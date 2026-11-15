@@ -68,3 +68,10 @@ O pacote leva código e cenas (`scripts/` e `scenes/`). Imagens, sons e modelos 
 
 - Em **Permissões**, marque **Internet**.
 - Em **Recursos**, desmarque *Converter recursos de texto para binário*, e em **Script**, escolha o modo *Texto*. Assim as atualizações substituem os arquivos sem problemas.
+
+## Baixar o APK
+
+A cada envio para o GitHub, o APK é gerado sozinho e publicado em **Releases**. A versão mais recente fica em:
+https://github.com/marcosantoniosoaresvalentin-bit/Last-Horizon/releases/latest
+
+O ícone e a capa para a Play Store ficam em `store/` (`icone_512.png` e `capa_1024x500.png`).
