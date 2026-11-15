@@ -20,25 +20,65 @@ const CHARACTER_FILE := "res://personagem/soldado.glbin"
 const TERRAIN_SHADER := """
 shader_type spatial;
 uniform float wet = 0.0;
+uniform sampler2D soil_a : filter_linear, repeat_disable;   // R argila, G areia, B umidade, A grama
+uniform sampler2D soil_b : filter_linear, repeat_disable;   // R caulinita, G ilita, B esmectita
+uniform vec2 world_size = vec2(640.0, 480.0);
 varying vec3 wpos;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+vec2 hash2(vec2 p){ return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
 float noise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
 	return mix(mix(hash(i), hash(i+vec2(1,0)), f.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y); }
 float fbm(vec2 p){ float s = 0.0; float a = 0.5; for(int i = 0; i < 4; i++){ s += noise(p) * a; p *= 2.03; a *= 0.5; } return s; }
+// rachaduras do barro seco (placas, como lama secando)
+float cracks(vec2 p){
+	vec2 g = floor(p); vec2 f = fract(p);
+	float d1 = 8.0; float d2 = 8.0;
+	for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+		vec2 o = vec2(float(x), float(y));
+		vec2 r = o + hash2(g + o) * 0.85 - f;
+		float d = dot(r, r);
+		if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+	}
+	return 1.0 - smoothstep(0.0, 0.08, sqrt(d2) - sqrt(d1));
+}
 void vertex(){ wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment(){
-	vec3 c = COLOR.rgb * COLOR.rgb * 1.25;
+	vec2 uv = wpos.xz / world_size;
+	vec4 a = texture(soil_a, uv);
+	vec4 b = texture(soil_b, uv);
+	float rock = COLOR.a;
+	float clay = a.r; float sand = a.g; float moist = a.b; float grass = a.a;
+	vec3 kao = vec3(0.70, 0.45, 0.30);   // caulinita: latossolo vermelho-amarelo
+	vec3 ili = vec3(0.52, 0.47, 0.38);   // ilita: marrom acinzentado
+	vec3 sme = vec3(0.34, 0.31, 0.26);   // esmectita: cinza escuro
+	float tsum = max(b.r + b.g + b.b, 0.01);
+	vec3 clayc = (kao * b.r + ili * b.g + sme * b.b) / tsum;
+	vec3 loam = vec3(0.34, 0.25, 0.17);
+	vec3 sandc = vec3(0.74, 0.64, 0.47);
+	vec3 soil = mix(loam, clayc, smoothstep(0.15, 0.6, clay));
+	soil = mix(soil, sandc, sand * 0.8 * (1.0 - clay));
+	float soaked = smoothstep(0.55, 0.95, moist);
+	soil *= mix(1.0, 0.55, soaked);
+	// barro seco racha; a esmectita racha em placas grandes e fundas
+	float dry_clay = smoothstep(0.35, 0.7, clay) * (1.0 - soaked) * (1.0 - smoothstep(0.2, 0.6, grass));
+	float cr = cracks(wpos.xz * mix(2.2, 0.9, b.b / tsum));
+	soil = mix(soil, soil * 0.3, cr * dry_clay * (0.35 + 0.65 * b.b / tsum));
+	// grama: verde com água no solo, cor de palha na seca
+	vec3 green = vec3(0.26, 0.36, 0.13);
+	vec3 straw = vec3(0.60, 0.54, 0.30);
+	vec3 gc = mix(straw, green, smoothstep(0.15, 0.6, moist));
+	float g = smoothstep(0.1, 0.6, grass) * (0.75 + 0.25 * noise(wpos.xz * 1.3));
+	vec3 c = mix(soil, gc, g);
+	c = mix(c, vec3(0.45, 0.43, 0.39), rock);
+	c = c * c * 1.25;
 	float big = fbm(wpos.xz * 0.05);
-	float mid = fbm(wpos.xz * 0.4);
 	float fine = noise(wpos.xz * 3.0) * 0.6 + noise(wpos.xz * 9.0) * 0.4;
-	c *= 0.8 + big * 0.3 + mid * 0.15 + fine * 0.12;
-	// tons de grama seca e grama mais escura misturados
-	float dry = smoothstep(0.55, 0.8, fbm(wpos.xz * 0.11 + 7.0));
-	c = mix(c, c * vec3(1.35, 1.15, 0.7), dry * 0.35 * (1.0 - COLOR.a));
-	c *= mix(1.0, 0.72, wet);
+	c *= 0.82 + big * 0.28 + fine * 0.12;
+	float wetness = max(wet, soaked * (1.0 - g));
+	c *= mix(1.0, 0.8, wet);
 	ALBEDO = c;
-	ROUGHNESS = mix(0.95, 0.55, wet);
-	SPECULAR = 0.2;
+	ROUGHNESS = mix(0.95, 0.4, wetness);
+	SPECULAR = mix(0.2, 0.45, wetness);
 }
 """
 
@@ -148,6 +188,12 @@ var _grass_queue: Array[Vector2i] = []
 
 var _hud: CanvasLayer
 var _clock: Label
+var _soil_label: Label
+var _soil_a: ImageTexture
+var _soil_b: ImageTexture
+var _soil_bytes := PackedByteArray()
+var _soil_timer := 0.0
+var _refresh_timer := 0.0
 var _loading: Label
 var _loading_bg: ColorRect
 var _joy_ui: Control
@@ -209,6 +255,18 @@ func _build_hud() -> void:
 	_clock.add_theme_constant_override("outline_size", 6)
 	_clock.visible = false
 	_hud.add_child(_clock)
+
+	_soil_label = Label.new()
+	_soil_label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_soil_label.offset_top = -46
+	_soil_label.offset_bottom = -14
+	_soil_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_soil_label.add_theme_font_size_override("font_size", 18)
+	_soil_label.add_theme_color_override("font_color", Color(0.95, 0.92, 0.85))
+	_soil_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	_soil_label.add_theme_constant_override("outline_size", 5)
+	_soil_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(_soil_label)
 
 	var menu := Button.new()
 	menu.text = "Menu"
@@ -318,6 +376,7 @@ func _on_world_ready() -> void:
 	_gw = sim.gw0
 	_max_h = sim.max_h
 	await _set_loading("Moldando o terreno…")
+	_apply_soil()
 	_build_terrain()
 	await _set_loading("Enchendo as lagoas…")
 	_water_mi = MeshInstance3D.new()
@@ -513,6 +572,12 @@ func _build_grass_chunk(key: Vector2i) -> void:
 		if _rockiness(h) > rng.randf() * 0.8 + 0.1:
 			continue
 		var cell := int(pz / CELL) * W + int(px / CELL)
+		if _soil_bytes.size() == W * MundoSim.H * 4:
+			var cov := _soil_bytes[cell * 4 + 3] / 255.0
+			if rng.randf() > cov * 1.15:
+				continue
+			var moist := _soil_bytes[cell * 4 + 2] / 255.0
+			tint = tint * Color(1, 1, 1).lerp(Color(1.45, 1.2, 0.75), 1.0 - smoothstep(0.15, 0.6, moist))
 		if _water_level.size() == W * MundoSim.H and _water_level[cell] > h + 0.05:
 			continue
 		var b := Basis(Vector3.UP, rot).scaled(Vector3(s, s, s))
@@ -592,7 +657,40 @@ func _process(delta: float) -> void:
 	_update_grass()
 	_grass_mat.set_shader_parameter("player_pos", _player.global_position)
 	var h: float = sim.hour()
-	_clock.text = "Dia %d · %02d:%02d%s" % [sim.day(), int(h), int(fmod(h, 1.0) * 60.0), " · Chovendo" if sim.raining else ""]
+	_clock.text = "Dia %d · %02d:%02d · %s%s" % [sim.day(), int(h), int(fmod(h, 1.0) * 60.0), sim.season_name(), " · Chovendo" if sim.raining else ""]
+	_soil_timer -= delta
+	if _soil_timer <= 0.0:
+		_soil_timer = 2.0
+		_apply_soil()
+		_soil_label.text = sim.soil_info(Vector2i(int(_player.position.x / CELL), int(_player.position.z / CELL)))
+	# a grama vai sendo refeita aos poucos, acompanhando as estações
+	_refresh_timer -= delta
+	if _refresh_timer <= 0.0 and _grass_queue.is_empty() and not _grass_chunks.is_empty():
+		_refresh_timer = 1.5
+		var keys := _grass_chunks.keys()
+		var key: Vector2i = keys[randi() % keys.size()]
+		_grass_chunks[key].queue_free()
+		_grass_chunks.erase(key)
+		_build_grass_chunk(key)
+
+
+## Atualiza as texturas do solo (argila, areia, umidade, grama e tipos de argila).
+func _apply_soil() -> void:
+	var soil: Array = sim.take_soil()
+	if soil.is_empty():
+		return
+	_soil_bytes = soil[0]
+	var ia := Image.create_from_data(MundoSim.W, MundoSim.H, false, Image.FORMAT_RGBA8, soil[0])
+	var ib := Image.create_from_data(MundoSim.W, MundoSim.H, false, Image.FORMAT_RGBA8, soil[1])
+	if _soil_a == null:
+		_soil_a = ImageTexture.create_from_image(ia)
+		_soil_b = ImageTexture.create_from_image(ib)
+		_terrain_mat.set_shader_parameter("soil_a", _soil_a)
+		_terrain_mat.set_shader_parameter("soil_b", _soil_b)
+		_terrain_mat.set_shader_parameter("world_size", Vector2(MundoSim.W * CELL, MundoSim.H * CELL))
+	else:
+		_soil_a.update(ia)
+		_soil_b.update(ib)
 
 
 func _update_sky(delta: float) -> void:

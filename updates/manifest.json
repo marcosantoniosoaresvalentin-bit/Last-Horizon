@@ -1,9 +1,9 @@
 {
-  "version": 5,
-  "file": "update_5.zip",
-  "size": 1395789,
-  "sha256": "39658fcab72196caa3ca3afc89316c15c96d79c6f826117667cba77b7a7f30ad",
+  "version": 6,
+  "file": "update_6.zip",
+  "size": 1401059,
+  "sha256": "f9d418b3a92a68e8e7d796044495f00a309148f57791f7ce7dd34f4edffd101d",
   "min_build": 1,
-  "notes": "Terceira pessoa com personagem realista animado, mapa 5x maior só com grama, jogo mais leve",
+  "notes": "Sistema da Terra: estações de cheia e seca, baixadas que viram lagos, geologia e argila que nasce da rocha (caulinita, ilita, esmectita)",
   "date": "2026-11-15"
 }
