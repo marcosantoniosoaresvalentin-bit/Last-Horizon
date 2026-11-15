@@ -1,9 +1,9 @@
 {
-  "version": 9,
-  "file": "update_9.zip",
-  "size": 5334139,
-  "sha256": "2e04cbbcb53ec8d42cc61d7ba867c00cc0027d695722836480907900dea63a52",
+  "version": 10,
+  "file": "update_10.zip",
+  "size": 3301634,
+  "sha256": "8cc02fe53b17267caa435f8f9abd27871207477976afb6ccec145c065a931208",
   "min_build": 1,
-  "notes": "Personagens humanos realistas (masculino e feminino) com escolha no menu",
+  "notes": "Personagens bem mais leves na memória (correção de travamento)",
   "date": "2026-11-15"
 }
