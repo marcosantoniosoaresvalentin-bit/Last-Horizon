@@ -1,9 +1,9 @@
 {
-  "version": 3,
-  "file": "update_3.zip",
-  "size": 16712,
-  "sha256": "60e047379a121c213ca48229c2e731579a5705350354961bb937968f47a84dce",
+  "version": 4,
+  "file": "update_4.zip",
+  "size": 28783,
+  "sha256": "833a9b0ae4a0746030ec66b39abdc848454f088ba2e1431743edd6a52766a45c",
   "min_build": 1,
-  "notes": "O mapa agora é o mundo do jogo: personagem visto de cima, câmera seguindo, dia, noite e chuva automáticos",
+  "notes": "Mundo em 3D: terreno, lagoas realistas, mato, samambaias, helicônias e árvores da Amazônia com frutas (açaí, castanheira, cupuaçu, bananeira, samaúma)",
   "date": "2026-11-15"
 }

@@ -40,6 +40,12 @@ var _mx := Mutex.new()
 var _quit := false
 var _out_pixels := PackedByteArray()
 var _out_new := false
+var _out_wat := PackedFloat32Array()
+var _water_new := false
+## Cópias estáveis feitas logo após gerar o mundo (seguras para ler na tela).
+var ter0 := PackedFloat32Array()
+var moist0 := PackedFloat32Array()
+var gw0 := PackedFloat32Array()
 
 
 func _ready() -> void:
@@ -70,7 +76,21 @@ func day() -> int:
 func water_at(cell: Vector2i) -> float:
 	if cell.x < 0 or cell.y < 0 or cell.x >= W or cell.y >= H:
 		return 0.0
-	return wat[cell.y * W + cell.x]
+	_mx.lock()
+	var v := _out_wat[cell.y * W + cell.x] if _out_wat.size() == N else 0.0
+	_mx.unlock()
+	return v
+
+
+## Devolve a água atual se mudou desde a última vez, ou um array vazio.
+func take_water() -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	_mx.lock()
+	if _water_new:
+		out = _out_wat
+		_water_new = false
+	_mx.unlock()
+	return out
 
 
 ## Devolve os pixels novos do mapa, ou um array vazio se nada mudou.
@@ -87,6 +107,9 @@ func take_pixels() -> PackedByteArray:
 func _sim_loop() -> void:
 	_generate()
 	_find_spawn()
+	ter0 = ter.duplicate()
+	moist0 = moist.duplicate()
+	gw0 = gw.duplicate()
 	_publish()
 	is_ready = true
 	call_deferred("emit_signal", "world_ready")
@@ -103,7 +126,7 @@ func _sim_loop() -> void:
 			_weather_step()
 			_step(raining, STEP_MULT)
 		loops += 1
-		if n > 0 and loops % 3 == 0:
+		if n > 0 and loops % 8 == 0:
 			_publish()
 		OS.delay_msec(15)
 
@@ -124,10 +147,10 @@ func _find_spawn() -> void:
 
 
 func _publish() -> void:
-	_build_pixels()
+	var w := wat.duplicate()
 	_mx.lock()
-	_out_pixels = _pixels.duplicate()
-	_out_new = true
+	_out_wat = w
+	_water_new = true
 	_mx.unlock()
 
 
