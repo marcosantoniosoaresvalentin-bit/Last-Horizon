@@ -1,0 +1,233 @@
+<title>Mapa Vivo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: mapa no topo em largura total, painel de clima e controles embaixo */
+:root{
+  --bg:#10160f; --ink:#f1ead8; --muted:#a7b29a; --panel:#1a2318; --line:rgba(241,234,216,.14);
+  --accent:#e3a94b; --water:#6bb6d6;
+  --display:'Bricolage Grotesque',system-ui,-apple-system,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--display)}
+body{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:14px 24px}
+main{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:22px;letter-spacing:.01em}
+header p{margin:0;font-size:13px;color:var(--muted)}
+.mapwrap{position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#0b0f0a}
+#map{display:block;width:100%;height:auto;image-rendering:pixelated;touch-action:manipulation;cursor:crosshair}
+#weather{position:absolute;top:10px;left:10px;font-family:var(--mono);font-size:12px;background:rgba(10,14,9,.78);border:1px solid var(--line);border-radius:999px;padding:5px 10px}
+#tip{position:absolute;bottom:10px;left:10px;right:10px;font-family:var(--mono);font-size:11.5px;background:rgba(10,14,9,.82);border:1px solid var(--line);border-radius:10px;padding:7px 10px;line-height:1.5}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-width:0}
+.stat small{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.stat strong{font-family:var(--mono);font-weight:500;font-size:15px;font-variant-numeric:tabular-nums}
+.controls{display:flex;flex-wrap:wrap;gap:8px}
+.seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px}
+button{font-family:var(--mono);font-size:12px;color:var(--ink);background:transparent;border:0;border-radius:7px;padding:8px 10px;cursor:pointer}
+button[aria-pressed="true"]{background:var(--accent);color:#1d160a;font-weight:500}
+button.main{background:var(--water);color:#08202b;font-weight:500;font-family:var(--display);font-size:14px;padding:9px 14px;border-radius:10px}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:12px;height:12px;border-radius:3px;display:inline-block}
+.how{font-size:13px;line-height:1.55;color:var(--muted);max-width:68ch}
+.how b{color:var(--ink);font-weight:500}
+@media (max-width:560px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+
+<main>
+  <header>
+    <h1>Mapa Vivo</h1>
+    <p>Last Horizon · gerador de mapa com chuva</p>
+  </header>
+
+  <div class="mapwrap">
+    <canvas id="map" width="200" height="150" aria-label="Mapa gerado visto de cima"></canvas>
+    <div id="weather">Tempo seco</div>
+    <div id="tip">Toque no mapa para ver a altitude, a água e o solo daquele ponto.</div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><small>Dia</small><strong id="sDay">1</strong></div>
+    <div class="stat"><small>Área com água</small><strong id="sWater">0%</strong></div>
+    <div class="stat"><small>Lagoas</small><strong id="sPonds">0</strong></div>
+    <div class="stat"><small>Nascentes ativas</small><strong id="sSprings">0</strong></div>
+  </div>
+
+  <div class="controls">
+    <button class="main" id="rain">Fazer chover</button>
+    <div class="seg" role="group" aria-label="Velocidade">
+      <button data-speed="1" aria-pressed="true">1x</button>
+      <button data-speed="3">3x</button>
+      <button data-speed="6">6x</button>
+    </div>
+    <div class="seg" role="group" aria-label="Camada">
+      <button data-layer="natural" aria-pressed="true">Natural</button>
+      <button data-layer="relevo">Relevo</button>
+      <button data-layer="solo">Solo</button>
+    </div>
+    <button id="newmap" class="seg" style="padding:8px 12px">Novo mapa</button>
+  </div>
+
+  <div class="legend" id="legend"></div>
+
+  <p class="how"><b>Como funciona.</b> O relevo é gerado com uma serra principal e morros em volta. A chuva cai mais forte na serra. A água escorre sempre para o lado mais baixo e empoça onde não tem saída, formando lagoas. Parte dela infiltra no solo e anda devagar por baixo da terra, até brotar como <b>nascente</b> onde o solo fica encharcado, geralmente no pé da serra. As lagoas secam aos poucos com o sol, e o mato fica mais verde onde a água costuma ficar.</p>
+</main>
+
+<script>
+(()=>{
+const W=200,H=150,N=W*H;
+const cv=document.getElementById('map'),ctx=cv.getContext('2d');
+const img=ctx.createImageData(W,H),px=img.data;
+
+// ---------- ruído ----------
+let SEED=Math.floor(Math.random()*1e6);
+function hash(x,y){let h=(x*374761393+y*668265263+SEED*2246822519)|0;h=Math.imul(h^(h>>>13),1274126177);return ((h^(h>>>16))>>>0)/4294967295}
+function vn(x,y){const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,s=t=>t*t*(3-2*t);
+  const a=hash(xi,yi),b=hash(xi+1,yi),c=hash(xi,yi+1),d=hash(xi+1,yi+1),u=s(xf),v=s(yf);return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v}
+function fbm(x,y,o=5){let s=0,a=.5,f=1,n=0;for(let i=0;i<o;i++){s+=vn(x*f,y*f)*a;n+=a;a*=.5;f*=2}return s/n}
+function ridged(x,y){let s=0,a=.5,f=1,n=0;for(let i=0;i<5;i++){s+=(1-Math.abs(vn(x*f,y*f)*2-1))*a;n+=a;a*=.5;f*=2.1}return s/n}
+
+// ---------- estado ----------
+const ter=new Float32Array(N), wat=new Float32Array(N), gw=new Float32Array(N), moist=new Float32Array(N);
+const fl=new Float32Array(N),fr=new Float32Array(N),ft=new Float32Array(N),fb=new Float32Array(N);
+const shade=new Float32Array(N), spring=new Float32Array(N);
+let maxH=1, raining=false, rainT=0, dryT=0, steps=0, speed=1, layer='natural', userRain=0;
+const GW_CAP=1.6;      // quanto de água o solo segura
+const STEPS_DAY=1800;
+
+function generate(){
+  SEED=Math.floor(Math.random()*1e6);
+  // serra: um segmento com pico alongado
+  const ax=W*(.25+hash(1,1)*.2),ay=H*(.25+hash(2,1)*.5),ang=hash(3,1)*Math.PI,len=W*(.22+hash(4,1)*.15);
+  const bx=ax+Math.cos(ang)*len,by=ay+Math.sin(ang)*len;
+  const tilt=hash(5,1)*Math.PI*2;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
+    // distância até a linha da serra
+    const vx=bx-ax,vy=by-ay;let t=((x-ax)*vx+(y-ay)*vy)/(vx*vx+vy*vy);t=Math.max(0,Math.min(1,t));
+    const dx=x-(ax+vx*t),dy=y-(ay+vy*t),dist=Math.hypot(dx,dy);
+    const serra=Math.exp(-((dist/(24+fbm(x*.03,y*.03)*16))**2))*(.75+.25*Math.sin(t*Math.PI));
+    const r=ridged(x*.035,y*.035);
+    let h=serra*(34+r*18);
+    h+=fbm(x*.018+50,y*.018,4)*10;            // morros e baixadas
+    h+=(fbm(x*.07,y*.07,3)-.5)*3;             // irregularidade fina
+    h+=((x/W-.5)*Math.cos(tilt)+(y/H-.5)*Math.sin(tilt))*7; // caimento geral do terreno
+    ter[i]=h}
+  let mn=1e9;for(let i=0;i<N;i++)mn=Math.min(mn,ter[i]);
+  maxH=0;for(let i=0;i<N;i++){ter[i]-=mn;maxH=Math.max(maxH,ter[i])}
+  // sombreamento do relevo
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
+    const hx=ter[y*W+Math.min(W-1,x+1)]-ter[y*W+Math.max(0,x-1)],hy=ter[Math.min(H-1,y+1)*W+x]-ter[Math.max(0,y-1)*W+x];
+    shade[i]=Math.max(-.6,Math.min(.6,(-hx-hy)*.09))}
+  wat.fill(0);gw.fill(0);moist.fill(0);fl.fill(0);fr.fill(0);ft.fill(0);fb.fill(0);spring.fill(0);
+  for(let i=0;i<N;i++)gw[i]=GW_CAP*.25;
+  steps=0;raining=false;dryT=200;rainT=0;
+  // aquece o mundo: uma chuva longa e depois um tempo seco, para já começar com lagoas e córregos
+  for(let k=0;k<300;k++)step(true,3);
+  for(let k=0;k<250;k++)step(false,3);
+  steps=0;dryT=600}
+
+// ---------- simulação ----------
+function step(rainNow,mult=1){
+  const C=.22, damp=.985;
+  // chuva, infiltração, evaporação
+  for(let i=0;i<N;i++){
+    if(rainNow)wat[i]+=.0008*mult*(.55+ter[i]/maxH*.9);
+    const room=GW_CAP-gw[i];
+    if(wat[i]>0&&room>0){const inf=Math.min(wat[i],.00025*mult,room);wat[i]-=inf;gw[i]+=inf}
+    wat[i]=Math.max(0,wat[i]-(rainNow?.00005:.0005)*mult);
+  }
+  // fluxo de superfície (modelo de canos virtuais)
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,h=ter[i]+wat[i];
+    let l=x>0?Math.max(0,fl[i]*damp+C*(h-ter[i-1]-wat[i-1])):0;
+    let r=x<W-1?Math.max(0,fr[i]*damp+C*(h-ter[i+1]-wat[i+1])):0;
+    let t=y>0?Math.max(0,ft[i]*damp+C*(h-ter[i-W]-wat[i-W])):0;
+    let b=y<H-1?Math.max(0,fb[i]*damp+C*(h-ter[i+W]-wat[i+W])):0;
+    const s=l+r+t+b;if(s>wat[i]&&s>0){const k=wat[i]/s;l*=k;r*=k;t*=k;b*=k}
+    fl[i]=l;fr[i]=r;ft[i]=t;fb[i]=b}
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
+    let inn=0;if(x>0)inn+=fr[i-1];if(x<W-1)inn+=fl[i+1];if(y>0)inn+=fb[i-W];if(y<H-1)inn+=ft[i+W];
+    wat[i]=Math.max(0,wat[i]+inn-fl[i]-fr[i]-ft[i]-fb[i]);
+    if(x===0||y===0||x===W-1||y===H-1)wat[i]*=.8}   // a água sai pelas bordas do mapa
+  // água subterrânea: anda devagar morro abaixo e brota onde o solo enche
+  if((steps&3)===0){
+    for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const i=y*W+x;if(gw[i]<=.01)continue;
+      const lvl=ter[i]-GW_CAP+gw[i];let best=-1,bd=0;
+      for(const j of [i-1,i+1,i-W,i+W]){const d=lvl-(ter[j]-GW_CAP+gw[j]);if(d>bd){bd=d;best=j}}
+      if(best>=0){const m=Math.min(gw[i]*.5,bd*.012,GW_CAP-gw[best]);if(m>0){gw[i]-=m;gw[best]+=m}}}
+    for(let i=0;i<N;i++){spring[i]*=.97;
+      if(gw[i]>GW_CAP*.97){const out=(gw[i]-GW_CAP*.93)*.15;gw[i]-=out;wat[i]+=out;spring[i]=Math.min(1,spring[i]+out*40)}
+      else gw[i]=Math.max(0,gw[i]-.00012*mult)}}  // raízes e evaporação do solo
+  for(let i=0;i<N;i++)moist[i]=moist[i]*.9993+(wat[i]>.03?.0007:0);
+  steps++}
+
+// ---------- clima ----------
+function weather(){
+  if(userRain>0){userRain--;raining=true;return}
+  if(raining){if(--rainT<=0){raining=false;dryT=1500+Math.random()*2500}}
+  else if(--dryT<=0){raining=true;rainT=500+Math.random()*900}}
+
+// ---------- desenho ----------
+const lerp=(a,b,t)=>a+(b-a)*t;
+function draw(){
+  for(let i=0;i<N;i++){const h=ter[i]/maxH,w=wat[i],s=shade[i];let r,g,b;
+    if(layer==='relevo'){const t=h;r=lerp(40,235,t);g=lerp(70,220,t);b=lerp(40,190,t);
+      if(Math.floor(ter[i]/2.5)!==Math.floor((ter[i]+.4)/2.5)){r*=.6;g*=.6;b*=.6}}
+    else if(layer==='solo'){const t=gw[i]/GW_CAP;r=lerp(150,30,t);g=lerp(110,90,t);b=lerp(60,150,t)}
+    else{ // natural
+      const green=Math.min(1,moist[i]*2.2+gw[i]/GW_CAP*.55);
+      if(h>.78){r=lerp(110,150,(h-.78)*4);g=lerp(108,140,(h-.78)*4);b=lerp(92,125,(h-.78)*4)}           // pedra no alto da serra
+      else{r=lerp(150,38,green);g=lerp(132,96,green);b=lerp(78,40,green);
+        if(h>.6){const k=(h-.6)/.18;r=lerp(r,104,k*.6);g=lerp(g,100,k*.6);b=lerp(b,84,k*.6)}}}
+    const L=1+s;r*=L;g*=L;b*=L;
+    if(w>.02&&layer!=='solo'){const a=Math.min(.9,.35+w*.9),deep=Math.min(1,w/2.2);
+      r=lerp(r,lerp(110,28,deep),a);g=lerp(g,lerp(175,78,deep),a);b=lerp(b,lerp(200,130,deep),a)}
+    if(spring[i]>.5&&w<.3&&layer==='natural'){r=lerp(r,190,.6);g=lerp(g,235,.6);b=lerp(b,255,.6)}
+    const p=i*4;px[p]=r;px[p+1]=g;px[p+2]=b;px[p+3]=255}
+  ctx.putImageData(img,0,0);
+  if(raining){ctx.strokeStyle='rgba(200,225,240,.35)';ctx.lineWidth=.5;ctx.beginPath();
+    for(let k=0;k<90;k++){const x=Math.random()*W,y=Math.random()*H;ctx.moveTo(x,y);ctx.lineTo(x-1.5,y+4)}ctx.stroke()}
+  if(sel){ctx.strokeStyle='#e3a94b';ctx.lineWidth=1;ctx.strokeRect(sel.x-2.5,sel.y-2.5,6,6)}}
+
+// ---------- estatísticas ----------
+const $=id=>document.getElementById(id);
+function stats(){let wet=0,sp=0;const seen=new Uint8Array(N);let ponds=0;
+  for(let i=0;i<N;i++){if(wat[i]>.05)wet++}
+  {const ss=new Uint8Array(N);for(let i=0;i<N;i++){if(ss[i]||spring[i]<=.5||wat[i]>=.3)continue;let cn=0;const q=[i];ss[i]=1;while(q.length){const c=q.pop(),x=c%W;cn++;for(const j of [x>0?c-1:-1,x<W-1?c+1:-1,c-W,c+W]){if(j<0||j>=N||ss[j]||spring[j]<=.5||wat[j]>=.3)continue;ss[j]=1;q.push(j)}}if(cn>=3)sp++}}
+  // lagoa = grupo de água parada com pelo menos 6 células
+  for(let i=0;i<N;i++){if(seen[i]||wat[i]<.25)continue;let q=[i],n=0,flow=0;seen[i]=1;
+    while(q.length){const c=q.pop();n++;flow+=fl[c]+fr[c]+ft[c]+fb[c];const x=c%W;
+      for(const j of [x>0?c-1:-1,x<W-1?c+1:-1,c-W,c+W]){if(j<0||j>=N||seen[j]||wat[j]<.25)continue;seen[j]=1;q.push(j)}}
+    if(n>=6&&flow/n<.05)ponds++}
+  $('sDay').textContent=Math.floor(steps/STEPS_DAY)+1;$('sWater').textContent=(wet/N*100).toFixed(1).replace('.',',')+'%';
+  $('sPonds').textContent=ponds;$('sSprings').textContent=sp;
+  $('weather').textContent=raining?'Chovendo':'Tempo seco';
+  if(sel)showCell()}
+
+// ---------- interação ----------
+let sel=null;
+cv.addEventListener('click',e=>{const r=cv.getBoundingClientRect();sel={x:Math.floor((e.clientX-r.left)/r.width*W),y:Math.floor((e.clientY-r.top)/r.height*H)};showCell()});
+function showCell(){const i=sel.y*W+sel.x,alt=Math.round(ter[i]*18+40),w=wat[i];
+  const flow=fl[i]+fr[i]+ft[i]+fb[i];let kind='terra seca';
+  if(spring[i]>.5&&w<.3)kind='nascente';else if(w>.25&&flow<.05)kind='lagoa';else if(w>.05&&flow>=.05)kind='córrego correndo';else if(w>.02)kind='poça';
+  else if(gw[i]/GW_CAP>.85)kind='solo encharcado';
+  $('tip').textContent=`${alt} m de altitude · ${kind} · água ${w>.02?Math.round(w*60)+' cm':'nenhuma'} · solo ${Math.round(gw[i]/GW_CAP*100)}% úmido`}
+$('rain').onclick=()=>{userRain=700;raining=true};
+document.querySelectorAll('[data-speed]').forEach(b=>b.onclick=()=>{speed=+b.dataset.speed;document.querySelectorAll('[data-speed]').forEach(o=>o.setAttribute('aria-pressed',String(o===b)))});
+document.querySelectorAll('[data-layer]').forEach(b=>b.onclick=()=>{layer=b.dataset.layer;document.querySelectorAll('[data-layer]').forEach(o=>o.setAttribute('aria-pressed',String(o===b)));legend()});
+$('newmap').onclick=()=>{sel=null;$('tip').textContent='Gerando um mapa novo…';setTimeout(()=>{generate();$('tip').textContent='Toque no mapa para ver a altitude, a água e o solo daquele ponto.'},20)};
+function legend(){const L={natural:[['#26602a','Mato verde (úmido)'],['#968450','Campo seco'],['#96907d','Pedra da serra'],['#3a8fb8','Água'],['#bfe9ff','Nascente']],
+  relevo:[['#284628','Baixada'],['#9a9a74','Encosta'],['#ebdcbe','Topo da serra']],
+  solo:[['#966e3c','Solo seco'],['#1e5a96','Solo encharcado']]}[layer];
+  $('legend').innerHTML=L.map(([c,t])=>`<span><i style="background:${c}"></i>${t}</span>`).join('')}
+
+generate();legend();
+let tick=0;
+function frame(){for(let k=0;k<speed*3;k++){weather();step(raining)}draw();if(++tick%15===0)stats();requestAnimationFrame(frame)}
+stats();requestAnimationFrame(frame);
+})();
+</script>
