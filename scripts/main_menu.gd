@@ -1,6 +1,6 @@
 extends Control
 ## Menu principal: escolha do personagem (masculino ou feminino) e entrar no jogo.
-## Também avisa se o jogo fechou sozinho da última vez e liga o modo leve.
+## Também avisa se o jogo fechou sozinho da última vez, e em que momento.
 
 const Diag := preload("res://scripts/diagnostico.gd")
 const SAVE := "user://personagem.txt"
@@ -14,11 +14,8 @@ const PASSO_NOME := {
 	"jogando": "o jogo",
 }
 
-var _leve_btn: Button
-
 
 func _ready() -> void:
-	Diag.instalar_registro()
 	var last := Diag.ultimo()
 	var caiu := not Diag.PASSOS_OK.has(last)
 
@@ -26,13 +23,9 @@ func _ready() -> void:
 	var box: VBoxContainer = %MapButton.get_parent()
 
 	if caiu:
-		Diag.set_modo_leve(true)
 		var warn := Label.new()
 		var onde: String = PASSO_NOME.get(last, last)
-		warn.text = "O jogo fechou sozinho da última vez, durante %s.\nLiguei o modo leve para ele rodar melhor." % onde
-		var erros := Diag.ultimos_erros(3)
-		if not erros.is_empty():
-			warn.text += "\nÚltimo erro: " + erros[erros.size() - 1]
+		warn.text = "O jogo fechou sozinho da última vez, durante %s." % onde
 		warn.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		warn.add_theme_font_size_override("font_size", 17)
@@ -63,27 +56,9 @@ func _ready() -> void:
 		if opt[0] == last_who:
 			b.call_deferred("grab_focus")
 
-	_leve_btn = Button.new()
-	_leve_btn.custom_minimum_size = Vector2(300, 48)
-	_leve_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_leve_btn.add_theme_font_size_override("font_size", 18)
-	_leve_btn.pressed.connect(_toggle_leve)
-	box.add_child(_leve_btn)
-	_update_leve()
-
-
-func _toggle_leve() -> void:
-	Diag.set_modo_leve(not Diag.modo_leve())
-	_update_leve()
-
-
-func _update_leve() -> void:
-	_leve_btn.text = "Modo leve: %s" % ("ligado" if Diag.modo_leve() else "desligado")
-
 
 func _play(who: String) -> void:
 	Engine.set_meta("personagem", who)
-	Engine.set_meta("modo_leve", Diag.modo_leve())
 	var f := FileAccess.open(SAVE, FileAccess.WRITE)
 	if f:
 		f.store_string(who)

@@ -215,7 +215,6 @@ var _loading_bg: ColorRect
 var _joy_ui: Control
 
 var _ready_world := false
-var _leve := false
 var _play_time := 0.0
 var _face := 0.0
 var _rain_amount := 0.0
@@ -248,20 +247,10 @@ func _exit_tree() -> void:
 
 
 func _ready() -> void:
-	_leve = Engine.get_meta("modo_leve", false)
-	if _leve:
-		SUB = 1
-		GRASS_RADIUS = 2
-		GRASS_PER_CHUNK = 110
 	Diag.marcar("gerando mundo")
 	_build_hud()
 	_build_environment()
-	if _leve:
-		_rain.amount = 350
 	sim = MundoSim.new()
-	if _leve:
-		sim.steps_per_sec = 3.0
-		sim.step_mult = 10.0
 	add_child(sim)
 	sim.world_ready.connect(_on_world_ready)
 
@@ -913,7 +902,7 @@ func _update_sky(delta: float) -> void:
 	var warm := clampf(1.0 - elev * 2.5, 0.0, 1.0)
 	_sun.light_color = Color(1, 0.97, 0.9).lerp(Color(1.0, 0.62, 0.35), warm)
 	_sun.light_energy = lerpf(0.0, 1.5, daylight) * lerpf(1.0, 0.35, _rain_amount)
-	_sun.shadow_enabled = daylight > 0.2 and not _leve
+	_sun.shadow_enabled = daylight > 0.2
 	var night := 1.0 - daylight
 	var top := Color(0.30, 0.50, 0.78).lerp(Color(0.42, 0.45, 0.5), _rain_amount).lerp(Color(0.02, 0.03, 0.08), night)
 	var hor := Color(0.72, 0.78, 0.82).lerp(Color(0.95, 0.62, 0.4), warm * daylight).lerp(Color(0.58, 0.6, 0.62), _rain_amount).lerp(Color(0.04, 0.05, 0.1), night)

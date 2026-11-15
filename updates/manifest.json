@@ -1,9 +1,9 @@
 {
-  "version": 11,
-  "file": "update_11.zip",
-  "size": 3304081,
-  "sha256": "cd83fe628f3726d2f8693dadabb8b3164e43b54512f27dc2bc48ea03c7180621",
+  "version": 12,
+  "file": "update_12.zip",
+  "size": 2734647,
+  "sha256": "2854e0e7d8526b61c8f3a8542fb9a5b073b1c29a97de48c30b62121b3d5c7947",
   "min_build": 1,
-  "notes": "Proteção contra fechamento: registro de onde o jogo fechou, modo leve automático",
+  "notes": "Correção do fechamento: personagens numa malha só, sem modo leve",
   "date": "2026-11-15"
 }
