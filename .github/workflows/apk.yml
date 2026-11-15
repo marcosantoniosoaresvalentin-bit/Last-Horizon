@@ -59,12 +59,12 @@ jobs:
 
       - name: Exportar APK
         env:
-          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/android/debug.keystore
-          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
-          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ github.workspace }}/android/debug.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
         run: |
           mkdir -p build
-          ./godot --headless --export-debug "Android" build/LastHorizon.apk
+          ./godot --headless --export-release "Android" build/LastHorizon.apk
           ls -la build
           test -s build/LastHorizon.apk
 
