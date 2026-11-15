@@ -15,7 +15,8 @@ const GRASS_CHUNK := 12.0    # tamanho de cada bloco de grama, em metros
 const GRASS_RADIUS := 3      # blocos de grama em volta do jogador
 const GRASS_PER_CHUNK := 200
 const CAM_DIST := 4.2
-const CHARACTER_FILE := "res://personagem/soldado.glbin"
+const CHARACTER_FILE := "res://personagem/humano.glbin"
+const ANIMS := {"Idle": "parado", "Walk": "andando", "Run": "correndo"}
 
 const TERRAIN_SHADER := """
 shader_type spatial;
@@ -667,27 +668,41 @@ func _build_grass_chunk(key: Vector2i) -> void:
 func _build_player() -> void:
 	_player = Node3D.new()
 	add_child(_player)
+	# o "corpo" é um nó separado para o personagem poder se abaixar sem girar o resto
+	_model = Node3D.new()
+	_player.add_child(_model)
+	var body: Node3D = null
 	var bytes := FileAccess.get_file_as_bytes(CHARACTER_FILE)
 	if not bytes.is_empty():
 		var doc := GLTFDocument.new()
 		var state := GLTFState.new()
 		if doc.append_from_buffer(bytes, "", state) == OK:
-			_model = doc.generate_scene(state)
-	if _model == null:
+			body = doc.generate_scene(state)
+	if body == null:
 		# reserva, caso o arquivo do personagem não esteja no celular
-		_model = MeshInstance3D.new()
-		var cap := CapsuleMesh.new(); cap.radius = 0.3; cap.height = 1.75
-		_model.mesh = cap
-		_model.position.y = 0.875
-	_player.add_child(_model)
-	var aps := _model.find_children("*", "AnimationPlayer", true, false)
-	if not aps.is_empty():
-		_anim = aps[0]
-		for n in ["Idle", "Walk", "Run"]:
-			if _anim.has_animation(n):
-				_anim.get_animation(n).loop_mode = Animation.LOOP_LINEAR
-		_play("Idle")
-	for mi in _model.find_children("*", "MeshInstance3D", true, false):
+		var cap := MeshInstance3D.new()
+		var cm := CapsuleMesh.new(); cm.radius = 0.3; cm.height = 1.7
+		cap.mesh = cm
+		cap.position.y = 0.85
+		_model.add_child(cap)
+		return
+	body.rotation.y = PI        # o modelo vem olhando para trás
+	_model.add_child(body)
+	for old in body.find_children("*", "AnimationPlayer", true, false):
+		old.queue_free()
+	# animações do Mixamo convertidas para o esqueleto deste personagem
+	_anim = AnimationPlayer.new()
+	body.add_child(_anim)
+	_anim.root_node = NodePath("..")
+	var lib := AnimationLibrary.new()
+	for n in ANIMS:
+		var a: Animation = load("res://personagem/%s.tres" % ANIMS[n])
+		if a:
+			a.loop_mode = Animation.LOOP_LINEAR
+			lib.add_animation(n, a)
+	_anim.add_animation_library("", lib)
+	_play("Idle")
+	for mi in body.find_children("*", "MeshInstance3D", true, false):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 
 

@@ -1,9 +1,9 @@
 {
-  "version": 7,
-  "file": "update_7.zip",
-  "size": 1402736,
-  "sha256": "d3f3f4d7b7c93b067208aef6241bb299e4bb00aed6afebff7e506884725b4fff",
+  "version": 8,
+  "file": "update_8.zip",
+  "size": 2316432,
+  "sha256": "caca8c0654aafe90017f818962e2d0a8db2edd6dfd6a99e7f820e1417a87245e",
   "min_build": 1,
-  "notes": "Coleta de argila: cavar com as mãos, argila molhada ou em torrões, mochila por tipo, jazida que se esgota",
+  "notes": "Personagem humano realista com animações de parado, andando e correndo",
   "date": "2026-11-15"
 }
