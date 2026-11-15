@@ -1,0 +1,405 @@
+<title>Mata Viva</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: mapa em tela cheia (visto de cima), HUD flutuante em painéis escuros de "folha de mata" */
+:root{
+  --bg:#142012; --ink:#f1ead8; --muted:#aab49b; --panel:rgba(16,22,14,.84);
+  --line:rgba(241,234,216,.16); --accent:#e3a94b; --danger:#e3704f; --good:#8fcf6a; --blue:#6bb6d6;
+  --display:'Bricolage Grotesque',system-ui,-apple-system,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--display)}
+body{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+.hud{position:fixed;z-index:5;pointer-events:none}
+.hud>*{pointer-events:auto}
+#top{top:calc(env(safe-area-inset-top,0px) + 10px);left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 11px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.brand{display:flex;flex-direction:column;justify-content:center}
+.brand b{font-size:17px;letter-spacing:.01em;line-height:1.1}
+.brand span{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.stat{display:flex;flex-direction:column;justify-content:center;min-width:0}
+.stat small{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.stat strong{font-family:var(--mono);font-weight:500;font-size:15px;font-variant-numeric:tabular-nums}
+#spark{width:84px;height:26px;display:block}
+#info{top:calc(env(safe-area-inset-top,0px) + 72px);right:max(12px,env(safe-area-inset-right,0px));width:min(260px,calc(100vw - 24px))}
+#info h3{margin:0 0 2px;font-size:16px}
+#info .sub{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px}
+#info p{margin:6px 0 0;font-size:13px;line-height:1.4;color:var(--ink)}
+.bar{display:grid;grid-template-columns:52px 1fr 34px;gap:6px;align-items:center;font-size:11px;margin-top:5px}
+.bar i{display:block;height:6px;border-radius:3px;background:rgba(241,234,216,.12);overflow:hidden}
+.bar i u{display:block;height:100%;background:var(--good)}
+.bar em{font-style:normal;font-family:var(--mono);text-align:right;color:var(--muted)}
+#close{position:absolute;top:6px;right:8px;background:none;border:0;color:var(--muted);font-size:18px;cursor:pointer;padding:4px}
+#bottom{bottom:calc(env(safe-area-inset-bottom,0px) + 12px);left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));display:flex;justify-content:space-between;align-items:flex-end;gap:8px}
+.group{display:flex;gap:4px;padding:4px}
+.btn{font-family:var(--mono);font-size:12px;background:transparent;color:var(--ink);border:1px solid transparent;border-radius:8px;padding:7px 9px;cursor:pointer;min-width:34px}
+.btn[aria-pressed="true"]{background:var(--accent);color:#1d160a;font-weight:500}
+.btn:focus-visible,#act:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#act{font-family:var(--display);font-weight:700;font-size:14px;background:var(--accent);color:#1d160a;border:0;border-radius:999px;padding:13px 18px;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+#inv{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.5}
+#inv b{color:var(--ink);font-weight:500}
+#log{position:fixed;z-index:4;left:max(12px,env(safe-area-inset-left,0px));bottom:calc(env(safe-area-inset-bottom,0px) + 70px);display:flex;flex-direction:column;gap:4px;pointer-events:none;max-width:min(320px,calc(100vw - 24px))}
+#log div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:12px;transition:opacity .6s}
+#hint{position:fixed;z-index:4;left:50%;top:50%;transform:translate(-50%,60px);font-size:12px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:6px 12px;pointer-events:none;transition:opacity 1s;white-space:nowrap}
+@media (max-width:520px){#spark{width:64px}.brand span{display:none}.stat strong{font-size:13px}}
+@media (prefers-reduced-motion:reduce){#log div,#hint{transition:none}}
+</style>
+
+<canvas id="c" aria-label="Mapa do jogo visto de cima"></canvas>
+
+<div class="hud" id="top">
+  <div class="card brand"><b>Mata Viva</b><span>protótipo 0.1</span></div>
+  <div class="card stat"><small>Tempo</small><strong id="clock">Dia 1 · 07:00</strong></div>
+  <div class="card stat"><small>Capivaras</small><strong id="pop">0</strong></div>
+  <div class="card stat"><small>Carcaças</small><strong id="carc">0</strong></div>
+  <div class="card stat"><small>Capim</small><strong id="grassPct">0%</strong></div>
+  <div class="card stat"><small>População/dia</small><canvas id="spark" width="168" height="52"></canvas></div>
+</div>
+
+<div class="hud card" id="info" hidden>
+  <button id="close" aria-label="Fechar">×</button>
+  <div id="infoBody"></div>
+</div>
+
+<div id="log" aria-live="polite"></div>
+<div id="hint">Arraste para andar · toque num animal para ver detalhes</div>
+
+<div class="hud" id="bottom">
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="card" id="inv">Carne <b id="iMeat">0</b> · Podre <b id="iRot">0</b> · Couro <b id="iHide">0</b></div>
+    <div class="card group" role="group" aria-label="Velocidade do tempo">
+      <button class="btn" data-speed="0" id="sp0">❚❚</button>
+      <button class="btn" data-speed="1" id="sp1" aria-pressed="true">1x</button>
+      <button class="btn" data-speed="4" id="sp4">4x</button>
+      <button class="btn" data-speed="16" id="sp16">16x</button>
+      <button class="btn" id="zOut" aria-label="Afastar">−</button>
+      <button class="btn" id="zIn" aria-label="Aproximar">+</button>
+    </div>
+  </div>
+  <button id="act" hidden>Caçar</button>
+</div>
+
+<script>
+(()=>{
+// ================== CONFIG ==================
+const DAY = 60;            // segundos reais por dia de jogo (em 1x)
+const T = 12;              // tamanho do tile em px
+const W = 180, H = 140, N = W*H;
+const MAX_POP = 400;
+
+// ================== TERRENO ==================
+const water=new Uint8Array(N), tree=new Uint8Array(N), dist=new Uint16Array(N);
+const grass=new Float32Array(N), gmax=new Float32Array(N), fert=new Float32Array(N);
+function hash(x,y){let h=(x*374761393+y*668265263)|0;h=Math.imul(h^(h>>>13),1274126177);return ((h^(h>>>16))>>>0)/4294967295}
+function vnoise(x,y){const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,s=t=>t*t*(3-2*t);
+  const a=hash(xi,yi),b=hash(xi+1,yi),c=hash(xi,yi+1),d=hash(xi+1,yi+1),u=s(xf),v=s(yf);
+  return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v}
+const fbm=(x,y)=>vnoise(x,y)*.5+vnoise(x*2,y*2)*.25+vnoise(x*4,y*4)*.125+.0625;
+const I=(x,y)=>y*W+x;
+const riverY=x=>H*.56+Math.sin(x*.045)*16+Math.sin(x*.017+2)*12;
+
+for(let x=0;x<W;x++){const cy=riverY(x),w=2.3+fbm(x*.1,5)*2.6;
+  for(let y=0;y<H;y++) if(Math.abs(y-cy)<w) water[I(x,y)]=1;}
+// lagoa
+for(let y=0;y<H;y++)for(let x=0;x<W;x++){const d=Math.hypot(x-40,y-26);if(d<8+(fbm(x*.25,y*.25)-.5)*7) water[I(x,y)]=1;}
+// igarapé ligando a lagoa ao rio
+for(let y=30;y<H;y++){const x=Math.round(40+Math.sin(y*.28)*2.5);if(y>36&&water[I(x,y)])break;water[I(x,y)]=1;if(y%3==0)water[I(x+1,y)]=1;}
+// segunda lagoa
+for(let y=0;y<H;y++)for(let x=0;x<W;x++){const d=Math.hypot(x-135,y-112);if(d<6+(fbm(x*.3+9,y*.3)-.5)*6) water[I(x,y)]=1;}
+
+// distância até a água (BFS)
+dist.fill(65535);{const q=new Int32Array(N);let h=0,t=0;
+  for(let i=0;i<N;i++)if(water[i]){dist[i]=0;q[t++]=i}
+  while(h<t){const i=q[h++],x=i%W,y=(i/W)|0,d=dist[i]+1;
+    if(x>0&&dist[i-1]>d){dist[i-1]=d;q[t++]=i-1} if(x<W-1&&dist[i+1]>d){dist[i+1]=d;q[t++]=i+1}
+    if(y>0&&dist[i-W]>d){dist[i-W]=d;q[t++]=i-W} if(y<H-1&&dist[i+W]>d){dist[i+W]=d;q[t++]=i+W}}}
+
+for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=I(x,y);if(water[i])continue;
+  if(dist[i]>2&&fbm(x*.08+20,y*.08)>.6&&hash(x*3,y*7)>.35) tree[i]=1;
+  fert[i]=.3+fbm(x*.12+40,y*.12)*.5;
+  let g=dist[i]<=1?.95:Math.max(.12,Math.min(1,1.15-dist[i]/20));
+  if(tree[i])g*=.45; gmax[i]=g; grass[i]=g*(.55+Math.random()*.45);}
+
+// ================== ESTADO ==================
+let gameTime=DAY*7/24, speed=1, zoom=1.15, uid=0;
+const capys=[], carcasses=[], popHist=[];
+const player={x:62*T,y:(riverY(62)-9)*T,face:0,walk:0,meat:[],hide:0};
+let selected=null;
+const NAMES=['Tainá','Juruá','Iara','Piatã','Moema','Caí','Jaci','Ubirajara','Araci','Tibira','Inaiê','Potira','Guaraci','Ceci','Raoni','Jupi','Anahí','Coaraci','Irapuã','Maíra','Obá','Jandira','Tupã','Yara','Ibira','Aimã'];
+const pick=a=>a[(Math.random()*a.length)|0];
+const tileAt=(x,y)=>{const tx=Math.max(0,Math.min(W-1,(x/T)|0)),ty=Math.max(0,Math.min(H-1,(y/T)|0));return I(tx,ty)};
+
+function makeCapy(x,y,age){return{id:++uid,name:pick(NAMES),sex:Math.random()<.5?'F':'M',x,y,face:Math.random()*6.28,walk:0,
+  hunger:65+Math.random()*35,thirst:65+Math.random()*35,age,maxAge:24+Math.random()*12,breedCd:Math.random()*3,preg:0,
+  state:'vagando',tx:x,ty:y,think:Math.random(),partner:null,moving:false}}
+
+// população inicial: grupos perto do rio
+for(let g=0;g<6;g++){let gx=20+g*27+Math.random()*10,gy=riverY(gx)+(Math.random()<.5?-7:7);
+  for(let k=0;k<4;k++)capys.push(makeCapy(gx*T+(Math.random()-.5)*60,gy*T+(Math.random()-.5)*60,2+Math.random()*14));}
+
+// ================== LOG ==================
+const logEl=document.getElementById('log');
+function log(msg){const d=document.createElement('div');d.textContent=msg;logEl.appendChild(d);
+  while(logEl.children.length>3)logEl.firstChild.remove();
+  setTimeout(()=>{d.style.opacity='0';setTimeout(()=>d.remove(),700)},5000)}
+
+// ================== SIMULAÇÃO ==================
+const isAdult=c=>c.age>=4;
+function moveTo(c,tx,ty,dt,sp){const dx=tx-c.x,dy=ty-c.y,d=Math.hypot(dx,dy);if(d<2){c.moving=false;return true}
+  const inW=water[tileAt(c.x,c.y)];const s=sp*(inW?.7:1)*dt;const st=Math.min(s,d);
+  c.x+=dx/d*st;c.y+=dy/d*st;c.face=Math.atan2(dy,dx);c.walk+=st*.35;c.moving=true;
+  c.x=Math.max(4,Math.min(W*T-4,c.x));c.y=Math.max(4,Math.min(H*T-4,c.y));return false}
+
+function pickGrass(c){const cx=(c.x/T)|0,cy=(c.y/T)|0;let best=-1,bs=-9;
+  for(let k=0;k<18;k++){const x=cx+((Math.random()*17)|0)-8,y=cy+((Math.random()*17)|0)-8;
+    if(x<0||y<0||x>=W||y>=H)continue;const i=I(x,y);if(water[i]||grass[i]<.22)continue;
+    const s=grass[i]-Math.hypot(x-cx,y-cy)*.035;if(s>bs){bs=s;best=i}}
+  if(best>=0){c.tx=(best%W+.5)*T;c.ty=(((best/W)|0)+.5)*T;c.searching=false}
+  else{const a=Math.random()*6.28;c.tx=c.x+Math.cos(a)*T*14;c.ty=c.y+Math.sin(a)*T*14;c.searching=true}}
+
+function findPartner(c){let best=null,bd=90;for(const o of capys){if(o===c||o.sex===c.sex||!readyToBreed(o))continue;
+  const d=Math.hypot(o.x-c.x,o.y-c.y);if(d<bd){bd=d;best=o}}return best}
+const readyToBreed=c=>isAdult(c)&&c.breedCd<=0&&c.preg<=0&&c.hunger>55&&c.thirst>45&&capys.length<MAX_POP;
+
+function decide(c){
+  if(c.state==='bebendo'&&c.thirst<98)return;
+  if(c.state==='comendo'&&c.hunger<95){if(!c.searching&&grass[tileAt(c.tx,c.ty)]<.06)pickGrass(c);return}
+  if(c.thirst<45){c.state='bebendo';return}
+  if(c.hunger<60){c.state='comendo';pickGrass(c);return}
+  if(readyToBreed(c)){const p=findPartner(c);if(p){c.state='namorando';c.partner=p;return}}
+  if(Math.random()<.35){c.state='descansando';return}
+  c.state='vagando';
+  const near=capys[(Math.random()*capys.length)|0];
+  if(near&&Math.hypot(near.x-c.x,near.y-c.y)<160&&Math.random()<.6){c.tx=near.x+(Math.random()-.5)*40;c.ty=near.y+(Math.random()-.5)*40}
+  else{c.tx=c.x+(Math.random()-.5)*T*10;c.ty=c.y+(Math.random()-.5)*T*10}}
+
+function die(c,cause){const idx=capys.indexOf(c);if(idx<0)return;capys.splice(idx,1);
+  const k={kind:'carcass',x:c.x,y:c.y,face:c.face,size:sizeOf(c),t:0,cause,name:c.name,harvested:false};
+  carcasses.push(k);if(selected===c)selected=k;
+  const txt={fome:'morreu de fome',sede:'morreu de sede',velhice:'morreu de velhice',caçada:'foi caçada'}[cause];
+  log(`${c.name} ${txt}`)}
+
+function simCapy(c,dt){
+  c.hunger-=1.15*dt; c.thirst-=1.6*dt; c.age+=dt/DAY; if(c.breedCd>0)c.breedCd-=dt/DAY;
+  if(c.preg>0){c.preg-=dt/DAY;if(c.preg<=0){const n=1+((Math.random()*3)|0)+(Math.random()<.25?1:0);
+    for(let k=0;k<n;k++){const p=makeCapy(c.x+(Math.random()-.5)*20,c.y+(Math.random()-.5)*20,0);p.hunger=p.thirst=85;capys.push(p)}
+    log(`${c.name} teve ${n} filhote${n>1?'s':''}`)}}
+  if(c.hunger<=0)return die(c,'fome'); if(c.thirst<=0)return die(c,'sede'); if(c.age>c.maxAge)return die(c,'velhice');
+  c.think-=dt;if(c.think<=0){c.think=.7+Math.random()*.7;decide(c)}
+  const sp=isAdult(c)?17:14;
+  switch(c.state){
+    case 'bebendo':{const i=tileAt(c.x,c.y);
+      if(dist[i]<=1){c.moving=false;c.thirst=Math.min(100,c.thirst+30*dt);if(c.thirst>=98){c.state='vagando';c.think=0}}
+      else{const x=i%W,y=(i/W)|0;let bi=i;for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++){const nx=x+ox,ny=y+oy;if(nx<0||ny<0||nx>=W||ny>=H)continue;const j=I(nx,ny);if(dist[j]<dist[bi])bi=j}
+        moveTo(c,(bi%W+.5)*T,(((bi/W)|0)+.5)*T,dt,sp*1.3)}break}
+    case 'comendo':{if(moveTo(c,c.tx,c.ty,dt,sp*1.15)){if(c.searching){pickGrass(c);break}
+      const i=tileAt(c.x,c.y);const take=Math.min(grass[i],.33*dt);grass[i]-=take;c.hunger=Math.min(100,c.hunger+take*100);
+      if(grass[i]<.05)pickGrass(c);if(c.hunger>=95){c.state='vagando';c.think=0}}break}
+    case 'namorando':{const p=c.partner;if(!p||!capys.includes(p)||!readyToBreed(p)||!readyToBreed(c)){c.state='vagando';c.partner=null;break}
+      if(moveTo(c,p.x,p.y,dt,sp*1.2)||Math.hypot(p.x-c.x,p.y-c.y)<12){const f=c.sex==='F'?c:p,m=f===c?p:c;
+        f.preg=1.6;f.breedCd=8;m.breedCd=1.2;c.state=p.state='vagando';c.partner=p.partner=null}break}
+    case 'vagando':moveTo(c,c.tx,c.ty,dt,sp*.7);break;
+    default:c.moving=false}
+}
+
+const ST=[ // estágios da decomposição (dias de jogo)
+  {end:1,  name:'Fresca',            desc:'Morte recente. Ainda dá para tirar couro e carne.'},
+  {end:2.5,name:'Inchada',           desc:'Gases da decomposição incham o corpo. A carne já está estragada.'},
+  {end:4.5,name:'Decomposição ativa',desc:'Moscas e larvas consomem os tecidos. O cheiro atrai urubus de longe.'},
+  {end:7,  name:'Decomposição avançada',desc:'Restam couro seco, cartilagem e ossos expostos.'},
+  {end:12, name:'Esqueleto',         desc:'Só a ossada. Aos poucos ela se desfaz e aduba o solo.'}];
+const stageOf=k=>{for(let s=0;s<ST.length;s++)if(k.t<ST[s].end)return s;return 5};
+
+function simCarcass(k,dt){k.t+=dt/DAY;if(k.t>=ST[4].end){
+  const cx=(k.x/T)|0,cy=(k.y/T)|0;
+  for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++){const x=cx+ox,y=cy+oy;if(x<0||y<0||x>=W||y>=H)continue;const i=I(x,y);if(water[i])continue;
+    fert[i]=Math.min(1.6,fert[i]+.6);gmax[i]=Math.min(1,gmax[i]+.25)}
+  carcasses.splice(carcasses.indexOf(k),1);if(selected===k)selected=null}}
+
+let gAcc=0,dayMark=0;
+function growGrass(dt){for(let i=0;i<N;i++){if(water[i])continue;const g=grass[i],m=gmax[i];
+  if(g<m)grass[i]=Math.min(m,g+.0019*dt*(.45+fert[i])*(g<.03?.5:1))}}
+
+function sim(dt){gameTime+=dt;
+  for(let i=capys.length-1;i>=0;i--)if(capys[i])simCapy(capys[i],dt);
+  for(let i=carcasses.length-1;i>=0;i--)if(carcasses[i])simCarcass(carcasses[i],dt);
+  gAcc+=dt;if(gAcc>=.5){growGrass(gAcc);gAcc=0}
+  const day=Math.floor(gameTime/DAY);if(day!==dayMark){dayMark=day;popHist.push(capys.length);if(popHist.length>40)popHist.shift()}
+  for(let i=player.meat.length-1;i>=0;i--){} }
+popHist.push(capys.length);
+
+// ================== ENTRADA ==================
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+let dpr=1,vw=0,vh=0;
+function resize(){dpr=Math.min(2,window.devicePixelRatio||1);vw=innerWidth;vh=innerHeight;cv.width=vw*dpr;cv.height=vh*dpr}
+addEventListener('resize',resize);resize();
+
+const keys={};addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true});addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+let joy=null;
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);joy={id:e.pointerId,ox:e.clientX,oy:e.clientY,x:e.clientX,y:e.clientY,t:performance.now(),moved:false};hideHint()});
+cv.addEventListener('pointermove',e=>{if(!joy||e.pointerId!==joy.id)return;joy.x=e.clientX;joy.y=e.clientY;if(Math.hypot(joy.x-joy.ox,joy.y-joy.oy)>10)joy.moved=true});
+const endJoy=e=>{if(!joy||e.pointerId!==joy.id)return;if(!joy.moved&&performance.now()-joy.t<400)tapAt(e.clientX,e.clientY);joy=null};
+cv.addEventListener('pointerup',endJoy);cv.addEventListener('pointercancel',endJoy);
+
+let camX=player.x,camY=player.y;
+const toWorld=(sx,sy)=>({x:(sx-vw/2)/zoom+camX,y:(sy-vh/2)/zoom+camY});
+function tapAt(sx,sy){const p=toWorld(sx,sy);let best=null,bd=22/zoom+10;
+  for(const c of capys){const d=Math.hypot(c.x-p.x,c.y-p.y);if(d<bd){bd=d;best=c}}
+  for(const k of carcasses){const d=Math.hypot(k.x-p.x,k.y-p.y);if(d<bd){bd=d;best=k}}
+  selected=best;renderInfo(true)}
+
+function setSpeed(s){speed=s;document.querySelectorAll('[data-speed]').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.speed===s)))}
+document.querySelectorAll('[data-speed]').forEach(b=>b.addEventListener('click',()=>setSpeed(+b.dataset.speed)));
+document.getElementById('zIn').onclick=()=>zoom=Math.min(3,zoom*1.25);
+document.getElementById('zOut').onclick=()=>zoom=Math.max(.5,zoom/1.25);
+document.getElementById('close').onclick=()=>{selected=null;renderInfo(true)};
+
+const hintEl=document.getElementById('hint');let hintGone=false;
+function hideHint(){if(hintGone)return;hintGone=true;hintEl.style.opacity='0'}
+setTimeout(hideHint,7000);
+
+// ação contextual
+const actBtn=document.getElementById('act');let actTarget=null,actKind=null;
+function updateAction(){actTarget=null;actKind=null;let bd=30;
+  for(const k of carcasses){const d=Math.hypot(k.x-player.x,k.y-player.y);if(d<bd&&stageOf(k)===0&&!k.harvested){bd=d;actTarget=k;actKind='harvest'}}
+  if(!actTarget){bd=30;for(const c of capys){const d=Math.hypot(c.x-player.x,c.y-player.y);if(d<bd){bd=d;actTarget=c;actKind='hunt'}}}
+  if(actTarget){actBtn.hidden=false;actBtn.textContent=actKind==='hunt'?`Caçar ${actTarget.name}`:'Tirar couro e carne'}else actBtn.hidden=true}
+actBtn.onclick=()=>{if(!actTarget)return;
+  if(actKind==='hunt'){die(actTarget,'caçada')}
+  else{const k=actTarget;const n=Math.max(1,Math.round(k.size*3));for(let i=0;i<n;i++)player.meat.push(gameTime);player.hide++;
+    k.harvested=true;k.t=ST[2].end;log(`Você tirou ${n} de carne e 1 couro. Os restos ficaram no chão.`)}
+  updateAction();renderInfo(true)};
+
+// ================== DESENHO ==================
+const GR=[];for(let f=0;f<4;f++){GR[f]=[];for(let g=0;g<=16;g++){const t=g/16,ff=f/3;
+  const r=Math.round(128+(62-128)*t-ff*10),gg=Math.round(104+(130-104)*t+ff*6),b=Math.round(64+(52-64)*t-ff*4);GR[f][g]=`rgb(${r},${gg},${b})`}}
+const WA=['#2a6884','#2d6e8a','#2b6b87','#30738f'];
+const sizeOf=c=>.45+.55*Math.min(1,c.age/4);
+
+function drawCapy(c,t){const s=sizeOf(c);const inW=water[tileAt(c.x,c.y)];
+  ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.face);ctx.scale(s,s);
+  if(inW){ctx.strokeStyle='rgba(220,240,250,.45)';ctx.lineWidth=1;ctx.beginPath();ctx.ellipse(0,0,13+Math.sin(t*3)*1.2,9,0,0,6.29);ctx.stroke()}
+  else{ctx.fillStyle='rgba(0,0,0,.22)';ctx.beginPath();ctx.ellipse(1.5,2,11,7.5,0,0,6.29);ctx.fill()}
+  const lp=c.moving?Math.sin(c.walk)*2.2:0;
+  if(!inW){ctx.fillStyle='#4a3322';for(const[lx,ly,ph]of[[5,5.5,1],[5,-5.5,-1],[-6,5.5,-1],[-6,-5.5,1]]){ctx.beginPath();ctx.ellipse(lx+lp*ph,ly,2.2,1.6,0,0,6.29);ctx.fill()}}
+  const body=c.sex==='M'?'#80593a':'#8f6844';
+  ctx.fillStyle=body;ctx.beginPath();ctx.ellipse(-1,0,10,6.6,0,0,6.29);ctx.fill();
+  ctx.fillStyle='rgba(255,230,190,.12)';ctx.beginPath();ctx.ellipse(-2,-1.5,7,3,0,0,6.29);ctx.fill();
+  ctx.fillStyle=c.sex==='M'?'#6f4c31':'#7b5838';ctx.beginPath();ctx.ellipse(9.5,0,5.6,4.4,0,0,6.29);ctx.fill();
+  ctx.fillStyle='#4a3322';ctx.beginPath();ctx.ellipse(13.6,0,2.4,3.4,0,0,6.29);ctx.fill();
+  ctx.fillStyle='#5a3d26';ctx.beginPath();ctx.arc(7,3.8,1.5,0,6.29);ctx.arc(7,-3.8,1.5,0,6.29);ctx.fill();
+  ctx.fillStyle='#16100a';ctx.beginPath();ctx.arc(11,2.4,.75,0,6.29);ctx.arc(11,-2.4,.75,0,6.29);ctx.fill();
+  if(c.preg>0){ctx.fillStyle=body;ctx.beginPath();ctx.ellipse(-1,0,9,7.6,0,0,6.29);ctx.fill()}
+  ctx.restore();
+  if(c.state==='descansando'&&!c.moving){ctx.fillStyle='rgba(241,234,216,.6)';ctx.font='7px IBM Plex Mono,monospace';ctx.fillText('z',c.x+6,c.y-8-Math.sin(t*2)*1.5)}}
+
+function drawCarcass(k,t){const st=stageOf(k);const s=k.size;
+  ctx.save();ctx.translate(k.x,k.y);ctx.rotate(k.face);ctx.scale(s,s);
+  if(st>=2){ctx.fillStyle=`rgba(40,28,18,${st===2?.55:st===3?.4:.2})`;ctx.beginPath();ctx.ellipse(0,0,17,12,0,0,6.29);ctx.fill()}
+  if(st<=2){const sw=st===1?1.28:st===2?.9:1;const col=['#6f4f33','#7a6a3c','#4b3926'][st];
+    ctx.strokeStyle=col;ctx.lineWidth=2.2;ctx.lineCap='round';ctx.beginPath();
+    for(const[x0,y0,x1,y1]of[[5,4,8,11],[-5,4,-7,11],[5,4,11,9],[-5,4,-11,9]]){ctx.moveTo(x0,y0*sw);ctx.lineTo(x1,y1*sw)}ctx.stroke();
+    ctx.fillStyle=col;ctx.beginPath();ctx.ellipse(-1,0,10*sw,6.8*sw,0,0,6.29);ctx.fill();
+    ctx.beginPath();ctx.ellipse(10*Math.min(sw,1.1),-1,5.4,4.2,.2,0,6.29);ctx.fill();
+    if(k.harvested){ctx.fillStyle='#8e2f25';ctx.beginPath();ctx.ellipse(-1,0,7,4,0,0,6.29);ctx.fill()}
+    if(st===2){ctx.fillStyle='rgba(240,235,215,.85)';for(let i=0;i<9;i++){const a=hash(i,k.name.length)*6.28,r=hash(i,3)*6;ctx.fillRect(Math.cos(a)*r+Math.sin(t*4+i)*.6-1,Math.sin(a)*r*.6,1.4,.8)}}}
+  if(st===3){ctx.fillStyle='#4f3e2c';ctx.beginPath();ctx.ellipse(-3,2,6,3.5,0,0,6.29);ctx.fill()}
+  if(st>=3){const a=st===5?.4:1;ctx.globalAlpha=a*(st===4?Math.max(.35,1-(k.t-7)/7):1);
+    ctx.strokeStyle='#e9e2cc';ctx.fillStyle='#e9e2cc';ctx.lineWidth=1.3;ctx.beginPath();ctx.moveTo(-11,0);ctx.lineTo(7,0);ctx.stroke();
+    ctx.lineWidth=1;ctx.beginPath();for(let r=-6;r<=3;r+=2.2){ctx.moveTo(r,0);ctx.quadraticCurveTo(r+1,5,r-1,6.5);ctx.moveTo(r,0);ctx.quadraticCurveTo(r+1,-5,r-1,-6.5)}ctx.stroke();
+    ctx.beginPath();ctx.ellipse(11,0,4.2,3.2,0,0,6.29);ctx.fill();ctx.fillStyle='#2a2117';ctx.beginPath();ctx.arc(11.5,1.5,.9,0,6.29);ctx.arc(11.5,-1.5,.9,0,6.29);ctx.fill();
+    ctx.fillStyle='#e9e2cc';ctx.fillRect(-13,-4,3,1.4);ctx.fillRect(-13,3,3,1.4)}
+  ctx.restore();
+  if(st>=0&&st<=3&&k.t>.3){ctx.fillStyle='#111';const n=st===2?7:st===1?5:3;for(let i=0;i<n;i++){const a=t*(3+i*.7)+i*1.9,r=7+Math.sin(t*2+i)*4;ctx.fillRect(k.x+Math.cos(a)*r,k.y+Math.sin(a*1.3)*r*.7-4,1.3,1.3)}}}
+
+function drawPlayer(t){const p=player;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.face);
+  ctx.fillStyle='rgba(0,0,0,.25)';ctx.beginPath();ctx.ellipse(1.5,2,8,6,0,0,6.29);ctx.fill();
+  const sw=Math.sin(p.walk)*3;ctx.fillStyle='#3b2c20';ctx.beginPath();ctx.ellipse(sw,3,3,2,0,0,6.29);ctx.ellipse(-sw,-3,3,2,0,0,6.29);ctx.fill();
+  ctx.fillStyle='#c9772f';ctx.beginPath();ctx.ellipse(0,0,4.5,7.5,0,0,6.29);ctx.fill();
+  ctx.fillStyle='#b9845c';ctx.beginPath();ctx.arc(-sw*.6+2,7.2,1.8,0,6.29);ctx.arc(sw*.6+2,-7.2,1.8,0,6.29);ctx.fill();
+  ctx.fillStyle='#2b1d14';ctx.beginPath();ctx.arc(.5,0,4,0,6.29);ctx.fill();
+  ctx.restore()}
+
+function render(t){
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#142012';ctx.fillRect(0,0,vw,vh);
+  ctx.setTransform(dpr*zoom,0,0,dpr*zoom,dpr*(vw/2-camX*zoom),dpr*(vh/2-camY*zoom));
+  const x0=Math.max(0,Math.floor((camX-vw/2/zoom)/T)),x1=Math.min(W-1,Math.ceil((camX+vw/2/zoom)/T));
+  const y0=Math.max(0,Math.floor((camY-vh/2/zoom)/T)),y1=Math.min(H-1,Math.ceil((camY+vh/2/zoom)/T));
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const i=I(x,y);
+    if(water[i]){ctx.fillStyle=WA[((hash(x,y)*4+t*.6+x*.1)|0)&3]}
+    else{ctx.fillStyle=GR[Math.min(3,(fert[i]*2.2)|0)][Math.round(Math.min(1,grass[i])*16)]}
+    ctx.fillRect(x*T,y*T,T+.5,T+.5)}
+  // margem lamacenta
+  ctx.fillStyle='rgba(90,70,45,.35)';for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const i=I(x,y);if(dist[i]===1)ctx.fillRect(x*T,y*T,T,T)}
+  // tufos de capim
+  ctx.strokeStyle='rgba(150,200,110,.5)';ctx.lineWidth=.8;ctx.beginPath();
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const i=I(x,y);if(water[i]||grass[i]<.55||hash(x,y*3)<.5)continue;const bx=x*T+hash(x*7,y)*8+2,by=y*T+hash(x,y*5)*8+4;
+    ctx.moveTo(bx,by);ctx.lineTo(bx-1.5,by-3.5);ctx.moveTo(bx,by);ctx.lineTo(bx+1.5,by-3.5)}ctx.stroke();
+  for(const k of carcasses)drawCarcass(k,t);
+  for(const c of capys)drawCapy(c,t);
+  drawPlayer(t);
+  // árvores (copas por cima)
+  for(let y=y0-1;y<=y1+1;y++)for(let x=x0-1;x<=x1+1;x++){if(x<0||y<0||x>=W||y>=H)continue;const i=I(x,y);if(!tree[i])continue;
+    const cx=x*T+T/2+(hash(x,y)-.5)*5,cy=y*T+T/2+(hash(y,x)-.5)*5,r=9+hash(x*2,y)*6,sh=hash(x,y*2);
+    ctx.fillStyle='rgba(0,0,0,.25)';ctx.beginPath();ctx.arc(cx+4,cy+5,r,0,6.29);ctx.fill();
+    ctx.fillStyle=sh>.5?'#24502a':'#2c5a2c';ctx.beginPath();ctx.arc(cx,cy,r,0,6.29);ctx.fill();
+    ctx.fillStyle='rgba(120,170,90,.25)';ctx.beginPath();ctx.arc(cx-r*.3,cy-r*.3,r*.5,0,6.29);ctx.fill()}
+  if(selected){ctx.strokeStyle='#e3a94b';ctx.lineWidth=1.5/zoom*1.2;ctx.setLineDash([3,2]);ctx.beginPath();ctx.arc(selected.x,selected.y,16,0,6.29);ctx.stroke();ctx.setLineDash([])}
+  // noite
+  ctx.setTransform(dpr,0,0,dpr,0,0);const h=(gameTime/DAY%1)*24;
+  let dark=h<5||h>20?.5:h<7?.5*(1-(h-5)/2):h>18?.5*((h-18)/2):0;
+  if(dark>0){ctx.fillStyle=`rgba(8,14,40,${dark})`;ctx.fillRect(0,0,vw,vh)}
+  if(joy&&joy.moved){ctx.strokeStyle='rgba(241,234,216,.35)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(joy.ox,joy.oy,42,0,6.29);ctx.stroke();
+    const dx=joy.x-joy.ox,dy=joy.y-joy.oy,d=Math.min(42,Math.hypot(dx,dy)),a=Math.atan2(dy,dx);
+    ctx.fillStyle='rgba(227,169,75,.7)';ctx.beginPath();ctx.arc(joy.ox+Math.cos(a)*d,joy.oy+Math.sin(a)*d,16,0,6.29);ctx.fill()}}
+
+// ================== HUD ==================
+const $=id=>document.getElementById(id);
+const fmtTime=()=>{const d=Math.floor(gameTime/DAY)+1,h=(gameTime/DAY%1)*24;return `Dia ${d} · ${String(Math.floor(h)).padStart(2,'0')}:${String(Math.floor(h%1*60)).padStart(2,'0')}`};
+const sctx=$('spark').getContext('2d');
+function drawSpark(){const w=168,h=52;sctx.clearRect(0,0,w,h);const d=[...popHist,capys.length];const mx=Math.max(10,...d);
+  sctx.strokeStyle='rgba(241,234,216,.15)';sctx.beginPath();sctx.moveTo(0,h-1);sctx.lineTo(w,h-1);sctx.stroke();
+  sctx.beginPath();d.forEach((v,i)=>{const x=d.length<2?w:i/(d.length-1)*(w-6)+3,y=h-4-v/mx*(h-10);i?sctx.lineTo(x,y):sctx.moveTo(x,y)});
+  sctx.strokeStyle='#e3a94b';sctx.lineWidth=2.5;sctx.stroke();
+  const lx=w-3,ly=h-4-capys.length/mx*(h-10);sctx.fillStyle='#e3a94b';sctx.beginPath();sctx.arc(lx,ly,3.5,0,6.29);sctx.fill()}
+let infoKey='';
+function bar(label,v,color){return `<div class="bar"><span>${label}</span><i><u style="width:${Math.max(0,v)}%;background:${color}"></u></i><em>${Math.round(Math.max(0,v))}</em></div>`}
+const STATE_TXT={vagando:'Andando com o grupo',comendo:'Procurando e comendo capim',bebendo:'Indo beber água',descansando:'Descansando',namorando:'Acasalando'};
+function renderInfo(force){const el=$('info');if(!selected){el.hidden=true;return}el.hidden=false;let html;
+  if(selected.kind==='carcass'){const k=selected,st=stageOf(k);const s=ST[Math.min(4,st)];
+    html=`<h3>Carcaça de capivara</h3><div class="sub">${k.name} · ${k.cause} · há ${k.t.toFixed(1)} dias</div>
+      <div class="bar"><span>Estágio</span><i><u style="width:${Math.min(100,k.t/ST[4].end*100)}%;background:#c9a46a"></u></i><em>${Math.min(5,st+1)}/5</em></div>
+      <p><b>${s.name}.</b> ${k.harvested&&st<3?'Couro e carne já foram retirados. ':''}${s.desc}</p>`}
+  else{const c=selected;const age=c.age<4?`filhote, ${c.age.toFixed(1)} dias`:`adulto, ${c.age.toFixed(1)} dias`;
+    html=`<h3>${c.name}</h3><div class="sub">Capivara · ${c.sex==='F'?'fêmea':'macho'} · ${age}</div>
+      ${bar('Barriga',c.hunger,c.hunger<30?'var(--danger)':'var(--good)')}${bar('Água',c.thirst,c.thirst<30?'var(--danger)':'var(--blue)')}
+      <p>${STATE_TXT[c.state]||c.state}${c.preg>0?` · prenha, parto em ${c.preg.toFixed(1)} dias`:''}</p>
+      <p style="color:var(--muted);font-size:12px">Come capim e plantas da margem. Precisa beber várias vezes por dia.</p>`}
+  if(force||html!==infoKey){infoKey=html;$('infoBody').innerHTML=html}}
+
+let hudT=0;
+function updateHUD(dt){hudT-=dt;if(hudT>0)return;hudT=.25;
+  $('clock').textContent=fmtTime();$('pop').textContent=capys.length;$('carc').textContent=carcasses.length;
+  let gs=0,gn=0;for(let i=0;i<N;i+=7)if(!water[i]){gs+=grass[i];gn++}$('grassPct').textContent=Math.round(gs/gn*100)+'%';
+  let fresh=0,rot=0;for(const m of player.meat)(gameTime-m>DAY*1.2?rot++:fresh++);
+  $('iMeat').textContent=fresh;$('iRot').textContent=rot;$('iHide').textContent=player.hide;
+  drawSpark();renderInfo(false);updateAction()}
+
+// ================== LOOP ==================
+let last=performance.now();
+function frame(now){const dt=Math.min(.05,(now-last)/1000);last=now;const t=now/1000;
+  let mx=0,my=0;if(keys.w||keys.arrowup)my--;if(keys.s||keys.arrowdown)my++;if(keys.a||keys.arrowleft)mx--;if(keys.d||keys.arrowright)mx++;
+  if(joy&&joy.moved){const dx=joy.x-joy.ox,dy=joy.y-joy.oy,d=Math.hypot(dx,dy);if(d>6){const k=Math.min(1,d/42);mx=dx/d*k;my=dy/d*k}}
+  if(mx||my){const m=Math.hypot(mx,my),k=Math.min(1,m);const inW=water[tileAt(player.x,player.y)];const sp=72*(inW?.5:1);
+    player.x=Math.max(6,Math.min(W*T-6,player.x+mx/m*k*sp*dt));player.y=Math.max(6,Math.min(H*T-6,player.y+my/m*k*sp*dt));
+    player.face=Math.atan2(my,mx);player.walk+=dt*10*k;hideHint()}
+  camX+=(player.x-camX)*Math.min(1,dt*6);camY+=(player.y-camY)*Math.min(1,dt*6);
+  for(let s=0;s<speed;s++)sim(dt);
+  render(t);updateHUD(dt);requestAnimationFrame(frame)}
+requestAnimationFrame(frame);
+})();
+</script>

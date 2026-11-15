@@ -23,3 +23,18 @@ Jogo de sobrevivência multiplayer online com visão de cima, feito na **Godot 4
 | `scripts/loading_screen.gd` | Carrega a próxima cena em segundo plano, mostra o progresso e as dicas |
 | `scripts/horizon_backdrop.gd` | Fundo animado: pôr do sol, serras com pinheiros e brasas |
 | `scenes/main_menu.tscn` | Menu principal (provisório) |
+| `prototipo-web/index.html` | Protótipo jogável no navegador do ecossistema (Mata Viva), usado para testar as mecânicas |
+
+## Protótipo do ecossistema (navegador)
+
+A pasta `prototipo-web/` tem um protótipo em HTML que roda direto no navegador do celular, sem instalar nada. Ele serve para testar as mecânicas antes de passá-las para a Godot. O arquivo `.gdignore` faz a Godot ignorar essa pasta.
+
+O que já funciona:
+
+- **Capivaras:** fome, sede, grupo, descanso, acasalamento, gestação, filhotes, envelhecimento e morte
+- **Capim:** é consumido e volta a crescer, mais rápido perto da água e em solo fértil
+- **Carcaças:** 5 estágios de decomposição (fresca, inchada, ativa, avançada, esqueleto) que no fim adubam o solo
+- **Jogador:** anda, caça e tira couro e carne; a carne estraga com o tempo
+- Ciclo de dia e noite e aceleração do tempo (1x, 4x, 16x)
+
+Para abrir: baixe o arquivo `prototipo-web/index.html` e abra no navegador.
