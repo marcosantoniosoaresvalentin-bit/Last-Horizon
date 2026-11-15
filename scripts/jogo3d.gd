@@ -1,18 +1,21 @@
 extends Node3D
-## Mundo do jogo em 3D, visto de cima (câmera aérea seguindo o personagem).
-## Terreno, lagoas, mato e árvores da Amazônia são montados em código.
-## O tempo passa sozinho: dia, noite e chuva vêm da simulação do mundo.
+## Mundo do jogo em 3D, em terceira pessoa.
+## Mapa grande coberto de grama, com serra, lagoas e chuva automática.
+## A grama só é montada perto do jogador, para o jogo rodar leve no celular.
 
 const MundoSim := preload("res://scripts/mundo_sim.gd")
-const Plantas := preload("res://scripts/plantas.gd")
 
-const CELL := 2.0           # metros por célula da simulação
-const HS := 0.8             # metros por unidade de altura da simulação
-const SUB := 2              # subdivisões do terreno por célula
-const SPEED := 4.2          # m/s andando
-const CAM_OFFSET := Vector3(0, 15, 11)
+const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
+const HS := 1.2              # metros por unidade de altura da simulação
+const SUB := 2               # subdivisões do terreno por célula
+const WALK_SPEED := 2.2
+const RUN_SPEED := 5.5
 const JOY_RADIUS := 70.0
-const CHUNK := 8            # células por bloco de vegetação
+const GRASS_CHUNK := 12.0    # tamanho de cada bloco de grama, em metros
+const GRASS_RADIUS := 3      # blocos de grama em volta do jogador
+const GRASS_PER_CHUNK := 200
+const CAM_DIST := 4.2
+const CHARACTER_FILE := "res://personagem/soldado.glbin"
 
 const TERRAIN_SHADER := """
 shader_type spatial;
@@ -24,66 +27,53 @@ float noise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
 float fbm(vec2 p){ float s = 0.0; float a = 0.5; for(int i = 0; i < 4; i++){ s += noise(p) * a; p *= 2.03; a *= 0.5; } return s; }
 void vertex(){ wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment(){
-	vec3 c = COLOR.rgb * COLOR.rgb * 1.15;
-	float big = fbm(wpos.xz * 0.12);
-	float mid = fbm(wpos.xz * 0.9);
-	float fine = noise(wpos.xz * 6.0);
-	c *= 0.78 + big * 0.35 + mid * 0.15 + fine * 0.07;
-	// folhas secas e terra escura espalhadas pelo chão da mata
-	float litter = smoothstep(0.55, 0.75, noise(wpos.xz * 4.1 + 11.0)) * smoothstep(0.4, 0.7, noise(wpos.xz * 0.7));
-	c = mix(c, vec3(0.10, 0.06, 0.03), litter * 0.5 * (1.0 - COLOR.a));
+	vec3 c = COLOR.rgb * COLOR.rgb * 1.25;
+	float big = fbm(wpos.xz * 0.05);
+	float mid = fbm(wpos.xz * 0.4);
+	float fine = noise(wpos.xz * 3.0) * 0.6 + noise(wpos.xz * 9.0) * 0.4;
+	c *= 0.8 + big * 0.3 + mid * 0.15 + fine * 0.12;
+	// tons de grama seca e grama mais escura misturados
+	float dry = smoothstep(0.55, 0.8, fbm(wpos.xz * 0.11 + 7.0));
+	c = mix(c, c * vec3(1.35, 1.15, 0.7), dry * 0.35 * (1.0 - COLOR.a));
 	c *= mix(1.0, 0.72, wet);
 	ALBEDO = c;
 	ROUGHNESS = mix(0.95, 0.55, wet);
-	SPECULAR = 0.25;
+	SPECULAR = 0.2;
 }
 """
 
-const PLANT_SHADER := """
+const GRASS_SHADER := """
 shader_type spatial;
 render_mode cull_disabled;
 uniform float wind = 0.12;
 uniform float wet = 0.0;
 uniform vec3 player_pos = vec3(0.0);
-varying vec3 wp;
+uniform float fade_start = 26.0;
+uniform float fade_end = 34.0;
 void vertex(){
 	vec3 root = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	// a grama encolhe perto da borda da área desenhada, sem "pular" na tela
+	float shrink = 1.0 - smoothstep(fade_start, fade_end, distance(root.xz, player_pos.xz));
+	VERTEX.y *= shrink;
 	float s = COLOR.a * COLOR.a;
 	float t = TIME * 1.7 + root.x * 0.31 + root.z * 0.23;
 	float gust = 0.6 + 0.4 * sin(TIME * 0.37 + root.x * 0.02);
 	VERTEX.x += sin(t) * wind * s * gust;
 	VERTEX.z += cos(t * 0.83) * wind * 0.6 * s * gust;
-	wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	// a grama se abre quando o personagem passa por cima
+	vec3 wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	vec2 away = wp.xz - player_pos.xz;
+	float push = (1.0 - smoothstep(0.0, 0.9, length(away))) * s;
+	vec2 dw = normalize(away + vec2(0.001)) * push * 0.5;
+	VERTEX += transpose(mat3(MODEL_MATRIX)) * vec3(dw.x, 0.0, dw.y);
 }
 void fragment(){
-	// abre um buraco nas copas entre a câmera e o personagem, para ele não sumir
-	vec3 cam = CAMERA_POSITION_WORLD;
-	vec3 ab = player_pos - cam;
-	float h = clamp(dot(wp - cam, ab) / dot(ab, ab), 0.0, 1.0);
-	float d = length(wp - (cam + ab * h));
-	float cut = smoothstep(5.0, 3.0, d) * step(player_pos.y + 2.3, wp.y);
-	float dither = fract(dot(floor(FRAGCOORD.xy), vec2(0.5, 0.25)) + 0.125);
-	if (cut > dither + 0.05) { discard; }
-	if (UV2.x > 0.5) {
-		// desenho de um ramo com folhas dentro do cartão
-		vec2 q = UV * 2.0 - 1.0;
-		float m = 0.0;
-		for (int k = 0; k < 5; k++) {
-			float a = float(k) * 1.2566 + 0.4;
-			vec2 dir = vec2(cos(a), sin(a));
-			vec2 p = q - dir * 0.42;
-			vec2 r = vec2(dot(p, dir), dot(p, vec2(-dir.y, dir.x)));
-			m = max(m, 1.0 - length(r / vec2(0.5, 0.2)));
-		}
-		m = max(m, 1.0 - length(q / 0.3));
-		if (m < 0.02) { discard; }
-	}
 	vec3 c = COLOR.rgb;
-	c = mix(c * c * 1.4, c, 0.55);
+	c = mix(c * c * 1.4, c, 0.5);
 	c *= mix(1.0, 0.8, wet);
 	ALBEDO = c;
-	ROUGHNESS = mix(0.82, 0.45, wet);
-	SPECULAR = 0.35;
+	ROUGHNESS = mix(0.85, 0.5, wet);
+	SPECULAR = 0.3;
 	if (!FRONT_FACING) { NORMAL = -NORMAL; }
 }
 """
@@ -136,7 +126,7 @@ var _gw := PackedFloat32Array()
 var _max_h := 1.0
 
 var _terrain_mat: ShaderMaterial
-var _plant_mat: ShaderMaterial
+var _grass_mat: ShaderMaterial
 var _water_mat: ShaderMaterial
 var _water_mi: MeshInstance3D
 var _sun: DirectionalLight3D
@@ -145,8 +135,16 @@ var _env: Environment
 var _sky_mat: ProceduralSkyMaterial
 var _cam: Camera3D
 var _rain: CPUParticles3D
+
 var _player: Node3D
-var _limbs := {}
+var _model: Node3D
+var _anim: AnimationPlayer
+var _anim_now := ""
+
+var _grass_meshes: Array[Mesh] = []
+var _grass_chunks := {}          # Vector2i -> MultiMeshInstance3D
+var _grass_center := Vector2i(-999, -999)
+var _grass_queue: Array[Vector2i] = []
 
 var _hud: CanvasLayer
 var _clock: Label
@@ -156,13 +154,25 @@ var _joy_ui: Control
 
 var _ready_world := false
 var _face := 0.0
-var _walk := 0.0
-var _moving := false
 var _rain_amount := 0.0
 var _joy_id := -1
 var _joy_origin := Vector2.ZERO
 var _joy_vec := Vector2.ZERO
+var _look_id := -1
+var _look_last := Vector2.ZERO
+var _yaw := 0.0
+var _pitch := 0.32
 var _water_level := PackedFloat32Array()
+var _corner_h := PackedFloat32Array()
+var _water_timer := 0.0
+var _water_task := -1
+var _w_level := PackedFloat32Array()
+var _w_arr := []
+
+
+func _exit_tree() -> void:
+	if _water_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_water_task)
 
 
 func _ready() -> void:
@@ -228,10 +238,6 @@ func _set_loading(text: String) -> void:
 func _build_environment() -> void:
 	_env = Environment.new()
 	_sky_mat = ProceduralSkyMaterial.new()
-	_sky_mat.sky_top_color = Color(0.32, 0.52, 0.78)
-	_sky_mat.sky_horizon_color = Color(0.72, 0.78, 0.82)
-	_sky_mat.ground_horizon_color = Color(0.5, 0.55, 0.5)
-	_sky_mat.ground_bottom_color = Color(0.2, 0.25, 0.2)
 	var sky := Sky.new()
 	sky.sky_material = _sky_mat
 	_env.background_mode = Environment.BG_SKY
@@ -243,57 +249,57 @@ func _build_environment() -> void:
 	_env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	_env.tonemap_exposure = 1.05
 	_env.fog_enabled = true
-	_env.fog_light_color = Color(0.7, 0.76, 0.8)
-	_env.fog_density = 0.0025
-	_env.fog_sky_affect = 0.4
+	_env.fog_density = 0.0018
+	_env.fog_sky_affect = 0.5
 	var we := WorldEnvironment.new()
 	we.environment = _env
 	add_child(we)
 
 	_sun = DirectionalLight3D.new()
 	_sun.shadow_enabled = true
-	_sun.directional_shadow_max_distance = 55.0
-	_sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	_sun.light_energy = 1.2
-	_sun.shadow_opacity = 0.8
+	_sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	_sun.directional_shadow_max_distance = 18.0
+	_sun.shadow_opacity = 0.75
 	add_child(_sun)
 	_moon = DirectionalLight3D.new()
 	_moon.light_color = Color(0.55, 0.65, 0.95)
 	_moon.rotation = Vector3(deg_to_rad(-55), deg_to_rad(-30), 0)
-	_moon.shadow_enabled = false
 	add_child(_moon)
 
 	_cam = Camera3D.new()
-	_cam.fov = 50
-	_cam.far = 220
+	_cam.fov = 62
+	_cam.near = 0.1
+	_cam.far = 700
 	add_child(_cam)
 
 	_rain = CPUParticles3D.new()
-	_rain.amount = 1400
-	_rain.lifetime = 0.9
+	_rain.amount = 900
+	_rain.lifetime = 0.8
 	_rain.emitting = false
 	_rain.local_coords = false
 	_rain.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	_rain.emission_box_extents = Vector3(22, 0.5, 22)
+	_rain.emission_box_extents = Vector3(14, 0.5, 14)
 	_rain.direction = Vector3(0.1, -1, 0)
 	_rain.spread = 2
-	_rain.initial_velocity_min = 24
-	_rain.initial_velocity_max = 28
-	_rain.gravity = Vector3(0, -9.8, 0)
+	_rain.initial_velocity_min = 22
+	_rain.initial_velocity_max = 26
 	var drop := BoxMesh.new()
-	drop.size = Vector3(0.015, 0.55, 0.015)
+	drop.size = Vector3(0.012, 0.45, 0.012)
 	var dm := StandardMaterial3D.new()
 	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	dm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	dm.albedo_color = Color(0.8, 0.86, 0.92, 0.45)
+	dm.albedo_color = Color(0.8, 0.86, 0.92, 0.4)
 	drop.material = dm
 	_rain.mesh = drop
 	add_child(_rain)
 
 	_terrain_mat = ShaderMaterial.new()
 	_terrain_mat.shader = _shader(TERRAIN_SHADER)
-	_plant_mat = ShaderMaterial.new()
-	_plant_mat.shader = _shader(PLANT_SHADER)
+	_grass_mat = ShaderMaterial.new()
+	_grass_mat.shader = _shader(GRASS_SHADER)
+	var fade_end := (GRASS_RADIUS + 0.2) * GRASS_CHUNK
+	_grass_mat.set_shader_parameter("fade_end", fade_end)
+	_grass_mat.set_shader_parameter("fade_start", fade_end - 9.0)
 	_water_mat = ShaderMaterial.new()
 	_water_mat.shader = _shader(WATER_SHADER)
 
@@ -321,10 +327,17 @@ func _on_world_ready() -> void:
 	var w: PackedFloat32Array = sim.take_water()
 	if not w.is_empty():
 		_update_water(w)
-	await _set_loading("Plantando a floresta…")
-	await _build_vegetation()
+		while not WorkerThreadPool.is_task_completed(_water_task):
+			await get_tree().process_frame
+		_finish_water()
+	await _set_loading("Chamando o personagem…")
 	_build_player()
 	_player.position = _ground_pos(Vector2((sim.spawn.x + 0.5) * CELL, (sim.spawn.y + 0.5) * CELL))
+	_yaw = 0.0
+	await _set_loading("Plantando a grama…")
+	for k in 3:
+		_grass_meshes.append(_make_grass_mesh(k))
+	_update_grass(true)
 	_loading.visible = false
 	_loading_bg.visible = false
 	_clock.visible = true
@@ -357,19 +370,21 @@ func _ground_pos(p: Vector2) -> Vector3:
 	return Vector3(p.x, height_at(p.x, p.y), p.y)
 
 
+func _rockiness(h: float) -> float:
+	return smoothstep(0.72, 0.86, h / (_max_h * HS))
+
+
 func _terrain_color(x: float, z: float, h: float, slope: float) -> Color:
-	var hn := h / (_max_h * HS)
 	var green := clampf(_field_at(_moist, x, z) * 2.2 + _field_at(_gw, x, z) / MundoSim.GW_CAP * 0.6, 0.0, 1.0)
-	var forest := Color(0.16, 0.20, 0.08)        # chão de mata, sombreado
-	var grass := Color(0.24, 0.36, 0.10)
-	var dry := Color(0.40, 0.40, 0.22)
-	var mud := Color(0.22, 0.17, 0.10)
-	var rock := Color(0.42, 0.40, 0.36)
-	var c := dry.lerp(grass, smoothstep(0.0, 0.35, green + 0.1)).lerp(forest, smoothstep(0.55, 1.0, green))
+	var grass := Color(0.24, 0.32, 0.12)
+	var lush := Color(0.18, 0.28, 0.09)
+	var mud := Color(0.25, 0.20, 0.12)
+	var rock := Color(0.45, 0.43, 0.39)
+	var c := grass.lerp(lush, smoothstep(0.3, 0.8, green))
 	if green > 0.85: c = c.lerp(mud, (green - 0.85) * 3.0)
-	if hn > 0.7: c = c.lerp(rock, smoothstep(0.7, 0.85, hn))
-	c = c.lerp(rock.darkened(0.1), smoothstep(0.55, 0.9, slope))
-	c.a = smoothstep(0.7, 0.85, hn)   # nas pedras não tem folha seca
+	var r := maxf(_rockiness(h), smoothstep(0.55, 0.85, slope))
+	c = c.lerp(rock, r)
+	c.a = r
 	return c
 
 
@@ -412,253 +427,180 @@ func _build_terrain() -> void:
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.material_override = _terrain_mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 
 
-## Monta a superfície da água: lagoas, córregos e poças.
-func _update_water(wat: PackedFloat32Array) -> void:
-	var W := MundoSim.W; var H := MundoSim.H
-	var lvl := PackedFloat32Array(); lvl.resize(W * H); lvl.fill(-1e9)
-	for i in W * H:
-		if wat[i] > 0.035:
-			lvl[i] = (_ter[i] + wat[i]) * HS
-	# estende a água um pouco por baixo da margem, para o terreno cortar a borda
-	var ext := lvl.duplicate()
-	for y in H:
-		for x in W:
-			var i := y * W + x
-			if lvl[i] > -1e8:
-				continue
-			var best := -1e9
-			if x > 0: best = maxf(best, lvl[i - 1])
-			if x < W - 1: best = maxf(best, lvl[i + 1])
-			if y > 0: best = maxf(best, lvl[i - W])
-			if y < H - 1: best = maxf(best, lvl[i + W])
-			ext[i] = best
-	_water_level = lvl
-	var verts := PackedVector3Array()
-	var cols := PackedColorArray()
-	for y in H:
-		for x in W:
-			var i := y * W + x
-			var L := ext[i]
-			if L < -1e8:
-				continue
-			var corners := [Vector2(x, y), Vector2(x + 1, y), Vector2(x + 1, y + 1), Vector2(x, y + 1)]
-			var vs := []
-			var cs := []
-			for c: Vector2 in corners:
-				# nível do canto: média dos vizinhos com água
-				var s := 0.0; var n := 0
-				for oy in [-1, 0]:
-					for ox in [-1, 0]:
-						var cx: int = int(c.x) + ox; var cy: int = int(c.y) + oy
-						if cx >= 0 and cy >= 0 and cx < W and cy < H and ext[cy * W + cx] > -1e8:
-							s += ext[cy * W + cx]; n += 1
-				var lv := s / n if n > 0 else L
-				var px: float = c.x * CELL; var pz: float = c.y * CELL
-				vs.append(Vector3(px, lv, pz))
-				cs.append(Color(1, 1, 1, maxf(0.0, lv - height_at(px, pz))))
-			for t in [0, 1, 2, 0, 2, 3]:
-				verts.append(vs[t]); cols.append(cs[t])
-	if verts.is_empty():
-		_water_mi.mesh = null
-		return
-	var arr := []
-	arr.resize(Mesh.ARRAY_MAX)
-	arr[Mesh.ARRAY_VERTEX] = verts
-	arr[Mesh.ARRAY_COLOR] = cols
-	var nrm := PackedVector3Array(); nrm.resize(verts.size()); nrm.fill(Vector3.UP)
-	arr[Mesh.ARRAY_NORMAL] = nrm
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
-	_water_mi.mesh = mesh
+# ================== GRAMA ==================
 
-
-func _build_vegetation() -> void:
+## Touceira de grama: lâminas finas e curvas.
+func _make_grass_mesh(variant: int) -> ArrayMesh:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 12345
-	# modelos: algumas variações de cada planta
-	var kinds := {
-		"capim_alto": {"meshes": [], "range": 45.0, "shadow": false},
-		"capim": {"meshes": [], "range": 45.0, "shadow": false},
-		"samambaia": {"meshes": [], "range": 60.0, "shadow": false},
-		"heliconia": {"meshes": [], "range": 70.0, "shadow": true},
-		"arbusto": {"meshes": [], "range": 80.0, "shadow": true},
-		"folhagem": {"meshes": [], "range": 60.0, "shadow": false},
-		"acai": {"meshes": [], "range": 150.0, "shadow": true},
-		"castanheira": {"meshes": [], "range": 200.0, "shadow": true},
-		"cupuacu": {"meshes": [], "range": 120.0, "shadow": true},
-		"bananeira": {"meshes": [], "range": 120.0, "shadow": true},
-		"samauma": {"meshes": [], "range": 220.0, "shadow": true},
-	}
-	for k in 3:
-		kinds.capim_alto.meshes.append(Plantas.capim(rng, true))
-		kinds.capim.meshes.append(Plantas.capim(rng, false))
-		kinds.acai.meshes.append(Plantas.acai(rng))
-		kinds.cupuacu.meshes.append(Plantas.cupuacu(rng))
-		kinds.bananeira.meshes.append(Plantas.bananeira(rng))
-	for k in 2:
-		kinds.samambaia.meshes.append(Plantas.samambaia(rng))
-		kinds.heliconia.meshes.append(Plantas.heliconia(rng))
-		kinds.arbusto.meshes.append(Plantas.arbusto(rng))
-		kinds.folhagem.meshes.append(Plantas.folhagem(rng))
-		kinds.castanheira.meshes.append(Plantas.castanheira(rng))
-	kinds.samauma.meshes.append(Plantas.samauma(rng))
-	await get_tree().process_frame
-
-	var W := MundoSim.W; var H := MundoSim.H
-	var spawn_p := Vector2((sim.spawn.x + 0.5) * CELL, (sim.spawn.y + 0.5) * CELL)
-	var chunks_x := ceili(float(W) / CHUNK); var chunks_z := ceili(float(H) / CHUNK)
-	var done := 0
-	for cz in chunks_z:
-		for cx in chunks_x:
-			var lists := {}
-			for name in kinds:
-				lists[name] = []
-				for m in kinds[name].meshes.size():
-					lists[name].append([])
-			for y in range(cz * CHUNK, mini((cz + 1) * CHUNK, H)):
-				for x in range(cx * CHUNK, mini((cx + 1) * CHUNK, W)):
-					var i := y * W + x
-					if _water_level.size() == W * H and _water_level[i] > -1e8:
-						continue
-					var hn := _ter[i] / _max_h
-					if hn > 0.86:
-						continue
-					var green := clampf(_moist[i] * 2.2 + _gw[i] / MundoSim.GW_CAP * 0.6, 0.0, 1.0)
-					var rocky := smoothstep(0.7, 0.86, hn)
-					var near_water := _moist[i] > 0.25
-					# capim e mato baixo
-					var n_grass := int(lerpf(2.0, 5.0, green) * (1.0 - rocky) + rng.randf())
-					for g in n_grass:
-						var kind := "capim_alto" if rng.randf() < 0.35 - green * 0.15 else "capim"
-						_add(lists, kind, rng, x, y, 0.8, 1.3)
-					if rng.randf() < 0.45 * (1.0 - rocky):
-						var r := rng.randf()
-						var kind := "samambaia"
-						if r < 0.25: kind = "arbusto"
-						elif r < 0.45: kind = "folhagem"
-						elif r < 0.6 and green > 0.4: kind = "heliconia"
-						_add(lists, kind, rng, x, y, 0.8, 1.25)
-					# árvores
-					var p := Vector2((x + 0.5) * CELL, (y + 0.5) * CELL)
-					if p.distance_to(spawn_p) < 7.0:
-						continue
-					var tree_chance := lerpf(0.05, 0.16, green) * (1.0 - rocky)
-					if rng.randf() < tree_chance:
-						var r := rng.randf()
-						var kind: String
-						if near_water and r < 0.55: kind = "acai"
-						elif r < 0.08 and near_water: kind = "samauma"
-						elif r < 0.35: kind = "cupuacu"
-						elif r < 0.55 and green > 0.3: kind = "bananeira"
-						elif hn > 0.3 and r < 0.8: kind = "castanheira"
-						else: kind = "acai" if green > 0.5 else "cupuacu"
-						if kind == "samauma" and rng.randf() > 0.25:
-							kind = "castanheira"
-						_add(lists, kind, rng, x, y, 0.85, 1.15)
-			for name in lists:
-				for m in lists[name].size():
-					var items: Array = lists[name][m]
-					if items.is_empty():
-						continue
-					_make_multimesh(kinds[name].meshes[m], items, kinds[name].range, kinds[name].shadow)
-			done += 1
-			if done % 6 == 0:
-				await _set_loading("Plantando a floresta… %d%%" % int(done * 100.0 / (chunks_x * chunks_z)))
+	rng.seed = 77 + variant
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var blades: int = [10, 8, 12][variant]
+	for k in blades:
+		var a := rng.randf() * TAU
+		var r := rng.randf() * 0.35
+		var base := Vector3(cos(a) * r, -0.04, sin(a) * r)
+		var lean := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.1, 0.45)
+		var h := rng.randf_range(0.25, 0.55) * (1.5 if variant == 1 else 1.0)
+		var w := rng.randf_range(0.025, 0.04)
+		var side := Vector3(-sin(a), 0, cos(a)) * w
+		var root := Color(0.16, 0.24, 0.08, 0.0)
+		var tip := Color(0.38, 0.50, 0.17).lerp(Color(0.52, 0.52, 0.25), rng.randf() * 0.5)
+		tip.a = 1.0
+		var mid := root.lerp(tip, 0.55); mid.a = 0.45
+		var p1 := base + Vector3.UP * h * 0.55 + lean * h * 0.35
+		var p2 := base + Vector3.UP * h + lean * h
+		for tri in [[base - side, root], [base + side, root], [p1 + side * 0.7, mid],
+				[base - side, root], [p1 + side * 0.7, mid], [p1 - side * 0.7, mid],
+				[p1 - side * 0.7, mid], [p1 + side * 0.7, mid], [p2, tip]]:
+			st.set_color(tri[1])
+			st.add_vertex(tri[0])
+	st.index()
+	st.generate_normals()
+	return st.commit()
 
 
-func _add(lists: Dictionary, kind: String, rng: RandomNumberGenerator, x: int, y: int, smin: float, smax: float) -> void:
-	var px := (x + rng.randf()) * CELL
-	var pz := (y + rng.randf()) * CELL
-	var s := rng.randf_range(smin, smax)
-	var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s))
-	var tint := Color(1, 1, 1).lerp(Color(rng.randf_range(0.8, 1.15), rng.randf_range(0.85, 1.15), rng.randf_range(0.8, 1.05)), 0.8)
-	var variants: Array = lists[kind]
-	variants[rng.randi() % variants.size()].append([Transform3D(b, Vector3(px, height_at(px, pz) - 0.05, pz)), tint])
+func _update_grass(all_now := false) -> void:
+	var c := Vector2i(floori(_player.position.x / GRASS_CHUNK), floori(_player.position.z / GRASS_CHUNK))
+	if c != _grass_center:
+		_grass_center = c
+		var wanted := {}
+		for dz in range(-GRASS_RADIUS, GRASS_RADIUS + 1):
+			for dx in range(-GRASS_RADIUS, GRASS_RADIUS + 1):
+				if dx * dx + dz * dz > (GRASS_RADIUS + 0.5) * (GRASS_RADIUS + 0.5):
+					continue
+				wanted[c + Vector2i(dx, dz)] = true
+		for key in _grass_chunks.keys():
+			if not wanted.has(key):
+				_grass_chunks[key].queue_free()
+				_grass_chunks.erase(key)
+		_grass_queue.clear()
+		for key in wanted:
+			if not _grass_chunks.has(key):
+				_grass_queue.append(key)
+		_grass_queue.sort_custom(func(a, b): return (a - c).length_squared() < (b - c).length_squared())
+	var budget := 999 if all_now else 2
+	while budget > 0 and not _grass_queue.is_empty():
+		_build_grass_chunk(_grass_queue.pop_front())
+		budget -= 1
 
 
-func _make_multimesh(mesh: Mesh, items: Array, vis_range: float, shadow: bool) -> void:
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_colors = true
-	mm.mesh = mesh
-	mm.instance_count = items.size()
-	for k in items.size():
-		mm.set_instance_transform(k, items[k][0])
-		mm.set_instance_color(k, items[k][1])
-	var mmi := MultiMeshInstance3D.new()
-	mmi.multimesh = mm
-	mmi.material_override = _plant_mat
-	mmi.visibility_range_end = vis_range
-	mmi.visibility_range_end_margin = 8.0
-	mmi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
-	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mmi)
+func _build_grass_chunk(key: Vector2i) -> void:
+	var x0 := key.x * GRASS_CHUNK
+	var z0 := key.y * GRASS_CHUNK
+	if x0 < -GRASS_CHUNK or z0 < -GRASS_CHUNK or x0 > MundoSim.W * CELL or z0 > MundoSim.H * CELL:
+		_grass_chunks[key] = Node3D.new()
+		add_child(_grass_chunks[key])
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(key)
+	var per_mesh := [[], [], []]
+	var W := MundoSim.W
+	for k in GRASS_PER_CHUNK:
+		var px := x0 + rng.randf() * GRASS_CHUNK
+		var pz := z0 + rng.randf() * GRASS_CHUNK
+		var variant := rng.randi() % 3
+		var s := rng.randf_range(0.8, 1.35)
+		var rot := rng.randf() * TAU
+		var tint := Color(rng.randf_range(0.85, 1.15), rng.randf_range(0.9, 1.12), rng.randf_range(0.85, 1.05))
+		if px < 0 or pz < 0 or px >= W * CELL or pz >= MundoSim.H * CELL:
+			continue
+		var h := height_at(px, pz)
+		if _rockiness(h) > rng.randf() * 0.8 + 0.1:
+			continue
+		var cell := int(pz / CELL) * W + int(px / CELL)
+		if _water_level.size() == W * MundoSim.H and _water_level[cell] > h + 0.05:
+			continue
+		var b := Basis(Vector3.UP, rot).scaled(Vector3(s, s, s))
+		per_mesh[variant].append([Transform3D(b, Vector3(px, h, pz)), tint])
+	var holder := Node3D.new()
+	for v in 3:
+		var items: Array = per_mesh[v]
+		if items.is_empty():
+			continue
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.mesh = _grass_meshes[v]
+		mm.instance_count = items.size()
+		for k in items.size():
+			mm.set_instance_transform(k, items[k][0])
+			mm.set_instance_color(k, items[k][1])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.material_override = _grass_mat
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		holder.add_child(mmi)
+	_grass_chunks[key] = holder
+	add_child(holder)
 
 
 # ================== PERSONAGEM ==================
 
-func _part(mesh: Mesh, color: Color, pos: Vector3, parent: Node3D) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	var m := StandardMaterial3D.new()
-	m.albedo_color = color
-	m.roughness = 0.85
-	mi.material_override = m
-	mi.position = pos
-	parent.add_child(mi)
-	return mi
-
-
 func _build_player() -> void:
 	_player = Node3D.new()
 	add_child(_player)
-	var body := Node3D.new()
-	_player.add_child(body)
-	var skin := Color(0.62, 0.44, 0.32)
-	var shirt := Color(0.75, 0.40, 0.14)
-	var pants := Color(0.18, 0.22, 0.28)
-	var torso := CapsuleMesh.new(); torso.radius = 0.2; torso.height = 0.7
-	_part(torso, shirt, Vector3(0, 1.2, 0), body)
-	var head := SphereMesh.new(); head.radius = 0.14; head.height = 0.3
-	_part(head, skin, Vector3(0, 1.68, 0), body)
-	var hair := SphereMesh.new(); hair.radius = 0.15; hair.height = 0.18
-	_part(hair, Color(0.1, 0.07, 0.05), Vector3(0, 1.76, -0.02), body)
-	for side in [-1.0, 1.0]:
-		var hip := Node3D.new(); hip.position = Vector3(0.1 * side, 0.9, 0); body.add_child(hip)
-		var leg := CapsuleMesh.new(); leg.radius = 0.085; leg.height = 0.85
-		_part(leg, pants, Vector3(0, -0.42, 0), hip)
-		var sh := Node3D.new(); sh.position = Vector3(0.27 * side, 1.45, 0); body.add_child(sh)
-		var arm := CapsuleMesh.new(); arm.radius = 0.06; arm.height = 0.62
-		_part(arm, shirt, Vector3(0, -0.28, 0), sh)
-		var hand := SphereMesh.new(); hand.radius = 0.055; hand.height = 0.11
-		_part(hand, skin, Vector3(0, -0.6, 0), sh)
-		_limbs["leg%d" % int(side)] = hip
-		_limbs["arm%d" % int(side)] = sh
-	_limbs["body"] = body
+	var bytes := FileAccess.get_file_as_bytes(CHARACTER_FILE)
+	if not bytes.is_empty():
+		var doc := GLTFDocument.new()
+		var state := GLTFState.new()
+		if doc.append_from_buffer(bytes, "", state) == OK:
+			_model = doc.generate_scene(state)
+	if _model == null:
+		# reserva, caso o arquivo do personagem não esteja no celular
+		_model = MeshInstance3D.new()
+		var cap := CapsuleMesh.new(); cap.radius = 0.3; cap.height = 1.75
+		_model.mesh = cap
+		_model.position.y = 0.875
+	_player.add_child(_model)
+	var aps := _model.find_children("*", "AnimationPlayer", true, false)
+	if not aps.is_empty():
+		_anim = aps[0]
+		for n in ["Idle", "Walk", "Run"]:
+			if _anim.has_animation(n):
+				_anim.get_animation(n).loop_mode = Animation.LOOP_LINEAR
+		_play("Idle")
+	for mi in _model.find_children("*", "MeshInstance3D", true, false):
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+
+func _play(name: String, speed := 1.0) -> void:
+	if _anim == null or not _anim.has_animation(name):
+		return
+	if _anim_now != name:
+		_anim.play(name, 0.25)
+		_anim_now = name
+	_anim.speed_scale = speed
 
 
 func _process(delta: float) -> void:
-	_update_sky()
+	_update_sky(delta)
 	if not _ready_world:
 		return
-	var w: PackedFloat32Array = sim.take_water()
-	if not w.is_empty():
-		_update_water(w)
+	_finish_water()
+	_water_timer -= delta
+	if _water_timer <= 0.0:
+		var w: PackedFloat32Array = sim.take_water()
+		if not w.is_empty():
+			_update_water(w)
+			_water_timer = 3.0
 	_move_player(delta)
+	_update_grass()
+	_grass_mat.set_shader_parameter("player_pos", _player.global_position)
 	var h: float = sim.hour()
 	_clock.text = "Dia %d · %02d:%02d%s" % [sim.day(), int(h), int(fmod(h, 1.0) * 60.0), " · Chovendo" if sim.raining else ""]
 
 
-func _update_sky() -> void:
+func _update_sky(delta: float) -> void:
 	if sim == null:
 		return
 	var h: float = sim.hour() if sim.is_ready else 7.0
 	var target := 1.0 if (sim.is_ready and sim.raining) else 0.0
-	_rain_amount = move_toward(_rain_amount, target, get_process_delta_time() * 0.3)
-	# sol nasce às 6h e se põe às 18h
+	_rain_amount = move_toward(_rain_amount, target, delta * 0.3)
 	var elev := sin((h - 6.0) / 12.0 * PI)
 	var daylight := clampf(elev * 3.0 + 0.3, 0.0, 1.0)
 	_sun.rotation = Vector3(-asin(clampf(elev, 0.12, 1.0)), deg_to_rad(35.0 + (h - 12.0) * 6.0), 0)
@@ -672,71 +614,89 @@ func _update_sky() -> void:
 	_sky_mat.sky_top_color = top
 	_sky_mat.sky_horizon_color = hor
 	_sky_mat.ground_horizon_color = hor
+	_sky_mat.ground_bottom_color = hor.darkened(0.5)
 	_env.ambient_light_energy = lerpf(1.0, 0.5, night)
-	_moon.light_energy = 0.35 * night * lerpf(1.0, 0.4, _rain_amount)
 	_env.ambient_light_color = Color(0.62, 0.68, 0.66).lerp(Color(0.25, 0.3, 0.45), night)
+	_moon.light_energy = 0.35 * night * lerpf(1.0, 0.4, _rain_amount)
 	_env.fog_light_color = hor
-	_env.fog_density = lerpf(0.0025, 0.012, _rain_amount)
+	_env.fog_density = lerpf(0.0018, 0.012, _rain_amount)
 	_terrain_mat.set_shader_parameter("wet", _rain_amount)
-	_plant_mat.set_shader_parameter("wet", _rain_amount)
-	_plant_mat.set_shader_parameter("wind", lerpf(0.1, 0.3, _rain_amount))
+	_grass_mat.set_shader_parameter("wet", _rain_amount)
+	_grass_mat.set_shader_parameter("wind", lerpf(0.1, 0.28, _rain_amount))
 	_water_mat.set_shader_parameter("rain", _rain_amount)
-	if _player:
-		_plant_mat.set_shader_parameter("player_pos", _player.global_position)
 	_rain.emitting = _rain_amount > 0.3
 	if _player:
-		_rain.global_position = _player.global_position + Vector3(0, 16, -4)
+		_rain.global_position = _player.global_position + Vector3(0, 12, 0)
 
 
 func _move_player(delta: float) -> void:
 	var dir := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	if _joy_id >= 0:
 		dir = _joy_vec
-	_moving = dir.length() > 0.1
+	var amount := minf(dir.length(), 1.0)
 	var p := _player.position
 	var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
 	var depth := 0.0
 	if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
 		depth = maxf(0.0, _water_level[cell.y * MundoSim.W + cell.x] - height_at(p.x, p.z))
-	if _moving:
-		var sp := SPEED * lerpf(1.0, 0.4, clampf(depth / 0.8, 0.0, 1.0))
-		p.x += dir.x * sp * delta
-		p.z += dir.y * sp * delta
+	var water_slow := lerpf(1.0, 0.4, clampf(depth / 0.8, 0.0, 1.0))
+	if amount > 0.12:
+		# anda na direção para onde a câmera está olhando
+		var fwd := Vector3(-sin(_yaw), 0, -cos(_yaw))
+		var right := Vector3(cos(_yaw), 0, -sin(_yaw))
+		var move := (right * dir.x - fwd * dir.y).normalized()
+		var running := amount > 0.85
+		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow
+		p += move * sp * delta
 		p.x = clampf(p.x, 1.0, MundoSim.W * CELL - 1.0)
 		p.z = clampf(p.z, 1.0, MundoSim.H * CELL - 1.0)
-		_face = lerp_angle(_face, atan2(dir.x, dir.y), minf(1.0, delta * 12.0))
-		_walk += delta * sp * 2.2
+		_face = lerp_angle(_face, atan2(-move.x, -move.z), minf(1.0, delta * 10.0))
+		_play("Run" if running else "Walk", water_slow)
 	else:
-		_walk = lerpf(_walk, roundf(_walk / PI) * PI, minf(1.0, delta * 8.0))
-	p.y = height_at(p.x, p.z) - minf(depth, 0.9) * 0.6
+		_play("Idle")
+	p.y = height_at(p.x, p.z) - minf(depth, 0.9) * 0.5
 	_player.position = p
 	_player.rotation.y = _face
-	var sw := sin(_walk) * (0.6 if _moving else 0.0)
-	_limbs["leg-1"].rotation.x = sw
-	_limbs["leg1"].rotation.x = -sw
-	_limbs["arm-1"].rotation.x = -sw * 0.8
-	_limbs["arm1"].rotation.x = sw * 0.8
-	_limbs["body"].position.y = absf(cos(_walk)) * 0.04 if _moving else 0.0
-	var target := _player.position + CAM_OFFSET
-	_cam.position = _cam.position.lerp(target, minf(1.0, delta * 5.0)) if _cam.position.distance_to(target) < 30 else target
-	_cam.look_at(_player.position + Vector3(0, 1.0, 0))
+
+	# câmera em terceira pessoa, atrás do personagem
+	var target := p + Vector3(0, 1.55, 0)
+	var back := Vector3(sin(_yaw) * cos(_pitch), sin(_pitch), cos(_yaw) * cos(_pitch))
+	var cam_pos := target + back * CAM_DIST
+	cam_pos.y = maxf(cam_pos.y, height_at(cam_pos.x, cam_pos.z) + 0.4)
+	_cam.position = _cam.position.lerp(cam_pos, minf(1.0, delta * 12.0)) if _cam.position.distance_to(cam_pos) < 8.0 else cam_pos
+	_cam.look_at(target + Vector3(0, 0.15, 0))
 
 
 # ================== CONTROLE ==================
+# Lado esquerdo da tela: andar (joystick). Lado direito: girar a câmera.
 
 func _input(e: InputEvent) -> void:
+	var half := get_viewport().get_visible_rect().size.x * 0.5
 	if e is InputEventScreenTouch:
-		if e.pressed and _joy_id < 0 and e.position.x < get_viewport().get_visible_rect().size.x * 0.65:
-			_joy_id = e.index
-			_joy_origin = e.position
-			_joy_vec = Vector2.ZERO
-		elif not e.pressed and e.index == _joy_id:
-			_joy_id = -1
-			_joy_vec = Vector2.ZERO
+		if e.pressed:
+			if e.position.x < half and _joy_id < 0:
+				_joy_id = e.index
+				_joy_origin = e.position
+				_joy_vec = Vector2.ZERO
+			elif e.position.x >= half and _look_id < 0:
+				_look_id = e.index
+				_look_last = e.position
+		else:
+			if e.index == _joy_id:
+				_joy_id = -1
+				_joy_vec = Vector2.ZERO
+			if e.index == _look_id:
+				_look_id = -1
 		_joy_ui.queue_redraw()
-	elif e is InputEventScreenDrag and e.index == _joy_id:
-		_joy_vec = ((e.position - _joy_origin) / JOY_RADIUS).limit_length(1.0)
-		_joy_ui.queue_redraw()
+	elif e is InputEventScreenDrag:
+		if e.index == _joy_id:
+			_joy_vec = ((e.position - _joy_origin) / JOY_RADIUS).limit_length(1.0)
+			_joy_ui.queue_redraw()
+		elif e.index == _look_id:
+			var d: Vector2 = e.position - _look_last
+			_look_last = e.position
+			_yaw -= d.x * 0.006
+			_pitch = clampf(_pitch + d.y * 0.004, -0.15, 1.1)
 
 
 func _draw_joy() -> void:
@@ -744,3 +704,102 @@ func _draw_joy() -> void:
 		return
 	_joy_ui.draw_arc(_joy_origin, JOY_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.35), 3.0)
 	_joy_ui.draw_circle(_joy_origin + _joy_vec * JOY_RADIUS, 28, Color(1, 0.54, 0.24, 0.7))
+
+
+## Monta a superfície da água em segundo plano, sem travar a tela.
+func _update_water(wat: PackedFloat32Array) -> void:
+	if _water_task >= 0:
+		return
+	_water_task = WorkerThreadPool.add_task(_water_arrays.bind(wat))
+
+
+func _finish_water() -> void:
+	if _water_task < 0 or not WorkerThreadPool.is_task_completed(_water_task):
+		return
+	WorkerThreadPool.wait_for_task_completion(_water_task)
+	_water_task = -1
+	_water_level = _w_level
+	if _w_arr.is_empty():
+		_water_mi.mesh = null
+		return
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _w_arr)
+	_water_mi.mesh = mesh
+
+
+## Calcula a malha da água: lagoas, córregos e poças.
+func _water_arrays(wat: PackedFloat32Array) -> void:
+	var W := MundoSim.W; var H := MundoSim.H
+	var NONE := -1e9
+	if _corner_h.is_empty():
+		_corner_h.resize((W + 1) * (H + 1))
+		for y in H + 1:
+			for x in W + 1:
+				_corner_h[y * (W + 1) + x] = height_at(x * CELL, y * CELL)
+	var lvl := PackedFloat32Array(); lvl.resize(W * H); lvl.fill(NONE)
+	var count := 0
+	for i in W * H:
+		if wat[i] > 0.035:
+			lvl[i] = (_ter[i] + wat[i]) * HS
+	# estende a água um pouco por baixo da margem, para o terreno cortar a borda
+	var ext := lvl.duplicate()
+	for y in H:
+		for x in W:
+			var i := y * W + x
+			if lvl[i] > NONE:
+				count += 1
+				continue
+			var best := NONE
+			if x > 0 and lvl[i - 1] > best: best = lvl[i - 1]
+			if x < W - 1 and lvl[i + 1] > best: best = lvl[i + 1]
+			if y > 0 and lvl[i - W] > best: best = lvl[i - W]
+			if y < H - 1 and lvl[i + W] > best: best = lvl[i + W]
+			ext[i] = best
+			if best > NONE:
+				count += 1
+	_w_level = lvl
+	_w_arr = []
+	if count == 0:
+		return
+	# nível em cada canto: média das células vizinhas que têm água
+	var cw := W + 1
+	var corner := PackedFloat32Array(); corner.resize(cw * (H + 1)); corner.fill(NONE)
+	for y in H + 1:
+		for x in cw:
+			var s := 0.0; var n := 0
+			if x > 0 and y > 0 and ext[(y - 1) * W + x - 1] > NONE: s += ext[(y - 1) * W + x - 1]; n += 1
+			if x < W and y > 0 and ext[(y - 1) * W + x] > NONE: s += ext[(y - 1) * W + x]; n += 1
+			if x > 0 and y < H and ext[y * W + x - 1] > NONE: s += ext[y * W + x - 1]; n += 1
+			if x < W and y < H and ext[y * W + x] > NONE: s += ext[y * W + x]; n += 1
+			if n > 0:
+				corner[y * cw + x] = s / n
+	var verts := PackedVector3Array(); verts.resize(count * 6)
+	var cols := PackedColorArray(); cols.resize(count * 6)
+	var nrm := PackedVector3Array(); nrm.resize(count * 6); nrm.fill(Vector3.UP)
+	var k := 0
+	for y in H:
+		for x in W:
+			if ext[y * W + x] <= NONE:
+				continue
+			var c00 := y * cw + x; var c10 := c00 + 1; var c01 := c00 + cw; var c11 := c01 + 1
+			var p00 := Vector3(x * CELL, corner[c00], y * CELL)
+			var p10 := Vector3((x + 1) * CELL, corner[c10], y * CELL)
+			var p01 := Vector3(x * CELL, corner[c01], (y + 1) * CELL)
+			var p11 := Vector3((x + 1) * CELL, corner[c11], (y + 1) * CELL)
+			var d00 := Color(1, 1, 1, maxf(0.0, corner[c00] - _corner_h[c00]))
+			var d10 := Color(1, 1, 1, maxf(0.0, corner[c10] - _corner_h[c10]))
+			var d01 := Color(1, 1, 1, maxf(0.0, corner[c01] - _corner_h[c01]))
+			var d11 := Color(1, 1, 1, maxf(0.0, corner[c11] - _corner_h[c11]))
+			verts[k] = p00; cols[k] = d00
+			verts[k + 1] = p10; cols[k + 1] = d10
+			verts[k + 2] = p11; cols[k + 2] = d11
+			verts[k + 3] = p00; cols[k + 3] = d00
+			verts[k + 4] = p11; cols[k + 4] = d11
+			verts[k + 5] = p01; cols[k + 5] = d01
+			k += 6
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = verts
+	arr[Mesh.ARRAY_COLOR] = cols
+	arr[Mesh.ARRAY_NORMAL] = nrm
+	_w_arr = arr

@@ -11,9 +11,9 @@ const H := 96
 const N := W * H
 const SC := 200.0 / W
 const GW_CAP := 1.6
-const STEPS_PER_SEC := 8.0
-const STEP_MULT := 3.75
-const STEPS_DAY := 3840          # um dia de jogo = 8 minutos
+const STEPS_PER_SEC := 6.0
+const STEP_MULT := 5.0
+const STEPS_DAY := 2880          # um dia de jogo = 8 minutos
 const START_HOUR := 7.0
 
 var ter := PackedFloat32Array()
