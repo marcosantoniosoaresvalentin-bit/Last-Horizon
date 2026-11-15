@@ -3,4 +3,4 @@ extends Control
 
 
 func _ready() -> void:
-	%MapButton.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/mapa.tscn"))
+	%MapButton.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/jogo.tscn"))

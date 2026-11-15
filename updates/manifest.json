@@ -1,9 +1,9 @@
 {
-  "version": 2,
-  "file": "update_2.zip",
-  "size": 16042,
-  "sha256": "ba7acb064f80558498c0b308d92159fd07370bf16ee765562bc1e2125472d3f2",
+  "version": 3,
+  "file": "update_3.zip",
+  "size": 16712,
+  "sha256": "60e047379a121c213ca48229c2e731579a5705350354961bb937968f47a84dce",
   "min_build": 1,
-  "notes": "Novo: Mapa Vivo no menu principal, com serra, chuva, lagoas e nascentes",
+  "notes": "O mapa agora é o mundo do jogo: personagem visto de cima, câmera seguindo, dia, noite e chuva automáticos",
   "date": "2026-11-15"
 }
