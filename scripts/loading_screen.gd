@@ -1,6 +1,9 @@
 extends Control
-## Tela de carregamento: carrega a próxima cena em segundo plano
+## Tela de carregamento. Primeiro procura e baixa atualizações do jogo
+## (mostrando "MB / MB"), depois carrega a próxima cena em segundo plano
 ## enquanto mostra o progresso e dicas de sobrevivência.
+
+const Updater := preload("res://scripts/updater.gd")
 
 ## Cena que abre quando o carregamento termina.
 @export_file("*.tscn") var next_scene_path := "res://scenes/main_menu.tscn"
@@ -8,6 +11,8 @@ extends Control
 @export var min_duration := 3.0
 ## Segundos que cada dica fica na tela.
 @export var tip_interval := 4.0
+## Segundos que a mensagem do atualizador fica visível antes de carregar.
+@export var update_message_time := 1.2
 
 const TIPS := [
 	"As Sombras temem o fogo. Mantenha a fogueira acesa.",
@@ -26,37 +31,84 @@ const STAGES := [
 	[1.0, "Pronto"],
 ]
 
+enum Phase { UPDATING, LOADING, DONE }
+
 @onready var _progress: ProgressBar = %ProgressBar
 @onready var _status: Label = %StatusLabel
 @onready var _percent: Label = %PercentLabel
 @onready var _tip: Label = %TipLabel
 @onready var _version: Label = %VersionLabel
 
+var _phase := Phase.UPDATING
 var _elapsed := 0.0
 var _shown := 0.0
 var _tip_index := 0
 var _tip_timer := 0.0
-var _finished := false
 var _failed := false
+var _updater: Node
 
 
 func _ready() -> void:
-	_version.text = "v" + str(ProjectSettings.get_setting("application/config/version", "0.0.0"))
+	# Aplica a última atualização já baixada antes de carregar qualquer cena.
+	var build := Updater.apply_installed()
+	_set_version_label(build)
+
 	_tip_index = randi() % TIPS.size()
 	_tip.text = TIPS[_tip_index]
 	_progress.value = 0.0
-
-	var err := ResourceLoader.load_threaded_request(next_scene_path)
-	if err != OK:
-		_fail("Não foi possível iniciar o carregamento (%s)." % error_string(err))
+	_percent.text = ""
 
 	modulate.a = 0.0
 	create_tween().tween_property(self, "modulate:a", 1.0, 0.6)
 
+	_updater = Updater.new()
+	add_child(_updater)
+	_updater.status_changed.connect(func(t: String): _status.text = t)
+	_updater.progress_changed.connect(_on_update_progress)
+	_updater.finished.connect(_on_update_finished)
+	_updater.start()
+
+
+func _set_version_label(build: int) -> void:
+	var v := str(ProjectSettings.get_setting("application/config/version", "0.0.0"))
+	_version.text = "v%s (build %d)" % [v, build]
+
+
+func _on_update_progress(done: int, total: int) -> void:
+	if total > 0:
+		_progress.value = float(done) / float(total) * 100.0
+		_percent.text = "%s / %s" % [_mb(done), _mb(total)]
+	else:
+		_percent.text = _mb(done)
+
+
+static func _mb(bytes: int) -> String:
+	return ("%.1f MB" % (bytes / 1048576.0)).replace(".", ",")
+
+
+func _on_update_finished(updated: bool, message: String) -> void:
+	_status.text = message
+	if updated:
+		_set_version_label(Updater.current_build())
+	await get_tree().create_timer(update_message_time if updated else 0.4).timeout
+	_start_loading()
+
+
+func _start_loading() -> void:
+	_phase = Phase.LOADING
+	_elapsed = 0.0
+	_shown = 0.0
+	_progress.value = 0.0
+	_percent.text = "0%"
+	_status.text = _stage_text(0.0)
+	var err := ResourceLoader.load_threaded_request(next_scene_path)
+	if err != OK:
+		_fail("Não foi possível iniciar o carregamento (%s)." % error_string(err))
+
 
 func _process(delta: float) -> void:
 	_rotate_tips(delta)
-	if _finished or _failed:
+	if _phase != Phase.LOADING or _failed:
 		return
 	_elapsed += delta
 
@@ -104,7 +156,7 @@ func _rotate_tips(delta: float) -> void:
 
 
 func _finish() -> void:
-	_finished = true
+	_phase = Phase.DONE
 	var scene := ResourceLoader.load_threaded_get(next_scene_path) as PackedScene
 	var tw := create_tween()
 	tw.tween_interval(0.35)

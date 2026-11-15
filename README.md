@@ -5,6 +5,7 @@ Jogo de sobrevivência multiplayer online com visão de cima, feito na **Godot 4
 ## Status
 
 - [x] Tela de carregamento
+- [x] Atualização automática na tela de carregamento
 - [ ] Menu principal (por enquanto é só um aviso de "em construção")
 - [ ] Jogo, multiplayer, servidor e APK
 
@@ -21,6 +22,9 @@ Jogo de sobrevivência multiplayer online com visão de cima, feito na **Godot 4
 | `project.godot` | Configuração do projeto (tela deitada, 1280×720, renderizador Compatibility para rodar em mais celulares) |
 | `scenes/loading_screen.tscn` | Tela de carregamento |
 | `scripts/loading_screen.gd` | Carrega a próxima cena em segundo plano, mostra o progresso e as dicas |
+| `scripts/updater.gd` | Atualizador: baixa e instala as atualizações do jogo ao abrir |
+| `updates/manifest.json` | Diz qual é a versão mais nova e qual arquivo baixar |
+| `tools/criar_atualizacao.py` | Gera um pacote de atualização novo |
 | `scripts/horizon_backdrop.gd` | Fundo animado: pôr do sol, serras com pinheiros e brasas |
 | `scenes/main_menu.tscn` | Menu principal (provisório) |
 | `prototipo-web/index.html` | Protótipo jogável no navegador do ecossistema (Mata Viva), usado para testar as mecânicas |
@@ -38,3 +42,29 @@ O que já funciona:
 - Ciclo de dia e noite e aceleração do tempo (1x, 4x, 16x)
 
 Para abrir: baixe o arquivo `prototipo-web/index.html` e abra no navegador.
+
+## Atualização automática
+
+Ao abrir o jogo, a tela de carregamento procura atualizações antes de tudo:
+
+1. Baixa `updates/manifest.json` deste repositório.
+2. Se a versão do manifest for maior que a do celular, baixa o pacote `updates/update_N.zip` mostrando o progresso em **MB / MB**.
+3. Confere o tamanho e o SHA-256, instala o pacote e só então carrega o jogo.
+4. Sem internet, o jogo abre normalmente com a versão que já está no celular.
+
+A versão do celular aparece no canto da tela como `build N`.
+
+### Publicar uma atualização
+
+```
+python3 tools/criar_atualizacao.py "o que mudou"
+```
+
+Isso gera o pacote novo em `updates/`, atualiza o manifest e o `config/build` do `project.godot`. Depois é só enviar para o GitHub.
+
+O pacote leva código e cenas (`scripts/` e `scenes/`). Imagens, sons e modelos 3D novos precisam de um **APK novo**, porque a Godot tem que importá-los. Para obrigar quem tem um APK antigo a instalar o novo, aumente `min_build` no manifest.
+
+### Ao exportar o APK
+
+- Em **Permissões**, marque **Internet**.
+- Em **Recursos**, desmarque *Converter recursos de texto para binário*, e em **Script**, escolha o modo *Texto*. Assim as atualizações substituem os arquivos sem problemas.
