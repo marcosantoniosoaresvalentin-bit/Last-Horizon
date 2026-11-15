@@ -1,0 +1,83 @@
+name: Gerar APK
+
+on:
+  push:
+    branches: [ccr-5a916500-dbxvjv]
+    paths-ignore:
+      - "updates/**"
+      - "prototipo-web/**"
+      - "store/**"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Baixar Godot e modelos de exportação
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          wget -q "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          wget -q "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          tdir="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$tdir"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          mv templates/* "$tdir/"
+          rm -f *.zip *.tpz
+
+      - name: Configurar Android SDK e Java na Godot
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          minor="${GODOT_VERSION%.*}"
+          for f in "editor_settings-${minor}.tres" "editor_settings-4.tres"; do
+            cat > "$HOME/.config/godot/$f" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_SDK_ROOT"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOF
+          done
+
+      - name: Importar o projeto
+        run: ./godot --headless --import || ./godot --headless --editor --quit-after 300 || true
+
+      - name: Exportar APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/android/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          mkdir -p build
+          ./godot --headless --export-debug "Android" build/LastHorizon.apk
+          ls -la build
+          test -s build/LastHorizon.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LastHorizon-apk
+          path: build/LastHorizon.apk
+
+      - name: Publicar na página de Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Last Horizon (build ${{ github.run_number }})
+          body: APK gerado automaticamente. Baixe o arquivo LastHorizon.apk abaixo e instale no celular.
+          files: build/LastHorizon.apk
+          make_latest: true
