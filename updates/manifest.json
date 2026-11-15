@@ -1,9 +1,9 @@
 {
-  "version": 1,
-  "file": "",
-  "size": 0,
-  "sha256": "",
+  "version": 2,
+  "file": "update_2.zip",
+  "size": 16042,
+  "sha256": "ba7acb064f80558498c0b308d92159fd07370bf16ee765562bc1e2125472d3f2",
   "min_build": 1,
-  "notes": "Versão inicial do APK.",
+  "notes": "Novo: Mapa Vivo no menu principal, com serra, chuva, lagoas e nascentes",
   "date": "2026-11-15"
 }
