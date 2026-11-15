@@ -1,9 +1,9 @@
 {
-  "version": 8,
-  "file": "update_8.zip",
-  "size": 2316432,
-  "sha256": "caca8c0654aafe90017f818962e2d0a8db2edd6dfd6a99e7f820e1417a87245e",
+  "version": 9,
+  "file": "update_9.zip",
+  "size": 5334139,
+  "sha256": "2e04cbbcb53ec8d42cc61d7ba867c00cc0027d695722836480907900dea63a52",
   "min_build": 1,
-  "notes": "Personagem humano realista com animações de parado, andando e correndo",
+  "notes": "Personagens humanos realistas (masculino e feminino) com escolha no menu",
   "date": "2026-11-15"
 }

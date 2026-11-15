@@ -15,7 +15,6 @@ const GRASS_CHUNK := 12.0    # tamanho de cada bloco de grama, em metros
 const GRASS_RADIUS := 3      # blocos de grama em volta do jogador
 const GRASS_PER_CHUNK := 200
 const CAM_DIST := 4.2
-const CHARACTER_FILE := "res://personagem/humano.glbin"
 const ANIMS := {"Idle": "parado", "Walk": "andando", "Run": "correndo"}
 
 const TERRAIN_SHADER := """
@@ -672,7 +671,8 @@ func _build_player() -> void:
 	_model = Node3D.new()
 	_player.add_child(_model)
 	var body: Node3D = null
-	var bytes := FileAccess.get_file_as_bytes(CHARACTER_FILE)
+	var who: String = Engine.get_meta("personagem", "homem")
+	var bytes := FileAccess.get_file_as_bytes("res://personagem/%s.glbin" % who)
 	if not bytes.is_empty():
 		var doc := GLTFDocument.new()
 		var state := GLTFState.new()
@@ -696,7 +696,7 @@ func _build_player() -> void:
 	_anim.root_node = NodePath("..")
 	var lib := AnimationLibrary.new()
 	for n in ANIMS:
-		var a: Animation = load("res://personagem/%s.tres" % ANIMS[n])
+		var a: Animation = load("res://personagem/%s_%s.tres" % [who, ANIMS[n]])
 		if a:
 			a.loop_mode = Animation.LOOP_LINEAR
 			lib.add_animation(n, a)

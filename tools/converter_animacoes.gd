@@ -12,7 +12,9 @@ func _init():
 	await process_frame
 	var sk_s: Skeleton3D = src.find_children("*", "Skeleton3D", true, false)[0]
 	var sk_t: Skeleton3D = tgt.find_children("*", "Skeleton3D", true, false)[0]
-	var ap_t: AnimationPlayer = tgt.find_children("*", "AnimationPlayer", true, false)[0]
+	var aps_t = tgt.find_children("*", "AnimationPlayer", true, false)
+	var ap_t: AnimationPlayer = aps_t[0] if aps_t.size() else null
+	var pre := "mixamorig_" if sk_t.find_bone("mixamorig_Hips") >= 0 else ""
 	var ap_s: AnimationPlayer = src.find_children("*", "AnimationPlayer", true, false)[0]
 	var gs: Transform3D = sk_s.global_transform
 	var gt: Transform3D = sk_t.global_transform
@@ -20,14 +22,19 @@ func _init():
 	ap_s.play("TPose"); ap_s.seek(0.0, true); sk_s.force_update_all_bone_transforms()
 	var ref_s := {}
 	for b in sk_s.get_bone_count(): ref_s[b] = gs * sk_s.get_bone_global_pose(b)
-	ap_t.play("TPose"); ap_t.seek(0.0, true); sk_t.force_update_all_bone_transforms()
 	var ref_t := {}
-	for b in sk_t.get_bone_count(): ref_t[b] = gt * sk_t.get_bone_global_pose(b)
-	ap_t.stop()
+	if ap_t and ap_t.has_animation("TPose"):
+		ap_t.play("TPose"); ap_t.seek(0.0, true); sk_t.force_update_all_bone_transforms()
+		for b in sk_t.get_bone_count(): ref_t[b] = gt * sk_t.get_bone_global_pose(b)
+		ap_t.stop()
+	else:
+		# sem animação de pose T: o modelo já vem em pose T no repouso
+		for b in sk_t.get_bone_count(): ref_t[b] = gt * sk_t.get_bone_global_rest(b)
 	# alinha a "frente" dos dois corpos (eles podem estar virados para lados diferentes)
 	var frame = func(ref: Dictionary, sk: Skeleton3D) -> Basis:
-		var x: Vector3 = (ref[sk.find_bone("mixamorig_LeftHand")].origin - ref[sk.find_bone("mixamorig_RightHand")].origin).normalized()
-		var y: Vector3 = (ref[sk.find_bone("mixamorig_Head")].origin - ref[sk.find_bone("mixamorig_Hips")].origin).normalized()
+		var p := "mixamorig_" if sk.find_bone("mixamorig_Hips") >= 0 else ""
+		var x: Vector3 = (ref[sk.find_bone(p + "LeftHand")].origin - ref[sk.find_bone(p + "RightHand")].origin).normalized()
+		var y: Vector3 = (ref[sk.find_bone(p + "Head")].origin - ref[sk.find_bone(p + "Hips")].origin).normalized()
 		var z := x.cross(y).normalized()
 		y = z.cross(x).normalized()
 		return Basis(x, y, z)
@@ -37,9 +44,9 @@ func _init():
 	# mapa de ossos pelo nome
 	var map := {}
 	for b in sk_t.get_bone_count():
-		var sb := sk_s.find_bone(sk_t.get_bone_name(b))
+		var sb := sk_s.find_bone("mixamorig_" + sk_t.get_bone_name(b).trim_prefix(pre))
 		if sb >= 0: map[b] = sb
-	var hips_t := sk_t.find_bone("mixamorig_Hips"); var hips_s := sk_s.find_bone("mixamorig_Hips")
+	var hips_t := sk_t.find_bone(pre + "Hips"); var hips_s := sk_s.find_bone("mixamorig_Hips")
 	var rest_s_h: Vector3 = ref_s[hips_s].origin
 	var rest_t_h: Vector3 = ref_t[hips_t].origin
 	var ratio := rest_t_h.y / rest_s_h.y
@@ -57,7 +64,7 @@ func _init():
 			out.track_set_path(t, NodePath(skel_path + ":" + sk_t.get_bone_name(b)))
 			tr[b] = t
 		var tp := out.add_track(Animation.TYPE_POSITION_3D)
-		out.track_set_path(tp, NodePath(skel_path + ":mixamorig_Hips"))
+		out.track_set_path(tp, NodePath(skel_path + ":" + pre + "Hips"))
 		ap_s.play(name)
 		var fps := 30.0
 		var frames := int(ceil(a_s.length * fps))
@@ -92,6 +99,6 @@ func _init():
 			var par := sk_t.get_bone_parent(hips_t)
 			var local_pos := skel_space if par < 0 else (sk_t.get_bone_global_rest(par).affine_inverse() * skel_space)
 			out.position_track_insert_key(tp, time, local_pos)
-		var err = ResourceSaver.save(out, "res://out_%s.tres" % names[name])
+		var err = ResourceSaver.save(out, "res://out_%s_%s.tres" % [OS.get_environment("NOME"), names[name]])
 		print(name, " -> ", names[name], " quadros ", frames + 1, " salvo ", err)
 	quit()
