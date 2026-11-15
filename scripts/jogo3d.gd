@@ -194,6 +194,21 @@ var _soil_b: ImageTexture
 var _soil_bytes := PackedByteArray()
 var _soil_timer := 0.0
 var _refresh_timer := 0.0
+
+# coleta de argila
+const BAG_MAX := 30.0
+var _bag := [0.0, 0.0, 0.0]      # kg de caulinita, ilita e esmectita
+var _dig_btn: Button
+var _dig_bar: ProgressBar
+var _inv_label: Label
+var _toast: Label
+var _toast_t := 0.0
+var _dig_check := 0.0
+var _digging := false
+var _dig_t := 0.0
+var _dig_need := 1.0
+var _dig_info := {}
+var _dig_cell := Vector2i.ZERO
 var _loading: Label
 var _loading_bg: ColorRect
 var _joy_ui: Control
@@ -267,6 +282,49 @@ func _build_hud() -> void:
 	_soil_label.add_theme_constant_override("outline_size", 5)
 	_soil_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hud.add_child(_soil_label)
+
+	_inv_label = _hud_label(Vector2(24, 54), 19)
+	_toast = _hud_label(Vector2(0, 0), 22)
+	_toast.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_toast.offset_top = 90
+	_toast.offset_left = -400
+	_toast.offset_right = 400
+	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	_dig_btn = Button.new()
+	_dig_btn.text = "Pegar argila"
+	_dig_btn.add_theme_font_size_override("font_size", 22)
+	_dig_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_dig_btn.offset_left = -300
+	_dig_btn.offset_top = -170
+	_dig_btn.offset_right = -30
+	_dig_btn.offset_bottom = -96
+	_dig_btn.visible = false
+	_dig_btn.pressed.connect(_start_dig)
+	_hud.add_child(_dig_btn)
+
+	_dig_bar = ProgressBar.new()
+	_dig_bar.set_anchors_preset(Control.PRESET_CENTER)
+	_dig_bar.offset_left = -160
+	_dig_bar.offset_right = 160
+	_dig_bar.offset_top = 70
+	_dig_bar.offset_bottom = 92
+	_dig_bar.show_percentage = false
+	_dig_bar.visible = false
+	_hud.add_child(_dig_bar)
+	_update_inventory()
+
+
+func _hud_label(pos: Vector2, size: int) -> Label:
+	var l := Label.new()
+	l.position = pos
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", Color(0.95, 0.92, 0.85))
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	l.add_theme_constant_override("outline_size", 5)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(l)
+	return l
 
 	var menu := Button.new()
 	menu.text = "Menu"
@@ -663,6 +721,7 @@ func _process(delta: float) -> void:
 		_soil_timer = 2.0
 		_apply_soil()
 		_soil_label.text = sim.soil_info(Vector2i(int(_player.position.x / CELL), int(_player.position.z / CELL)))
+	_update_dig(delta)
 	# a grama vai sendo refeita aos poucos, acompanhando as estações
 	_refresh_timer -= delta
 	if _refresh_timer <= 0.0 and _grass_queue.is_empty() and not _grass_chunks.is_empty():
@@ -672,6 +731,109 @@ func _process(delta: float) -> void:
 		_grass_chunks[key].queue_free()
 		_grass_chunks.erase(key)
 		_build_grass_chunk(key)
+
+
+# ================== COLETA DE ARGILA ==================
+
+static func _kg(v: float) -> String:
+	return ("%.1f" % v).replace(".", ",")
+
+
+func _bag_total() -> float:
+	return _bag[0] + _bag[1] + _bag[2]
+
+
+func _update_inventory() -> void:
+	if _bag_total() <= 0.0:
+		_inv_label.text = ""
+		return
+	var parts := []
+	for k in 3:
+		if _bag[k] > 0.0:
+			parts.append("%s %s kg" % [MundoSim.CLAY_NAMES[k], _kg(_bag[k])])
+	_inv_label.text = "Mochila: " + " · ".join(parts) + "  (%s/%d kg)" % [_kg(_bag_total()), int(BAG_MAX)]
+
+
+func _show_toast(text: String) -> void:
+	_toast.text = text
+	_toast.modulate.a = 1.0
+	_toast_t = 3.5
+
+
+func _player_depth() -> float:
+	var p := _player.position
+	var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
+	if _water_level.size() != MundoSim.W * MundoSim.H or cell.x < 0 or cell.y < 0 or cell.x >= MundoSim.W or cell.y >= MundoSim.H:
+		return 0.0
+	return maxf(0.0, _water_level[cell.y * MundoSim.W + cell.x] - height_at(p.x, p.z))
+
+
+func _update_dig(delta: float) -> void:
+	if _toast_t > 0.0:
+		_toast_t -= delta
+		_toast.modulate.a = clampf(_toast_t, 0.0, 1.0)
+	if _digging:
+		_dig_t += delta
+		_dig_bar.value = _dig_t / _dig_need * 100.0
+		if _dig_t >= _dig_need:
+			_finish_dig()
+		return
+	_dig_check -= delta
+	if _dig_check > 0.0:
+		return
+	_dig_check = 0.3
+	var cell := Vector2i(int(_player.position.x / CELL), int(_player.position.z / CELL))
+	var d: Dictionary = sim.soil_data(cell)
+	var ok: bool = not d.is_empty() and d.clay >= 0.35 and _player_depth() < 0.8
+	_dig_btn.visible = ok
+	if ok:
+		_dig_btn.text = "Pegar argila (%s)" % MundoSim.CLAY_NAMES[d.kind]
+
+
+func _start_dig() -> void:
+	if _digging:
+		return
+	if _bag_total() >= BAG_MAX - 0.05:
+		_show_toast("A mochila está cheia (%d kg)." % int(BAG_MAX))
+		return
+	_dig_cell = Vector2i(int(_player.position.x / CELL), int(_player.position.z / CELL))
+	_dig_info = sim.soil_data(_dig_cell)
+	if _dig_info.is_empty() or _dig_info.clay < 0.35:
+		return
+	var wet: bool = _dig_info.moist > 0.55 or _dig_info.water > 0.02
+	_dig_info["wet"] = wet
+	# barro mole sai rápido; torrão seco e duro demora
+	_dig_need = 1.3 if wet else 2.6
+	_dig_t = 0.0
+	_digging = true
+	_dig_btn.visible = false
+	_dig_bar.visible = true
+	_dig_bar.value = 0
+	_play("Idle", 0.6)
+	if _model:
+		_model.rotation.x = 0.45
+
+
+func _cancel_dig() -> void:
+	_digging = false
+	_dig_bar.visible = false
+	if _model:
+		_model.rotation.x = 0.0
+
+
+func _finish_dig() -> void:
+	_cancel_dig()
+	var d := _dig_info
+	var wet: bool = d.wet
+	var purity: float = clampf(1.0 - d.sand * 0.6, 0.3, 1.0)
+	var kg: float = 2.0 * d.clay * (1.3 if wet else 0.7) * purity
+	kg = minf(kg, BAG_MAX - _bag_total())
+	_bag[d.kind] += kg
+	sim.dig(_dig_cell, kg * 0.002)
+	_update_inventory()
+	var state := "molhada, macia" if wet else "seca, em torrões"
+	_show_toast("+%s kg de argila %s (%s, %d%% pura)" % [_kg(kg), MundoSim.CLAY_NAMES[d.kind], state, int(purity * 100)])
+	_dig_check = 0.0
 
 
 ## Atualiza as texturas do solo (argila, areia, umidade, grama e tipos de argila).
@@ -732,6 +894,11 @@ func _move_player(delta: float) -> void:
 	if _joy_id >= 0:
 		dir = _joy_vec
 	var amount := minf(dir.length(), 1.0)
+	if _digging:
+		if amount > 0.12:
+			_cancel_dig()
+		else:
+			amount = 0.0
 	var p := _player.position
 	var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
 	var depth := 0.0
@@ -750,7 +917,7 @@ func _move_player(delta: float) -> void:
 		p.z = clampf(p.z, 1.0, MundoSim.H * CELL - 1.0)
 		_face = lerp_angle(_face, atan2(-move.x, -move.z), minf(1.0, delta * 10.0))
 		_play("Run" if running else "Walk", water_slow)
-	else:
+	elif not _digging:
 		_play("Idle")
 	p.y = height_at(p.x, p.z) - minf(depth, 0.9) * 0.5
 	_player.position = p
@@ -771,6 +938,8 @@ func _move_player(delta: float) -> void:
 func _input(e: InputEvent) -> void:
 	var half := get_viewport().get_visible_rect().size.x * 0.5
 	if e is InputEventScreenTouch:
+		if e.pressed and _dig_btn.visible and _dig_btn.get_global_rect().has_point(e.position):
+			return
 		if e.pressed:
 			if e.position.x < half and _joy_id < 0:
 				_joy_id = e.index

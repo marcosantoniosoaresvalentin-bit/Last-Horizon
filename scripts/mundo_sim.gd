@@ -71,6 +71,7 @@ var _out_soil := PackedByteArray()
 var _out_types := PackedByteArray()
 var _soil_new := false
 var _info := PackedFloat32Array()
+var _dig_queue := []
 ## Cópias estáveis feitas logo após gerar o mundo (seguras para ler na tela).
 var ter0 := PackedFloat32Array()
 var moist0 := PackedFloat32Array()
@@ -154,6 +155,38 @@ func take_soil() -> Array:
 
 
 const ROCKS := ["sedimento antigo", "granito", "gnaisse", "xisto"]
+const CLAY_NAMES := ["caulinita", "ilita", "esmectita"]
+
+
+## Dados do solo numa célula (vazio se ainda não há dados).
+func soil_data(cell: Vector2i) -> Dictionary:
+	if cell.x < 0 or cell.y < 0 or cell.x >= W or cell.y >= H:
+		return {}
+	var i := cell.y * W + cell.x
+	_mx.lock()
+	if _info.size() != N * 7:
+		_mx.unlock()
+		return {}
+	var d := {"clay": _info[i * 7], "sand": _info[i * 7 + 1], "moist": _info[i * 7 + 2],
+		"types": [_info[i * 7 + 3], _info[i * 7 + 4], _info[i * 7 + 5]], "water": _info[i * 7 + 6]}
+	_mx.unlock()
+	var t: Array = d.types
+	var top := 0
+	for k in 3:
+		if t[k] > t[top]:
+			top = k
+	d["kind"] = top
+	return d
+
+
+## Tira argila de uma célula (o jogador cavou ali). Aplicado pela simulação.
+func dig(cell: Vector2i, amount: float) -> void:
+	_mx.lock()
+	_dig_queue.append([cell.y * W + cell.x, amount])
+	var q := (cell.y * W + cell.x) * 7
+	if _info.size() == N * 7:
+		_info[q] = maxf(0.0, _info[q] - amount)
+	_mx.unlock()
 
 ## Descrição do solo numa célula, para mostrar ao jogador.
 func soil_info(cell: Vector2i) -> String:
@@ -210,6 +243,12 @@ func _sim_loop() -> void:
 		for k in n:
 			_weather_step()
 			_step(raining, STEP_MULT)
+		_mx.lock()
+		var digs := _dig_queue
+		_dig_queue = []
+		_mx.unlock()
+		for d in digs:
+			clay[d[0]] = maxf(0.0, clay[d[0]] - d[1])
 		loops += 1
 		if n > 0 and loops % 8 == 0:
 			_publish()

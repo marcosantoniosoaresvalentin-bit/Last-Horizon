@@ -1,9 +1,9 @@
 {
-  "version": 6,
-  "file": "update_6.zip",
-  "size": 1401059,
-  "sha256": "f9d418b3a92a68e8e7d796044495f00a309148f57791f7ce7dd34f4edffd101d",
+  "version": 7,
+  "file": "update_7.zip",
+  "size": 1402736,
+  "sha256": "d3f3f4d7b7c93b067208aef6241bb299e4bb00aed6afebff7e506884725b4fff",
   "min_build": 1,
-  "notes": "Sistema da Terra: estações de cheia e seca, baixadas que viram lagos, geologia e argila que nasce da rocha (caulinita, ilita, esmectita)",
+  "notes": "Coleta de argila: cavar com as mãos, argila molhada ou em torrões, mochila por tipo, jazida que se esgota",
   "date": "2026-11-15"
 }
