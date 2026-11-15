@@ -61,6 +61,9 @@ var dry_t := 0
 var raining := false
 var spawn := Vector2i(W / 2, H / 2)
 var is_ready := false
+## No modo leve a simulação roda menos vezes por segundo (com passos maiores).
+var steps_per_sec := STEPS_PER_SEC
+var step_mult := STEP_MULT
 
 var _thread := Thread.new()
 var _mx := Mutex.new()
@@ -236,13 +239,13 @@ func _sim_loop() -> void:
 	var loops := 0
 	while not _quit:
 		var now := Time.get_ticks_usec()
-		acc += (now - t_last) / 1000000.0 * STEPS_PER_SEC
+		acc += (now - t_last) / 1000000.0 * steps_per_sec
 		t_last = now
 		var n := mini(int(acc), 4)
 		acc = minf(acc - n, 4.0)
 		for k in n:
 			_weather_step()
-			_step(raining, STEP_MULT)
+			_step(raining, step_mult)
 		_mx.lock()
 		var digs := _dig_queue
 		_dig_queue = []

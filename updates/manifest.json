@@ -1,9 +1,9 @@
 {
-  "version": 10,
-  "file": "update_10.zip",
-  "size": 3301634,
-  "sha256": "8cc02fe53b17267caa435f8f9abd27871207477976afb6ccec145c065a931208",
+  "version": 11,
+  "file": "update_11.zip",
+  "size": 3304081,
+  "sha256": "cd83fe628f3726d2f8693dadabb8b3164e43b54512f27dc2bc48ea03c7180621",
   "min_build": 1,
-  "notes": "Personagens bem mais leves na memória (correção de travamento)",
+  "notes": "Proteção contra fechamento: registro de onde o jogo fechou, modo leve automático",
   "date": "2026-11-15"
 }

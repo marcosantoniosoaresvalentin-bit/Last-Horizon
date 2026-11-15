@@ -1,12 +1,47 @@
 extends Control
 ## Menu principal: escolha do personagem (masculino ou feminino) e entrar no jogo.
+## Também avisa se o jogo fechou sozinho da última vez e liga o modo leve.
 
+const Diag := preload("res://scripts/diagnostico.gd")
 const SAVE := "user://personagem.txt"
+const PASSO_NOME := {
+	"gerando mundo": "a geração do mundo",
+	"moldando terreno": "a montagem do terreno",
+	"enchendo lagoas": "a montagem das lagoas",
+	"carregando personagem": "o carregamento do personagem",
+	"plantando grama": "a montagem da grama",
+	"entrando no mundo": "a entrada no mundo",
+	"jogando": "o jogo",
+}
+
+var _leve_btn: Button
 
 
 func _ready() -> void:
+	Diag.instalar_registro()
+	var last := Diag.ultimo()
+	var caiu := not Diag.PASSOS_OK.has(last)
+
 	%MapButton.visible = false
 	var box: VBoxContainer = %MapButton.get_parent()
+
+	if caiu:
+		Diag.set_modo_leve(true)
+		var warn := Label.new()
+		var onde: String = PASSO_NOME.get(last, last)
+		warn.text = "O jogo fechou sozinho da última vez, durante %s.\nLiguei o modo leve para ele rodar melhor." % onde
+		var erros := Diag.ultimos_erros(3)
+		if not erros.is_empty():
+			warn.text += "\nÚltimo erro: " + erros[erros.size() - 1]
+		warn.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		warn.add_theme_font_size_override("font_size", 17)
+		warn.add_theme_color_override("font_color", Color(1.0, 0.62, 0.45))
+		box.add_child(warn)
+	else:
+		Diag.limpar_erros()
+	Diag.marcar("menu")
+
 	var ask := Label.new()
 	ask.text = "Escolha seu personagem"
 	ask.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -17,7 +52,7 @@ func _ready() -> void:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 24)
 	box.add_child(row)
-	var last := FileAccess.get_file_as_string(SAVE).strip_edges() if FileAccess.file_exists(SAVE) else "homem"
+	var last_who := FileAccess.get_file_as_string(SAVE).strip_edges() if FileAccess.file_exists(SAVE) else "homem"
 	for opt in [["homem", "Masculino"], ["mulher", "Feminino"]]:
 		var b := Button.new()
 		b.text = opt[1]
@@ -25,13 +60,40 @@ func _ready() -> void:
 		b.add_theme_font_size_override("font_size", 26)
 		b.pressed.connect(_play.bind(opt[0]))
 		row.add_child(b)
-		if opt[0] == last:
+		if opt[0] == last_who:
 			b.call_deferred("grab_focus")
+
+	_leve_btn = Button.new()
+	_leve_btn.custom_minimum_size = Vector2(300, 48)
+	_leve_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_leve_btn.add_theme_font_size_override("font_size", 18)
+	_leve_btn.pressed.connect(_toggle_leve)
+	box.add_child(_leve_btn)
+	_update_leve()
+
+
+func _toggle_leve() -> void:
+	Diag.set_modo_leve(not Diag.modo_leve())
+	_update_leve()
+
+
+func _update_leve() -> void:
+	_leve_btn.text = "Modo leve: %s" % ("ligado" if Diag.modo_leve() else "desligado")
 
 
 func _play(who: String) -> void:
 	Engine.set_meta("personagem", who)
+	Engine.set_meta("modo_leve", Diag.modo_leve())
 	var f := FileAccess.open(SAVE, FileAccess.WRITE)
 	if f:
 		f.store_string(who)
+		f.close()
+	Diag.marcar("gerando mundo")
 	get_tree().change_scene_to_file("res://scenes/jogo3d.tscn")
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		Diag.marcar("ok")
+	elif what == NOTIFICATION_APPLICATION_RESUMED:
+		Diag.marcar("menu")

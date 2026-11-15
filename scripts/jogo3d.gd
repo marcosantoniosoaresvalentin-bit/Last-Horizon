@@ -4,16 +4,17 @@ extends Node3D
 ## A grama só é montada perto do jogador, para o jogo rodar leve no celular.
 
 const MundoSim := preload("res://scripts/mundo_sim.gd")
+const Diag := preload("res://scripts/diagnostico.gd")
 
 const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
 const HS := 1.2              # metros por unidade de altura da simulação
-const SUB := 2               # subdivisões do terreno por célula
+var SUB := 2                 # subdivisões do terreno por célula
 const WALK_SPEED := 2.2
 const RUN_SPEED := 5.5
 const JOY_RADIUS := 70.0
 const GRASS_CHUNK := 12.0    # tamanho de cada bloco de grama, em metros
-const GRASS_RADIUS := 3      # blocos de grama em volta do jogador
-const GRASS_PER_CHUNK := 200
+var GRASS_RADIUS := 3        # blocos de grama em volta do jogador
+var GRASS_PER_CHUNK := 200
 const CAM_DIST := 4.2
 const ANIMS := {"Idle": "parado", "Walk": "andando", "Run": "correndo"}
 
@@ -214,6 +215,8 @@ var _loading_bg: ColorRect
 var _joy_ui: Control
 
 var _ready_world := false
+var _leve := false
+var _play_time := 0.0
 var _face := 0.0
 var _rain_amount := 0.0
 var _joy_id := -1
@@ -231,15 +234,34 @@ var _w_level := PackedFloat32Array()
 var _w_arr := []
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		Diag.marcar("ok")
+	elif what == NOTIFICATION_APPLICATION_RESUMED and _ready_world:
+		Diag.marcar("jogando")
+
+
 func _exit_tree() -> void:
+	Diag.marcar("menu")
 	if _water_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_water_task)
 
 
 func _ready() -> void:
+	_leve = Engine.get_meta("modo_leve", false)
+	if _leve:
+		SUB = 1
+		GRASS_RADIUS = 2
+		GRASS_PER_CHUNK = 110
+	Diag.marcar("gerando mundo")
 	_build_hud()
 	_build_environment()
+	if _leve:
+		_rain.amount = 350
 	sim = MundoSim.new()
+	if _leve:
+		sim.steps_per_sec = 3.0
+		sim.step_mult = 10.0
 	add_child(sim)
 	sim.world_ready.connect(_on_world_ready)
 
@@ -433,9 +455,11 @@ func _on_world_ready() -> void:
 	_moist = sim.moist0
 	_gw = sim.gw0
 	_max_h = sim.max_h
+	Diag.marcar("moldando terreno")
 	await _set_loading("Moldando o terreno…")
 	_apply_soil()
 	_build_terrain()
+	Diag.marcar("enchendo lagoas")
 	await _set_loading("Enchendo as lagoas…")
 	_water_mi = MeshInstance3D.new()
 	_water_mi.material_override = _water_mat
@@ -447,10 +471,12 @@ func _on_world_ready() -> void:
 		while not WorkerThreadPool.is_task_completed(_water_task):
 			await get_tree().process_frame
 		_finish_water()
+	Diag.marcar("carregando personagem")
 	await _set_loading("Chamando o personagem…")
 	_build_player()
 	_player.position = _ground_pos(Vector2((sim.spawn.x + 0.5) * CELL, (sim.spawn.y + 0.5) * CELL))
 	_yaw = 0.0
+	Diag.marcar("plantando grama")
 	await _set_loading("Plantando a grama…")
 	for k in 3:
 		_grass_meshes.append(_make_grass_mesh(k))
@@ -459,6 +485,7 @@ func _on_world_ready() -> void:
 	_loading_bg.visible = false
 	_clock.visible = true
 	_ready_world = true
+	Diag.marcar("entrando no mundo")
 
 
 ## Altura do terreno (metros) num ponto do mundo.
@@ -728,6 +755,10 @@ func _process(delta: float) -> void:
 			_water_timer = 3.0
 	_move_player(delta)
 	_update_grass()
+	if _play_time < 15.0:
+		_play_time += delta
+		if _play_time >= 15.0:
+			Diag.marcar("jogando")
 	_grass_mat.set_shader_parameter("player_pos", _player.global_position)
 	var h: float = sim.hour()
 	_clock.text = "Dia %d · %02d:%02d · %s%s" % [sim.day(), int(h), int(fmod(h, 1.0) * 60.0), sim.season_name(), " · Chovendo" if sim.raining else ""]
@@ -882,7 +913,7 @@ func _update_sky(delta: float) -> void:
 	var warm := clampf(1.0 - elev * 2.5, 0.0, 1.0)
 	_sun.light_color = Color(1, 0.97, 0.9).lerp(Color(1.0, 0.62, 0.35), warm)
 	_sun.light_energy = lerpf(0.0, 1.5, daylight) * lerpf(1.0, 0.35, _rain_amount)
-	_sun.shadow_enabled = daylight > 0.2
+	_sun.shadow_enabled = daylight > 0.2 and not _leve
 	var night := 1.0 - daylight
 	var top := Color(0.30, 0.50, 0.78).lerp(Color(0.42, 0.45, 0.5), _rain_amount).lerp(Color(0.02, 0.03, 0.08), night)
 	var hor := Color(0.72, 0.78, 0.82).lerp(Color(0.95, 0.62, 0.4), warm * daylight).lerp(Color(0.58, 0.6, 0.62), _rain_amount).lerp(Color(0.04, 0.05, 0.1), night)
