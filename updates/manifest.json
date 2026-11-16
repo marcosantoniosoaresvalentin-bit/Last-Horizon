@@ -1,9 +1,9 @@
 {
-  "version": 18,
-  "file": "update_18.zip",
-  "size": 2714261,
-  "sha256": "222e9053346c8646a3e98b74aace69af7eee59a0c3ec96c0f9304384469ea902",
+  "version": 19,
+  "file": "update_19.zip",
+  "size": 2721565,
+  "sha256": "9bc90691ac33763566a1bc13f9f41583fcfda114679266b666b201b740100e3a",
   "min_build": 1,
-  "notes": "Menu novo (Mundos, Skin em 3D, Configurações) e mundos salvos",
+  "notes": "Sistema de contas: criar conta (nome, e-mail, senha), entrar, esqueci a senha, trocar nome e sair",
   "date": "2026-11-16"
 }

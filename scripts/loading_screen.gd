@@ -4,6 +4,7 @@ extends Control
 ## enquanto mostra o progresso e dicas de sobrevivência.
 
 const Updater := preload("res://scripts/updater.gd")
+const Conta := preload("res://scripts/conta.gd")
 
 ## Cena que abre quando o carregamento termina.
 @export_file("*.tscn") var next_scene_path := "res://scenes/main_menu.tscn"
@@ -159,6 +160,9 @@ func _rotate_tips(delta: float) -> void:
 func _finish() -> void:
 	_phase = Phase.DONE
 	var scene := ResourceLoader.load_threaded_get(next_scene_path) as PackedScene
+	# primeira vez (ou depois de sair da conta): criar conta ou entrar antes do menu
+	if Conta.needs_login():
+		scene = load("res://scenes/conta.tscn")
 	var tw := create_tween()
 	tw.tween_interval(0.35)
 	tw.tween_property(self, "modulate:a", 0.0, 0.5)

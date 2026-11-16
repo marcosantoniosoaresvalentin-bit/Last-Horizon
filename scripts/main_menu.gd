@@ -10,6 +10,7 @@ const Diag := preload("res://scripts/diagnostico.gd")
 const Updater := preload("res://scripts/updater.gd")
 const Mundos := preload("res://scripts/mundos.gd")
 const Perfil := preload("res://scripts/perfil.gd")
+const Conta := preload("res://scripts/conta.gd")
 
 const PASSO_NOME := {
 	"gerando mundo": "a geração do mundo",
@@ -40,10 +41,16 @@ var _name_label: Label
 var _skin_view: SubViewport
 var _skin_pivots := {}
 var _skin_buttons := {}
+var _conta: Node
 
 
 func _ready() -> void:
 	Updater.mark_ok()   # esta versão abriu direitinho
+	if Conta.needs_login():
+		get_tree().change_scene_to_file.call_deferred("res://scenes/conta.tscn")
+		return
+	_conta = Conta.new()
+	add_child(_conta)
 	var last := Diag.ultimo()
 	if not Diag.PASSOS_OK.has(last):
 		_crash_text = "O jogo fechou sozinho da última vez, durante %s." % PASSO_NOME.get(last, last)
@@ -540,6 +547,18 @@ func _page_settings() -> Control:
 			msg.text = "O nome precisa ter pelo menos 3 letras."
 			msg.add_theme_color_override("font_color", C_DANGER)
 			return
+		if Conta.logged_in():
+			save.disabled = true
+			msg.text = "Salvando na sua conta…"
+			msg.add_theme_color_override("font_color", C_DIM)
+			var r: Dictionary = await _conta.trocar_nome(n)
+			if not is_instance_valid(save):
+				return
+			save.disabled = false
+			if not r.ok:
+				msg.text = Conta.mensagem(str(r.erro))
+				msg.add_theme_color_override("font_color", C_DANGER)
+				return
 		Perfil.set_nome(n)
 		edit.text = Perfil.nome()
 		msg.text = "Nome salvo."
@@ -547,7 +566,46 @@ func _page_settings() -> Control:
 		_update_name_label()
 	save.pressed.connect(do_save)
 	edit.text_submitted.connect(func(_t): do_save.call())
+
+	var s := Conta.session()
+	if not s.is_empty():
+		var acc := PanelContainer.new()
+		acc.add_theme_stylebox_override("panel", _box(C_CARD, 10, C_LINE, 1))
+		v.add_child(acc)
+		var am := MarginContainer.new()
+		for k in ["left", "right", "top", "bottom"]:
+			am.add_theme_constant_override("margin_" + k, 22)
+		acc.add_child(am)
+		var ah := HBoxContainer.new()
+		ah.add_theme_constant_override("separation", 12)
+		am.add_child(ah)
+		var ai := VBoxContainer.new()
+		ai.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ah.add_child(ai)
+		var at := Label.new()
+		at.text = "Conta"
+		at.add_theme_font_size_override("font_size", 22)
+		ai.add_child(at)
+		ai.add_child(_note(str(s.get("email", "")), C_DIM))
+		var out := _button("Sair da conta")
+		out.custom_minimum_size = Vector2(190, 54)
+		out.add_theme_color_override("font_color", C_DANGER)
+		out.pressed.connect(_ask_logout)
+		ah.add_child(out)
 	return v
+
+
+func _ask_logout() -> void:
+	var box := _dialog("Sair da conta")
+	var t := Label.new()
+	t.text = "Para jogar de novo, você vai precisar entrar com seu e-mail e senha. Os mundos salvos neste celular continuam aqui."
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	t.add_theme_font_size_override("font_size", 19)
+	box.add_child(t)
+	var do_out := func():
+		Conta.sair()
+		get_tree().change_scene_to_file("res://scenes/conta.tscn")
+	_dialog_buttons(box, "Sair", do_out, true)
 
 
 func _update_name_label() -> void:
@@ -613,7 +671,7 @@ func _close_overlay() -> void:
 
 # ================== ESTILO ==================
 
-func _make_theme() -> Theme:
+static func _make_theme() -> Theme:
 	var th := Theme.new()
 	th.set_color("font_color", "Label", C_BONE)
 	th.set_font_size("font_size", "Button", 22)
@@ -632,7 +690,7 @@ func _make_theme() -> Theme:
 	return th
 
 
-func _button(text: String, accent := false) -> Button:
+static func _button(text: String, accent := false) -> Button:
 	var b := Button.new()
 	b.text = text
 	if accent:

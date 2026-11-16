@@ -2,6 +2,7 @@ extends RefCounted
 ## Perfil do jogador neste celular: nome de usuário e personagem escolhido.
 ## (Quando as contas online estiverem ligadas, o nome também vai para a conta.)
 
+const Conta := preload("res://scripts/conta.gd")
 const PATH := "user://perfil.json"
 const OLD_SKIN := "user://personagem.txt"
 const MAX_NAME := 20
@@ -26,6 +27,10 @@ static func _write(d: Dictionary) -> void:
 
 
 static func nome() -> String:
+	# com conta, o nome que vale é o da conta
+	var c := Conta.session()
+	if not c.is_empty() and str(c.get("nome", "")) != "":
+		return str(c.nome)
 	return str(_read().get("nome", "Sobrevivente"))
 
 
