@@ -1067,7 +1067,7 @@ func _open_calendar() -> void:
 	_look_id = -1
 	_cal = Calendario.new()
 	_hud.add_child(_cal)
-	_cal.abrir(sim)
+	_cal.abrir(sim, Mundos.dir(_world_id) + "/calendario.json" if _world_id != "" else "")
 	_cal.closed.connect(func(): _cal = null)
 
 

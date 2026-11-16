@@ -1,7 +1,7 @@
 extends Node
 ## Simulação da Terra: relevo, estações do ano, água e solo.
 ##
-## - Calendário de verdade (meses de 28 a 31 dias), começando em 1º/3/2000.
+## - Calendário de verdade (meses de 28 a 31 dias), começando em 1º/1/2000.
 ##   1 dia = 8 minutos de jogo. O tempo só passa com o jogo aberto.
 ##   Chove de acordo com o mês: muito de dezembro a abril, as chuvas param em
 ##   maio e junho, seca forte de julho a setembro (quase sem chuva, falta água)
@@ -36,10 +36,10 @@ const STEP_MULT := 5.0
 const STEPS_DAY := 2880           # um dia de jogo = 8 minutos
 const START_HOUR := 7.0
 # Calendário de verdade: meses de 28 a 31 dias, anos bissextos e dias da semana certos.
-# Todo mundo novo começa em 1º de março de 2000 (uma quarta-feira); depois 2001, 2002...
+# Todo mundo novo começa em 1º de janeiro de 2000 (um sábado); depois 2001, 2002...
 # O tempo só passa com o jogo aberto (fica pausado quando a pessoa sai).
 const START_YEAR := 2000
-const START_MONTH := 2            # 0 = janeiro
+const START_MONTH := 0            # o mundo começa em 1º de janeiro (0 = janeiro)
 const MONTH_DAYS := 30.4375       # duração média de um mês (para o ritmo do clima)
 ## O clima foi ajustado para meses de 5 dias; com meses de verdade, os processos que
 ## duram a estação inteira (secar lagoas, intervalo entre chuvas na seca, água do solo)

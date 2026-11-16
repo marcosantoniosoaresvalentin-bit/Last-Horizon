@@ -1,11 +1,12 @@
 extends Control
 ## Calendário de papel, como um calendário de parede antigo, com tudo escrito à mão.
-## - O dia de hoje fica com um círculo vermelho em volta.
-## - Os dias que já passaram ficam com o círculo e um X vermelho no meio.
-## - Setas ‹ › mudam o mês (do mês em que o mundo começou até o mês atual).
-## Toque fora do papel (ou em "Fechar") para fechar.
+## Quem marca é o jogador (nada é marcado sozinho, só o 1º de janeiro já vem com a bolinha):
+##   toca no número do dia → "Dia atual" desenha a bolinha, "Finalizar dia" desenha o X.
+## Se esquecer de marcar, o jogo não avisa: dá para se perder nos dias, de propósito.
+## As 12 folhas do ano; setas embaixo mudam de mês. Abre na folha que ficou aberta da última vez.
+## As marcas ficam salvas no mundo (calendario.json).
 ##
-## Uso: var cal = Calendario.new(); hud.add_child(cal); cal.abrir(sim)
+## Uso: var cal = Calendario.new(); hud.add_child(cal); cal.abrir(sim, caminho_do_arquivo)
 
 signal closed
 
@@ -13,11 +14,18 @@ const MundoSim := preload("res://scripts/mundo_sim.gd")
 const FONT_PATH := "res://fontes/caveat.fonte"
 const MONTHS_UP := ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO",
 	"JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
+const MONTHS := ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+	"julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+
+const CIRCLE := 1
+const CROSS := 2
+const DRAW_TIME := {CIRCLE: 0.7, CROSS: 0.55}   # segundos para "escrever" cada marca
 
 const INK := Color(0.13, 0.105, 0.085, 0.93)
 const RED := Color(0.78, 0.12, 0.10, 0.85)
 const PAPER_A := Color(0.84, 0.73, 0.57)
 const PAPER_B := Color(0.96, 0.89, 0.76)
+const C_UI := Color(0.95, 0.9, 0.8)
 
 static var _font: Font
 static var _font_bold: Font
@@ -25,13 +33,17 @@ static var _grain: NoiseTexture2D
 static var _stains: NoiseTexture2D
 static var _edges: GradientTexture2D
 
-var _today := {}
+var marks := {}            # "ano-mês-dia" -> bits (CIRCLE, CROSS)
+var anim := {}             # marca sendo desenhada: {key, kind, t}
+var _path := ""
 var _start := {}
+var _last_year := 2000     # ano mais avançado que dá para folhear (o ano atual do jogo)
 var _shown_y := 2000
-var _shown_m := 3
+var _shown_m := 1
 var _paper := Paper.new()
 var _prev: Button
 var _next: Button
+var _menu: Control
 
 
 func _ready() -> void:
@@ -45,60 +57,70 @@ func _ready() -> void:
 	add_child(dim)
 	_paper.cal = self
 	add_child(_paper)
-	_prev = _arrow("‹", -1)
-	_next = _arrow("›", 1)
-	var close := Button.new()
-	close.text = "Fechar"
-	close.flat = true
-	close.add_theme_font_override("font", _font_bold)
-	close.add_theme_font_size_override("font_size", 40)
-	close.add_theme_color_override("font_color", Color(0.95, 0.9, 0.8))
-	close.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	close.offset_left = -90
-	close.offset_right = 90
-	close.offset_top = -74
-	close.offset_bottom = -14
-	close.pressed.connect(fechar)
-	add_child(close)
+	_prev = _ui_button("‹  Mês anterior", _move.bind(-1))
+	_next = _ui_button("Próximo mês  ›", _move.bind(1))
+	var close := _ui_button("Fechar", fechar)
+	close.name = "Fechar"
 	resized.connect(_layout)
 	_layout()
 
 
-func abrir(sim: Node) -> void:
-	_today = sim.date()
+func abrir(sim: Node, path: String) -> void:
+	_path = path
 	_start = Time.get_datetime_dict_from_unix_time(MundoSim.start_unix())
-	_shown_y = int(_today.year)
-	_shown_m = int(_today.month)
+	_last_year = maxi(int(sim.year()), int(_start.year))
+	_load()
 	_refresh()
 
 
 func fechar() -> void:
+	_save()
 	closed.emit()
 	queue_free()
 
 
-func _gui_input(e: InputEvent) -> void:
-	var tap: bool = (e is InputEventScreenTouch and e.pressed) or (e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT)
-	if tap and not _paper.get_rect().has_point(e.position):
-		fechar()
-	accept_event()
+static func _key(y: int, m: int, d: int) -> String:
+	return "%d-%d-%d" % [y, m, d]
 
 
-func _arrow(t: String, dir: int) -> Button:
-	var b := Button.new()
-	b.text = t
-	b.flat = true
-	b.add_theme_font_override("font", _font_bold)
-	b.add_theme_font_size_override("font_size", 90)
-	b.add_theme_color_override("font_color", Color(0.95, 0.9, 0.8))
-	b.add_theme_color_override("font_disabled_color", Color(0.95, 0.9, 0.8, 0.15))
-	b.custom_minimum_size = Vector2(80, 120)
-	b.pressed.connect(_move.bind(dir))
-	add_child(b)
-	return b
+func mark_of(y: int, m: int, d: int) -> int:
+	return int(marks.get(_key(y, m, d), 0))
 
+
+# ================== SALVAR ==================
+
+func _load() -> void:
+	marks = {}
+	_shown_y = int(_start.year)
+	_shown_m = int(_start.month)
+	if _path != "" and FileAccess.file_exists(_path):
+		var d = JSON.parse_string(FileAccess.get_file_as_string(_path))
+		if d is Dictionary:
+			if d.get("marcas") is Dictionary:
+				marks = d.marcas
+			if d.get("folha") is Array and d.folha.size() == 2:
+				_shown_y = clampi(int(d.folha[0]), int(_start.year), _last_year)
+				_shown_m = clampi(int(d.folha[1]), 1, 12)
+			return
+	# calendário novo: só o primeiro dia vem marcado com a bolinha
+	marks[_key(int(_start.year), int(_start.month), int(_start.day))] = CIRCLE
+
+
+func _save() -> void:
+	if _path == "":
+		return
+	var f := FileAccess.open(_path, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify({"marcas": marks, "folha": [_shown_y, _shown_m]}))
+		f.close()
+
+
+# ================== FOLHAS ==================
 
 func _move(dir: int) -> void:
+	if not anim.is_empty():
+		return
+	_close_menu()
 	_shown_m += dir
 	if _shown_m < 1:
 		_shown_m = 12
@@ -109,44 +131,132 @@ func _move(dir: int) -> void:
 	_refresh()
 
 
-func _key(y: int, m: int) -> int:
-	return y * 12 + m
-
-
 func _refresh() -> void:
-	if _today.is_empty():
-		return
-	_prev.disabled = _key(_shown_y, _shown_m) <= _key(int(_start.year), int(_start.month))
-	_next.disabled = _key(_shown_y, _shown_m) >= _key(int(_today.year), int(_today.month))
+	var k := _shown_y * 12 + _shown_m
+	_prev.disabled = k <= int(_start.year) * 12 + 1
+	_next.disabled = k >= _last_year * 12 + 12
 	_paper.queue_redraw()
 
 
 func _layout() -> void:
 	var vw := size.x
 	var vh := size.y
-	var w := minf(vw * 0.80, (vh - 110.0) * 1.5)
+	var w := minf(vw * 0.8, (vh - 120.0) * 1.5)
 	var h := w / 1.5
 	_paper.size = Vector2(w, h)
-	_paper.position = Vector2((vw - w) * 0.5, (vh - h) * 0.5 - 30.0)
-	_prev.position = Vector2(_paper.position.x - 95, _paper.position.y + h * 0.5 - 60)
-	_next.position = Vector2(_paper.position.x + w + 15, _paper.position.y + h * 0.5 - 60)
+	_paper.position = Vector2((vw - w) * 0.5, (vh - h) * 0.5 - 40.0)
+	var by := _paper.position.y + h + 16.0
+	_prev.position = Vector2(vw * 0.5 - 380, by)
+	_next.position = Vector2(vw * 0.5 + 140, by)
+	var close: Button = get_node_or_null("Fechar")
+	if close:
+		close.position = Vector2(vw * 0.5 - 90, by)
 	_paper.queue_redraw()
 
 
-## Estado de um dia do mês mostrado: 0 = nada, 1 = hoje (círculo), 2 = já passou (círculo e X).
-func day_state(d: int) -> int:
-	var t := _key(int(_today.year), int(_today.month))
-	var s := _key(int(_start.year), int(_start.month))
-	var k := _key(_shown_y, _shown_m)
-	if k < s or k > t:
-		return 0
-	if k == s and d < int(_start.day):
-		return 0     # antes do mundo existir
-	if k < t:
-		return 2
-	if d < int(_today.day):
-		return 2
-	return 1 if d == int(_today.day) else 0
+func _ui_button(t: String, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = t
+	b.flat = true
+	b.custom_minimum_size = Vector2(180 if t == "Fechar" else 240, 64)
+	b.add_theme_font_override("font", _font_bold)
+	b.add_theme_font_size_override("font_size", 38)
+	b.add_theme_color_override("font_color", C_UI)
+	b.add_theme_color_override("font_hover_color", Color(1, 0.8, 0.6))
+	b.add_theme_color_override("font_disabled_color", Color(C_UI, 0.2))
+	b.pressed.connect(cb)
+	add_child(b)
+	return b
+
+
+func _gui_input(e: InputEvent) -> void:
+	var tap: bool = (e is InputEventScreenTouch and e.pressed) or (e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT)
+	if tap and _menu == null and not _paper.get_rect().has_point(e.position):
+		fechar()
+	accept_event()
+
+
+# ================== MARCAR UM DIA ==================
+
+## O jogador tocou num dia: pergunta o que marcar.
+func ask_day(d: int) -> void:
+	if not anim.is_empty():
+		return
+	_close_menu()
+	var m := mark_of(_shown_y, _shown_m, d)
+	_menu = ColorRect.new()
+	(_menu as ColorRect).color = Color(0, 0, 0, 0.45)
+	_menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_menu)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_menu.add_child(center)
+	var panel := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.93, 0.86, 0.72)
+	sb.set_corner_radius_all(6)
+	sb.set_border_width_all(2)
+	sb.border_color = Color(0.45, 0.33, 0.2)
+	sb.shadow_color = Color(0, 0, 0, 0.4)
+	sb.shadow_size = 10
+	sb.content_margin_left = 30
+	sb.content_margin_right = 30
+	sb.content_margin_top = 18
+	sb.content_margin_bottom = 18
+	panel.add_theme_stylebox_override("panel", sb)
+	center.add_child(panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	panel.add_child(v)
+	var t := Label.new()
+	t.text = "%d de %s" % [d, MONTHS[_shown_m - 1]]
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.add_theme_font_override("font", _font_bold)
+	t.add_theme_font_size_override("font_size", 46)
+	t.add_theme_color_override("font_color", INK)
+	v.add_child(t)
+	v.add_child(_menu_option("Dia atual", m & CIRCLE == 0, _mark.bind(d, CIRCLE)))
+	v.add_child(_menu_option("Finalizar dia", m & CROSS == 0, _mark.bind(d, CROSS)))
+	v.add_child(_menu_option("Cancelar", true, _close_menu, true))
+
+
+func _menu_option(text: String, enabled: bool, cb: Callable, dim := false) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.flat = true
+	b.disabled = not enabled
+	b.custom_minimum_size = Vector2(320, 62)
+	b.add_theme_font_override("font", _font_bold)
+	b.add_theme_font_size_override("font_size", 40)
+	b.add_theme_color_override("font_color", INK if not dim else Color(INK, 0.55))
+	b.add_theme_color_override("font_hover_color", RED)
+	b.add_theme_color_override("font_pressed_color", RED)
+	b.add_theme_color_override("font_disabled_color", Color(INK, 0.25))
+	b.pressed.connect(cb)
+	return b
+
+
+func _close_menu() -> void:
+	if _menu and is_instance_valid(_menu):
+		_menu.queue_free()
+	_menu = null
+
+
+func _mark(d: int, kind: int) -> void:
+	_close_menu()
+	var k := _key(_shown_y, _shown_m, d)
+	anim = {"key": k, "kind": kind, "t": 0.0}
+
+
+func _process(delta: float) -> void:
+	if anim.is_empty():
+		return
+	anim.t += delta / float(DRAW_TIME[anim.kind])
+	if anim.t >= 1.0:
+		marks[anim.key] = int(marks.get(anim.key, 0)) | int(anim.kind)
+		anim = {}
+		_save()
+	_paper.queue_redraw()
 
 
 # ================== FONTE E TEXTURAS ==================
@@ -201,12 +311,23 @@ static func _noise_tex(px: int, freq: float, seed_: int, colors: Array, offsets:
 
 class Paper extends Control:
 	var cal
+	var cells := {}    # dia -> Rect2 (para saber em que dia o jogador tocou)
 
 	func _ready() -> void:
 		mouse_filter = Control.MOUSE_FILTER_STOP
 
+	func _gui_input(e: InputEvent) -> void:
+		var tap: bool = (e is InputEventScreenTouch and e.pressed) or (e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT)
+		if not tap:
+			return
+		for d in cells:
+			if (cells[d] as Rect2).has_point(e.position):
+				cal.ask_day(d)
+				break
+		accept_event()
+
 	func _draw() -> void:
-		if cal == null or cal._today.is_empty():
+		if cal == null:
 			return
 		var w := size.x
 		var h := size.y
@@ -274,22 +395,35 @@ class Paper extends Control:
 		for c in 7:
 			draw_string(f, Vector2(L + cw * c, week_b - h * 0.022), MundoSim.WEEKDAYS[c], HORIZONTAL_ALIGNMENT_CENTER, cw, wk, cal.INK)
 
-		# números dos dias e as marcas vermelhas
+		# números dos dias e as marcas que o jogador fez
 		var num := int(minf(h * 0.072, rh * 0.62))
+		cells.clear()
 		for d in range(1, ndays + 1):
 			var idx := first + d - 1
 			var cx := L + cw * (idx % 7)
 			var cy := week_b + rh * (idx / 7)
+			cells[d] = Rect2(cx, cy, cw, rh)
 			draw_string(fb, Vector2(cx + cw * 0.07, cy + num * 0.95), str(d), HORIZONTAL_ALIGNMENT_LEFT, -1, num, cal.INK)
-			var st: int = cal.day_state(d)
-			if st > 0:
-				var mr := RandomNumberGenerator.new()
-				mr.seed = hash(Vector3i(y0, m0, d))
-				var center := Vector2(cx + cw * 0.6 + mr.randf_range(-2, 2), cy + rh * 0.57 + mr.randf_range(-2, 2))
-				var rad := minf(cw, rh) * 0.31
-				_circle(center, rad, lw * 1.6, mr)
-				if st == 2:
-					_cross(center, rad * 0.62, lw * 1.6, mr)
+			var key: String = cal._key(y0, m0, d)
+			var have: int = cal.mark_of(y0, m0, d)
+			var drawing: bool = not cal.anim.is_empty() and cal.anim.key == key
+			if have == 0 and not drawing:
+				continue
+			var mr := RandomNumberGenerator.new()
+			mr.seed = hash(Vector3i(y0, m0, d))
+			var center := Vector2(cx + cw * 0.6 + mr.randf_range(-2, 2), cy + rh * 0.57 + mr.randf_range(-2, 2))
+			var rad := minf(cw, rh) * 0.31
+			# a mesma sequência de sorteios para o círculo e o X, para a marca não "pular"
+			var circle_rng := RandomNumberGenerator.new()
+			circle_rng.seed = mr.seed + 1
+			var cross_rng := RandomNumberGenerator.new()
+			cross_rng.seed = mr.seed + 2
+			var pc := 1.0 if have & cal.CIRCLE else (float(cal.anim.t) if drawing and cal.anim.kind == cal.CIRCLE else 0.0)
+			var px := 1.0 if have & cal.CROSS else (float(cal.anim.t) if drawing and cal.anim.kind == cal.CROSS else 0.0)
+			if pc > 0.0:
+				_circle(center, rad, lw * 1.6, circle_rng, pc)
+			if px > 0.0:
+				_cross(center, rad * 0.62, lw * 1.6, cross_rng, px)
 
 	## Desenha o contorno em fatias saindo do centro (sempre funciona, mesmo com a borda irregular).
 	func _fan(pts: PackedVector2Array, uvs: PackedVector2Array, color: Color, tex: Texture2D) -> void:
@@ -305,7 +439,6 @@ class Paper extends Control:
 			else:
 				draw_primitive(tri, cols, PackedVector2Array())
 
-
 	## Linha de tinta levemente torta.
 	func _line(a: Vector2, b: Vector2, width: float, rng: RandomNumberGenerator) -> void:
 		var pts := PackedVector2Array()
@@ -318,29 +451,41 @@ class Paper extends Control:
 		draw_polyline(pts, cal.INK, width, true)
 
 	## Círculo feito à mão: não fecha certinho e passa um pouco do começo.
-	func _circle(c: Vector2, r: float, width: float, rng: RandomNumberGenerator) -> void:
+	## 'part' de 0 a 1 desenha só o pedaço já "escrito".
+	func _circle(c: Vector2, r: float, width: float, rng: RandomNumberGenerator, part: float) -> void:
 		var pts := PackedVector2Array()
 		var a0 := rng.randf_range(0, TAU)
 		var turn := TAU * rng.randf_range(1.03, 1.12)
 		var squash := Vector2(rng.randf_range(0.95, 1.07), rng.randf_range(0.92, 1.03))
+		var wob := []
 		var n := 40
 		for i in n + 1:
+			wob.append(rng.randf_range(-0.015, 0.015))
+		var last := int(ceil(n * clampf(part, 0.0, 1.0)))
+		for i in last + 1:
 			var t := float(i) / n
 			var a := a0 + turn * t
-			var rr := r * (1.0 + 0.06 * sin(a * 2.0 + a0) + rng.randf_range(-0.015, 0.015) + 0.05 * t)
+			var rr: float = r * (1.0 + 0.06 * sin(a * 2.0 + a0) + wob[i] + 0.05 * t)
 			pts.append(c + Vector2(cos(a) * squash.x, sin(a) * squash.y) * rr)
-		draw_polyline(pts, cal.RED, width, true)
+		if pts.size() >= 2:
+			draw_polyline(pts, cal.RED, width, true)
 
-	## X feito à mão, com traços levemente curvos.
-	func _cross(c: Vector2, r: float, width: float, rng: RandomNumberGenerator) -> void:
+	## X feito à mão, com traços levemente curvos. Primeiro um traço, depois o outro.
+	func _cross(c: Vector2, r: float, width: float, rng: RandomNumberGenerator, part: float) -> void:
 		for k in 2:
 			var a := Vector2(-r, -r) if k == 0 else Vector2(r, -r)
 			var b := -a
 			a += Vector2(rng.randf_range(-3, 3), rng.randf_range(-3, 3))
 			b += Vector2(rng.randf_range(-3, 3), rng.randf_range(-3, 3))
 			var bend := (b - a).orthogonal().normalized() * rng.randf_range(-3, 3)
+			var wmul := rng.randf_range(0.9, 1.15)
+			var seg := clampf(part * 2.0 - k, 0.0, 1.0)
+			if seg <= 0.0:
+				continue
 			var pts := PackedVector2Array()
-			for i in 6:
-				var t := i / 5.0
+			var n := 8
+			for i in int(ceil(n * seg)) + 1:
+				var t := minf(float(i) / n, seg)
 				pts.append(c + a.lerp(b, t) + bend * sin(t * PI))
-			draw_polyline(pts, cal.RED, width * rng.randf_range(0.9, 1.15), true)
+			if pts.size() >= 2:
+				draw_polyline(pts, cal.RED, width * wmul, true)
