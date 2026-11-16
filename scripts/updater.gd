@@ -16,6 +16,7 @@ const REPO_RAW := "https://raw.githubusercontent.com/marcosantoniosoaresvalentin
 const MANIFEST_URL := REPO_RAW + "manifest.json"
 const DIR := "user://updates"
 const INSTALLED_PATH := DIR + "/installed.json"
+const BOOT_PATH := DIR + "/boot.json"
 const MANIFEST_TIMEOUT := 10.0
 
 var _manifest_http: HTTPRequest
@@ -39,12 +40,61 @@ static func read_installed() -> Dictionary:
 	return data if data is Dictionary else {}
 
 
+## Proteção: se uma versão baixada fez o jogo fechar antes de chegar no menu
+## duas vezes seguidas, ela não é mais carregada (o jogo abre com a versão do
+## APK) até chegar uma atualização mais nova.
+static func _read_boot() -> Dictionary:
+	if not FileAccess.file_exists(BOOT_PATH):
+		return {}
+	var data = JSON.parse_string(FileAccess.get_file_as_string(BOOT_PATH))
+	return data if data is Dictionary else {}
+
+
+static func _write_boot(data: Dictionary) -> void:
+	DirAccess.make_dir_recursive_absolute(DIR)
+	var f := FileAccess.open(BOOT_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(data))
+		f.close()
+
+
+## Chamado pelo menu: a versão atual abriu direitinho.
+static func mark_ok() -> void:
+	var b := _read_boot()
+	b["ok"] = true
+	b["fails"] = 0
+	_write_boot(b)
+
+
+static func is_broken(version: int) -> bool:
+	var b := _read_boot()
+	return int(b.get("broken", 0)) == version and version > 0
+
+
+## Antes de abrir: se a última abertura não chegou ao menu, conta como falha.
+static func check_last_boot() -> void:
+	var b := _read_boot()
+	if b.is_empty() or bool(b.get("ok", true)):
+		return
+	var fails := int(b.get("fails", 0)) + 1
+	b["fails"] = fails
+	if fails >= 2:
+		b["broken"] = int(b.get("version", 0))
+	_write_boot(b)
+
+
 ## Carrega a última atualização baixada, antes de qualquer cena do jogo.
 ## Devolve a build que está valendo agora.
 static func apply_installed() -> int:
 	var info := read_installed()
 	var version := int(info.get("version", 0))
 	var path := str(info.get("file", ""))
+	var b := _read_boot()
+	if is_broken(version):
+		return base_build()
+	b["version"] = version if version > base_build() else base_build()
+	b["ok"] = false
+	_write_boot(b)
 	if version <= base_build():
 		# O APK instalado já é igual ou mais novo que a atualização baixada.
 		if path != "" and FileAccess.file_exists(path):

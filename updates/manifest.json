@@ -1,9 +1,9 @@
 {
-  "version": 12,
-  "file": "update_12.zip",
-  "size": 2734647,
-  "sha256": "2854e0e7d8526b61c8f3a8542fb9a5b073b1c29a97de48c30b62121b3d5c7947",
+  "version": 13,
+  "file": "update_13.zip",
+  "size": 2735144,
+  "sha256": "37294c4b3780c5484f04906ed5d28dc51620f83d1b0ff2891216e7f5eaca3639",
   "min_build": 1,
-  "notes": "Correção do fechamento: personagens numa malha só, sem modo leve",
+  "notes": "Atualização à prova de falha: procura versão nova antes de abrir e ignora versão que fechou o jogo",
   "date": "2026-11-15"
 }

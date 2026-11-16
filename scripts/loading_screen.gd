@@ -49,9 +49,10 @@ var _updater: Node
 
 
 func _ready() -> void:
-	# Aplica a última atualização já baixada antes de carregar qualquer cena.
-	var build := Updater.apply_installed()
-	_set_version_label(build)
+	# Primeiro procura atualização nova; só depois carrega a versão baixada.
+	# Assim, mesmo que uma versão baixada esteja com problema, a correção chega.
+	Updater.check_last_boot()
+	_set_version_label(Updater.base_build())
 
 	_tip_index = randi() % TIPS.size()
 	_tip.text = TIPS[_tip_index]
@@ -88,8 +89,8 @@ static func _mb(bytes: int) -> String:
 
 func _on_update_finished(updated: bool, message: String) -> void:
 	_status.text = message
-	if updated:
-		_set_version_label(Updater.current_build())
+	var build := Updater.apply_installed()
+	_set_version_label(build)
 	await get_tree().create_timer(update_message_time if updated else 0.4).timeout
 	_start_loading()
 

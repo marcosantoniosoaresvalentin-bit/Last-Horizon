@@ -3,6 +3,7 @@ extends Control
 ## Também avisa se o jogo fechou sozinho da última vez, e em que momento.
 
 const Diag := preload("res://scripts/diagnostico.gd")
+const Updater := preload("res://scripts/updater.gd")
 const SAVE := "user://personagem.txt"
 const PASSO_NOME := {
 	"gerando mundo": "a geração do mundo",
@@ -16,6 +17,7 @@ const PASSO_NOME := {
 
 
 func _ready() -> void:
+	Updater.mark_ok()   # esta versão abriu direitinho
 	var last := Diag.ultimo()
 	var caiu := not Diag.PASSOS_OK.has(last)
 
