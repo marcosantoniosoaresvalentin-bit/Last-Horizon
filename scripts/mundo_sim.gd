@@ -1,7 +1,8 @@
 extends Node
 ## Simulação da Terra: relevo, estações do ano, água e solo.
 ##
-## - Calendário: 1 dia = 8 minutos, 1 mês = 5 dias, 1 ano = 12 meses.
+## - Calendário de verdade (meses de 28 a 31 dias), começando em 1º/3/2000.
+##   1 dia = 8 minutos de jogo. O tempo só passa com o jogo aberto.
 ##   Chove de acordo com o mês: muito de dezembro a abril, as chuvas param em
 ##   maio e junho, seca forte de julho a setembro (quase sem chuva, falta água)
 ##   e as chuvas voltam aos poucos em outubro e novembro.
@@ -34,9 +35,17 @@ const STEPS_PER_SEC := 6.0
 const STEP_MULT := 5.0
 const STEPS_DAY := 2880           # um dia de jogo = 8 minutos
 const START_HOUR := 7.0
-const DAYS_PER_MONTH := 5         # 1 mês do jogo = 5 dias (40 minutos jogando)
-const YEAR_DAYS := DAYS_PER_MONTH * 12   # 1 ano = 12 meses = 60 dias
-const START_MONTH := 2            # o jogo começa em 1º de março (0 = janeiro)
+# Calendário de verdade: meses de 28 a 31 dias, anos bissextos e dias da semana certos.
+# Todo mundo novo começa em 1º de março de 2000 (uma quarta-feira); depois 2001, 2002...
+# O tempo só passa com o jogo aberto (fica pausado quando a pessoa sai).
+const START_YEAR := 2000
+const START_MONTH := 2            # 0 = janeiro
+const MONTH_DAYS := 30.4375       # duração média de um mês (para o ritmo do clima)
+## O clima foi ajustado para meses de 5 dias; com meses de verdade, os processos que
+## duram a estação inteira (secar lagoas, intervalo entre chuvas na seca, água do solo)
+## ficam K vezes mais lentos por dia, para cada mês continuar igual.
+const K := MONTH_DAYS / 5.0
+const WEEKDAYS := ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
 const MONTHS := ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
 	"Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
 ## Quanto chove em cada mês (0 = nada, 1 = o máximo).
@@ -196,32 +205,56 @@ func sun() -> float:
 	return clampf(sin((hour() - 6.0) / 12.0 * PI), 0.0, 1.0)
 
 
-## Dias passados desde 1º de janeiro do ano 1 (com fração).
-func _days() -> float:
-	return START_MONTH * DAYS_PER_MONTH + START_HOUR / 24.0 + float(steps) / STEPS_DAY
+## Dias inteiros passados desde o começo do mundo.
+func elapsed_days() -> int:
+	return int((START_HOUR / 24.0 + float(steps) / STEPS_DAY))
 
 
-## Dia do mês (1 a 5).
+static func start_unix() -> int:
+	return Time.get_unix_time_from_datetime_dict({"year": START_YEAR, "month": START_MONTH + 1, "day": 1, "hour": 12})
+
+
+## Data de hoje no jogo: {year, month (1-12), day, weekday (0 = domingo)}.
+func date() -> Dictionary:
+	return Time.get_datetime_dict_from_unix_time(start_unix() + elapsed_days() * 86400)
+
+
+static func days_in_month(y: int, m: int) -> int:
+	if m == 2:
+		return 29 if (y % 4 == 0 and y % 100 != 0) or y % 400 == 0 else 28
+	return 30 if m in [4, 6, 9, 11] else 31
+
+
+## Dia da semana (0 = domingo) do dia 1 de um mês.
+static func first_weekday(y: int, m: int) -> int:
+	var u := Time.get_unix_time_from_datetime_dict({"year": y, "month": m, "day": 1, "hour": 12})
+	return int(Time.get_datetime_dict_from_unix_time(u).weekday)
+
+
+## Dia do mês (1 a 31).
 func day() -> int:
-	return int(fmod(_days(), DAYS_PER_MONTH)) + 1
+	return int(date().day)
 
 
 ## Mês atual (0 = janeiro).
 func month() -> int:
-	return int(_days() / DAYS_PER_MONTH) % 12
+	return int(date().month) - 1
 
 
 func month_name() -> String:
 	return MONTHS[month()]
 
 
+## Ano do calendário: 2000, 2001, 2002...
 func year() -> int:
-	return int(_days() / YEAR_DAYS) + 1
+	return int(date().year)
 
 
 ## Quanto está chovendo nesta época (0 a 1), passando suave de um mês para o outro.
 func wetness() -> float:
-	var m := _days() / DAYS_PER_MONTH - 0.5
+	var d := date()
+	var frac := (float(d.day) - 1.0 + hour() / 24.0) / days_in_month(d.year, d.month)
+	var m := float(d.month - 1) + frac - 0.5
 	var i := floori(m)
 	var t := smoothstep(0.0, 1.0, m - i)
 	return lerpf(RAIN_BY_MONTH[posmod(i, 12)], RAIN_BY_MONTH[posmod(i + 1, 12)], t)
@@ -637,7 +670,7 @@ func _weather_step() -> void:
 		if rain_t <= 0:
 			raining = false
 			# nas chuvas o tempo firme dura pouco; na seca passa quase um mês sem chover
-			dry_t = int(lerpf(STEPS_DAY * 4.5, 1000.0, pow(wet, 0.6)) * randf_range(0.6, 1.4))
+			dry_t = int(lerpf(STEPS_DAY * 4.5, 1000.0, pow(wet, 0.6)) * K * randf_range(0.6, 1.4))
 	else:
 		dry_t -= 1
 		if dry_t <= 0:
@@ -666,7 +699,7 @@ func _step(rain_now: bool, mult: float) -> void:
 	var mh := max_h
 	var season_wet := wetness()
 	# o sol da seca evapora bem mais; ao meio-dia evapora muito, à noite quase nada
-	var evap := (0.00001 if rain_now else lerpf(0.00005, 0.00003, season_wet) * (0.3 + 1.4 * sun())) * mult
+	var evap := (0.00001 if rain_now else lerpf(0.00005, 0.00003, season_wet) * (0.3 + 1.4 * sun())) * mult / K
 	# boa parte da chuva entra na terra; só escorre quando chove forte ou o chão está encharcado
 	var rain := 0.00038 * mult
 	var inf_max := 0.0005 * mult
@@ -805,7 +838,7 @@ func _slow_step(mult: float, season_wet: float) -> void:
 			moved[i] += keep
 			i += 1
 
-	var loss := 0.0000075 * mult * lerpf(1.8, 0.7, season_wet)
+	var loss := 0.0000075 * mult * lerpf(1.8, 0.7, season_wet) / K
 	var grow := 0.00035 * mult
 	for c in N:
 		var w := Wt[c]
@@ -843,7 +876,7 @@ func _slow_step(mult: float, season_wet: float) -> void:
 		# lembrança de alagamento
 		WM[c] = maxf(WM[c] * (1.0 - 0.0004 * mult), 1.0 if w > 0.1 else 0.0)
 		# leito de lagoa: só água parada conta (rio correndo não); some bem devagar (dura a seca inteira)
-		BD[c] = maxf(BD[c] * (1.0 - 0.0000012 * mult), 1.0 if w > 0.1 and speed < 0.2 else 0.0)
+		BD[c] = maxf(BD[c] * (1.0 - 0.0000012 * mult / K), 1.0 if w > 0.1 and speed < 0.2 else 0.0)
 		# superfície: molha com chuva ou água, seca com o sol (mais na seca)
 		if w > 0.02 or raining_now:
 			TP[c] = 1.0

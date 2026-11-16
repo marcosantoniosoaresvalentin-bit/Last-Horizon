@@ -7,6 +7,7 @@ const MundoSim := preload("res://scripts/mundo_sim.gd")
 const Diag := preload("res://scripts/diagnostico.gd")
 const Mundos := preload("res://scripts/mundos.gd")
 const Perfil := preload("res://scripts/perfil.gd")
+const Calendario := preload("res://scripts/ui/calendario.gd")
 const SAVE_EVERY := 60.0     # salva o mundo a cada minuto
 
 const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
@@ -242,6 +243,7 @@ var _water_task := -1
 var _w_level := PackedFloat32Array()
 var _w_arr := []
 var _world_id := ""
+var _cal: Control = null
 var _save_timer := SAVE_EVERY
 const DEEP := 0.12        # água funda o bastante para virar lagoa ou poça na tela; a rasa só molha o chão
 
@@ -360,6 +362,18 @@ func _build_hud() -> void:
 		_save_world()
 		get_tree().change_scene_to_file("res://scenes/main_menu.tscn"))
 	_hud.add_child(menu)
+
+	# por enquanto o calendário abre por este botão; depois vai ser um item da mochila
+	var cal_btn := Button.new()
+	cal_btn.text = "Calendário"
+	cal_btn.add_theme_font_size_override("font_size", 20)
+	cal_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	cal_btn.offset_left = -290
+	cal_btn.offset_top = 16
+	cal_btn.offset_right = -136
+	cal_btn.offset_bottom = 60
+	cal_btn.pressed.connect(_open_calendar)
+	_hud.add_child(cal_btn)
 
 	_joy_ui = Control.new()
 	_joy_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -499,7 +513,7 @@ func _on_world_ready() -> void:
 	_update_grass(true)
 	_loading.visible = false
 	_loading_bg.visible = false
-	_clock.visible = true
+	# hora e dia não aparecem na tela (o calendário vai mostrar a data)
 	_ready_world = true
 	Diag.marcar("entrando no mundo")
 
@@ -780,12 +794,12 @@ func _process(delta: float) -> void:
 			Diag.marcar("jogando")
 	_grass_mat.set_shader_parameter("player_pos", _player.global_position)
 	var h: float = sim.hour()
-	_clock.text = "%d de %s, ano %d · %02d:%02d · %s%s" % [sim.day(), sim.month_name(), sim.year(), int(h), int(fmod(h, 1.0) * 60.0), sim.season_name(), " · Chovendo" if sim.raining else ""]
+	_clock.text = "%d de %s de %d · %02d:%02d · %s%s" % [sim.day(), sim.month_name(), sim.year(), int(h), int(fmod(h, 1.0) * 60.0), sim.season_name(), " · Chovendo" if sim.raining else ""]
 	_soil_timer -= delta
 	if _soil_timer <= 0.0:
 		_soil_timer = 2.0
 		_apply_soil()
-		_soil_label.text = sim.soil_info(Vector2i(int(_player.position.x / CELL), int(_player.position.z / CELL)))
+		# a informação do solo não aparece mais na tela
 	_update_dig(delta)
 	# a grama vai sendo refeita aos poucos, acompanhando as estações
 	_refresh_timer -= delta
@@ -803,7 +817,7 @@ func _process(delta: float) -> void:
 func _game_date() -> String:
 	if sim == null or not sim.is_ready:
 		return ""
-	return "%d de %s, ano %d" % [sim.day(), sim.month_name(), sim.year()]
+	return "%d de %s de %d" % [sim.day(), sim.month_name(), sim.year()]
 
 
 ## Salva o mundo (na thread da simulação) e o jogador.
@@ -1045,7 +1059,21 @@ func _move_player(delta: float) -> void:
 # ================== CONTROLE ==================
 # Lado esquerdo da tela: andar (joystick). Lado direito: girar a câmera.
 
+func _open_calendar() -> void:
+	if _cal != null or not _ready_world:
+		return
+	_joy_id = -1
+	_joy_vec = Vector2.ZERO
+	_look_id = -1
+	_cal = Calendario.new()
+	_hud.add_child(_cal)
+	_cal.abrir(sim)
+	_cal.closed.connect(func(): _cal = null)
+
+
 func _input(e: InputEvent) -> void:
+	if _cal != null:
+		return   # com o calendário aberto, o toque não anda nem gira a câmera
 	var half := get_viewport().get_visible_rect().size.x * 0.5
 	if e is InputEventScreenTouch:
 		if e.pressed and _dig_btn.visible and _dig_btn.get_global_rect().has_point(e.position):

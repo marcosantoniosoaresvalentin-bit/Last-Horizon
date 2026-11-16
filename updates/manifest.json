@@ -1,9 +1,9 @@
 {
-  "version": 23,
-  "file": "update_23.zip",
-  "size": 2720627,
-  "sha256": "1af085d05e4d7215de1f8b1b700229276ebe76d5de53e3e35fd85c0a40863910",
+  "version": 24,
+  "file": "update_24.zip",
+  "size": 2945920,
+  "sha256": "93a32aad4b2320b842edb16738548c1297e3f66733c21556010fac6c5bf1482c",
   "min_build": 1,
-  "notes": "Criar conta obrigatório (salva no celular) e apelido nas Configurações",
+  "notes": "Calendário de papel escrito à mão, meses de verdade começando em março de 2000, sem hora e solo na tela",
   "date": "2026-11-16"
 }
