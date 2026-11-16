@@ -3,11 +3,13 @@ extends Node3D
 ## tábuas, ripas, forro e mata-junta.
 ##
 ## O modelo é construído aqui mesmo, em código (sem arquivo 3D):
-## - tronco reto e cilíndrico de 15 a 30 m, mais fino em cima, com pequenas sapopemas
+## - tronco reto e cilíndrico, mais fino em cima, com pequenas sapopemas
 ##   (raízes em aba) na base e casca acinzentada com fissuras;
 ## - galhos grossos só no alto;
 ## - copa larga e um pouco achatada, feita de cachos de folhas que balançam com o vento.
 ##
+## Tamanhos misturados: 6 em 10 jovens (7 a 13 m), 3 em 10 médias (13 a 19 m) e
+## 1 em 10 grandes (20 a 27 m).
 ## As árvores ficam em manchas de floresta, fora da água, do fundo das lagoas, das pedras
 ## e da clareira onde o jogador começa. Ficam sempre no mesmo lugar em cada mundo (semente).
 ## O jogador não atravessa os troncos (push_out).
@@ -73,7 +75,9 @@ func _place(jogo: Node, seed_: int) -> void:
 			continue
 		if _near(x, z, 5.5):
 			continue
-		var s := rng.randf_range(0.6, 1.1)
+		# tamanhos misturados: muitas jovens, algumas médias e poucas grandes
+		var roll := rng.randf()
+		var s := rng.randf_range(0.28, 0.5) if roll < 0.6 else (rng.randf_range(0.5, 0.72) if roll < 0.9 else rng.randf_range(0.78, 0.98))
 		_add(Vector4(x, z, s, rng.randi() % VARIANTS))
 
 

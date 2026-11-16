@@ -1,9 +1,9 @@
 {
-  "version": 27,
-  "file": "update_27.zip",
-  "size": 3054311,
-  "sha256": "e0f08a4644a5612a9d9f5687e3b60cc90ca757f79ec3d52b3b2a70f206db1163",
+  "version": 28,
+  "file": "update_28.zip",
+  "size": 3054431,
+  "sha256": "7fa1723d2196871948738102638e1d9cccfbf548792440795a8f95074513dd9b",
   "min_build": 1,
-  "notes": "Floresta de Cedrinho (árvore da Amazônia boa para tábuas e mata-junta)",
+  "notes": "Árvores menores e com tamanhos variados",
   "date": "2026-11-16"
 }
