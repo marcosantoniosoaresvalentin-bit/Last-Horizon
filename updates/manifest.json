@@ -1,9 +1,9 @@
 {
-  "version": 28,
-  "file": "update_28.zip",
-  "size": 3054431,
-  "sha256": "7fa1723d2196871948738102638e1d9cccfbf548792440795a8f95074513dd9b",
+  "version": 29,
+  "file": "update_29.zip",
+  "size": 3054505,
+  "sha256": "11f2f0301b0f5c6eced00ee0a7663a19549ee68048528f733092d4ee8bf6614e",
   "min_build": 1,
-  "notes": "Árvores menores e com tamanhos variados",
+  "notes": "Cedrinho salpicado pelo mapa (poucas árvores, espalhadas)",
   "date": "2026-11-16"
 }

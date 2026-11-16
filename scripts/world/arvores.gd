@@ -10,7 +10,8 @@ extends Node3D
 ##
 ## Tamanhos misturados: 6 em 10 jovens (7 a 13 m), 3 em 10 médias (13 a 19 m) e
 ## 1 em 10 grandes (20 a 27 m).
-## As árvores ficam em manchas de floresta, fora da água, do fundo das lagoas, das pedras
+## São poucas (o Cedrinho é uma espécie entre muitas na Amazônia), salpicadas pelo mapa,
+## longe umas das outras, fora da água, do fundo das lagoas, das pedras
 ## e da clareira onde o jogador começa. Ficam sempre no mesmo lugar em cada mundo (semente).
 ## O jogador não atravessa os troncos (push_out).
 
@@ -20,7 +21,7 @@ const VARIANTS := 3            # modelos diferentes, para a floresta não parece
 const CHUNK := 64.0            # metros de cada bloco de árvores (para o celular desenhar só o que está perto)
 const VIEW_DIST := 190.0       # até onde as árvores aparecem
 const TRUNK_HIT := 0.75        # raio do tronco para o jogador não atravessar
-const MAX_TREES := 900
+const MAX_TREES := 130          # o Cedrinho é uma espécie entre muitas: fica salpicado pelo mapa
 
 var trees: Array[Vector4] = []     # x, z, escala, variante
 var _grid := {}                    # Vector2i (célula de 8 m) -> índices de árvores
@@ -57,9 +58,9 @@ func _place(jogo: Node, seed_: int) -> void:
 		tries += 1
 		var x := rng.randf_range(4.0, W * cell - 4.0)
 		var z := rng.randf_range(4.0, H * cell - 4.0)
-		# manchas de floresta: muita árvore em alguns lugares, quase nada em outros
+		# salpicado: um pouco mais onde é mata, mas aparece em qualquer lugar que dê árvore
 		var f := forest.get_noise_2d(x, z) * 0.5 + 0.5
-		if rng.randf() > smoothstep(0.42, 0.72, f) * 0.95 + 0.02:
+		if rng.randf() > 0.35 + f * 0.65:
 			continue
 		if Vector2(x, z).distance_to(spawn) < 18.0:
 			continue
@@ -73,7 +74,7 @@ func _place(jogo: Node, seed_: int) -> void:
 		var slope := absf(jogo.height_at(x + 2.0, z) - jogo.height_at(x - 2.0, z)) + absf(jogo.height_at(x, z + 2.0) - jogo.height_at(x, z - 2.0))
 		if slope > 2.6:
 			continue
-		if _near(x, z, 5.5):
+		if _near(x, z, 22.0):
 			continue
 		# tamanhos misturados: muitas jovens, algumas médias e poucas grandes
 		var roll := rng.randf()
@@ -91,8 +92,9 @@ func _add(t: Vector4) -> void:
 
 func _near(x: float, z: float, r: float) -> bool:
 	var k := Vector2i(floori(x / 8.0), floori(z / 8.0))
-	for dz in range(-1, 2):
-		for dx in range(-1, 2):
+	var n := ceili(r / 8.0)
+	for dz in range(-n, n + 1):
+		for dx in range(-n, n + 1):
 			for i in _grid.get(k + Vector2i(dx, dz), []):
 				var t: Vector4 = trees[i]
 				if Vector2(t.x - x, t.y - z).length_squared() < r * r:
