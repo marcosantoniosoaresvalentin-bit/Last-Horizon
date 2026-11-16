@@ -1,9 +1,9 @@
 {
-  "version": 29,
-  "file": "update_29.zip",
-  "size": 3054505,
-  "sha256": "11f2f0301b0f5c6eced00ee0a7663a19549ee68048528f733092d4ee8bf6614e",
+  "version": 30,
+  "file": "update_30.zip",
+  "size": 3057428,
+  "sha256": "b45f5fd576ec8051223ecaa48889a799019faaca07c0e2722063dbff7038ff17",
   "min_build": 1,
-  "notes": "Cedrinho salpicado pelo mapa (poucas árvores, espalhadas)",
+  "notes": "Cedrinho solta sementes em setembro, brotam com as chuvas e crescem com os anos",
   "date": "2026-11-16"
 }

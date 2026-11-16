@@ -531,8 +531,8 @@ func _on_world_ready() -> void:
 	var t0 := Time.get_ticks_msec()
 	_arvores = Arvores.new()
 	add_child(_arvores)
-	_arvores.build(self, int(sim.world_seed))
-	print("árvores: %d em %d ms" % [_arvores.trees.size(), Time.get_ticks_msec() - t0])
+	_arvores.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/arvores.json" if _world_id != "" else "")
+	print("árvores: %d plantas em %d ms" % [_arvores.plants.size(), Time.get_ticks_msec() - t0])
 	_loading.visible = false
 	_loading_bg.visible = false
 	# hora e dia não aparecem na tela (o calendário vai mostrar a data)
@@ -807,6 +807,8 @@ func _process(delta: float) -> void:
 			_water_timer = 3.0
 	_move_player(delta)
 	_update_grass()
+	if _arvores:
+		_arvores.tick()   # quando vira o dia: sementes, brotos, crescimento
 	_save_timer -= delta
 	if _save_timer <= 0.0:
 		_save_world()
@@ -849,6 +851,8 @@ func _save_world() -> void:
 		return
 	sim.request_save()
 	_save_player()
+	if _arvores:
+		_arvores.save(Mundos.dir(_world_id) + "/arvores.json")
 	Mundos.touch(_world_id, _game_date())
 
 
