@@ -15,8 +15,8 @@ extends Node
 ## - O sol evapora a água (forte ao meio-dia, quase nada à noite). Quando uma
 ##   lagoa seca, o fundo vira lama; com o sol a lama seca e racha. Na chuva a
 ##   água escorre de novo para essas baixadas e a lagoa volta.
-## - Argila para pegar só existe na beira das lagoas (faixa seca em volta do
-##   leito). Ela se esgota quando o jogador cava e se forma de novo devagar.
+## - Argila para pegar só existe em poucas jazidas de terra avermelhada na beira
+##   das lagoas. Ela se esgota quando o jogador cava e se forma de novo bem devagar.
 ## - A grama cresce onde o solo tem água, amarela na seca e morre afogada.
 ##
 ## Roda numa thread separada para não travar o jogo.
@@ -63,6 +63,10 @@ var bed := PackedFloat32Array()        # leito de lagoa: onde a água fica parad
 var shore := PackedFloat32Array()      # beira da lagoa (0 a 1), recalculada de tempos em tempos
 var bank := PackedFloat32Array()       # argila que dá para pegar na beira (0 a 1)
 var top := PackedFloat32Array()        # umidade da superfície: molha na chuva, seca no sol
+var drain := PackedFloat32Array()      # quanta área escorre para cada célula (log); fixo depois de gerar
+var deposit := PackedFloat32Array()    # jazidas de argila: poucos pontos de terra avermelhada perto das lagoas
+const DEPOSITS := 5                    # quantas jazidas o mapa tem
+var drain_min := 1e9                   # só os 4% de células com mais drenagem viram filete de enxurrada
 var _shore_timer := 0
 
 var max_h := 1.0
@@ -94,7 +98,7 @@ var gw0 := PackedFloat32Array()
 
 func _ready() -> void:
 	rock_name.resize(N)
-	for a in ["ter", "wat", "gw", "moist", "fl", "fr", "ft", "fb", "spring", "clay", "sand", "sus", "cover", "wetmem", "feld", "mica", "kao", "ili", "sme", "bed", "shore", "bank", "top"]:
+	for a in ["ter", "wat", "gw", "moist", "fl", "fr", "ft", "fb", "spring", "clay", "sand", "sus", "cover", "wetmem", "feld", "mica", "kao", "ili", "sme", "bed", "shore", "bank", "top", "drain", "deposit"]:
 		var arr := PackedFloat32Array()
 		arr.resize(N)
 		set(a, arr)
@@ -163,7 +167,7 @@ func take_water() -> PackedFloat32Array:
 
 
 ## Mapas do solo, se mudaram:
-## [RGBA argila da beira/areia/umidade do solo/grama, RGBA leito de lagoa/umidade da superfície/-/rocha].
+## [RGBA jazida de argila/areia/umidade do solo/grama, RGBA leito de lagoa/umidade da superfície/filete de enxurrada/rocha].
 func take_soil() -> Array:
 	var out := []
 	_mx.lock()
@@ -223,16 +227,16 @@ func soil_info(cell: Vector2i) -> String:
 			kind = "lama do fundo da lagoa"
 		else:
 			kind = "lama seca e rachada do fundo da lagoa"
-	elif c >= 0.35:
-		kind = "beira da lagoa, com argila"
-	elif c > 0.05:
-		kind = "beira da lagoa (argila quase esgotada)"
+	elif deposit[i] > 0.2:
+		kind = "terra avermelhada, com argila" if c >= 0.35 else "terra avermelhada (argila esgotada, volta com o tempo)"
+	elif shore[i] > 0.0:
+		kind = "beira da lagoa"
 	var state := "seco"
 	if w > 0.1: state = "alagado"
 	elif g > 0.85: state = "encharcado"
 	elif g > 0.45: state = "úmido"
 	var txt := "Solo: %s · %s" % [kind, state]
-	if c > 0.05 and b <= 0.5:
+	if deposit[i] > 0.2 and b <= 0.5:
 		txt += " · argila %d%%" % int(c * 100)
 	return txt + " · rocha: %s" % rock
 
@@ -297,7 +301,7 @@ func _publish() -> void:
 	soil.resize(N * 4)
 	for i in N:
 		var p := i * 4
-		soil[p] = int(clampf(bank[i], 0.0, 1.0) * 255.0)
+		soil[p] = int(clampf(deposit[i], 0.0, 1.0) * 255.0)
 		soil[p + 1] = int(clampf(sand[i], 0.0, 1.0) * 255.0)
 		soil[p + 2] = int(clampf(gw[i] / GW_CAP, 0.0, 1.0) * 255.0)
 		soil[p + 3] = int(clampf(cover[i], 0.0, 1.0) * 255.0)
@@ -309,7 +313,8 @@ func _publish() -> void:
 		var p := i * 4
 		types[p] = int(clampf(bed[i], 0.0, 1.0) * 255.0)
 		types[p + 1] = int(clampf(top[i], 0.0, 1.0) * 255.0)
-		types[p + 2] = 0
+		# filete de enxurrada: água rasa correndo nos caminhos naturais (desenhado no chão)
+		types[p + 2] = int(clampf((wat[i] - 0.015) / 0.04, 0.0, 1.0) * 255.0) if drain[i] >= drain_min else 0
 		types[p + 3] = rock_name[i] * 80
 		var q := i * INFO
 		info[q] = bank[i]; info[q + 1] = sand[i]; info[q + 2] = top[i]
@@ -402,7 +407,7 @@ func _generate() -> void:
 	gw.fill(GW_CAP * 0.35)
 	steps = 0
 	# aquece o mundo: uma cheia forte para encher as baixadas
-	for k in 90:
+	for k in 170:
 		_step(true, 10.0)
 	for k in 50:
 		_step(false, 10.0)
@@ -413,7 +418,12 @@ func _generate() -> void:
 	for i in N:
 		bed[i] = 1.0 if wat[i] > 0.1 else 0.0
 	_update_shore()
-	bank = shore.duplicate()
+	_place_deposits(rng)
+	bank = deposit.duplicate()
+	for i in N:
+		cover[i] *= 1.0 - deposit[i] * 0.8
+		if drain[i] >= drain_min:
+			cover[i] *= 0.35
 	for i in N:
 		top[i] = 1.0 if wat[i] > 0.02 else clampf(gw[i] / GW_CAP, 0.0, 0.6)
 
@@ -446,6 +456,11 @@ func _initial_soil(soiln: FastNoiseLite) -> void:
 		if best >= 0:
 			accum[best] += accum[i]
 			recv[i] = best
+	for i in N:
+		drain[i] = log(accum[i])
+	var dr := drain.duplicate()
+	dr.sort()
+	drain_min = dr[int(N * 0.96)]
 	var made := PackedFloat32Array(); made.resize(N)
 	for y in H:
 		for x in W:
@@ -547,8 +562,9 @@ func _step(rain_now: bool, mult: float) -> void:
 	var season_wet := wetness()
 	# o sol da seca evapora bem mais; ao meio-dia evapora muito, à noite quase nada
 	var evap := (0.00002 if rain_now else lerpf(0.0002, 0.00006, season_wet) * (0.3 + 1.4 * sun())) * mult
-	var rain := 0.0008 * mult
-	var inf_max := 0.00025 * mult
+	# boa parte da chuva entra na terra; só escorre quando chove forte ou o chão está encharcado
+	var rain := 0.00045 * mult
+	var inf_max := 0.0005 * mult
 	for i in N:
 		var w := Wt[i]
 		if rain_now:
@@ -631,6 +647,9 @@ func _slow_step(mult: float, season_wet: float) -> void:
 	var BD := bed
 	var SH := shore
 	var BK := bank
+	var DP := deposit
+	var DR := drain
+	var dmin := drain_min
 	var TP := top
 	var sun_now := sun()
 	var raining_now := raining
@@ -728,12 +747,9 @@ func _slow_step(mult: float, season_wet: float) -> void:
 			if G[c] > GW_CAP * 0.95:
 				dry *= 0.5   # solo encharcado por baixo demora mais a secar
 			TP[c] = maxf(0.0, TP[c] - dry)
-		# argila da beira: se forma devagar onde é beira e some onde deixou de ser
-		var sh := SH[c]
-		if sh > BK[c]:
-			BK[c] = minf(sh, BK[c] + 0.0001 * mult)
-		elif BK[c] > sh:
-			BK[c] = maxf(sh, BK[c] - 0.0005 * mult)
+		# argila da jazida: depois de cavada, se forma de novo bem devagar
+		if BK[c] < DP[c]:
+			BK[c] = minf(DP[c], BK[c] + 0.00005 * mult)
 
 		# intemperismo: feldspato e mica viram argila com água e calor (bem devagar)
 		var water_now := clampf(G[c] / GW_CAP + WM[c] * 0.5, 0.0, 1.0)
@@ -759,6 +775,9 @@ func _slow_step(mult: float, season_wet: float) -> void:
 		var target := clampf(G[c] / GW_CAP * 1.4 + 0.4, 0.0, 1.0)
 		target *= 1.0 - smoothstep(0.72, 0.86, hn)
 		target *= 1.0 - BD[c] * 0.9             # fundo de lagoa seco fica só lama, sem grama
+		target *= 1.0 - DP[c] * 0.8             # jazida de argila: terra vermelha quase sem grama
+		if DR[c] >= dmin:
+			target *= 0.35                      # sulco da enxurrada: a água corrente não deixa a grama fechar
 		if w > 0.15:
 			target = 0.0
 		var rate := grow if target > CV[c] else grow * (3.0 if w > 0.15 else 0.6)
@@ -771,6 +790,45 @@ func _slow_step(mult: float, season_wet: float) -> void:
 	if _shore_timer >= 30:
 		_shore_timer = 0
 		_update_shore()
+
+
+## Jazidas de argila: poucos pontos na beira das lagoas, longe uns dos outros.
+## Cada jazida é uma mancha de uns 15 a 20 m de terra avermelhada.
+func _place_deposits(rng: RandomNumberGenerator) -> void:
+	deposit.fill(0.0)
+	var cands := []
+	for i in N:
+		if shore[i] > 0.0 and ter[i] / max_h < 0.5:
+			cands.append(i)
+	if cands.is_empty():
+		for i in N:
+			if wetmem[i] > 0.3 and wat[i] < 0.05:
+				cands.append(i)
+	for k in cands.size():
+		var j := rng.randi_range(k, cands.size() - 1)
+		var t = cands[k]; cands[k] = cands[j]; cands[j] = t
+	var picked := []
+	for c in cands:
+		if picked.size() >= DEPOSITS:
+			break
+		var cx: int = c % W; var cy: int = c / W
+		var far := true
+		for p in picked:
+			if Vector2(cx - p % W, cy - p / W).length() < 28.0:
+				far = false
+				break
+		if far:
+			picked.append(c)
+	for c in picked:
+		var cx: int = c % W; var cy: int = c / W
+		var r := rng.randf_range(1.6, 2.3)
+		for y in range(maxi(0, cy - 3), mini(H, cy + 4)):
+			for x in range(maxi(0, cx - 3), mini(W, cx + 4)):
+				var d := Vector2(x - cx, y - cy).length() / r
+				var v := clampf(1.15 - d, 0.0, 1.0)
+				if bed[y * W + x] > 0.5:
+					v = 0.0   # dentro da lagoa não; só na terra da margem
+				deposit[y * W + x] = maxf(deposit[y * W + x], v)
 
 
 ## Beira da lagoa: célula seca, fora do leito, a até 2 células (10 m) de um leito.

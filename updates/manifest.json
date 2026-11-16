@@ -1,9 +1,9 @@
 {
-  "version": 15,
-  "file": "update_15.zip",
-  "size": 2703870,
-  "sha256": "f8fed51ea20fd692e7326e8eb7b56744c5694bd7eb9ce23b2fe48fd59304b96d",
+  "version": 16,
+  "file": "update_16.zip",
+  "size": 2705081,
+  "sha256": "aedb2cb038afbfc660a5d9bfc58ac1eb6577167ff186a24384e994ff29dfb14d",
   "min_build": 1,
-  "notes": "Ecossistema: argila só na beira das lagoas, sol seca as lagoas, fundo vira lama rachada e a chuva enche de novo",
+  "notes": "Argila só em 5 jazidas de terra avermelhada; chuva vira filetes nos sulcos e poças com borda suave, sem lâmina de água no mapa todo",
   "date": "2026-11-16"
 }

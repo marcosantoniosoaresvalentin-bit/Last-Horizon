@@ -21,8 +21,8 @@ const ANIMS := {"Idle": "parado", "Walk": "andando", "Run": "correndo"}
 const TERRAIN_SHADER := """
 shader_type spatial;
 uniform float wet = 0.0;
-uniform sampler2D soil_a : filter_linear, repeat_disable;   // R argila da beira, G areia, B umidade do solo, A grama
-uniform sampler2D soil_b : filter_linear, repeat_disable;   // R leito de lagoa, G umidade da superfície
+uniform sampler2D soil_a : filter_linear, repeat_disable;   // R jazida de argila, G areia, B umidade do solo, A grama
+uniform sampler2D soil_b : filter_linear, repeat_disable;   // R leito de lagoa, G umidade da superfície, B filete de enxurrada
 uniform vec2 world_size = vec2(640.0, 480.0);
 varying vec3 wpos;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -53,10 +53,11 @@ void fragment(){
 	float surf = b.g;                          // umidade da superfície
 	vec3 loam = vec3(0.34, 0.25, 0.17);
 	vec3 sandc = vec3(0.74, 0.64, 0.47);
-	vec3 clayc = vec3(0.47, 0.45, 0.41);       // argila cinza da beira
+	vec3 clayc = vec3(0.56, 0.30, 0.19);       // terra avermelhada da jazida de argila
 	vec3 mud = vec3(0.31, 0.27, 0.21);         // lama do fundo
 	vec3 soil = mix(loam, sandc, sand * 0.8);
-	soil = mix(soil, clayc, smoothstep(0.1, 0.5, clay) * (1.0 - bed));
+	float patch = smoothstep(0.15, 0.55, clay + (noise(wpos.xz * 0.45) - 0.5) * 0.35);
+	soil = mix(soil, clayc, patch * (1.0 - bed));
 	soil = mix(soil, mud, bed);
 	float soaked = smoothstep(0.5, 0.9, surf);
 	soil *= mix(1.0, 0.55, soaked);
@@ -78,9 +79,14 @@ void fragment(){
 	c *= 0.82 + big * 0.28 + fine * 0.12;
 	float wetness = max(wet, soaked * (1.0 - g));
 	c *= mix(1.0, 0.8, wet);
+	// filete de enxurrada: trilha estreita e sinuosa de água rasa correndo
+	float wob = (noise(wpos.xz * 0.35) - 0.5) * 0.55 + (noise(wpos.xz * 1.6 + vec2(0.0, TIME * 0.6)) - 0.5) * 0.12;
+	float run = smoothstep(0.58, 0.72, b.b + wob);
+	float glint = noise(wpos.xz * 2.5 - vec2(TIME * 0.9, TIME * 0.4));
+	c = mix(c, vec3(0.16, 0.19, 0.19) + glint * 0.06, run * 0.9);
 	ALBEDO = c;
-	ROUGHNESS = mix(0.95, 0.4, wetness);
-	SPECULAR = mix(0.2, 0.45, wetness);
+	ROUGHNESS = mix(mix(0.95, 0.4, wetness), 0.04, run);
+	SPECULAR = mix(mix(0.2, 0.45, wetness), 0.7, run);
 }
 """
 
@@ -232,6 +238,7 @@ var _water_timer := 0.0
 var _water_task := -1
 var _w_level := PackedFloat32Array()
 var _w_arr := []
+const DEEP := 0.12        # água funda o bastante para virar lagoa ou poça na tela; a rasa só molha o chão
 
 
 func _notification(what: int) -> void:
@@ -1037,11 +1044,14 @@ func _water_arrays(wat: PackedFloat32Array) -> void:
 			for x in W + 1:
 				_corner_h[y * (W + 1) + x] = height_at(x * CELL, y * CELL)
 	var lvl := PackedFloat32Array(); lvl.resize(W * H); lvl.fill(NONE)
+	var deep := PackedByteArray(); deep.resize(W * H)
 	var count := 0
 	for i in W * H:
-		if wat[i] > 0.035:
+		if wat[i] > DEEP:
 			lvl[i] = (_ter[i] + wat[i]) * HS
-	# estende a água um pouco por baixo da margem, para o terreno cortar a borda
+			deep[i] = 1
+	# estende a água das lagoas um pouco por baixo da margem, para o terreno cortar a borda
+	# (filete não se estende, senão vira uma faixa larga descendo a encosta)
 	var ext := lvl.duplicate()
 	for y in H:
 		for x in W:
@@ -1050,10 +1060,10 @@ func _water_arrays(wat: PackedFloat32Array) -> void:
 				count += 1
 				continue
 			var best := NONE
-			if x > 0 and lvl[i - 1] > best: best = lvl[i - 1]
-			if x < W - 1 and lvl[i + 1] > best: best = lvl[i + 1]
-			if y > 0 and lvl[i - W] > best: best = lvl[i - W]
-			if y < H - 1 and lvl[i + W] > best: best = lvl[i + W]
+			if x > 0 and deep[i - 1] and lvl[i - 1] > best: best = lvl[i - 1]
+			if x < W - 1 and deep[i + 1] and lvl[i + 1] > best: best = lvl[i + 1]
+			if y > 0 and deep[i - W] and lvl[i - W] > best: best = lvl[i - W]
+			if y < H - 1 and deep[i + W] and lvl[i + W] > best: best = lvl[i + W]
 			ext[i] = best
 			if best > NONE:
 				count += 1
@@ -1072,7 +1082,16 @@ func _water_arrays(wat: PackedFloat32Array) -> void:
 			if x > 0 and y < H and ext[y * W + x - 1] > NONE: s += ext[y * W + x - 1]; n += 1
 			if x < W and y < H and ext[y * W + x] > NONE: s += ext[y * W + x]; n += 1
 			if n > 0:
-				corner[y * cw + x] = s / n
+				var lv := s / n
+				# canto na borda (encosta em célula sem água): no plano a água afina até sumir
+				var edge := false
+				if x > 0 and y > 0 and lvl[(y - 1) * W + x - 1] <= NONE: edge = true
+				if x < W and y > 0 and lvl[(y - 1) * W + x] <= NONE: edge = true
+				if x > 0 and y < H and lvl[y * W + x - 1] <= NONE: edge = true
+				if x < W and y < H and lvl[y * W + x] <= NONE: edge = true
+				if edge:
+					lv = minf(lv, _corner_h[y * cw + x])
+				corner[y * cw + x] = lv
 	var verts := PackedVector3Array(); verts.resize(count * 6)
 	var cols := PackedColorArray(); cols.resize(count * 6)
 	var nrm := PackedVector3Array(); nrm.resize(count * 6); nrm.fill(Vector3.UP)
