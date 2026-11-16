@@ -1,9 +1,9 @@
 {
-  "version": 31,
-  "file": "update_31.zip",
-  "size": 3060381,
-  "sha256": "8926a11e0a76b712cf295d2911fb12d0a7dbd21b29162d97bddd7c6eb61cc1ea",
+  "version": 32,
+  "file": "update_32.zip",
+  "size": 3063360,
+  "sha256": "75fd4fce7bb5f118ea92cb8b8bb2ddef9a3a7f3d96ecc94631b661b9383ff852",
   "min_build": 1,
-  "notes": "Sementes visíveis no chão (pegar, plantar), brotam em 100 dias; árvores grandes secam e caem",
+  "notes": "Árvore morre aos poucos (amarela, perde folhas, fica seca de pé, perde galhos); semente nova",
   "date": "2026-11-16"
 }
