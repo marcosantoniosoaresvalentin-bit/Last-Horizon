@@ -323,19 +323,6 @@ func _build_hud() -> void:
 	_dig_bar.show_percentage = false
 	_dig_bar.visible = false
 	_hud.add_child(_dig_bar)
-	_update_inventory()
-
-
-func _hud_label(pos: Vector2, size: int) -> Label:
-	var l := Label.new()
-	l.position = pos
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", Color(0.95, 0.92, 0.85))
-	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
-	l.add_theme_constant_override("outline_size", 5)
-	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.add_child(l)
-	return l
 
 	var menu := Button.new()
 	menu.text = "Menu"
@@ -353,6 +340,19 @@ func _hud_label(pos: Vector2, size: int) -> Label:
 	_joy_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_joy_ui.draw.connect(_draw_joy)
 	_hud.add_child(_joy_ui)
+	_update_inventory()
+
+
+func _hud_label(pos: Vector2, size: int) -> Label:
+	var l := Label.new()
+	l.position = pos
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", Color(0.95, 0.92, 0.85))
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	l.add_theme_constant_override("outline_size", 5)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(l)
+	return l
 
 
 func _set_loading(text: String) -> void:

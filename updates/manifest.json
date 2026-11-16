@@ -1,9 +1,9 @@
 {
-  "version": 13,
-  "file": "update_13.zip",
-  "size": 2735144,
-  "sha256": "37294c4b3780c5484f04906ed5d28dc51620f83d1b0ff2891216e7f5eaca3639",
+  "version": 14,
+  "file": "update_14.zip",
+  "size": 2703060,
+  "sha256": "0de7d0497cce0cc0ca3cc2bdda348036c250f2e7898e5d87e8ff7e6819dddd5b",
   "min_build": 1,
-  "notes": "Atualização à prova de falha: procura versão nova antes de abrir e ignora versão que fechou o jogo",
-  "date": "2026-11-15"
+  "notes": "Corrige joystick invisível, botão Menu que sumiu e erro a cada toque na tela",
+  "date": "2026-11-16"
 }
