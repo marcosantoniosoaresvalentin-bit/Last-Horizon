@@ -589,7 +589,7 @@ func _page_settings() -> Control:
 		ai.add_child(at)
 		var conta_nome := str(s.get("conta", ""))
 		if conta_nome != "":
-			ai.add_child(_note("Nome da conta: %s  (único, não muda)" % conta_nome, C_BONE))
+			ai.add_child(_note("Nome da conta: %s" % conta_nome, C_BONE))
 		ai.add_child(_note(str(s.get("email", "")), C_DIM))
 		var out := _button("Sair da conta")
 		out.custom_minimum_size = Vector2(190, 54)

@@ -1,9 +1,9 @@
 {
-  "version": 22,
-  "file": "update_22.zip",
-  "size": 2723290,
-  "sha256": "4c13efb44e3899d956f12b576a18b0b4d0d64faa6404d5fb3dcee8c72c54a457",
+  "version": 23,
+  "file": "update_23.zip",
+  "size": 2720627,
+  "sha256": "1af085d05e4d7215de1f8b1b700229276ebe76d5de53e3e35fd85c0a40863910",
   "min_build": 1,
-  "notes": "Contas salvas num arquivo de texto no GitHub (nome e e-mail únicos)",
+  "notes": "Criar conta obrigatório (salva no celular) e apelido nas Configurações",
   "date": "2026-11-16"
 }

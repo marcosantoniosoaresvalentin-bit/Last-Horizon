@@ -6,5 +6,3 @@ export_presets.cfg.bak
 *.apk
 *.aab
 
-# chave das contas: só existe na hora de gerar o APK (segredo CONTAS_TOKEN)
-/segredos/
