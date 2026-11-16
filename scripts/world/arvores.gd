@@ -7,47 +7,59 @@ extends Node3D
 ## alto; copa larga com folhas que balançam. As plantas pequenas usam um modelo de muda.
 ##
 ## CICLO DE VIDA (segue o calendário do jogo):
-## - 15 de setembro (fim da seca, quando venta mais): cada árvore adulta solta as sementes.
-##   O fruto é seco e com asa; o vento leva a maioria a 10-60 m, algumas a mais de 100 m,
-##   mais para o oeste (vento de leste). Um pé solta milhares de frutos, mas quase todos
-##   morrem: no jogo, uma árvore grande consegue uns 6 a 15 brotos por ano.
-## - De meados de outubro ao fim de novembro (volta das chuvas): as sementes brotam, se
-##   caírem em chão bom (sem água, pedra, jazida e sem planta colada).
-## - A planta cresce com os anos: broto, muda, arvoreta, jovem, adulta (aí também solta
-##   sementes). Todo 1º de janeiro algumas morrem: mais as pequenas e as que estão na
-##   sombra de uma árvore grande.
-## - Mundo novo: 130 árvores salpicadas pelo mapa, com mudas e jovens em volta, como se a
-##   mata já viesse se renovando. Tudo fica salvo no mundo (arvores.json).
+## - De 15 de agosto a 30 de setembro cada árvore adulta solta, aos poucos, 25 a 60
+##   sementes (fruto seco com asa). O vento leva a maioria a 10-60 m, algumas a mais de
+##   100 m, mais para o oeste. As sementes FICAM VISÍVEIS no chão.
+## - 100 dias depois de cair, a semente brota (se o chão for bom e tiver espaço). Na
+##   natureza só umas 2 em 10 pegam; o resto apodrece ou é comido e some.
+## - O jogador pode pegar sementes do chão, guardar na mochila, soltar ou plantar.
+##   Semente plantada pelo jogador pega bem mais (8 em 10), também em 100 dias.
+## - A planta cresce com os anos: broto, muda, arvoreta, jovem, adulta. Em 1º de janeiro
+##   algumas morrem (mais as pequenas e as que estão na sombra).
+## - As grandes envelhecem (ou pegam doença, raio): SECAM de pé, sem folhas; de 6 a 18
+##   meses depois CAEM e o tronco fica deitado no chão uns anos (vai ser madeira).
+## - Mundo novo: árvores salpicadas, mudas e jovens em volta, e já algumas secas e
+##   caídas. Tudo fica salvo no mundo (arvores.json).
 
 const MundoSim := preload("res://scripts/mundo_sim.gd")
 
 const VARIANTS := 3            # modelos diferentes, para a floresta não parecer clonada
-const CHUNK := 64.0            # metros de cada bloco de árvores (para o celular desenhar só o que está perto)
+const CHUNK := 64.0            # metros de cada bloco (para o celular desenhar só o que está perto)
 const VIEW_DIST := 190.0       # até onde as árvores aparecem
 const SMALL_VIEW := 70.0       # até onde as mudas aparecem
+const SEED_VIEW := 45.0        # até onde as sementes no chão aparecem
 const TRUNK_HIT := 0.75        # raio do tronco (árvore de tamanho 1) para o jogador não atravessar
-const START_TREES := 130       # árvores adultas e jovens no começo: salpicadas pelo mapa
-const MAX_PLANTS := 2500       # limite de plantas por mundo, para o celular não pesar
+const START_TREES := 130       # árvores no começo: salpicadas pelo mapa
+const SAFETY_MAX := 8000       # só para o celular não travar se a mata crescer demais em muitos anos
 const SAPLING_MAX_H := 2.5     # abaixo dessa altura (m) usa o modelo de muda
 const GROW_T := 18.0           # anos: quanto maior, mais devagar a árvore cresce
-const SEED_MONTH := 9          # 15 de setembro: soltam as sementes
-const SEED_DAY := 15
-const ADULT_H := 12.0          # a partir dessa altura (m) a árvore já solta sementes
+const ADULT_H := 12.0          # a partir dessa altura (m) a árvore solta sementes
 const WIND_TO := PI            # para onde o vento leva as sementes (PI = oeste, -x)
+const GERM_DAYS := 100         # dias entre a semente cair e brotar
+const WILD_CHANCE := 0.2       # chance de uma semente do chão brotar
+const PLANTED_CHANCE := 0.8    # chance de uma semente plantada pelo jogador brotar
+const SEED_KG := 0.002
 
-## Cada planta: [x, z, dia_em_que_nasceu, altura_maxima_m, variante]
-## (o dia conta a partir do começo do mundo; árvores antigas têm dia negativo)
+enum { ALIVE, DRY, FALLEN }
+
+## Planta: [x, z, nasceu (dia), altura_max (m), variante, estado, dia_do_estado, ângulo_da_queda]
+## Semente: [x, z, caiu (dia), brota (dia), plantada (0/1), altura_max, variante]
+## (os dias contam a partir do começo do mundo; plantas antigas têm dia negativo)
 var plants: Array = []
-var seeds: Array = []              # sementes no chão esperando chover: mesmo formato
+var seeds: Array = []
 var last_day := 0
-var trees: Array = []              # compatibilidade: as plantas (para contar)
-var _grid := {}                    # Vector2i (célula de 8 m) -> índices de plantas com tronco
+var trees: Array = []              # compatibilidade: as plantas
+var _grid := {}                    # Vector2i (célula de 8 m) -> troncos [x, z, raio]
 var _meshes: Array = []            # [tronco, copa] por variante
 var _tree_h: Array = []            # altura do modelo de cada variante (m)
 var _sapling: Array = []           # [caule, folhas] da muda (1 m de altura)
+var _seed_mesh: Mesh
 var _bark: Material
+var _bark_dead: Material
 var _leaves: Material
+var _seed_mat: Material
 var _instances: Array = []
+var _seed_nodes: Array = []
 var _jogo: Node
 var _rng := RandomNumberGenerator.new()
 
@@ -64,6 +76,7 @@ func build(jogo: Node, seed_: int, save_path := "") -> void:
 		_meshes.append(m)
 		_tree_h.append((m[1] as Mesh).get_aabb().end.y)
 	_sapling = _make_sapling()
+	_seed_mesh = _make_seed()
 	last_day = int(jogo.sim.elapsed_days())
 	if save_path == "" or not _load(save_path):
 		_generate(seed_)
@@ -76,18 +89,16 @@ func tick() -> void:
 	var day := int(_jogo.sim.elapsed_days())
 	if day <= last_day:
 		return
-	var changed := false
 	while last_day < day:
 		last_day += 1
-		if _process_day(last_day):
-			changed = true
-	# a altura muda um pouquinho todo dia; redesenha uma vez por dia de jogo
-	_rebuild()
+		_process_day(last_day)
+	_rebuild()   # a altura muda um pouquinho todo dia; redesenha uma vez por dia de jogo
 
 
-## Altura (m) de uma planta num dia.
+## Altura (m) de uma planta num dia (árvore morta para de crescer).
 func height_of(p: Array, day: int) -> float:
-	var age := maxf(0.0, (day - float(p[2])) / 365.25)
+	var d := day if int(p[5]) == ALIVE else mini(day, int(p[6]))
+	var age := maxf(0.0, (d - float(p[2])) / 365.25)
 	return float(p[3]) * pow(1.0 - exp(-age / GROW_T), 1.3) + 0.12 * minf(age * 4.0, 1.0)
 
 
@@ -95,38 +106,60 @@ static func date_of(day: int) -> Dictionary:
 	return Time.get_datetime_dict_from_unix_time(MundoSim.start_unix() + day * 86400)
 
 
-func _process_day(day: int) -> bool:
+static func _doy(m: int, d: int) -> int:
+	var days := [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+	return days[m - 1] + d
+
+
+func _process_day(day: int) -> void:
 	var d := date_of(day)
-	var changed := false
-	if int(d.month) == SEED_MONTH and int(d.day) == SEED_DAY:
-		_disperse(day)
-	# sementes que já podem brotar
+	var doy := _doy(int(d.month), int(d.day))
+	# temporada das sementes: 15 de agosto a 30 de setembro
+	if doy >= _doy(8, 15) and doy <= _doy(9, 30):
+		_drop_seeds(day)
+	# sementes que completaram 100 dias: brotam ou somem
 	var keep := []
 	for sd in seeds:
-		if float(sd[2]) <= day:
-			if plants.size() < MAX_PLANTS and _ground_ok(sd[0], sd[1]) and not _crowded(sd[0], sd[1], day):
-				plants.append(sd)
-				changed = true
-		else:
+		if int(sd[3]) > day:
 			keep.append(sd)
+			continue
+		var chance := PLANTED_CHANCE if int(sd[4]) == 1 else WILD_CHANCE
+		if _rng.randf() < chance and plants.size() < SAFETY_MAX and _ground_ok(sd[0], sd[1]) and not _crowded(sd[0], sd[1], day):
+			plants.append([sd[0], sd[1], day, sd[5], sd[6], ALIVE, 0, 0.0])
 	seeds = keep
+	# árvores secas caem; troncos caídos apodrecem
+	var alive := []
+	for p in plants:
+		var st := int(p[5])
+		if st == DRY and day >= int(p[6]) + _hash_days(p, 180, 540):
+			p[5] = FALLEN
+			p[6] = day
+			p[7] = _rng.randf() * TAU
+		elif st == FALLEN and day >= int(p[6]) + _hash_days(p, 2500, 3600):
+			continue   # o tronco caído virou terra
+		alive.append(p)
+	plants = alive
 	if int(d.month) == 1 and int(d.day) == 1:
-		_yearly_mortality(day)
-		changed = true
-	return changed
+		_yearly(day)
+	trees = plants
 
 
-## As árvores adultas soltam as sementes; o vento leva.
-func _disperse(day: int) -> void:
-	var d := date_of(day)
-	var germ0 := day + (Time.get_unix_time_from_datetime_dict({"year": d.year, "month": 10, "day": 20, "hour": 12}) - Time.get_unix_time_from_datetime_dict({"year": d.year, "month": d.month, "day": d.day, "hour": 12})) / 86400
-	for p in plants.duplicate():
+## Um número de dias que é sempre o mesmo para a mesma planta (sem precisar guardar).
+func _hash_days(p: Array, lo: int, hi: int) -> int:
+	return lo + absi(hash(Vector2(p[0], p[1]))) % (hi - lo)
+
+
+## Cada árvore adulta solta 25 a 60 sementes por ano, espalhadas pela temporada.
+func _drop_seeds(day: int) -> void:
+	var season_days := 47.0
+	for p in plants:
+		if int(p[5]) != ALIVE:
+			continue
 		var h := height_of(p, day)
 		if h < ADULT_H:
 			continue
-		# quantas brotam: mais em árvore maior (6 a 15 numa árvore grande)
-		var mean := lerpf(3.0, 12.0, clampf((h - ADULT_H) / 14.0, 0.0, 1.0))
-		var n := maxi(0, int(round(mean + _rng.randfn(0.0, 2.0))))
+		var per_year := lerpf(25.0, 60.0, clampf((h - ADULT_H) / 14.0, 0.0, 1.0))
+		var n := int(per_year / season_days + _rng.randf())
 		for k in n:
 			var dist := 8.0 + absf(_rng.randfn(0.0, 22.0))
 			if _rng.randf() < 0.12:
@@ -134,13 +167,17 @@ func _disperse(day: int) -> void:
 			var ang := WIND_TO + _rng.randfn(0.0, 0.9)
 			var x := float(p[0]) + cos(ang) * dist
 			var z := float(p[1]) + sin(ang) * dist
-			var born := germ0 + _rng.randi_range(0, 40)
-			seeds.append([x, z, born, _rng.randf_range(20.0, 29.0), _rng.randi() % VARIANTS])
+			if x < 2.0 or z < 2.0 or x > MundoSim.W * _jogo.CELL - 2.0 or z > MundoSim.H * _jogo.CELL - 2.0:
+				continue
+			seeds.append([x, z, day, day + GERM_DAYS, 0, _rng.randf_range(20.0, 29.0), _rng.randi() % VARIANTS])
 
 
-func _yearly_mortality(day: int) -> void:
+func _yearly(day: int) -> void:
 	var survivors := []
 	for p in plants:
+		if int(p[5]) != ALIVE:
+			survivors.append(p)
+			continue
 		var h := height_of(p, day)
 		var age := (day - float(p[2])) / 365.25
 		var live := 0.97
@@ -152,17 +189,24 @@ func _yearly_mortality(day: int) -> void:
 			live = 0.9
 		if h < ADULT_H and _shaded(p, day):
 			live *= 0.6   # na sombra de uma árvore grande quase não cresce
-		if _rng.randf() < live:
-			survivors.append(p)
+		if _rng.randf() >= live:
+			continue
+		# as grandes envelhecem: secam de pé (velhice, doença, raio)
+		if h >= ADULT_H:
+			var lifespan := float(_hash_days(p, 90, 160))
+			var dry_chance := 0.008 + (0.25 if age > lifespan else 0.0)
+			if _rng.randf() < dry_chance:
+				p[5] = DRY
+				p[6] = day
+		survivors.append(p)
 	plants = survivors
-	trees = plants
 
 
 ## Está debaixo da copa de uma árvore bem maior?
 func _shaded(p: Array, day: int) -> bool:
 	var h := height_of(p, day)
 	for q in plants:
-		if q == p:
+		if q == p or int(q[5]) == FALLEN:
 			continue
 		var hq := height_of(q, day)
 		if hq < h * 2.0 or hq < 8.0:
@@ -191,6 +235,8 @@ func _ground_ok(x: float, z: float) -> bool:
 ## Tem planta colada (ou o tronco de uma árvore) bem ali?
 func _crowded(x: float, z: float, day: int) -> bool:
 	for p in plants:
+		if int(p[5]) == FALLEN:
+			continue
 		var dx := float(p[0]) - x
 		var dz := float(p[1]) - z
 		var min_d := 1.5 + height_of(p, day) * 0.08
@@ -199,7 +245,42 @@ func _crowded(x: float, z: float, day: int) -> bool:
 	return false
 
 
-## Mundo novo: árvores salpicadas e, em volta das maiores, mudas e jovens de várias idades.
+# ================== SEMENTES E O JOGADOR ==================
+
+## Índice da semente mais perto (a até 'r' metros), ou -1.
+func nearest_seed(pos: Vector3, r: float) -> int:
+	var best := -1
+	var bd := r * r
+	for i in seeds.size():
+		var sd: Array = seeds[i]
+		var d := Vector2(float(sd[0]) - pos.x, float(sd[1]) - pos.z).length_squared()
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+func take_seed(i: int) -> void:
+	if i >= 0 and i < seeds.size():
+		seeds.remove_at(i)
+		_rebuild_seeds()
+
+
+## Põe uma semente no chão (soltar) ou na terra (plantar). Brota em 100 dias.
+func put_seed(x: float, z: float, planted: bool) -> void:
+	var day := last_day
+	seeds.append([x, z, day, day + GERM_DAYS, 1 if planted else 0, _rng.randf_range(20.0, 29.0), _rng.randi() % VARIANTS])
+	_rebuild_seeds()
+
+
+## Dá para plantar aqui?
+func can_plant(x: float, z: float) -> bool:
+	return _ground_ok(x, z)
+
+
+# ================== MUNDO NOVO ==================
+
+## Árvores salpicadas; em volta das maiores, mudas e jovens; algumas secas e caídas.
 func _generate(seed_: int) -> void:
 	var sim = _jogo.sim
 	var cell: float = _jogo.CELL
@@ -233,11 +314,23 @@ func _generate(seed_: int) -> void:
 		var roll := rng.randf()
 		var h_now := rng.randf_range(7.0, 13.0) if roll < 0.6 else (rng.randf_range(13.0, 19.0) if roll < 0.9 else rng.randf_range(20.0, 27.0))
 		var h_max := maxf(rng.randf_range(20.0, 29.0), h_now + 1.0)
-		adults.append([x, z, day - _age_for(h_now, h_max) * 365.25, h_max, rng.randi() % VARIANTS])
+		adults.append([x, z, day - _age_for(h_now, h_max) * 365.25, h_max, rng.randi() % VARIANTS, ALIVE, 0, 0.0])
+	# algumas das grandes já estão secas, e outras já caíram
+	var big := adults.filter(func(a): return height_of(a, day) >= 16.0)
+	big.shuffle()
+	for i in mini(big.size(), 5):
+		var a: Array = big[i]
+		if i < 2:
+			a[5] = DRY
+			a[6] = day - rng.randi_range(30, 150)
+		else:
+			a[5] = FALLEN
+			a[6] = day - rng.randi_range(100, 900)
+			a[7] = rng.randf() * TAU
 	plants = adults.duplicate()
 	# a mata já vinha se renovando: algumas mudas e jovens em volta das maiores
 	for a in adults:
-		if height_of(a, day) < ADULT_H:
+		if int(a[5]) != ALIVE or height_of(a, day) < ADULT_H:
 			continue
 		for k in rng.randi_range(1, 4):
 			var dist := 8.0 + absf(rng.randfn(0.0, 22.0))
@@ -247,7 +340,7 @@ func _generate(seed_: int) -> void:
 			if Vector2(x, z).distance_to(spawn) < 12.0 or not _ground_ok(x, z) or _crowded(x, z, day):
 				continue
 			var age := rng.randf_range(0.3, 10.0)
-			plants.append([x, z, day - age * 365.25, rng.randf_range(20.0, 29.0), rng.randi() % VARIANTS])
+			plants.append([x, z, day - age * 365.25, rng.randf_range(20.0, 29.0), rng.randi() % VARIANTS, ALIVE, 0, 0.0])
 
 
 ## Quantos anos leva para chegar à altura h (quando a altura máxima é h_max).
@@ -261,7 +354,7 @@ func _age_for(h: float, h_max: float) -> float:
 func save(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "plantas": plants, "sementes": seeds}))
+		f.store_string(JSON.stringify({"versao": 2, "dia": last_day, "plantas": plants, "sementes": seeds}))
 		f.close()
 
 
@@ -269,10 +362,22 @@ func _load(path: String) -> bool:
 	if not FileAccess.file_exists(path):
 		return false
 	var d = JSON.parse_string(FileAccess.get_file_as_string(path))
-	if not d is Dictionary or int(d.get("versao", 0)) != 1:
+	if not d is Dictionary:
 		return false
-	plants = d.get("plantas", [])
-	seeds = d.get("sementes", [])
+	var v := int(d.get("versao", 0))
+	if v == 1:
+		# formato antigo: plantas sem estado; sementes esperando a chuva
+		plants = []
+		for p in d.get("plantas", []):
+			plants.append([p[0], p[1], p[2], p[3], p[4], ALIVE, 0, 0.0])
+		seeds = []
+		for sd in d.get("sementes", []):
+			seeds.append([sd[0], sd[1], float(sd[2]) - GERM_DAYS, sd[2], 0, sd[3], sd[4]])
+	elif v == 2:
+		plants = d.get("plantas", [])
+		seeds = d.get("sementes", [])
+	else:
+		return false
 	last_day = mini(int(d.get("dia", last_day)), last_day)
 	return true
 
@@ -286,17 +391,18 @@ func _rebuild() -> void:
 	_instances.clear()
 	_grid.clear()
 	var day := last_day
-	var big := {}     # Vector3i(chunk x, chunk z, variante) -> [Transform3D]
-	var small := {}   # Vector2i(chunk) -> [Transform3D]
-	for i in plants.size():
-		var p: Array = plants[i]
+	var crowns := {}  # Vector3i(chunk x, chunk z, variante) -> [Transform3D]  árvores vivas (tronco + copa)
+	var dry := {}     # árvores secas de pé e troncos caídos (só tronco, casca escura)
+	var small := {}   # Vector2i(chunk) -> [Transform3D]  mudas
+	for p in plants:
 		var x := float(p[0])
 		var z := float(p[1])
 		var h := height_of(p, day)
 		var y: float = _jogo.height_at(x, z) - 0.1
 		var rot := fmod(x * 12.9898 + z * 78.233, TAU)
 		var ck := Vector2i(floori(x / CHUNK), floori(z / CHUNK))
-		if h < SAPLING_MAX_H:
+		var st := int(p[5])
+		if st == ALIVE and h < SAPLING_MAX_H:
 			if not small.has(ck):
 				small[ck] = []
 			small[ck].append(Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(h, h, h)), Vector3(x, y, z)))
@@ -304,22 +410,55 @@ func _rebuild() -> void:
 		var v := int(p[4]) % VARIANTS
 		var s: float = h / float(_tree_h[v])
 		var key := Vector3i(ck.x, ck.y, v)
-		if not big.has(key):
-			big[key] = []
-		big[key].append(Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), Vector3(x, y - 0.05, z)))
-		var gk := Vector2i(floori(x / 8.0), floori(z / 8.0))
-		if not _grid.has(gk):
-			_grid[gk] = []
-		_grid[gk].append(Vector3(x, z, TRUNK_HIT * s + 0.3))
-	for key in big:
-		for part in 2:
-			_add_mm(_meshes[key.z][part], big[key], _bark if part == 0 else _leaves, VIEW_DIST)
+		var xf: Transform3D
+		if st == FALLEN:
+			# deitada no chão, na direção em que caiu
+			var ang := float(p[7])
+			var fall := Basis(Vector3.UP, ang) * Basis(Vector3.RIGHT, PI * 0.5)
+			xf = Transform3D(fall.scaled(Vector3(s, s, s)), Vector3(x, y + 0.35 * s, z))
+		else:
+			xf = Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), Vector3(x, y - 0.05, z))
+			var gk := Vector2i(floori(x / 8.0), floori(z / 8.0))
+			if not _grid.has(gk):
+				_grid[gk] = []
+			_grid[gk].append(Vector3(x, z, TRUNK_HIT * s + 0.3))
+		var target := crowns if st == ALIVE else dry
+		if not target.has(key):
+			target[key] = []
+		target[key].append(xf)
+	for key in crowns:
+		_add_mm(_meshes[key.z][0], crowns[key], _bark, VIEW_DIST)
+		_add_mm(_meshes[key.z][1], crowns[key], _leaves, VIEW_DIST)
+	for key in dry:
+		_add_mm(_meshes[key.z][0], dry[key], _bark_dead, VIEW_DIST)
 	for key in small:
-		for part in 2:
-			_add_mm(_sapling[part], small[key], _bark if part == 0 else _leaves, SMALL_VIEW)
+		_add_mm(_sapling[0], small[key], _bark, SMALL_VIEW)
+		_add_mm(_sapling[1], small[key], _leaves, SMALL_VIEW)
+	_rebuild_seeds()
 
 
-func _add_mm(mesh: Mesh, xfs: Array, mat: Material, dist: float) -> void:
+## Sementes no chão: o fruto com a asinha, marrom.
+func _rebuild_seeds() -> void:
+	for n in _seed_nodes:
+		n.queue_free()
+	_seed_nodes.clear()
+	var by_chunk := {}
+	for sd in seeds:
+		var x := float(sd[0])
+		var z := float(sd[1])
+		var ck := Vector2i(floori(x / CHUNK), floori(z / CHUNK))
+		if not by_chunk.has(ck):
+			by_chunk[ck] = []
+		var rot := fmod(x * 31.7 + z * 17.3, TAU)
+		var b := Basis(Vector3.UP, rot) * Basis(Vector3.FORWARD, 0.25)
+		by_chunk[ck].append(Transform3D(b, Vector3(x, _jogo.height_at(x, z) + 0.02, z)))
+	for key in by_chunk:
+		var n := _add_mm(_seed_mesh, by_chunk[key], _seed_mat, SEED_VIEW)
+		_instances.erase(n)
+		_seed_nodes.append(n)
+
+
+func _add_mm(mesh: Mesh, xfs: Array, mat: Material, dist: float) -> MultiMeshInstance3D:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = mesh
@@ -330,10 +469,11 @@ func _add_mm(mesh: Mesh, xfs: Array, mat: Material, dist: float) -> void:
 	mmi.multimesh = mm
 	mmi.material_override = mat
 	mmi.visibility_range_end = dist
-	mmi.visibility_range_end_margin = 15.0
+	mmi.visibility_range_end_margin = 10.0
 	mmi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(mmi)
 	_instances.append(mmi)
+	return mmi
 
 
 ## O jogador não atravessa os troncos: empurra a posição para fora.
@@ -349,6 +489,28 @@ func push_out(p: Vector3) -> Vector3:
 					p.x = t.x + n.x * t.z
 					p.z = t.y + n.y * t.z
 	return p
+
+
+## Fruto do Cedrinho caído no chão: corpinho com uma asa comprida
+## (um pouco maior que o de verdade, para dar para achar no chão).
+func _make_seed() -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var tri := func(a: Vector3, b: Vector3, c: Vector3, n: Vector3) -> void:
+		for v in [a, b, c]:
+			st.set_normal(n)
+			st.add_vertex(v)
+	# corpinho (semente): losango gordinho
+	var c := Vector3(0, 0.025, 0)
+	var pts := [Vector3(0.05, 0.02, 0), Vector3(0, 0.02, 0.03), Vector3(-0.04, 0.02, 0), Vector3(0, 0.02, -0.03)]
+	for i in 4:
+		tri.call(c + Vector3(0, 0.02, 0), pts[i], pts[(i + 1) % 4], Vector3.UP)
+		tri.call(Vector3(0, 0.0, 0), pts[(i + 1) % 4], pts[i], Vector3.DOWN)
+	# asa: lâmina fina e comprida, um pouco curvada
+	var w := [Vector3(-0.02, 0.025, -0.015), Vector3(-0.2, 0.04, -0.035), Vector3(-0.24, 0.045, 0.01), Vector3(-0.02, 0.025, 0.015)]
+	tri.call(w[0], w[1], w[2], Vector3.UP)
+	tri.call(w[0], w[2], w[3], Vector3.UP)
+	return st.commit()
 
 
 ## Muda (1 m de altura; a instância é esticada para a altura de verdade):
@@ -434,6 +596,14 @@ func _make_materials() -> void:
 	bark.roughness = 0.95
 	bark.uv1_scale = Vector3(1.0, 1.0, 1.0)
 	_bark = bark
+	var dead: StandardMaterial3D = bark.duplicate()
+	dead.albedo_color = Color(0.62, 0.6, 0.58)
+	_bark_dead = dead
+	var sm := StandardMaterial3D.new()
+	sm.albedo_color = Color(0.45, 0.3, 0.17)
+	sm.roughness = 0.9
+	sm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_seed_mat = sm
 
 	var sh := Shader.new()
 	sh.code = LEAF_SHADER

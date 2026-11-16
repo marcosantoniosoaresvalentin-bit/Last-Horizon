@@ -290,7 +290,7 @@ func _build() -> void:
 		_btn[t] = b
 	_btn.VOLTAR.pressed.connect(fechar)
 	_btn.EQUIPAR.pressed.connect(func(): _say("Esse item não é para vestir."))
-	_btn.USAR.pressed.connect(func(): _say("Não dá para usar a argila assim. Ela vai servir para fabricar coisas."))
+	_btn.USAR.pressed.connect(_use)
 	_btn.SOLTAR.pressed.connect(_drop)
 
 
@@ -337,6 +337,8 @@ func _refresh() -> void:
 	_items.clear()
 	if _game and float(_game._bag) > 0.0005:
 		_items.append({"id": "argila", "nome": "Argila", "kg": float(_game._bag)})
+	if _game and int(_game._seeds) > 0:
+		_items.append({"id": "semente", "nome": "Semente de Cedrinho", "kg": int(_game._seeds) * 0.002, "qtd": int(_game._seeds)})
 	var total := 0.0
 	for it in _items:
 		total += float(it.kg)
@@ -353,7 +355,7 @@ func _refresh() -> void:
 		var q: Label = _slots[i][2]
 		if i < _items.size():
 			ic.kind = "item_" + str(_items[i].id)
-			q.text = ("%.1f kg" % float(_items[i].kg)).replace(".", ",")
+			q.text = ("x%d" % int(_items[i].qtd)) if _items[i].has("qtd") else ("%.1f kg" % float(_items[i].kg)).replace(".", ",")
 		else:
 			ic.kind = ""
 			q.text = ""
@@ -377,13 +379,34 @@ func _select(i: int) -> void:
 	_selected = i
 	var it: Dictionary = _items[i]
 	_refresh()
-	_say("%s · %s kg" % [it.nome, ("%.1f" % float(it.kg)).replace(".", ",")])
+	if it.id == "semente":
+		_say("%s · %d · USAR planta aqui, SOLTAR larga uma no chão" % [it.nome, int(it.qtd)])
+	else:
+		_say("%s · %s kg" % [it.nome, ("%.1f" % float(it.kg)).replace(".", ",")])
+
+
+func _use() -> void:
+	if _selected < 0 or _selected >= _items.size():
+		return
+	var it: Dictionary = _items[_selected]
+	if it.id == "semente" and _game:
+		if _game.put_seed_from_bag(true):
+			fechar()
+		else:
+			_say("Não dá para plantar aqui. Vá para terra boa, longe da água e das pedras.")
+		return
+	_say("Não dá para usar a argila assim. Ela vai servir para fabricar coisas.")
 
 
 func _drop() -> void:
 	if _selected < 0 or _selected >= _items.size():
 		return
 	var it: Dictionary = _items[_selected]
+	if it.id == "semente" and _game:
+		_game.put_seed_from_bag(false)
+		_refresh()
+		_say("Você soltou uma semente no chão.")
+		return
 	if it.id == "argila" and _game:
 		_game._bag = 0.0
 		_game._update_inventory()
@@ -460,10 +483,24 @@ class SlotIcon extends Control:
 		match kind:
 			"item_argila":
 				_clay(c, s)
+			"item_semente":
+				_seed(c, s)
 			"mochila":
 				Desenhos.backpack(self, c + Vector2(0, s * 0.04), s * 0.9, faint, Color(1, 1, 1, 0.0))
 			_:
 				_silhouette(kind, c, s, faint)
+
+	func _seed(c: Vector2, s: float) -> void:
+		# fruto do Cedrinho: semente com uma asa comprida
+		var body := PackedVector2Array([c + Vector2(s * 0.18, 0), c + Vector2(s * 0.05, -s * 0.1), c + Vector2(-s * 0.08, 0), c + Vector2(s * 0.05, s * 0.1)])
+		var wing := PackedVector2Array([c + Vector2(-s * 0.04, -s * 0.06), c + Vector2(-s * 0.42, -s * 0.16), c + Vector2(-s * 0.46, -s * 0.04), c + Vector2(-s * 0.04, s * 0.05)])
+		draw_colored_polygon(wing, Color(0.66, 0.5, 0.32))
+		draw_polyline(wing + PackedVector2Array([wing[0]]), Color(0.35, 0.24, 0.13), 1.5, true)
+		for k in 4:
+			var t := 0.2 + k * 0.2
+			draw_line(c.lerp(c + Vector2(-s * 0.44, -s * 0.1), t) + Vector2(0, -s * 0.05), c.lerp(c + Vector2(-s * 0.44, -s * 0.1), t) + Vector2(0, s * 0.05), Color(0.45, 0.32, 0.18, 0.7), 1.0)
+		draw_colored_polygon(body, Color(0.42, 0.26, 0.14))
+		draw_polyline(body + PackedVector2Array([body[0]]), Color(0.25, 0.14, 0.07), 1.5, true)
 
 	func _clay(c: Vector2, s: float) -> void:
 		var pts := PackedVector2Array()

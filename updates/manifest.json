@@ -1,9 +1,9 @@
 {
-  "version": 30,
-  "file": "update_30.zip",
-  "size": 3057428,
-  "sha256": "b45f5fd576ec8051223ecaa48889a799019faaca07c0e2722063dbff7038ff17",
+  "version": 31,
+  "file": "update_31.zip",
+  "size": 3060381,
+  "sha256": "8926a11e0a76b712cf295d2911fb12d0a7dbd21b29162d97bddd7c6eb61cc1ea",
   "min_build": 1,
-  "notes": "Cedrinho solta sementes em setembro, brotam com as chuvas e crescem com os anos",
+  "notes": "Sementes visíveis no chão (pegar, plantar), brotam em 100 dias; árvores grandes secam e caem",
   "date": "2026-11-16"
 }

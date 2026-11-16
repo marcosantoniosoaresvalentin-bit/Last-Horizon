@@ -248,6 +248,9 @@ var _world_id := ""
 var _cal: Control = null
 var _bag_ui: Control = null
 var _arvores: Node3D = null
+var _seeds := 0                  # sementes de Cedrinho na mochila
+var _seed_btn: Button
+var _seed_check := 0.0
 var _save_timer := SAVE_EVERY
 const DEEP := 0.12        # água funda o bastante para virar lagoa ou poça na tela; a rasa só molha o chão
 
@@ -343,6 +346,18 @@ func _build_hud() -> void:
 	_dig_btn.visible = false
 	_dig_btn.pressed.connect(_start_dig)
 	_hud.add_child(_dig_btn)
+
+	_seed_btn = Button.new()
+	_seed_btn.text = "Pegar semente"
+	_seed_btn.add_theme_font_size_override("font_size", 22)
+	_seed_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_seed_btn.offset_left = -300
+	_seed_btn.offset_top = -250
+	_seed_btn.offset_right = -30
+	_seed_btn.offset_bottom = -176
+	_seed_btn.visible = false
+	_seed_btn.pressed.connect(_pick_seed)
+	_hud.add_child(_seed_btn)
 
 	_dig_bar = ProgressBar.new()
 	_dig_bar.set_anchors_preset(Control.PRESET_CENTER)
@@ -825,6 +840,10 @@ func _process(delta: float) -> void:
 		_apply_soil()
 		# a informação do solo não aparece mais na tela
 	_update_dig(delta)
+	_seed_check -= delta
+	if _seed_check <= 0.0 and _arvores:
+		_seed_check = 0.25
+		_seed_btn.visible = _arvores.nearest_seed(_player.position, 1.6) >= 0
 	# a grama vai sendo refeita aos poucos, acompanhando as estações
 	_refresh_timer -= delta
 	if _refresh_timer <= 0.0 and _grass_queue.is_empty() and not _grass_chunks.is_empty():
@@ -860,7 +879,7 @@ func _save_player() -> void:
 	if _world_id == "" or not _ready_world or _player == null:
 		return
 	var p := _player.position
-	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag}
+	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -883,6 +902,7 @@ func _load_player() -> void:
 	_yaw = float(d.get("yaw", 0.0))
 	_pitch = float(d.get("pitch", _pitch))
 	_bag = clampf(float(d.get("argila", 0.0)), 0.0, BAG_MAX)
+	_seeds = maxi(0, int(d.get("sementes", 0)))
 	_update_inventory()
 
 
@@ -893,7 +913,7 @@ static func _kg(v: float) -> String:
 
 
 func _bag_total() -> float:
-	return _bag
+	return _bag + _seeds * Arvores.SEED_KG
 
 
 func _update_inventory() -> void:
@@ -915,6 +935,38 @@ func _player_depth() -> float:
 	if _water_level.size() != MundoSim.W * MundoSim.H or cell.x < 0 or cell.y < 0 or cell.x >= MundoSim.W or cell.y >= MundoSim.H:
 		return 0.0
 	return maxf(0.0, _water_level[cell.y * MundoSim.W + cell.x] - height_at(p.x, p.z))
+
+
+## Pega a semente mais perto do chão e põe na mochila.
+func _pick_seed() -> void:
+	if _arvores == null:
+		return
+	var i: int = _arvores.nearest_seed(_player.position, 1.6)
+	if i < 0:
+		return
+	if _bag_total() + Arvores.SEED_KG > BAG_MAX:
+		_show_toast("A mochila está cheia.")
+		return
+	_arvores.take_seed(i)
+	_seeds += 1
+	_show_toast("+1 semente de Cedrinho (%d na mochila)" % _seeds)
+	_seed_check = 0.0
+
+
+## Mochila: soltar uma semente no chão (pode brotar sozinha) ou plantar (pega mais fácil).
+func put_seed_from_bag(plant: bool) -> bool:
+	if _seeds <= 0 or _arvores == null:
+		return false
+	var fwd := Vector3(-sin(_face), 0, -cos(_face))
+	var pos := _player.position + fwd * (0.6 if plant else 0.3)
+	if plant and not _arvores.can_plant(pos.x, pos.z):
+		_show_toast("Não dá para plantar aqui (água, pedra ou terra ruim).")
+		return false
+	_arvores.put_seed(pos.x, pos.z, plant)
+	_seeds -= 1
+	if plant:
+		_show_toast("Você plantou uma semente de Cedrinho. Deve brotar em uns 100 dias.")
+	return true
 
 
 func _update_dig(delta: float) -> void:
