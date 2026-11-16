@@ -8,6 +8,7 @@ const Diag := preload("res://scripts/diagnostico.gd")
 const Mundos := preload("res://scripts/mundos.gd")
 const Perfil := preload("res://scripts/perfil.gd")
 const Calendario := preload("res://scripts/ui/calendario.gd")
+const Mochila := preload("res://scripts/ui/mochila.gd")
 const SAVE_EVERY := 60.0     # salva o mundo a cada minuto
 
 const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
@@ -244,6 +245,7 @@ var _w_level := PackedFloat32Array()
 var _w_arr := []
 var _world_id := ""
 var _cal: Control = null
+var _bag_ui: Control = null
 var _save_timer := SAVE_EVERY
 const DEEP := 0.12        # água funda o bastante para virar lagoa ou poça na tela; a rasa só molha o chão
 
@@ -374,6 +376,17 @@ func _build_hud() -> void:
 	cal_btn.offset_bottom = 60
 	cal_btn.pressed.connect(_open_calendar)
 	_hud.add_child(cal_btn)
+
+	# botão da mochila: só o desenho da mochila, sem bola em volta
+	var bag_btn: Button = Mochila.BackpackButton.new()
+	bag_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	bag_btn.offset_left = -380
+	bag_btn.offset_top = 8
+	bag_btn.offset_right = -304
+	bag_btn.offset_bottom = 76
+	bag_btn.pressed.connect(_open_backpack)
+	_hud.add_child(bag_btn)
+	_inv_label.visible = false   # o que tem na mochila aparece na tela da mochila
 
 	_joy_ui = Control.new()
 	_joy_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1059,8 +1072,20 @@ func _move_player(delta: float) -> void:
 # ================== CONTROLE ==================
 # Lado esquerdo da tela: andar (joystick). Lado direito: girar a câmera.
 
+func _open_backpack() -> void:
+	if _bag_ui != null or _cal != null or not _ready_world:
+		return
+	_joy_id = -1
+	_joy_vec = Vector2.ZERO
+	_look_id = -1
+	_bag_ui = Mochila.new()
+	_hud.add_child(_bag_ui)
+	_bag_ui.abrir(self)
+	_bag_ui.closed.connect(func(): _bag_ui = null)
+
+
 func _open_calendar() -> void:
-	if _cal != null or not _ready_world:
+	if _cal != null or _bag_ui != null or not _ready_world:
 		return
 	_joy_id = -1
 	_joy_vec = Vector2.ZERO
@@ -1072,8 +1097,8 @@ func _open_calendar() -> void:
 
 
 func _input(e: InputEvent) -> void:
-	if _cal != null:
-		return   # com o calendário aberto, o toque não anda nem gira a câmera
+	if _cal != null or _bag_ui != null:
+		return   # com o calendário ou a mochila aberta, o toque não anda nem gira a câmera
 	var half := get_viewport().get_visible_rect().size.x * 0.5
 	if e is InputEventScreenTouch:
 		if e.pressed and _dig_btn.visible and _dig_btn.get_global_rect().has_point(e.position):

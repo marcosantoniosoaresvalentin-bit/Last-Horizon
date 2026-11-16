@@ -446,7 +446,7 @@ func _build_skin_scene(loading: Label) -> void:
 	_refresh_skin_tags()
 
 
-func _load_character(who: String) -> Node3D:
+static func _load_character(who: String) -> Node3D:
 	var bytes := FileAccess.get_file_as_bytes("res://personagem/%s.glbin" % who)
 	if bytes.is_empty():
 		return null

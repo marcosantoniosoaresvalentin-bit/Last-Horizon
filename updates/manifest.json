@@ -1,9 +1,9 @@
 {
-  "version": 25,
-  "file": "update_25.zip",
-  "size": 2947724,
-  "sha256": "f31ff76b17c6eff5c94cf2d1ad5c1004976888b00ba5b812d10e9894f23032ef",
+  "version": 26,
+  "file": "update_26.zip",
+  "size": 3048481,
+  "sha256": "359095a8b1b1175352f709d921737021c4479d2cce9aa2e0ae160bfac4ca1103",
   "min_build": 1,
-  "notes": "Calendário marcado pelo jogador (Dia atual / Finalizar dia), 12 folhas, mundo começa em 1º de janeiro de 2000",
+  "notes": "Mochila: tela de equipamento e inventário com o personagem em 3D e botão de mochila",
   "date": "2026-11-16"
 }
