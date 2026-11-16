@@ -43,6 +43,9 @@ const GERM_DAYS := 100         # dias entre a semente cair e brotar
 const WILD_CHANCE := 0.2       # chance de uma semente do chão brotar
 const PLANTED_CHANCE := 0.8    # chance de uma semente plantada pelo jogador brotar
 const SEED_KG := 0.002
+const DROWN_COVER := 0.8       # água cobrindo 80% da altura da planta: afogada
+const DROWN_DAYS := 4          # dias seguidos afogada até começar a morrer
+const DROWN_MAX_H := 8.0       # árvore maior que isso a cheia não mata
 
 enum { ALIVE, DYING, FALLEN }
 
@@ -68,6 +71,7 @@ var _instances: Array = []
 var _seed_nodes: Array = []
 var _jogo: Node
 var _rng := RandomNumberGenerator.new()
+var _drown := {}                   # Vector2(x, z) -> dias seguidos debaixo d'água
 
 
 # ================== MONTAGEM ==================
@@ -166,6 +170,7 @@ func _process_day(day: int) -> void:
 		if _rng.randf() < chance and plants.size() < SAFETY_MAX and _ground_ok(sd[0], sd[1]) and not _crowded(sd[0], sd[1], day):
 			plants.append([sd[0], sd[1], day, sd[5], sd[6], ALIVE, 0, 0.0])
 	seeds = keep
+	_check_flood(day)
 	# árvore seca que ninguém derrubou: depois de perder os galhos, o tronco cai sozinho;
 	# tronco caído apodrece e some depois de uns anos
 	var still := []
@@ -180,6 +185,34 @@ func _process_day(day: int) -> void:
 	if int(d.month) == 1 and int(d.day) == 1:
 		_yearly(day)
 	trees = plants
+
+
+## Cheia: planta viva pode ficar com o pé dentro do rio sem problema. Mas se a água subir
+## e cobrir quase a planta inteira (muda ou árvore pequena) por alguns dias, ela começa a
+## morrer ali dentro d'água, aos poucos, do mesmo jeito que as outras. Árvore grande não.
+func _check_flood(day: int) -> void:
+	var sim = _jogo.sim
+	var cell: float = _jogo.CELL
+	var hs: float = _jogo.HS
+	var under := {}
+	for p in plants:
+		if int(p[5]) != ALIVE:
+			continue
+		var h := height_of(p, day)
+		if h > DROWN_MAX_H:
+			continue
+		var c := Vector2i(int(float(p[0]) / cell), int(float(p[1]) / cell))
+		var depth: float = sim.water_at(c) * hs
+		if depth < h * DROWN_COVER:
+			continue
+		var k := Vector2(float(p[0]), float(p[1]))
+		var n: int = _drown.get(k, 0) + 1
+		if n >= DROWN_DAYS:
+			p[5] = DYING
+			p[6] = day
+		else:
+			under[k] = n
+	_drown = under
 
 
 ## Derruba a árvore (o jogador vai usar isto para cortar; também quando cai sozinha).

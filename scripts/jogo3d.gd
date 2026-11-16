@@ -87,9 +87,10 @@ void fragment(){
 	c *= mix(1.0, 0.8, wet);
 	// filete de enxurrada: trilha estreita e sinuosa de água rasa correndo
 	float wob = (noise(wpos.xz * 0.35) - 0.5) * 0.55 + (noise(wpos.xz * 1.6 + vec2(0.0, TIME * 0.6)) - 0.5) * 0.12;
-	float run = smoothstep(0.58, 0.72, b.b + wob);
+	float run = smoothstep(0.7, 0.8, b.b + wob);
 	float glint = noise(wpos.xz * 2.5 - vec2(TIME * 0.9, TIME * 0.4));
-	c = mix(c, vec3(0.16, 0.19, 0.19) + glint * 0.06, run * 0.9);
+	// a água da enxurrada desce barrenta
+	c = mix(c, vec3(0.27, 0.19, 0.11) + glint * 0.07, run * 0.85);
 	ALBEDO = c;
 	ROUGHNESS = mix(mix(0.95, 0.4, wetness), 0.04, run);
 	SPECULAR = mix(mix(0.2, 0.45, wetness), 0.7, run);
@@ -138,7 +139,9 @@ render_mode cull_disabled, depth_draw_always;
 uniform float rain = 0.0;
 uniform vec3 deep = vec3(0.012, 0.03, 0.025);
 uniform vec3 shallow = vec3(0.09, 0.08, 0.04);
+uniform vec3 mud = vec3(0.36, 0.26, 0.15);
 varying float depth;
+varying float murk;
 varying vec3 wpos;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
@@ -156,6 +159,7 @@ float waves(vec2 p, float t){
 }
 void vertex(){
 	depth = COLOR.a;
+	murk = COLOR.r;
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 void fragment(){
@@ -166,8 +170,12 @@ void fragment(){
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 	float d = clamp(depth / 1.6, 0.0, 1.0);
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
-	ALBEDO = mix(shallow, deep, sqrt(d)) + vec3(0.05, 0.07, 0.08) * fres;
-	ALPHA = clamp(mix(0.45, 0.93, sqrt(d)) + fres * 0.15, 0.0, 1.0) * smoothstep(0.0, 0.12, depth);
+	// barro: enxurrada marrom; lagoa e rio ficam só um pouco sujos depois da chuva
+	float m = clamp(murk, 0.0, 1.0) * (0.85 + noise(wpos.xz * 0.15 + vec2(t * 0.02, 0.0)) * 0.3);
+	vec3 clean = mix(shallow, deep, sqrt(d));
+	vec3 muddy = mud * mix(1.0, 0.55, sqrt(d));
+	ALBEDO = mix(clean, muddy, clamp(m, 0.0, 1.0) * 0.9) + vec3(0.05, 0.07, 0.08) * fres;
+	ALPHA = clamp(mix(0.45, 0.93, sqrt(d)) + m * 0.3 + fres * 0.15, 0.0, 1.0) * smoothstep(0.0, 0.06, depth);
 	ROUGHNESS = 0.12;
 	SPECULAR = 0.45;
 }
@@ -252,7 +260,7 @@ var _seeds := 0                  # sementes de Cedrinho na mochila
 var _seed_btn: Button
 var _seed_check := 0.0
 var _save_timer := SAVE_EVERY
-const DEEP := 0.12        # água funda o bastante para virar lagoa ou poça na tela; a rasa só molha o chão
+const DEEP := 0.05        # água parada funda o bastante para virar poça ou lagoa na tela; a rasa só molha o chão
 
 
 func _notification(what: int) -> void:
@@ -1061,7 +1069,8 @@ func _update_sky(delta: float) -> void:
 	if sim == null:
 		return
 	var h: float = sim.hour() if sim.is_ready else 7.0
-	var target := 1.0 if (sim.is_ready and sim.raining) else 0.0
+	# garoa escurece pouco o céu; temporal escurece bastante
+	var target: float = clampf(0.45 + sim.rain_mmh / 16.0, 0.5, 1.0) if (sim.is_ready and sim.raining) else 0.0
 	_rain_amount = move_toward(_rain_amount, target, delta * 0.3)
 	var elev := sin((h - 6.0) / 12.0 * PI)
 	var daylight := clampf(elev * 3.0 + 0.3, 0.0, 1.0)
@@ -1264,14 +1273,22 @@ func _water_arrays(wat: PackedFloat32Array) -> void:
 	# nível em cada canto: média das células vizinhas que têm água
 	var cw := W + 1
 	var corner := PackedFloat32Array(); corner.resize(cw * (H + 1)); corner.fill(NONE)
+	var cmurk := PackedFloat32Array(); cmurk.resize(cw * (H + 1))
+	var has_murk := wat.size() >= W * H * 2
 	for y in H + 1:
 		for x in cw:
-			var s := 0.0; var n := 0
-			if x > 0 and y > 0 and ext[(y - 1) * W + x - 1] > NONE: s += ext[(y - 1) * W + x - 1]; n += 1
-			if x < W and y > 0 and ext[(y - 1) * W + x] > NONE: s += ext[(y - 1) * W + x]; n += 1
-			if x > 0 and y < H and ext[y * W + x - 1] > NONE: s += ext[y * W + x - 1]; n += 1
-			if x < W and y < H and ext[y * W + x] > NONE: s += ext[y * W + x]; n += 1
+			var s := 0.0; var n := 0; var mk := 0.0
+			var cells := []
+			if x > 0 and y > 0: cells.append((y - 1) * W + x - 1)
+			if x < W and y > 0: cells.append((y - 1) * W + x)
+			if x > 0 and y < H: cells.append(y * W + x - 1)
+			if x < W and y < H: cells.append(y * W + x)
+			for ci in cells:
+				if ext[ci] > NONE:
+					s += ext[ci]; n += 1
+					if has_murk: mk += wat[W * H + ci]
 			if n > 0:
+				cmurk[y * cw + x] = mk / n
 				var lv := s / n
 				# canto na borda (encosta em célula sem água): no plano a água afina até sumir
 				var edge := false
@@ -1295,10 +1312,10 @@ func _water_arrays(wat: PackedFloat32Array) -> void:
 			var p10 := Vector3((x + 1) * CELL, corner[c10], y * CELL)
 			var p01 := Vector3(x * CELL, corner[c01], (y + 1) * CELL)
 			var p11 := Vector3((x + 1) * CELL, corner[c11], (y + 1) * CELL)
-			var d00 := Color(1, 1, 1, maxf(0.0, corner[c00] - _corner_h[c00]))
-			var d10 := Color(1, 1, 1, maxf(0.0, corner[c10] - _corner_h[c10]))
-			var d01 := Color(1, 1, 1, maxf(0.0, corner[c01] - _corner_h[c01]))
-			var d11 := Color(1, 1, 1, maxf(0.0, corner[c11] - _corner_h[c11]))
+			var d00 := Color(cmurk[c00], 1, 1, maxf(0.0, corner[c00] - _corner_h[c00]))
+			var d10 := Color(cmurk[c10], 1, 1, maxf(0.0, corner[c10] - _corner_h[c10]))
+			var d01 := Color(cmurk[c01], 1, 1, maxf(0.0, corner[c01] - _corner_h[c01]))
+			var d11 := Color(cmurk[c11], 1, 1, maxf(0.0, corner[c11] - _corner_h[c11]))
 			verts[k] = p00; cols[k] = d00
 			verts[k + 1] = p10; cols[k + 1] = d10
 			verts[k + 2] = p11; cols[k + 2] = d11

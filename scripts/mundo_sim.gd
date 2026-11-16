@@ -50,6 +50,9 @@ const MONTHS := ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
 	"Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
 ## Quanto chove em cada mês (0 = nada, 1 = o máximo).
 const RAIN_BY_MONTH := [0.9, 1.0, 1.0, 0.8, 0.5, 0.2, 0.05, 0.02, 0.05, 0.2, 0.45, 0.7]
+## Água em medidas de verdade: 1 unidade de altura = 1,2 m, então 1 mm de chuva = 1/1200.
+const MM := 1.0 / 1200.0
+const STEP_HOURS := 24.0 / STEPS_DAY   # cada passo da simulação = 30 segundos do jogo
 
 # terreno e água
 var ter := PackedFloat32Array()
@@ -78,6 +81,8 @@ var rock_name := PackedByteArray()     # 0 sedimento antigo, 1 granito, 2 gnaiss
 var bed := PackedFloat32Array()        # leito de lagoa: onde a água fica parada (dura uma estação)
 var shore := PackedFloat32Array()      # beira da lagoa (0 a 1), recalculada de tempos em tempos
 var bank := PackedFloat32Array()       # argila que dá para pegar na beira (0 a 1)
+var murk := PackedFloat32Array()       # água barrenta (0 limpa a 1 marrom de barro)
+var tsoil := PackedFloat32Array()      # água na terra de cima (uns palmos); quando enche, a chuva escorre
 var top := PackedFloat32Array()        # umidade da superfície: molha na chuva, seca no sol
 var drain := PackedFloat32Array()      # quanta área escorre para cada célula (log); fixo depois de gerar
 var deposit := PackedFloat32Array()    # jazidas de argila: poucos pontos de terra avermelhada perto das lagoas
@@ -90,6 +95,9 @@ var steps := 0
 var rain_t := 0
 var dry_t := 0
 var raining := false
+var rain_mmh := 8.0       # força da chuva agora (milímetros por hora)
+var long_rain := false    # chuva comprida de vários dias (só na época das chuvas)
+var _warm := false        # aquecimento do mundo novo (enchente forte para formar rios e lagoas)
 var spawn := Vector2i(W / 2, H / 2)
 var is_ready := false
 ## No modo leve a simulação roda menos vezes por segundo (com passos maiores).
@@ -124,7 +132,7 @@ var gw0 := PackedFloat32Array()
 
 func _ready() -> void:
 	rock_name.resize(N)
-	for a in ["ter", "wat", "gw", "moist", "fl", "fr", "ft", "fb", "spring", "clay", "sand", "sus", "cover", "wetmem", "feld", "mica", "kao", "ili", "sme", "bed", "shore", "bank", "top", "drain", "deposit"]:
+	for a in ["ter", "wat", "gw", "moist", "fl", "fr", "ft", "fb", "spring", "clay", "sand", "sus", "cover", "wetmem", "feld", "mica", "kao", "ili", "sme", "bed", "shore", "bank", "top", "drain", "deposit", "murk", "tsoil"]:
 		var arr := PackedFloat32Array()
 		arr.resize(N)
 		set(a, arr)
@@ -149,7 +157,8 @@ func request_save() -> void:
 
 func _save_state() -> void:
 	var data := {"versao": SAVE_VERSION, "max_h": max_h, "steps": steps, "rain_t": rain_t, "dry_t": dry_t,
-		"raining": raining, "spawn": spawn, "drain_min": drain_min, "rock_name": rock_name}
+		"raining": raining, "spawn": spawn, "drain_min": drain_min, "rock_name": rock_name,
+		"rain_mmh": rain_mmh, "long_rain": long_rain, "murk": murk, "tsoil": tsoil}
 	for a in SAVE_ARRAYS:
 		data[a] = get(a)
 	DirAccess.make_dir_recursive_absolute(save_dir)
@@ -188,6 +197,22 @@ func _load_state() -> bool:
 	rain_t = int(data.rain_t)
 	dry_t = int(data.dry_t)
 	raining = bool(data.raining)
+	rain_mmh = float(data.get("rain_mmh", 8.0))
+	long_rain = bool(data.get("long_rain", false))
+	var mk = data.get("murk")
+	if mk is PackedFloat32Array and mk.size() == N:
+		murk = mk
+	else:
+		murk.resize(N)
+		murk.fill(0.0)
+	var ts = data.get("tsoil")
+	if ts is PackedFloat32Array and ts.size() == N:
+		tsoil = ts
+	else:
+		tsoil.resize(N)
+		tsoil.fill(0.0)
+	if not data.has("rain_mmh"):
+		_calm_old_flood()
 	spawn = data.spawn
 	drain_min = float(data.drain_min)
 	return true
@@ -274,7 +299,7 @@ func water_at(cell: Vector2i) -> float:
 	if cell.x < 0 or cell.y < 0 or cell.x >= W or cell.y >= H:
 		return 0.0
 	_mx.lock()
-	var v := _out_wat[cell.y * W + cell.x] if _out_wat.size() == N else 0.0
+	var v := _out_wat[cell.y * W + cell.x] if _out_wat.size() >= N else 0.0
 	_mx.unlock()
 	return v
 
@@ -430,7 +455,18 @@ func _find_spawn() -> void:
 
 
 func _publish() -> void:
-	var w := wat.duplicate()
+	# Para a tela: [água que aparece como lâmina d'água (N), quanto ela está barrenta (N)].
+	# Enxurrada rasa correndo não vira lâmina: aparece só como filete no chão.
+	var w := PackedFloat32Array()
+	w.resize(N * 2)
+	for i in N:
+		var a := wat[i]
+		if a < 0.15:
+			var speed := (fl[i] + fr[i] + ft[i] + fb[i]) / maxf(a, 0.02)
+			if speed > 0.25 and bed[i] < 0.5:
+				a = 0.0
+		w[i] = a
+		w[N + i] = murk[i]
 	var soil := PackedByteArray()
 	soil.resize(N * 4)
 	for i in N:
@@ -448,7 +484,7 @@ func _publish() -> void:
 		types[p] = int(clampf(bed[i], 0.0, 1.0) * 255.0)
 		types[p + 1] = int(clampf(top[i], 0.0, 1.0) * 255.0)
 		# filete de enxurrada: água rasa correndo nos caminhos naturais (desenhado no chão)
-		types[p + 2] = int(clampf((wat[i] - 0.015) / 0.04, 0.0, 1.0) * 255.0) if drain[i] >= drain_min else 0
+		types[p + 2] = int(clampf((wat[i] - 0.003) / 0.025, 0.0, 1.0) * 255.0) if drain[i] >= drain_min else 0
 		types[p + 3] = rock_name[i] * 80
 		var q := i * INFO
 		info[q] = bank[i]; info[q + 1] = sand[i]; info[q + 2] = top[i]
@@ -544,16 +580,23 @@ func _generate() -> void:
 	gw.fill(GW_CAP * 0.35)
 	steps = 0
 	# aquece o mundo: uma cheia forte para encher as baixadas
+	_warm = true
 	for k in 170:
 		_step(true, 10.0)
 	for k in 50:
 		_step(false, 10.0)
+	_warm = false
 	steps = 0
 	raining = false
 	dry_t = 500
 	# só conta como lagoa o que ficou cheio depois da enchente inicial
 	for i in N:
 		bed[i] = 1.0 if wat[i] > 0.1 else 0.0
+	# a enchente do aquecimento acabou: tira a enxurrada que ainda estava descendo os morros
+	_calm_old_flood(0.0)
+	# começa no meio das chuvas: lagoas e rios pela metade, ainda com espaço para subir
+	for i in N:
+		wat[i] = maxf(0.0, wat[i] - 0.3)
 	_update_shore()
 	_place_deposits(rng)
 	bank = deposit.duplicate()
@@ -665,18 +708,58 @@ func _initial_soil(soiln: FastNoiseLite) -> void:
 
 func _weather_step() -> void:
 	var wet := wetness()
+	var yr := year_rain()
 	if raining:
 		rain_t -= 1
 		if rain_t <= 0:
 			raining = false
+			long_rain = false
 			# nas chuvas o tempo firme dura pouco; na seca passa quase um mês sem chover
-			dry_t = int(lerpf(STEPS_DAY * 4.5, 1000.0, pow(wet, 0.6)) * K * randf_range(0.6, 1.4))
+			dry_t = int(lerpf(STEPS_DAY * 4.5, 1000.0, pow(wet, 0.6)) * K * randf_range(0.6, 1.4) / yr)
 	else:
 		dry_t -= 1
 		if dry_t <= 0:
 			raining = true
-			# pancadas: algumas horas de chuva e depois para
-			rain_t = int(lerpf(100.0, 450.0, wet) * randf_range(0.6, 1.4))
+			if randf() < 0.13 * wet * wet * yr:
+				# chuva comprida: chove fraco/médio sem parar de meio dia a quase três dias
+				long_rain = true
+				rain_t = int(STEPS_DAY * randf_range(0.5, 2.8))
+				rain_mmh = randf_range(1.5, 4.5) * yr
+			else:
+				# pancada: algumas horas de chuva e depois para; às vezes um temporal curto
+				long_rain = false
+				rain_t = int(lerpf(100.0, 450.0, wet) * randf_range(0.6, 1.4))
+				rain_mmh = randf_range(3.0, 14.0) * yr
+				if randf() < 0.12:
+					rain_t = int(rain_t * 0.5)
+					rain_mmh = randf_range(25.0, 45.0)
+
+
+## Quanto chove neste ano comparado com um ano normal. Cada ano sorteia o seu
+## (sempre igual para o mesmo mundo): uns mais secos, a maioria normal e, de vez
+## em quando, um ano de cheia com bem mais chuva. O primeiro ano é sempre normal.
+func year_rain(y := -1) -> float:
+	if y < 0:
+		y = year()
+	if y <= START_YEAR:
+		return 1.0
+	var r := RandomNumberGenerator.new()
+	r.seed = hash(str(world_seed) + ":chuva:" + str(y))
+	var roll := r.randf()
+	if roll < 0.12:
+		return r.randf_range(1.35, 1.7)     # ano de cheia
+	if roll < 0.24:
+		return r.randf_range(0.6, 0.8)      # ano seco
+	return r.randf_range(0.85, 1.15)
+
+
+## Saves antigos vieram de quando a chuva enchia demais: tira a enxurrada que ficou
+## espalhada fora das lagoas (o que sobrar acima da borda das lagoas escoa sozinho).
+func _calm_old_flood(keep := 0.03) -> void:
+	for i in N:
+		if bed[i] < 0.5 and wat[i] > keep:
+			wat[i] = keep
+		fl[i] = 0.0; fr[i] = 0.0; ft[i] = 0.0; fb[i] = 0.0
 
 
 # ================== PASSO DA SIMULAÇÃO ==================
@@ -698,21 +781,48 @@ func _step(rain_now: bool, mult: float) -> void:
 	var SA := sand
 	var mh := max_h
 	var season_wet := wetness()
-	# o sol da seca evapora bem mais; ao meio-dia evapora muito, à noite quase nada
-	var evap := (0.00001 if rain_now else lerpf(0.00005, 0.00003, season_wet) * (0.3 + 1.4 * sun())) * mult / K
-	# boa parte da chuva entra na terra; só escorre quando chove forte ou o chão está encharcado
-	var rain := 0.00038 * mult
-	var inf_max := 0.0005 * mult
+	# Tudo em medidas de verdade (milímetros por hora); "hrs" é quanto tempo do jogo este passo representa.
+	var hrs := STEP_HOURS * mult / STEP_MULT
+	# o sol da seca evapora bem mais (uns 8 mm por dia); ao meio-dia muito, à noite quase nada
+	var evap := (0.02 if rain_now else lerpf(0.6, 0.25, season_wet) * (0.3 + 1.4 * sun())) * MM * hrs
+	var rain := rain_mmh * MM * hrs
+	# a terra seca chupa a chuva: areia uns 25 mm por hora, argila quase nada
+	var inf_k := MM * hrs
+	if _warm:
+		evap = 0.00001 * mult / K
+		rain = 0.00038 * mult
+		inf_k = 0.0005 * mult / 25.0
+	var TS := tsoil
 	for i in N:
 		var w := Wt[i]
 		if rain_now:
 			w += rain * (0.55 + T[i] / mh * 0.9)
 		var room := GW_CAP - G[i]
-		if w > 0.0 and room > 0.0:
-			# argila quase não deixa a água entrar; areia deixa muito
-			var inf := minf(minf(w, inf_max * (1.1 - CL[i] * 0.95) * (0.7 + SA[i] * 0.8)), room)
+		var cl := CL[i]
+		if _warm:
+			if w > 0.0 and room > 0.0:
+				var inf0 := minf(minf(w, inf_k * lerpf(25.0, 1.5, cl) * (0.6 + SA[i] * 0.8)), room)
+				w -= inf0
+				G[i] += inf0
+			Wt[i] = maxf(0.0, w - evap)
+			continue
+		# A chuva entra primeiro na terra de cima (4 a 6 cm de água cabem nela). Dali desce
+		# devagar para o fundo. Chuva curta some na terra; chovendo horas e horas a terra
+		# de cima enche e a água passa a escorrer para as baixadas e os rios.
+		var ts := TS[i]
+		var cap := lerpf(60.0, 25.0, cl) * MM
+		if w > 0.0 and ts < cap:
+			var inf := minf(minf(w, inf_k * lerpf(12.0, 1.0, cl) * (0.6 + SA[i] * 0.8)), cap - ts)
 			w -= inf
-			G[i] += inf
+			ts += inf
+		if ts > 0.0 and room > 0.0:
+			var perc := inf_k * lerpf(1.6, 0.25, cl) * clampf(room / (GW_CAP * 0.35), 0.0, 1.0)
+			if w > 0.03:
+				perc *= 0.1   # fundo de lagoa é vedado de lodo: vaza só uns milímetros por dia
+			perc = minf(minf(perc, ts), room)
+			ts -= perc
+			G[i] += perc
+		TS[i] = ts
 		Wt[i] = maxf(0.0, w - evap)
 
 	# fluxo de superfície (modelo de canos virtuais)
@@ -754,7 +864,7 @@ func _step(rain_now: bool, mult: float) -> void:
 			M[i] = M[i] * 0.9993 + (0.0007 if w > 0.03 else 0.0)
 			i += 1
 
-	wat = Wt; gw = G; fl = L; fr = R; ft = U; fb = D; moist = M
+	wat = Wt; gw = G; fl = L; fr = R; ft = U; fb = D; moist = M; tsoil = TS
 	if steps % 4 == 0:
 		_slow_step(mult * 4.0, season_wet)
 	steps += 1
@@ -793,7 +903,7 @@ func _slow_step(mult: float, season_wet: float) -> void:
 	var raining_now := raining
 
 	# água subterrânea anda devagar morro abaixo
-	var gm := 0.003 * mult
+	var gm := 0.0000015 * mult
 	for y in range(1, H - 1):
 		for x in range(1, W - 1):
 			var c := y * W + x
@@ -817,16 +927,18 @@ func _slow_step(mult: float, season_wet: float) -> void:
 					G[c] = gc - m
 					G[best] += m
 
-	# a argila carregada pela água vai junto com a correnteza
+	# a argila carregada pela água vai junto com a correnteza (e o barro que suja a água também)
 	var moved := PackedFloat32Array(); moved.resize(N)
+	var MK := murk
+	var mud := PackedFloat32Array(); mud.resize(N)
 	var i := 0
 	for y in H:
 		for x in W:
 			var w := Wt[i]
 			var keep := S[i]
+			var out := L[i] + R[i] + U[i] + D[i]
+			var frac := clampf(out * 4.0 / maxf(w, 0.0001), 0.0, 0.9)
 			if w > 0.02 and keep > 0.0:
-				var out := L[i] + R[i] + U[i] + D[i]
-				var frac := clampf(out * 4.0 / w, 0.0, 0.9)
 				var go := keep * frac
 				keep -= go
 				if out > 0.0:
@@ -836,9 +948,26 @@ func _slow_step(mult: float, season_wet: float) -> void:
 					if y > 0: moved[i - W] += U[i] * k
 					if y < H - 1: moved[i + W] += D[i] * k
 			moved[i] += keep
+			# barro: quantidade = quanto barro x quanta água
+			var mm := MK[i] * w
+			if mm > 0.0 and out > 0.0:
+				var go2 := mm * frac
+				mm -= go2
+				var k2 := go2 / out
+				if x > 0: mud[i - 1] += L[i] * k2
+				if x < W - 1: mud[i + 1] += R[i] * k2
+				if y > 0: mud[i - W] += U[i] * k2
+				if y < H - 1: mud[i + W] += D[i] * k2
+			mud[i] += mm
 			i += 1
+	# o barro assenta na água parada (em meio dia a água fica bem mais limpa)
+	var slow_k := mult / (STEP_MULT * 4.0)
+	var settle_mud := 1.0 - 0.0019 * slow_k
 
-	var loss := 0.0000075 * mult * lerpf(1.8, 0.7, season_wet) / K
+	# a terra perde água para as plantas e para o fundo: uns 5 mm por dia na seca, 2,5 nas chuvas
+	var loss := lerpf(5.0, 2.5, season_wet) / 24.0 * MM * STEP_HOURS * mult / STEP_MULT
+	if _warm:
+		loss = 0.0000075 * mult * lerpf(1.8, 0.7, season_wet) / K
 	var grow := 0.00035 * mult
 	for c in N:
 		var w := Wt[c]
@@ -846,6 +975,15 @@ func _slow_step(mult: float, season_wet: float) -> void:
 		var hn := T[c] / mh
 		var flow := L[c] + R[c] + U[c] + D[c]
 		var speed := flow / maxf(w, 0.05)
+		# água barrenta: a enxurrada correndo pela terra fica marrom; chuva em cima da água suja um pouco
+		var mk := mud[c] / maxf(w, 0.0001) if w > 0.001 else 0.0
+		if w > 0.001:
+			if raining_now and w < 0.06 and flow > 0.00002:
+				mk = maxf(mk, 0.9)                 # filete de enxurrada: puro barro
+			elif raining_now:
+				mk += 0.0007 * slow_k              # pingos e beira lavando terra para dentro
+			mk *= settle_mud if speed < 0.15 else 1.0 - (1.0 - settle_mud) * 0.2
+		MK[c] = clampf(mk, 0.0, 1.0)
 		# erosão: água correndo forte arranca argila (e deixa a areia)
 		if w > 0.08 and speed > 0.35 and hn < 0.85:
 			var e := minf(CL[c] * 0.2, (speed - 0.35) * 0.00003 * mult)
@@ -871,7 +1009,10 @@ func _slow_step(mult: float, season_wet: float) -> void:
 			Wt[c] += out
 			SP[c] = minf(1.0, SP[c] + out * 40.0)
 		else:
-			G[c] = maxf(0.0, gc - loss)
+			# as plantas bebem primeiro da terra de cima; o resto sai do fundo
+			var from_top := minf(tsoil[c], loss * 1.6)
+			tsoil[c] -= from_top
+			G[c] = maxf(0.0, gc - maxf(0.0, loss - from_top))
 
 		# lembrança de alagamento
 		WM[c] = maxf(WM[c] * (1.0 - 0.0004 * mult), 1.0 if w > 0.1 else 0.0)
@@ -923,7 +1064,7 @@ func _slow_step(mult: float, season_wet: float) -> void:
 
 	gw = G; spring = SP; clay = CL; sand = SA; sus = S; cover = CV; wetmem = WM; wat = Wt
 	feld = FE; mica = MI; kao = KA; ili = IL; sme = SM
-	bed = BD; bank = BK; top = TP
+	bed = BD; bank = BK; top = TP; murk = MK
 	_shore_timer += 1
 	if _shore_timer >= 30:
 		_shore_timer = 0
