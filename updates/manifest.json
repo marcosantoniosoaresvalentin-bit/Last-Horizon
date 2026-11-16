@@ -1,9 +1,9 @@
 {
-  "version": 33,
-  "file": "update_33.zip",
-  "size": 3066056,
-  "sha256": "a39a13d5f18e175f176b91fb2551cdc1a80967dacea1e6b6aaaf2fdc587361b5",
+  "version": 34,
+  "file": "update_34.zip",
+  "size": 3080400,
+  "sha256": "ebad3b5a360d052890c6a85fe3760052e3f086ceedf3125b82b2cac0bf4631f5",
   "min_build": 1,
-  "notes": "Chuva mais realista: a primeira chuva não enche os rios, vários dias de chuva sobem aos poucos e transbordam; enxurrada fina e barrenta; lagoas baixam na seca; anos mais chuvosos; muda afogada na cheia morre",
+  "notes": "Craft: menu de craft com peso da mochila, machado de pedra (todo mapa começa com um), cortar árvore com animação e a árvore tombando",
   "date": "2026-11-16"
 }

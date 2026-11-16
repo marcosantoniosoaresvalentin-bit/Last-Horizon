@@ -10,6 +10,9 @@ const Perfil := preload("res://scripts/perfil.gd")
 const Calendario := preload("res://scripts/ui/calendario.gd")
 const Mochila := preload("res://scripts/ui/mochila.gd")
 const Arvores := preload("res://scripts/world/arvores.gd")
+const Itens := preload("res://scripts/itens.gd")
+const Corte := preload("res://scripts/world/corte.gd")
+const Craft := preload("res://scripts/ui/craft.gd")
 const SAVE_EVERY := 60.0     # salva o mundo a cada minuto
 
 const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
@@ -260,6 +263,21 @@ var _seeds := 0                  # sementes de Cedrinho na mochila
 var _seed_btn: Button
 var _seed_check := 0.0
 var _save_timer := SAVE_EVERY
+# itens, ferramenta na mão e corte de árvore
+var _itens := {}                 # id -> quantidade (machado, pedra...)
+var _mao := ""                   # ferramenta equipada
+var _chao: Array = []            # itens soltos no chão: {id, qtd, x, z, node}
+var _craft_ui: Control = null
+var _chop_pose: Node = null
+var _axe_node: Node3D = null
+var _chop_btn: Button
+var _pick_btn: Button
+var _act_check := 0.0
+var _chopping := false
+var _chop_tree = null
+var _chop_t := 0.0
+var _chop_hits := 0
+var _chop_done := {}             # Vector2(x, z) da árvore -> machadadas já dadas
 const DEEP := 0.05        # água parada funda o bastante para virar poça ou lagoa na tela; a rasa só molha o chão
 
 
@@ -367,6 +385,29 @@ func _build_hud() -> void:
 	_seed_btn.pressed.connect(_pick_seed)
 	_hud.add_child(_seed_btn)
 
+	_chop_btn = Button.new()
+	_chop_btn.text = "Cortar árvore"
+	_chop_btn.add_theme_font_size_override("font_size", 22)
+	_chop_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_chop_btn.offset_left = -300
+	_chop_btn.offset_top = -330
+	_chop_btn.offset_right = -30
+	_chop_btn.offset_bottom = -256
+	_chop_btn.visible = false
+	_chop_btn.pressed.connect(_start_chop)
+	_hud.add_child(_chop_btn)
+
+	_pick_btn = Button.new()
+	_pick_btn.add_theme_font_size_override("font_size", 22)
+	_pick_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_pick_btn.offset_left = -300
+	_pick_btn.offset_top = -410
+	_pick_btn.offset_right = -30
+	_pick_btn.offset_bottom = -336
+	_pick_btn.visible = false
+	_pick_btn.pressed.connect(_pick_ground)
+	_hud.add_child(_pick_btn)
+
 	_dig_bar = ProgressBar.new()
 	_dig_bar.set_anchors_preset(Control.PRESET_CENTER)
 	_dig_bar.offset_left = -160
@@ -411,6 +452,18 @@ func _build_hud() -> void:
 	bag_btn.offset_bottom = 76
 	bag_btn.pressed.connect(_open_backpack)
 	_hud.add_child(bag_btn)
+
+	# craft de mão (poucas receitas; o craft de verdade vai ser nas bancadas)
+	var craft_btn := Button.new()
+	craft_btn.text = "Craft"
+	craft_btn.add_theme_font_size_override("font_size", 20)
+	craft_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	craft_btn.offset_left = -496
+	craft_btn.offset_top = 16
+	craft_btn.offset_right = -392
+	craft_btn.offset_bottom = 60
+	craft_btn.pressed.connect(_open_craft)
+	_hud.add_child(craft_btn)
 	_inv_label.visible = false   # o que tem na mochila aparece na tela da mochila
 
 	_joy_ui = Control.new()
@@ -806,6 +859,20 @@ func _build_player() -> void:
 	_play("Idle")
 	for mi in body.find_children("*", "MeshInstance3D", true, false):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	# machado na mão e golpe feito em código (por cima da animação)
+	var axe := MeshInstance3D.new()
+	axe.mesh = Corte.axe_mesh()
+	axe.material_override = Corte.axe_material()
+	axe.visible = false
+	add_child(axe)
+	_axe_node = axe
+	var sks := body.find_children("*", "Skeleton3D", true, false)
+	if not sks.is_empty():
+		var pose = Corte.ChopPose.new()
+		pose.player = _player
+		pose.axe = axe
+		sks[0].add_child(pose)
+		_chop_pose = pose
 
 
 func _play(name: String, speed := 1.0) -> void:
@@ -852,6 +919,7 @@ func _process(delta: float) -> void:
 	if _seed_check <= 0.0 and _arvores:
 		_seed_check = 0.25
 		_seed_btn.visible = _arvores.nearest_seed(_player.position, 1.6) >= 0
+	_update_chop(delta)
 	# a grama vai sendo refeita aos poucos, acompanhando as estações
 	_refresh_timer -= delta
 	if _refresh_timer <= 0.0 and _grass_queue.is_empty() and not _grass_chunks.is_empty():
@@ -887,7 +955,11 @@ func _save_player() -> void:
 	if _world_id == "" or not _ready_world or _player == null:
 		return
 	var p := _player.position
-	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds}
+	var chao := []
+	for g in _chao:
+		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z})
+	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
+		"itens": _itens, "mao": _mao, "chao": chao}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -895,6 +967,8 @@ func _save_player() -> void:
 
 
 func _load_player() -> void:
+	# todo mapa novo começa com um machado de pedra na mochila
+	_itens = {"machado": 1}
 	if _world_id == "" or not sim.loaded_from_save:
 		return
 	var path := Mundos.dir(_world_id) + "/jogador.json"
@@ -903,6 +977,16 @@ func _load_player() -> void:
 	var d = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if not d is Dictionary:
 		return
+	if d.has("itens") and d.itens is Dictionary:
+		_itens = {}
+		for k in d.itens:
+			if Itens.ITENS.has(k) and int(d.itens[k]) > 0:
+				_itens[k] = int(d.itens[k])
+	if d.has("chao") and d.chao is Array:
+		for g in d.chao:
+			if g is Dictionary and Itens.ITENS.has(str(g.get("id", ""))):
+				_add_ground(str(g.id), int(g.get("qtd", 1)), float(g.get("x", 0.0)), float(g.get("z", 0.0)))
+	equip(str(d.get("mao", "")))
 	var x := clampf(float(d.get("x", _player.position.x)), 1.0, MundoSim.W * CELL - 1.0)
 	var z := clampf(float(d.get("z", _player.position.z)), 1.0, MundoSim.H * CELL - 1.0)
 	_player.position = _ground_pos(Vector2(x, z))
@@ -921,7 +1005,129 @@ static func _kg(v: float) -> String:
 
 
 func _bag_total() -> float:
-	return _bag + _seeds * Arvores.SEED_KG
+	var t := _bag + _seeds * Arvores.SEED_KG
+	for id in _itens:
+		t += Itens.kg(id) * int(_itens[id])
+	return t
+
+
+func item_qtd(id: String) -> int:
+	if id == "semente":
+		return _seeds
+	return int(_itens.get(id, 0))
+
+
+func remove_item(id: String, qtd: int) -> void:
+	if id == "semente":
+		_seeds = maxi(0, _seeds - qtd)
+		return
+	var n := int(_itens.get(id, 0)) - qtd
+	if n > 0:
+		_itens[id] = n
+	else:
+		_itens.erase(id)
+		if _mao == id:
+			equip("")
+
+
+## Põe itens na mochila; o que não couber cai no chão do lado do jogador.
+## Devolve quantos foram para o chão.
+func add_item(id: String, qtd: int) -> int:
+	var kg := Itens.kg(id)
+	var fit := qtd
+	if kg > 0.0:
+		fit = clampi(int(floor((BAG_MAX - _bag_total()) / kg + 0.0001)), 0, qtd)
+	if fit > 0:
+		if id == "semente":
+			_seeds += fit
+		else:
+			_itens[id] = int(_itens.get(id, 0)) + fit
+	if qtd - fit > 0:
+		drop_item(id, qtd - fit, false)
+	return qtd - fit
+
+
+## Solta itens no chão na frente do jogador (from_bag: tira da mochila).
+func drop_item(id: String, qtd: int, from_bag := true) -> void:
+	if from_bag:
+		qtd = mini(qtd, item_qtd(id))
+		if qtd <= 0:
+			return
+		remove_item(id, qtd)
+	var fwd := Vector3(-sin(_face), 0, -cos(_face))
+	var side := Vector3(cos(_face), 0, -sin(_face)) * randf_range(-0.3, 0.3)
+	var pos := _player.position + fwd * 0.7 + side
+	_add_ground(id, qtd, pos.x, pos.z)
+
+
+func _add_ground(id: String, qtd: int, x: float, z: float) -> void:
+	var node := Node3D.new()
+	add_child(node)
+	if id == "machado":
+		var mi := MeshInstance3D.new()
+		mi.mesh = Corte.axe_mesh()
+		mi.material_override = Corte.axe_material()
+		node.add_child(mi)
+		mi.rotation = Vector3(PI * 0.5, randf() * TAU, 0)
+		mi.position.y = 0.04
+	else:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.22, 0.12, 0.18)
+		mi.mesh = bm
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.45, 0.4, 0.33)
+		mi.material_override = mat
+		mi.position.y = 0.06
+		node.add_child(mi)
+	node.position = Vector3(x, height_at(x, z), z)
+	_chao.append({"id": id, "qtd": qtd, "x": x, "z": z, "node": node})
+
+
+func _nearest_ground(r: float) -> int:
+	var best := -1
+	var bd := r
+	for i in _chao.size():
+		var g: Dictionary = _chao[i]
+		var d := Vector2(float(g.x) - _player.position.x, float(g.z) - _player.position.z).length()
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+func _pick_ground() -> void:
+	var i := _nearest_ground(1.8)
+	if i < 0:
+		return
+	var g: Dictionary = _chao[i]
+	var kg := Itens.kg(str(g.id))
+	var fit := int(g.qtd)
+	if kg > 0.0:
+		fit = mini(fit, int(floor((BAG_MAX - _bag_total()) / kg + 0.0001)))
+	if fit <= 0:
+		_show_toast("A mochila está cheia (%d kg)." % int(BAG_MAX))
+		return
+	if str(g.id) == "semente":
+		_seeds += fit
+	else:
+		_itens[g.id] = int(_itens.get(g.id, 0)) + fit
+	g.qtd = int(g.qtd) - fit
+	if int(g.qtd) <= 0:
+		g.node.queue_free()
+		_chao.remove_at(i)
+	_show_toast("+%d %s" % [fit, Itens.nome(str(g.id))])
+	_act_check = 0.0
+
+
+## Equipa uma ferramenta da mochila na mão ("" guarda).
+func equip(id: String) -> void:
+	_mao = id if id != "" and item_qtd(id) > 0 else ""
+	if _chop_pose:
+		_chop_pose.holding = _mao == "machado"
+	if _mao != "machado" and _chopping:
+		_cancel_chop()
+	_act_check = 0.0
 
 
 func _update_inventory() -> void:
@@ -1046,6 +1252,80 @@ func _finish_dig() -> void:
 	_dig_check = 0.0
 
 
+# ================== CORTE DE ÁRVORE ==================
+
+const CHOP_SWING := 0.95         # segundos por machadada
+
+
+## Mostra os botões "Cortar árvore" e "Pegar ..." e anima as machadadas.
+func _update_chop(delta: float) -> void:
+	if _chopping:
+		var before := fmod(_chop_t, CHOP_SWING) / CHOP_SWING
+		_chop_t += delta
+		var ph := fmod(_chop_t, CHOP_SWING) / CHOP_SWING
+		if _chop_pose:
+			_chop_pose.phase = ph
+		# a lâmina bate no tronco
+		if before < 0.68 and ph >= 0.68:
+			_chop_hits += 1
+			var need: int = _arvores.hits_to_fell(_chop_tree)
+			_dig_bar.value = float(_chop_hits) / need * 100.0
+			_chop_done[Vector2(float(_chop_tree[0]), float(_chop_tree[1]))] = _chop_hits
+			if _chop_hits >= need:
+				_finish_chop()
+		return
+	_act_check -= delta
+	if _act_check > 0.0:
+		return
+	_act_check = 0.25
+	var gi := _nearest_ground(1.8)
+	_pick_btn.visible = gi >= 0
+	if gi >= 0:
+		_pick_btn.text = "Pegar %s" % Itens.nome(str(_chao[gi].id)).to_lower()
+	_chop_btn.visible = _mao == "machado" and _arvores != null and _arvores.nearest_standing(_player.position, 1.3) != null and not _digging
+
+
+func _start_chop() -> void:
+	if _chopping or _mao != "machado" or _arvores == null:
+		return
+	var t = _arvores.nearest_standing(_player.position, 1.3)
+	if t == null:
+		return
+	if _digging:
+		_cancel_dig()
+	_chop_tree = t
+	_chop_hits = int(_chop_done.get(Vector2(float(t[0]), float(t[1])), 0))
+	_chop_t = 0.0
+	_chopping = true
+	_chop_btn.visible = false
+	_dig_bar.visible = true
+	_dig_bar.value = float(_chop_hits) / _arvores.hits_to_fell(t) * 100.0
+	_play("Idle", 0.5)
+	if _chop_pose:
+		_chop_pose.chopping = true
+		_chop_pose.phase = 0.0
+
+
+func _cancel_chop() -> void:
+	_chopping = false
+	_chop_tree = null
+	_dig_bar.visible = false
+	if _chop_pose:
+		_chop_pose.chopping = false
+	_act_check = 0.0
+
+
+func _finish_chop() -> void:
+	var t = _chop_tree
+	_cancel_chop()
+	if t == null:
+		return
+	_chop_done.erase(Vector2(float(t[0]), float(t[1])))
+	var away := Vector3(float(t[0]) - _player.position.x, 0, float(t[1]) - _player.position.z)
+	_arvores.fell_by_player(t, away)
+	_show_toast("A árvore caiu!")
+
+
 ## Atualiza as texturas do solo (argila, areia, umidade, grama e tipos de argila).
 func _apply_soil() -> void:
 	var soil: Array = sim.take_soil()
@@ -1110,6 +1390,11 @@ func _move_player(delta: float) -> void:
 			_cancel_dig()
 		else:
 			amount = 0.0
+	if _chopping:
+		if amount > 0.12:
+			_cancel_chop()
+		else:
+			amount = 0.0
 	var p := _player.position
 	var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
 	var depth := 0.0
@@ -1130,6 +1415,17 @@ func _move_player(delta: float) -> void:
 		_play("Run" if running else "Walk", water_slow)
 	elif not _digging:
 		_play("Idle")
+	if _chopping and _chop_tree != null:
+		# fica de frente para o tronco
+		var to := Vector2(float(_chop_tree[0]) - p.x, float(_chop_tree[1]) - p.z)
+		_face = lerp_angle(_face, atan2(-to.x, -to.y), minf(1.0, delta * 10.0))
+		# chega na distância certa para o machado bater no tronco
+		var want: float = _arvores.trunk_radius(_chop_tree) + 0.65
+		var dist := to.length()
+		if dist > 0.01 and absf(dist - want) > 0.05:
+			var step := clampf(dist - want, -delta * 1.5, delta * 1.5)
+			p.x += to.x / dist * step
+			p.z += to.y / dist * step
 	if _arvores:
 		p = _arvores.push_out(p)   # não atravessa os troncos
 	p.y = height_at(p.x, p.z) - minf(depth, 0.9) * 0.5
@@ -1149,7 +1445,7 @@ func _move_player(delta: float) -> void:
 # Lado esquerdo da tela: andar (joystick). Lado direito: girar a câmera.
 
 func _open_backpack() -> void:
-	if _bag_ui != null or _cal != null or not _ready_world:
+	if _bag_ui != null or _cal != null or _craft_ui != null or not _ready_world:
 		return
 	_joy_id = -1
 	_joy_vec = Vector2.ZERO
@@ -1160,8 +1456,20 @@ func _open_backpack() -> void:
 	_bag_ui.closed.connect(func(): _bag_ui = null)
 
 
+func _open_craft() -> void:
+	if _craft_ui != null or _bag_ui != null or _cal != null or not _ready_world:
+		return
+	_joy_id = -1
+	_joy_vec = Vector2.ZERO
+	_look_id = -1
+	_craft_ui = Craft.new()
+	_hud.add_child(_craft_ui)
+	_craft_ui.abrir(self)
+	_craft_ui.closed.connect(func(): _craft_ui = null)
+
+
 func _open_calendar() -> void:
-	if _cal != null or _bag_ui != null or not _ready_world:
+	if _cal != null or _bag_ui != null or _craft_ui != null or not _ready_world:
 		return
 	_joy_id = -1
 	_joy_vec = Vector2.ZERO
@@ -1173,8 +1481,8 @@ func _open_calendar() -> void:
 
 
 func _input(e: InputEvent) -> void:
-	if _cal != null or _bag_ui != null:
-		return   # com o calendário ou a mochila aberta, o toque não anda nem gira a câmera
+	if _cal != null or _bag_ui != null or _craft_ui != null:
+		return   # com o calendário, a mochila ou o craft aberto, o toque não anda nem gira a câmera
 	var half := get_viewport().get_visible_rect().size.x * 0.5
 	if e is InputEventScreenTouch:
 		if e.pressed and _dig_btn.visible and _dig_btn.get_global_rect().has_point(e.position):

@@ -43,6 +43,7 @@ const GERM_DAYS := 100         # dias entre a semente cair e brotar
 const WILD_CHANCE := 0.2       # chance de uma semente do chão brotar
 const PLANTED_CHANCE := 0.8    # chance de uma semente plantada pelo jogador brotar
 const SEED_KG := 0.002
+const GREEN_FALLEN_DAYS := 40   # dias até as folhas da árvore derrubada verde secarem e caírem
 const DROWN_COVER := 0.8       # água cobrindo 80% da altura da planta: afogada
 const DROWN_DAYS := 4          # dias seguidos afogada até começar a morrer
 const DROWN_MAX_H := 8.0       # árvore maior que isso a cheia não mata
@@ -71,6 +72,7 @@ var _instances: Array = []
 var _seed_nodes: Array = []
 var _jogo: Node
 var _rng := RandomNumberGenerator.new()
+var _falling: Array = []          # árvores tombando agora (a animação desenha elas)
 var _drown := {}                   # Vector2(x, z) -> dias seguidos debaixo d'água
 
 
@@ -466,8 +468,11 @@ func _load(path: String) -> bool:
 
 ## Monta (ou remonta) tudo com o tamanho e a fase de hoje.
 func _rebuild() -> void:
+	# libera na hora (não no fim do quadro): cada folha amarelando usa um espaço do
+	# "tint" no shader, e o celular só tem 4096; redesenhar duas vezes no mesmo quadro estourava
 	for n in _instances:
-		n.queue_free()
+		if is_instance_valid(n):
+			n.free()
 	_instances.clear()
 	_grid.clear()
 	var day := last_day
@@ -475,6 +480,8 @@ func _rebuild() -> void:
 	var logs := {}    # troncos caídos
 	var small := {}   # Vector2i(chunk) -> [Transform3D]  mudas
 	for p in plants:
+		if _falling.has(p):
+			continue
 		var x := float(p[0])
 		var z := float(p[1])
 		var h := height_of(p, day)
@@ -490,6 +497,9 @@ func _rebuild() -> void:
 		var v := int(p[4]) % VARIANTS
 		var s: float = h / float(_models[v].height)
 		var key := Vector3i(ck.x, ck.y, v)
+		if st == FALLEN and p.size() > 8 and int(p[8]) == 1 and day - int(p[6]) < GREEN_FALLEN_DAYS:
+			_build_fallen_green(p, v, s, day)
+			continue
 		if st == FALLEN:
 			var ang := float(p[7])
 			var fall := Basis(Vector3.UP, ang) * Basis(Vector3.RIGHT, PI * 0.5)
@@ -517,6 +527,35 @@ func _rebuild() -> void:
 		_add_mm(_sapling[0], small[key], _bark, SMALL_VIEW)
 		_add_mm(_sapling[1], small[key], _leaves, SMALL_VIEW)
 	_rebuild_seeds()
+
+
+## Árvore que o jogador derrubou ainda verde: fica deitada com a copa; as folhas
+## amarelam, ficam marrons e vão caindo ao longo de umas semanas (depois vira só o tronco).
+func _build_fallen_green(p: Array, v: int, s: float, day: int) -> void:
+	var m: Dictionary = _models[v]
+	var x := float(p[0])
+	var z := float(p[1])
+	var ang := float(p[7])
+	var away := Vector3(sin(ang), 0, cos(ang))
+	var axis := Vector3.UP.cross(away).normalized()
+	var rot := fmod(x * 12.9898 + z * 78.233, TAU)
+	var root := Node3D.new()
+	root.position = Vector3(x, _jogo.height_at(x, z) - 0.15, z)
+	root.basis = Basis(axis, PI * 0.5 - 0.04) * Basis(Vector3.UP, rot).scaled(Vector3(s, s, s))
+	add_child(root)
+	_instances.append(root)
+	var age := float(day - int(p[6])) / GREEN_FALLEN_DAYS
+	_piece(root, m.core, _bark)
+	for b in m.branches:
+		_piece(root, b, _bark)
+	var yellow := Color(0.62, 0.5, 0.12)
+	var brown := Color(0.48, 0.3, 0.13)
+	var color := yellow.lerp(brown, clampf((age - 0.35) / 0.4, 0.0, 1.0))
+	color.a = clampf(age / 0.35, 0.0, 1.0)
+	for i in m.clusters.size():
+		if age < _hash_range(p, 0.45, 1.0, 140 + i):
+			var mi := _piece(root, m.clusters[i], _leaves)
+			mi.set_instance_shader_parameter("tint", color)
 
 
 ## Árvore morrendo ou seca: monta peça por peça conforme a fase.
@@ -637,6 +676,94 @@ func _add_mm(mesh: Mesh, xfs: Array, mat: Material, dist: float) -> MultiMeshIns
 	add_child(mmi)
 	_instances.append(mmi)
 	return mmi
+
+
+## Árvore em pé mais perto do jogador, ao alcance do machado (ou null).
+func nearest_standing(pos: Vector3, reach: float) -> Variant:
+	var best = null
+	var bd := 1e9
+	var day := last_day
+	for p in plants:
+		if int(p[5]) == FALLEN or int(p[5]) == -1:
+			continue
+		var h := height_of(p, day)
+		if h < 0.6:
+			continue
+		var r := TRUNK_HIT * h / float(_models[int(p[4]) % VARIANTS].height) + 0.3
+		var d := Vector2(float(p[0]) - pos.x, float(p[1]) - pos.z).length() - r
+		if d < reach and d < bd:
+			bd = d
+			best = p
+	return best
+
+
+func trunk_radius(p: Array) -> float:
+	return TRUNK_HIT * height_of(p, last_day) / float(_models[int(p[4]) % VARIANTS].height)
+
+
+## Quantas machadadas para derrubar: muda sai com 2, árvore grande pede umas 14.
+func hits_to_fell(p: Array) -> int:
+	return clampi(int(round(2.0 + height_of(p, last_day) * 0.55)), 2, 16)
+
+
+## A árvore cortada tomba para o lado contrário de quem cortou: começa devagar,
+## vai acelerando, bate no chão e quica um pouco. Depois vira tronco caído.
+## Não dá madeira na hora: o tronco fica no chão.
+func fell_by_player(p: Array, away: Vector3) -> void:
+	var day := last_day
+	var h := height_of(p, day)
+	var v := int(p[4]) % VARIANTS
+	var s: float = h / float(_models[v].height)
+	var x := float(p[0])
+	var z := float(p[1])
+	var y: float = _jogo.height_at(x, z) - 0.15
+	var rot := fmod(x * 12.9898 + z * 78.233, TAU)
+	away.y = 0.0
+	if away.length() < 0.01:
+		away = Vector3(1, 0, 0)
+	away = away.normalized()
+	# vira "caindo": some do desenho normal enquanto a animação roda
+	var alive := _alive_now(p, day)
+	if alive and h >= SAPLING_MAX_H:
+		if p.size() < 9:
+			p.resize(9)
+		p[8] = 1   # caiu verde: as folhas secam aos poucos no chão
+	p[5] = FALLEN
+	p[6] = day
+	p[7] = atan2(away.x, away.z)
+	_falling.append(p)
+	_rebuild()
+	var pivot := Node3D.new()
+	pivot.position = Vector3(x, y, z)
+	add_child(pivot)
+	var tree := Node3D.new()
+	tree.basis = Basis(Vector3.UP, rot).scaled(Vector3(s, s, s))
+	pivot.add_child(tree)
+	var m: Dictionary = _models[v]
+	if h < SAPLING_MAX_H and alive:
+		_piece(tree, _sapling[0], _bark)
+		_piece(tree, _sapling[1], _leaves)
+		tree.basis = Basis(Vector3.UP, rot).scaled(Vector3(h, h, h))
+	elif alive:
+		_piece(tree, m.trunk, _bark)
+		_piece(tree, m.crown, _leaves)
+	else:
+		_piece(tree, m.core, _bark_dead)
+		for b in m.branches:
+			_piece(tree, b, _bark_dead)
+	var axis := Vector3.UP.cross(away).normalized()
+	var tw := pivot.create_tween()
+	var fall := func(a: float) -> void:
+		pivot.basis = Basis(axis, a)
+	var dur := clampf(1.2 + h * 0.09, 1.2, 3.2)
+	tw.tween_method(fall, 0.02, PI * 0.5 - 0.04, dur).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_method(fall, PI * 0.5 - 0.04, PI * 0.5 - 0.14, 0.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_method(fall, PI * 0.5 - 0.14, PI * 0.5 - 0.04, 0.22).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.tween_interval(0.6)
+	tw.tween_callback(func():
+		_falling.erase(p)
+		pivot.queue_free()
+		_rebuild())
 
 
 ## O jogador não atravessa os troncos: empurra a posição para fora.

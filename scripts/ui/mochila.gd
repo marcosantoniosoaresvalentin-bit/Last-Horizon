@@ -10,6 +10,7 @@ signal closed
 const Menu := preload("res://scripts/main_menu.gd")
 const Perfil := preload("res://scripts/perfil.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
+const Itens := preload("res://scripts/itens.gd")
 const FONT_PATH := "res://fontes/oswald.fonte"
 
 const C_TEXT := Color(0.93, 0.92, 0.89)
@@ -289,7 +290,7 @@ func _build() -> void:
 		bar.add_child(b)
 		_btn[t] = b
 	_btn.VOLTAR.pressed.connect(fechar)
-	_btn.EQUIPAR.pressed.connect(func(): _say("Esse item não é para vestir."))
+	_btn.EQUIPAR.pressed.connect(_equip)
 	_btn.USAR.pressed.connect(_use)
 	_btn.SOLTAR.pressed.connect(_drop)
 
@@ -339,9 +340,11 @@ func _refresh() -> void:
 		_items.append({"id": "argila", "nome": "Argila", "kg": float(_game._bag)})
 	if _game and int(_game._seeds) > 0:
 		_items.append({"id": "semente", "nome": "Semente de Cedrinho", "kg": int(_game._seeds) * 0.002, "qtd": int(_game._seeds)})
-	var total := 0.0
-	for it in _items:
-		total += float(it.kg)
+	if _game:
+		for id in _game._itens:
+			var n := int(_game._itens[id])
+			_items.append({"id": id, "nome": Itens.nome(id), "kg": Itens.kg(id) * n, "qtd": n})
+	var total: float = _game._bag_total() if _game else 0.0
 	var cap: float = _game.BAG_MAX if _game else 30.0
 	_weight_label.text = "%.1f / %.1f KG" % [total, cap]
 	_weight_bar.max_value = cap
@@ -356,6 +359,8 @@ func _refresh() -> void:
 		if i < _items.size():
 			ic.kind = "item_" + str(_items[i].id)
 			q.text = ("x%d" % int(_items[i].qtd)) if _items[i].has("qtd") else ("%.1f kg" % float(_items[i].kg)).replace(".", ",")
+			if _game and str(_items[i].id) == str(_game._mao):
+				q.text = "NA MÃO"
 		else:
 			ic.kind = ""
 			q.text = ""
@@ -364,7 +369,9 @@ func _refresh() -> void:
 	if _selected >= _items.size():
 		_selected = -1
 	var has := _selected >= 0
-	_btn.EQUIPAR.disabled = true
+	var tool: bool = has and bool(Itens.ITENS.get(str(_items[_selected].id), {}).get("ferramenta", false))
+	_btn.EQUIPAR.disabled = not tool
+	_btn.EQUIPAR.text = "GUARDAR" if tool and _game and str(_game._mao) == str(_items[_selected].id) else "EQUIPAR"
 	_btn.USAR.disabled = not has
 	_btn.SOLTAR.disabled = not has
 	if _info.text == "" or not has:
@@ -381,14 +388,32 @@ func _select(i: int) -> void:
 	_refresh()
 	if it.id == "semente":
 		_say("%s · %d · USAR planta aqui, SOLTAR larga uma no chão" % [it.nome, int(it.qtd)])
+	elif Itens.ITENS.has(str(it.id)) and it.id != "argila":
+		_say("%s · %s kg · %s" % [it.nome, Itens.kg_txt(Itens.kg(str(it.id))), Itens.ITENS[it.id].desc])
 	else:
 		_say("%s · %s kg" % [it.nome, ("%.1f" % float(it.kg)).replace(".", ",")])
+
+
+func _equip() -> void:
+	if _selected < 0 or _selected >= _items.size() or _game == null:
+		return
+	var id := str(_items[_selected].id)
+	if str(_game._mao) == id:
+		_game.equip("")
+		_refresh()
+		_say("%s guardado na mochila." % Itens.nome(id))
+		return
+	_game.equip(id)
+	fechar()
 
 
 func _use() -> void:
 	if _selected < 0 or _selected >= _items.size():
 		return
 	var it: Dictionary = _items[_selected]
+	if it.id == "machado":
+		_equip()
+		return
 	if it.id == "semente" and _game:
 		if _game.put_seed_from_bag(true):
 			fechar()
@@ -410,6 +435,12 @@ func _drop() -> void:
 	if it.id == "argila" and _game:
 		_game._bag = 0.0
 		_game._update_inventory()
+	elif _game and it.id != "semente":
+		_game.drop_item(str(it.id), 1)
+		_selected = -1
+		_refresh()
+		_say("Você soltou 1 %s no chão." % str(it.nome).to_lower())
+		return
 	_selected = -1
 	_refresh()
 	_say("Você soltou %s kg de %s." % [("%.1f" % float(it.kg)).replace(".", ","), str(it.nome).to_lower()])
@@ -488,7 +519,10 @@ class SlotIcon extends Control:
 			"mochila":
 				Desenhos.backpack(self, c + Vector2(0, s * 0.04), s * 0.9, faint, Color(1, 1, 1, 0.0))
 			_:
-				_silhouette(kind, c, s, faint)
+				if kind.begins_with("item_"):
+					Desenhos.item(self, kind.substr(5), c, s)
+				else:
+					_silhouette(kind, c, s, faint)
 
 	func _seed(c: Vector2, s: float) -> void:
 		# fruto do Cedrinho: semente com uma asa comprida
