@@ -1,9 +1,9 @@
 {
-  "version": 17,
-  "file": "update_17.zip",
-  "size": 2705551,
-  "sha256": "bd83e41bab674328dcda519aea3e752902ccbc2af8b2f143de96cbd4b60e62dc",
+  "version": 18,
+  "file": "update_18.zip",
+  "size": 2714261,
+  "sha256": "222e9053346c8646a3e98b74aace69af7eee59a0c3ec96c0f9304384469ea902",
   "min_build": 1,
-  "notes": "Calendário de 12 meses (1 mês = 5 dias): chuva de dezembro a abril, seca forte de julho a setembro com falta de água",
+  "notes": "Menu novo (Mundos, Skin em 3D, Configurações) e mundos salvos",
   "date": "2026-11-16"
 }

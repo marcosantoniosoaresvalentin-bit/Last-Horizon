@@ -5,6 +5,9 @@ extends Node3D
 
 const MundoSim := preload("res://scripts/mundo_sim.gd")
 const Diag := preload("res://scripts/diagnostico.gd")
+const Mundos := preload("res://scripts/mundos.gd")
+const Perfil := preload("res://scripts/perfil.gd")
+const SAVE_EVERY := 60.0     # salva o mundo a cada minuto
 
 const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
 const HS := 1.2              # metros por unidade de altura da simulação
@@ -238,17 +241,21 @@ var _water_timer := 0.0
 var _water_task := -1
 var _w_level := PackedFloat32Array()
 var _w_arr := []
+var _world_id := ""
+var _save_timer := SAVE_EVERY
 const DEEP := 0.12        # água funda o bastante para virar lagoa ou poça na tela; a rasa só molha o chão
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_save_world()
 		Diag.marcar("ok")
 	elif what == NOTIFICATION_APPLICATION_RESUMED and _ready_world:
 		Diag.marcar("jogando")
 
 
 func _exit_tree() -> void:
+	_save_player()
 	Diag.marcar("menu")
 	if _water_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_water_task)
@@ -259,6 +266,15 @@ func _ready() -> void:
 	_build_hud()
 	_build_environment()
 	sim = MundoSim.new()
+	_world_id = str(Engine.get_meta("mundo", ""))
+	var meta := Mundos.read_meta(_world_id) if _world_id != "" else {}
+	if not meta.is_empty():
+		sim.save_dir = Mundos.dir(_world_id)
+		sim.world_seed = int(meta.get("semente", 0))
+		if FileAccess.file_exists(sim.save_dir + "/mundo.dat"):
+			_loading.text = "Carregando %s…" % str(meta.get("nome", "o mundo"))
+	else:
+		_world_id = ""
 	add_child(sim)
 	sim.world_ready.connect(_on_world_ready)
 
@@ -340,7 +356,9 @@ func _build_hud() -> void:
 	menu.offset_top = 16
 	menu.offset_right = -20
 	menu.offset_bottom = 60
-	menu.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/main_menu.tscn"))
+	menu.pressed.connect(func():
+		_save_world()
+		get_tree().change_scene_to_file("res://scenes/main_menu.tscn"))
 	_hud.add_child(menu)
 
 	_joy_ui = Control.new()
@@ -473,6 +491,7 @@ func _on_world_ready() -> void:
 	_build_player()
 	_player.position = _ground_pos(Vector2((sim.spawn.x + 0.5) * CELL, (sim.spawn.y + 0.5) * CELL))
 	_yaw = 0.0
+	_load_player()
 	Diag.marcar("plantando grama")
 	await _set_loading("Plantando a grama…")
 	for k in 3:
@@ -695,7 +714,7 @@ func _build_player() -> void:
 	_model = Node3D.new()
 	_player.add_child(_model)
 	var body: Node3D = null
-	var who: String = Engine.get_meta("personagem", "homem")
+	var who: String = Engine.get_meta("personagem", Perfil.skin())
 	var bytes := FileAccess.get_file_as_bytes("res://personagem/%s.glbin" % who)
 	if not bytes.is_empty():
 		var doc := GLTFDocument.new()
@@ -752,6 +771,9 @@ func _process(delta: float) -> void:
 			_water_timer = 3.0
 	_move_player(delta)
 	_update_grass()
+	_save_timer -= delta
+	if _save_timer <= 0.0:
+		_save_world()
 	if _play_time < 15.0:
 		_play_time += delta
 		if _play_time >= 15.0:
@@ -774,6 +796,54 @@ func _process(delta: float) -> void:
 		_grass_chunks[key].queue_free()
 		_grass_chunks.erase(key)
 		_build_grass_chunk(key)
+
+
+# ================== SALVAMENTO ==================
+
+func _game_date() -> String:
+	if sim == null or not sim.is_ready:
+		return ""
+	return "%d de %s, ano %d" % [sim.day(), sim.month_name(), sim.year()]
+
+
+## Salva o mundo (na thread da simulação) e o jogador.
+func _save_world() -> void:
+	_save_timer = SAVE_EVERY
+	if _world_id == "" or not _ready_world:
+		return
+	sim.request_save()
+	_save_player()
+	Mundos.touch(_world_id, _game_date())
+
+
+func _save_player() -> void:
+	if _world_id == "" or not _ready_world or _player == null:
+		return
+	var p := _player.position
+	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag}
+	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(data))
+		f.close()
+
+
+func _load_player() -> void:
+	if _world_id == "" or not sim.loaded_from_save:
+		return
+	var path := Mundos.dir(_world_id) + "/jogador.json"
+	if not FileAccess.file_exists(path):
+		return
+	var d = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if not d is Dictionary:
+		return
+	var x := clampf(float(d.get("x", _player.position.x)), 1.0, MundoSim.W * CELL - 1.0)
+	var z := clampf(float(d.get("z", _player.position.z)), 1.0, MundoSim.H * CELL - 1.0)
+	_player.position = _ground_pos(Vector2(x, z))
+	_face = float(d.get("face", 0.0))
+	_yaw = float(d.get("yaw", 0.0))
+	_pitch = float(d.get("pitch", _pitch))
+	_bag = clampf(float(d.get("argila", 0.0)), 0.0, BAG_MAX)
+	_update_inventory()
 
 
 # ================== COLETA DE ARGILA ==================

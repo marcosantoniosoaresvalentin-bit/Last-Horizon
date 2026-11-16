@@ -87,6 +87,16 @@ var is_ready := false
 var steps_per_sec := STEPS_PER_SEC
 var step_mult := STEP_MULT
 
+## Pasta do mundo salvo ("" = não salva) e semente para gerar um mundo novo.
+## Precisam ser definidas antes de adicionar a simulação na cena.
+var save_dir := ""
+var world_seed := 0
+var loaded_from_save := false
+var _save_req := false
+const SAVE_VERSION := 1
+const SAVE_ARRAYS := ["ter", "wat", "gw", "moist", "spring", "clay", "sand", "sus", "cover", "wetmem",
+	"feld", "mica", "kao", "ili", "sme", "bed", "shore", "bank", "top", "drain", "deposit"]
+
 var _thread := Thread.new()
 var _mx := Mutex.new()
 var _quit := false
@@ -116,6 +126,62 @@ func _exit_tree() -> void:
 	_quit = true
 	if _thread.is_started():
 		_thread.wait_to_finish()
+	# a simulação já parou: dá para salvar com segurança
+	if save_dir != "" and is_ready:
+		_save_state()
+
+
+## Pede para a simulação salvar o mundo (feito entre dois passos, na thread dela).
+func request_save() -> void:
+	_mx.lock()
+	_save_req = true
+	_mx.unlock()
+
+
+func _save_state() -> void:
+	var data := {"versao": SAVE_VERSION, "max_h": max_h, "steps": steps, "rain_t": rain_t, "dry_t": dry_t,
+		"raining": raining, "spawn": spawn, "drain_min": drain_min, "rock_name": rock_name}
+	for a in SAVE_ARRAYS:
+		data[a] = get(a)
+	DirAccess.make_dir_recursive_absolute(save_dir)
+	var tmp := save_dir + "/mundo.dat.tmp"
+	var f := FileAccess.open_compressed(tmp, FileAccess.WRITE, FileAccess.COMPRESSION_ZSTD)
+	if f == null:
+		return
+	f.store_var(data)
+	f.close()
+	# troca o arquivo só depois de gravar tudo, para nunca ficar um save pela metade
+	DirAccess.rename_absolute(tmp, save_dir + "/mundo.dat")
+
+
+func _load_state() -> bool:
+	var path := save_dir + "/mundo.dat"
+	if not FileAccess.file_exists(path):
+		return false
+	var f := FileAccess.open_compressed(path, FileAccess.READ, FileAccess.COMPRESSION_ZSTD)
+	if f == null:
+		return false
+	var data = f.get_var()
+	f.close()
+	if not data is Dictionary or int(data.get("versao", 0)) != SAVE_VERSION:
+		return false
+	for a in SAVE_ARRAYS:
+		var arr = data.get(a)
+		if not arr is PackedFloat32Array or arr.size() != N:
+			return false
+	for a in SAVE_ARRAYS:
+		set(a, data[a])
+	var rn = data.get("rock_name")
+	if rn is PackedByteArray and rn.size() == N:
+		rock_name = rn
+	max_h = float(data.max_h)
+	steps = int(data.steps)
+	rain_t = int(data.rain_t)
+	dry_t = int(data.dry_t)
+	raining = bool(data.raining)
+	spawn = data.spawn
+	drain_min = float(data.drain_min)
+	return true
 
 
 # ================== TEMPO E ESTAÇÕES ==================
@@ -269,13 +335,17 @@ func soil_info(cell: Vector2i) -> String:
 # ================== LAÇO PRINCIPAL ==================
 
 func _sim_loop() -> void:
-	_generate()
-	_find_spawn()
+	loaded_from_save = save_dir != "" and _load_state()
+	if not loaded_from_save:
+		_generate()
+		_find_spawn()
 	ter0 = ter.duplicate()
 	moist0 = moist.duplicate()
 	gw0 = gw.duplicate()
 	_publish()
 	is_ready = true
+	if save_dir != "" and not loaded_from_save:
+		_save_state()
 	call_deferred("emit_signal", "world_ready")
 	var t_last := Time.get_ticks_usec()
 	var acc := 0.0
@@ -295,6 +365,12 @@ func _sim_loop() -> void:
 		_mx.unlock()
 		for d in digs:
 			bank[d[0]] = maxf(0.0, bank[d[0]] - d[1])
+		_mx.lock()
+		var want_save := _save_req
+		_save_req = false
+		_mx.unlock()
+		if want_save and save_dir != "":
+			_save_state()
 		loops += 1
 		if n > 0 and loops % 8 == 0:
 			_publish()
@@ -362,7 +438,10 @@ func _n01(n: FastNoiseLite, x: float, y: float) -> float:
 
 func _generate() -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.randomize()
+	if world_seed != 0:
+		rng.seed = world_seed
+	else:
+		rng.randomize()
 	var s := rng.randi()
 	var base := FastNoiseLite.new()
 	base.seed = s; base.noise_type = FastNoiseLite.TYPE_PERLIN
