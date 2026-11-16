@@ -103,14 +103,6 @@ func _set_mode(mode: String) -> void:
 	_submit.add_theme_font_size_override("font_size", 24)
 	_submit.pressed.connect(_go)
 	_form.add_child(_submit)
-	if mode == "entrar":
-		var forgot := Button.new()
-		forgot.text = "Esqueci minha senha"
-		forgot.flat = true
-		forgot.add_theme_font_size_override("font_size", 17)
-		forgot.add_theme_color_override("font_color", C_DIM)
-		forgot.pressed.connect(_forgot)
-		_form.add_child(forgot)
 	var first: LineEdit = _fields.values()[0]
 	first.call_deferred("grab_focus")
 
@@ -194,22 +186,6 @@ func _go() -> void:
 	_say("Bem-vindo, %s!" % str(s.get("nome", "")), C_OK)
 	await get_tree().create_timer(0.6).timeout
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
-
-
-func _forgot() -> void:
-	if _busy:
-		return
-	var email := _val("email").to_lower()
-	if not _email_ok(email):
-		_say("Escreva o seu e-mail no campo acima e toque de novo em \"Esqueci minha senha\".", C_DANGER)
-		return
-	_set_busy(true, "Enviando…")
-	var r: Dictionary = await _conta.esqueci_senha(email)
-	_set_busy(false)
-	if r.ok:
-		_say("Se existir uma conta com esse e-mail, chegou uma mensagem para criar uma senha nova. Veja também o spam.", C_OK)
-	else:
-		_say(Conta.mensagem(str(r.erro)), C_DANGER)
 
 
 static func _email_ok(e: String) -> bool:

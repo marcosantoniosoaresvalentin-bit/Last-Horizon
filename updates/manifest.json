@@ -1,9 +1,9 @@
 {
-  "version": 21,
-  "file": "update_21.zip",
-  "size": 2723283,
-  "sha256": "cb60caa39a8f0253b839954137b6cf11eac19e666f2b823de2bb4aab93ca3d96",
+  "version": 22,
+  "file": "update_22.zip",
+  "size": 2723290,
+  "sha256": "4c13efb44e3899d956f12b576a18b0b4d0d64faa6404d5fb3dcee8c72c54a457",
   "min_build": 1,
-  "notes": "Nome da conta único e apelido no jogo livre",
+  "notes": "Contas salvas num arquivo de texto no GitHub (nome e e-mail únicos)",
   "date": "2026-11-16"
 }

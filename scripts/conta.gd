@@ -1,41 +1,45 @@
 extends Node
-## Contas dos jogadores, com o Firebase Authentication (API REST).
+## Contas dos jogadores, guardadas num arquivo de texto no GitHub (contas.txt,
+## repositório privado; ver conta_config.gd). Uma conta por linha, separada por TAB:
+##   nome_da_conta  email  apelido  criada_em  uid  sal  senha_embaralhada
+## A senha nunca é gravada: só o resultado embaralhado (SHA-256 com sal, repetido).
 ##
-## - Criar conta: e-mail, senha e nome de usuário (o nome vai no perfil da conta).
-## - Entrar: e-mail e senha. Esqueci a senha: o Firebase manda um e-mail.
-## - A sessão fica salva em user://conta.json; o jogo não pede login de novo.
-## - Nome da conta: ÚNICO e fixo. Reservado no Firestore (coleção "usernames",
-##   documento = nome normalizado), então "Marcão", "marcao" e "MARCAO" são o mesmo nome.
-##   Fica também no displayName da conta.
+## - Nome da conta: ÚNICO e fixo ("Marcão", "marcao" e "MARCAO" são o mesmo nome).
+## - E-mail: ÚNICO.
 ## - Apelido no jogo: livre, pode repetir entre jogadores e mudar quando quiser.
-##   Fica no Firestore em users/<uid>.apelido (segue o jogador em outro celular).
-## Sessão salva: uid, email, conta (nome da conta), nome (apelido), refresh.
+## - A sessão fica salva em user://conta.json; o jogo não pede login de novo.
 ##
-## As funções que falam com o servidor são "await": adicione este nó na cena
+## As funções que falam com o GitHub são "await": adicione este nó na cena
 ## (add_child) e chame, por exemplo:  var r = await conta.entrar(email, senha)
 ## O resultado é um Dictionary com "ok" (true/false) e, se der errado, "erro".
 
 const Config := preload("res://scripts/conta_config.gd")
 const SESSION := "user://conta.json"
-const TIMEOUT := 15.0
+const TIMEOUT := 20.0
+const HASH_ROUNDS := 4000
+const HEADER := "# Last Horizon - contas (não editar à mão com o jogo aberto)\n# nome_da_conta\temail\tapelido\tcriada_em\tuid\tsal\tsenha_embaralhada\n"
 
 
 # ================== SESSÃO SALVA ==================
 
-## Para testes: LH_AUTH_BASE aponta para um servidor local no lugar do Firebase.
-static func _base() -> String:
-	return OS.get_environment("LH_AUTH_BASE")
+static func _token() -> String:
+	var t := OS.get_environment("LH_CONTAS_TOKEN")   # para testes
+	if t != "":
+		return t
+	if FileAccess.file_exists(Config.TOKEN_PATH):
+		return FileAccess.get_file_as_string(Config.TOKEN_PATH).strip_edges()
+	return ""
 
 
 static func configured() -> bool:
-	return (Config.API_KEY != "" and Config.PROJECT_ID != "") or _base() != ""
+	return _token() != ""
 
 
 static func session() -> Dictionary:
 	if not FileAccess.file_exists(SESSION):
 		return {}
 	var d = JSON.parse_string(FileAccess.get_file_as_string(SESSION))
-	return d if d is Dictionary and str(d.get("refresh", "")) != "" else {}
+	return d if d is Dictionary and str(d.get("uid", "")) != "" else {}
 
 
 static func logged_in() -> bool:
@@ -59,7 +63,7 @@ static func sair() -> void:
 		DirAccess.remove_absolute(SESSION)
 
 
-# ================== NOME DE USUÁRIO ==================
+# ================== NOMES ==================
 
 const NAME_MIN := 3
 const NAME_MAX := 20
@@ -68,14 +72,13 @@ const _ACCENTS := {"á": "a", "à": "a", "â": "a", "ã": "a", "ä": "a", "é": 
 	"ú": "u", "ù": "u", "û": "u", "ü": "u", "ç": "c", "ñ": "n"}
 
 
-## Explica o que está errado com o nome, ou "" se estiver bom.
+## Explica o que está errado com o nome da conta, ou "" se estiver bom.
 static func nome_invalido(nome: String) -> String:
 	if nome.length() < NAME_MIN:
 		return "O nome da conta precisa ter pelo menos %d caracteres." % NAME_MIN
 	if nome.length() > NAME_MAX:
 		return "O nome da conta pode ter no máximo %d caracteres." % NAME_MAX
-	var key := chave_nome(nome)
-	if key.length() != nome.length():
+	if chave_nome(nome).length() != nome.length():
 		return "Use só letras, números, _ . ou - (sem espaços)."
 	return ""
 
@@ -90,37 +93,51 @@ static func chave_nome(nome: String) -> String:
 	return out
 
 
-# ================== SERVIDOR ==================
-
-func _auth_url(method: String) -> String:
-	var base := _base()
-	if base != "":
-		return base + "v1/accounts:" + method + "?key=teste"
-	return "https://identitytoolkit.googleapis.com/v1/accounts:%s?key=%s" % [method, Config.API_KEY]
-
-
-func _token_url() -> String:
-	var base := _base()
-	if base != "":
-		return base + "v1/token?key=teste"
-	return "https://securetoken.googleapis.com/v1/token?key=" + Config.API_KEY
+## Apelido: de 3 a 20 caracteres, qualquer letra, pode ter espaço e repetir.
+static func apelido_invalido(nome: String) -> String:
+	var n := _limpo(nome)
+	if n.length() < NAME_MIN:
+		return "O apelido precisa ter pelo menos %d caracteres." % NAME_MIN
+	if n.length() > NAME_MAX:
+		return "O apelido pode ter no máximo %d caracteres." % NAME_MAX
+	return ""
 
 
-func _fs_url(path: String) -> String:
-	var base := _base()
-	if base != "":
-		return base + "v1/projects/teste/databases/(default)/documents/" + path
-	return "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/%s" % [Config.PROJECT_ID, path]
+## Tira TAB, quebra de linha e espaços das pontas (o arquivo usa TAB e linha).
+static func _limpo(s: String) -> String:
+	return s.replace("\t", " ").replace("\n", " ").replace("\r", " ").strip_edges()
 
 
-func _post(url: String, body: String, content_type := "application/json", method := HTTPClient.METHOD_POST, token := "") -> Dictionary:
+static func _hash(senha: String, sal: String) -> String:
+	var h := (sal + ":" + senha).sha256_text()
+	for i in HASH_ROUNDS:
+		h = (h + sal).sha256_text()
+	return h
+
+
+static func _rand_hex(bytes: int) -> String:
+	var c := Crypto.new()
+	return c.generate_random_bytes(bytes).hex_encode()
+
+
+# ================== ARQUIVO NO GITHUB ==================
+
+func _url() -> String:
+	var base := OS.get_environment("LH_GH_BASE")   # para testes: servidor local no lugar do GitHub
+	if base == "":
+		base = "https://api.github.com/"
+	return base + "repos/%s/%s/contents/%s" % [Config.OWNER, Config.REPO, Config.FILE]
+
+
+func _request(method: int, body := "") -> Dictionary:
 	var http := HTTPRequest.new()
 	http.timeout = TIMEOUT
 	add_child(http)
-	var headers := ["Content-Type: " + content_type]
-	if token != "":
-		headers.append("Authorization: Bearer " + token)
-	var err := http.request(url, headers, method, body)
+	var headers := ["Authorization: Bearer " + _token(), "Accept: application/vnd.github+json",
+		"X-GitHub-Api-Version: 2022-11-28", "User-Agent: LastHorizon"]
+	if body != "":
+		headers.append("Content-Type: application/json")
+	var err := http.request(_url(), headers, method, body)
 	if err != OK:
 		http.queue_free()
 		return {"ok": false, "erro": "SEM_CONEXAO"}
@@ -129,141 +146,154 @@ func _post(url: String, body: String, content_type := "application/json", method
 	if res[0] != HTTPRequest.RESULT_SUCCESS:
 		return {"ok": false, "erro": "SEM_CONEXAO"}
 	var data = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
-	if res[1] == 200 and data is Dictionary:
-		data["ok"] = true
-		return data
-	var msg := "ERRO_%d" % res[1]
-	if data is Dictionary and data.get("error") is Dictionary:
-		msg = str(data.error.get("message", msg))
-	return {"ok": false, "erro": msg, "codigo": res[1]}
+	return {"ok": res[1] >= 200 and res[1] < 300, "codigo": res[1], "data": data if data is Dictionary else {}}
 
 
-func _json(method: String, body: Dictionary) -> Dictionary:
-	return await _post(_auth_url(method), JSON.stringify(body))
+## Lê o arquivo de contas: {"ok", "linhas": Array[PackedStringArray], "sha"}
+func _ler() -> Dictionary:
+	var r := await _request(HTTPClient.METHOD_GET)
+	if not r.ok:
+		if int(r.get("codigo", 0)) == 404:
+			return {"ok": true, "linhas": [], "sha": ""}   # arquivo ainda não existe
+		return {"ok": false, "erro": _erro_http(r)}
+	var b64 := str(r.data.get("content", "")).replace("\n", "")
+	var text := Marshalls.base64_to_utf8(b64) if b64 != "" else ""
+	var linhas := []
+	for line in text.split("\n", false):
+		if line.begins_with("#") or line.strip_edges() == "":
+			continue
+		var p := line.split("\t")
+		if p.size() >= 7:
+			linhas.append(p)
+	return {"ok": true, "linhas": linhas, "sha": str(r.data.get("sha", ""))}
 
+
+## Grava o arquivo. Se outra pessoa gravou no meio tempo, devolve CONFLITO.
+func _gravar(linhas: Array, sha: String, msg: String) -> Dictionary:
+	var text := HEADER
+	for p in linhas:
+		text += "\t".join(p) + "\n"
+	var body := {"message": msg, "content": Marshalls.utf8_to_base64(text)}
+	if sha != "":
+		body["sha"] = sha
+	var r := await _request(HTTPClient.METHOD_PUT, JSON.stringify(body))
+	if r.ok:
+		return {"ok": true}
+	if int(r.get("codigo", 0)) in [409, 422]:
+		return {"ok": false, "erro": "CONFLITO"}
+	return {"ok": false, "erro": _erro_http(r)}
+
+
+static func _erro_http(r: Dictionary) -> String:
+	if r.has("erro"):
+		return str(r.erro)
+	match int(r.get("codigo", 0)):
+		401, 403: return "SERVIDOR_CONTAS"
+		429: return "MUITOS_ACESSOS"
+	return "ERRO_%d" % int(r.get("codigo", 0))
+
+
+static func _achar(linhas: Array, col: int, valor: String) -> int:
+	for i in linhas.size():
+		var v: String = linhas[i][col]
+		if (col == 0 and chave_nome(v) == valor) or (col == 1 and v.to_lower() == valor):
+			return i
+	return -1
+
+
+# ================== AÇÕES ==================
 
 ## O nome está livre? {"ok": true, "livre": bool}
 func nome_livre(nome: String) -> Dictionary:
-	var r := await _post(_fs_url("usernames/" + chave_nome(nome)), "", "application/json", HTTPClient.METHOD_GET)
-	if r.ok:
-		return {"ok": true, "livre": false}
-	if int(r.get("codigo", 0)) == 404:
-		return {"ok": true, "livre": true}
-	return r
-
-
-## Reserva o nome para esta conta. Falha com NOME_EM_USO se alguém já tiver.
-func _reservar(id_token: String, uid: String, nome: String) -> Dictionary:
-	var body := {"fields": {"uid": {"stringValue": uid}, "nome": {"stringValue": nome}}}
-	var r := await _post(_fs_url("usernames?documentId=" + chave_nome(nome)), JSON.stringify(body),
-		"application/json", HTTPClient.METHOD_POST, id_token)
-	if not r.ok and int(r.get("codigo", 0)) in [409, 403]:
-		return {"ok": false, "erro": "NOME_EM_USO"}
-	return r
-
-
-func _liberar(id_token: String, key: String) -> void:
-	await _post(_fs_url("usernames/" + key), "", "application/json", HTTPClient.METHOD_DELETE, id_token)
+	var f := await _ler()
+	if not f.ok:
+		return f
+	return {"ok": true, "livre": _achar(f.linhas, 0, chave_nome(nome)) < 0}
 
 
 func criar_conta(email: String, senha: String, nome: String) -> Dictionary:
-	var livre := await nome_livre(nome)
-	if not livre.ok:
-		return livre
-	if not livre.livre:
-		return {"ok": false, "erro": "NOME_EM_USO"}
-	var r := await _json("signUp", {"email": email, "password": senha, "returnSecureToken": true})
-	if not r.ok:
-		return r
-	var res := await _reservar(str(r.idToken), str(r.localId), nome)
-	if not res.ok:
-		# alguém pegou o nome no mesmo instante: desfaz a conta para o e-mail poder ser usado de novo
-		await _json("delete", {"idToken": r.idToken})
-		return res
-	var u := await _json("update", {"idToken": r.idToken, "displayName": nome, "returnSecureToken": true})
-	var refresh := str(u.get("refreshToken", r.refreshToken)) if u.ok else str(r.refreshToken)
-	# o apelido começa igual ao nome da conta
-	await _gravar_apelido(str(r.idToken), str(r.localId), nome)
-	_save({"uid": r.localId, "email": r.get("email", email), "conta": nome, "nome": nome, "refresh": refresh})
-	return {"ok": true}
+	email = _limpo(email).to_lower()
+	nome = _limpo(nome)
+	# tenta algumas vezes, caso outra pessoa esteja criando conta no mesmo instante
+	for tentativa in 4:
+		var f := await _ler()
+		if not f.ok:
+			return f
+		if _achar(f.linhas, 0, chave_nome(nome)) >= 0:
+			return {"ok": false, "erro": "NOME_EM_USO"}
+		if _achar(f.linhas, 1, email) >= 0:
+			return {"ok": false, "erro": "EMAIL_EXISTS"}
+		var uid := _rand_hex(8)
+		var sal := _rand_hex(8)
+		var agora := Time.get_datetime_string_from_system(true).left(10)
+		var linhas: Array = f.linhas.duplicate()
+		linhas.append(PackedStringArray([nome, email, nome, agora, uid, sal, _hash(senha, sal)]))
+		var g := await _gravar(linhas, f.sha, "Nova conta: " + nome)
+		if g.ok:
+			_save({"uid": uid, "email": email, "conta": nome, "nome": nome})
+			return {"ok": true}
+		if g.erro != "CONFLITO":
+			return g
+		await get_tree().create_timer(0.4 + randf() * 0.8).timeout
+	return {"ok": false, "erro": "CONFLITO"}
 
 
 func entrar(email: String, senha: String) -> Dictionary:
-	var r := await _json("signInWithPassword", {"email": email, "password": senha, "returnSecureToken": true})
-	if not r.ok:
-		return r
-	var conta := str(r.get("displayName", ""))
-	if conta == "":
-		conta = email.get_slice("@", 0).left(NAME_MAX)
-	var apelido := conta
-	var doc := await _post(_fs_url("users/" + str(r.localId)), "", "application/json", HTTPClient.METHOD_GET, str(r.idToken))
-	if doc.ok and doc.get("fields") is Dictionary and doc.fields.get("apelido") is Dictionary:
-		apelido = str(doc.fields.apelido.get("stringValue", conta))
-	_save({"uid": r.localId, "email": r.get("email", email), "conta": conta, "nome": apelido, "refresh": r.refreshToken})
+	email = _limpo(email).to_lower()
+	var f := await _ler()
+	if not f.ok:
+		return f
+	var i := _achar(f.linhas, 1, email)
+	if i < 0:
+		return {"ok": false, "erro": "INVALID_LOGIN_CREDENTIALS"}
+	var p: PackedStringArray = f.linhas[i]
+	if _hash(senha, p[5]) != p[6]:
+		return {"ok": false, "erro": "INVALID_LOGIN_CREDENTIALS"}
+	_save({"uid": p[4], "email": p[1], "conta": p[0], "nome": p[2]})
 	return {"ok": true}
-
-
-func esqueci_senha(email: String) -> Dictionary:
-	return await _json("sendOobCode", {"requestType": "PASSWORD_RESET", "email": email})
-
-
-## Pede um token novo ao servidor (o token de acesso dura só 1 hora).
-func _id_token() -> Dictionary:
-	var s := session()
-	if s.is_empty():
-		return {"ok": false, "erro": "SEM_SESSAO"}
-	var body := "grant_type=refresh_token&refresh_token=" + str(s.refresh).uri_encode()
-	var r := await _post(_token_url(), body, "application/x-www-form-urlencoded")
-	if r.ok:
-		s["refresh"] = r.get("refresh_token", s.refresh)
-		_save(s)
-	return r
-
-
-## Apelido: de 3 a 20 caracteres, qualquer letra, pode ter espaço e repetir.
-static func apelido_invalido(nome: String) -> String:
-	var n := nome.strip_edges()
-	if n.length() < 3:
-		return "O apelido precisa ter pelo menos 3 caracteres."
-	if n.length() > NAME_MAX:
-		return "O apelido pode ter no máximo %d caracteres." % NAME_MAX
-	return ""
-
-
-func _gravar_apelido(id_token: String, uid: String, apelido: String) -> Dictionary:
-	var body := {"fields": {"apelido": {"stringValue": apelido}}}
-	return await _post(_fs_url("users/%s?updateMask.fieldPaths=apelido" % uid), JSON.stringify(body),
-		"application/json", HTTPClient.METHOD_PATCH, id_token)
 
 
 ## Troca o apelido no jogo (pode ser igual ao de outros jogadores).
 func trocar_apelido(apelido: String) -> Dictionary:
-	apelido = apelido.strip_edges()
-	var t := await _id_token()
-	if not t.ok:
-		return t
-	var uid := str(t.get("user_id", session().get("uid", "")))
-	var r := await _gravar_apelido(str(t.id_token), uid, apelido)
-	if r.ok:
-		var s := session()
-		s["nome"] = apelido
-		_save(s)
-	return r
+	apelido = _limpo(apelido)
+	var s := session()
+	if s.is_empty():
+		return {"ok": false, "erro": "SEM_SESSAO"}
+	for tentativa in 4:
+		var f := await _ler()
+		if not f.ok:
+			return f
+		var linhas: Array = f.linhas.duplicate()
+		var i := -1
+		for k in linhas.size():
+			if linhas[k][4] == str(s.uid):
+				i = k
+		if i < 0:
+			return {"ok": false, "erro": "SEM_SESSAO"}
+		var p: PackedStringArray = linhas[i]
+		p[2] = apelido
+		linhas[i] = p
+		var g := await _gravar(linhas, f.sha, "Apelido: " + str(s.get("conta", "")))
+		if g.ok:
+			s["nome"] = apelido
+			_save(s)
+			return {"ok": true}
+		if g.erro != "CONFLITO":
+			return g
+		await get_tree().create_timer(0.4 + randf() * 0.8).timeout
+	return {"ok": false, "erro": "CONFLITO"}
 
 
 # ================== MENSAGENS ==================
 
 static func mensagem(erro: String) -> String:
-	var e := erro.get_slice(" ", 0)
-	match e:
+	match erro:
 		"NOME_EM_USO": return "Nome da conta já em uso. Escolha outro."
 		"EMAIL_EXISTS": return "Já existe uma conta com esse e-mail. Use a aba Entrar."
-		"INVALID_EMAIL", "MISSING_EMAIL": return "Esse e-mail não é válido."
-		"WEAK_PASSWORD", "MISSING_PASSWORD": return "A senha precisa ter pelo menos 6 caracteres."
-		"EMAIL_NOT_FOUND", "INVALID_PASSWORD", "INVALID_LOGIN_CREDENTIALS": return "E-mail ou senha incorretos."
-		"USER_DISABLED": return "Essa conta foi desativada."
-		"TOO_MANY_ATTEMPTS_TRY_LATER": return "Muitas tentativas. Espere alguns minutos e tente de novo."
+		"INVALID_LOGIN_CREDENTIALS": return "E-mail ou senha incorretos."
 		"SEM_CONEXAO": return "Sem conexão com a internet. Verifique e tente de novo."
-		"OPERATION_NOT_ALLOWED", "PASSWORD_LOGIN_DISABLED": return "O login por e-mail não está ativado no servidor."
-		"TOKEN_EXPIRED", "INVALID_REFRESH_TOKEN", "USER_NOT_FOUND", "SEM_SESSAO": return "Sua sessão expirou. Entre na conta de novo."
+		"SERVIDOR_CONTAS": return "O servidor de contas não aceitou o acesso. Avise o dono do jogo."
+		"MUITOS_ACESSOS": return "Muitas pessoas usando agora. Espere um pouco e tente de novo."
+		"CONFLITO": return "Muitas contas sendo criadas ao mesmo tempo. Tente de novo."
+		"SEM_SESSAO": return "Sua sessão acabou. Entre na conta de novo."
 	return "Não deu certo (%s). Tente de novo." % erro

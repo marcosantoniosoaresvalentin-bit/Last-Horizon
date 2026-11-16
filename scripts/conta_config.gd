@@ -1,11 +1,15 @@
 extends RefCounted
-## Configuração do servidor de contas (Firebase Authentication).
-## API_KEY: "Chave de API da Web" do projeto no Firebase
-## (console.firebase.google.com → Configurações do projeto → Geral).
-## Enquanto as duas estiverem vazias, o jogo não pede conta.
-## Essa chave identifica o projeto e pode ficar no código; a segurança é do próprio Firebase.
+## Onde ficam as contas: um arquivo de texto num repositório PRIVADO do GitHub,
+## separado do repositório do jogo. Uma conta por linha.
+##
+## A chave de acesso (token) NÃO fica no código, porque o repositório do jogo é
+## público. Ela é guardada nos segredos do GitHub (CONTAS_TOKEN) e o robô que gera
+## o APK grava em res://segredos/token.txt. Sem esse arquivo, o jogo não pede conta.
+##
+## Solução provisória: quem tirar a chave de dentro do APK consegue ler e mexer no
+## arquivo de contas. Antes de publicar o jogo, trocar por um servidor próprio.
 
-const API_KEY := ""
-## "Código do projeto" (Project ID), na mesma tela. Usado para reservar os nomes de usuário
-## no Firestore, para dois jogadores nunca terem o mesmo nome.
-const PROJECT_ID := ""
+const OWNER := "marcosantoniosoaresvalentin-bit"
+const REPO := "last-horizon-contas"
+const FILE := "contas.txt"
+const TOKEN_PATH := "res://segredos/token.txt"

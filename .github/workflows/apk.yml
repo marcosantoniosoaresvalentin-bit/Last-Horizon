@@ -54,6 +54,14 @@ jobs:
           EOF
           done
 
+      - name: Chave do arquivo de contas (segredo CONTAS_TOKEN)
+        env:
+          CONTAS_TOKEN: ${{ secrets.CONTAS_TOKEN }}
+        run: |
+          mkdir -p segredos
+          printf '%s' "$CONTAS_TOKEN" > segredos/token.txt
+          if [ -s segredos/token.txt ]; then echo "Chave das contas: configurada"; else echo "Chave das contas: VAZIA (o jogo não vai pedir conta)"; fi
+
       - name: Importar o projeto
         run: ./godot --headless --import || ./godot --headless --editor --quit-after 300 || true
 
