@@ -1,9 +1,9 @@
 {
-  "version": 32,
-  "file": "update_32.zip",
-  "size": 3063360,
-  "sha256": "75fd4fce7bb5f118ea92cb8b8bb2ddef9a3a7f3d96ecc94631b661b9383ff852",
+  "version": 33,
+  "file": "update_33.zip",
+  "size": 3066056,
+  "sha256": "a39a13d5f18e175f176b91fb2551cdc1a80967dacea1e6b6aaaf2fdc587361b5",
   "min_build": 1,
-  "notes": "Árvore morre aos poucos (amarela, perde folhas, fica seca de pé, perde galhos); semente nova",
+  "notes": "Chuva mais realista: a primeira chuva não enche os rios, vários dias de chuva sobem aos poucos e transbordam; enxurrada fina e barrenta; lagoas baixam na seca; anos mais chuvosos; muda afogada na cheia morre",
   "date": "2026-11-16"
 }
