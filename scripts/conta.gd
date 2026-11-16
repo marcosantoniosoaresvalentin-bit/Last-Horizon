@@ -4,10 +4,12 @@ extends Node
 ## - Criar conta: e-mail, senha e nome de usuário (o nome vai no perfil da conta).
 ## - Entrar: e-mail e senha. Esqueci a senha: o Firebase manda um e-mail.
 ## - A sessão fica salva em user://conta.json; o jogo não pede login de novo.
-## - Trocar o nome: atualiza na conta (precisa de internet).
-## - Nome de usuário único: cada nome é reservado no Firestore (coleção "usernames",
-##   documento = nome normalizado). "Marcão", "marcao" e "MARCAO" são o mesmo nome.
-##   As regras de segurança do Firestore garantem que ninguém pega um nome já reservado.
+## - Nome da conta: ÚNICO e fixo. Reservado no Firestore (coleção "usernames",
+##   documento = nome normalizado), então "Marcão", "marcao" e "MARCAO" são o mesmo nome.
+##   Fica também no displayName da conta.
+## - Apelido no jogo: livre, pode repetir entre jogadores e mudar quando quiser.
+##   Fica no Firestore em users/<uid>.apelido (segue o jogador em outro celular).
+## Sessão salva: uid, email, conta (nome da conta), nome (apelido), refresh.
 ##
 ## As funções que falam com o servidor são "await": adicione este nó na cena
 ## (add_child) e chame, por exemplo:  var r = await conta.entrar(email, senha)
@@ -69,9 +71,9 @@ const _ACCENTS := {"á": "a", "à": "a", "â": "a", "ã": "a", "ä": "a", "é": 
 ## Explica o que está errado com o nome, ou "" se estiver bom.
 static func nome_invalido(nome: String) -> String:
 	if nome.length() < NAME_MIN:
-		return "O nome de usuário precisa ter pelo menos %d caracteres." % NAME_MIN
+		return "O nome da conta precisa ter pelo menos %d caracteres." % NAME_MIN
 	if nome.length() > NAME_MAX:
-		return "O nome de usuário pode ter no máximo %d caracteres." % NAME_MAX
+		return "O nome da conta pode ter no máximo %d caracteres." % NAME_MAX
 	var key := chave_nome(nome)
 	if key.length() != nome.length():
 		return "Use só letras, números, _ . ou - (sem espaços)."
@@ -180,7 +182,9 @@ func criar_conta(email: String, senha: String, nome: String) -> Dictionary:
 		return res
 	var u := await _json("update", {"idToken": r.idToken, "displayName": nome, "returnSecureToken": true})
 	var refresh := str(u.get("refreshToken", r.refreshToken)) if u.ok else str(r.refreshToken)
-	_save({"uid": r.localId, "email": r.get("email", email), "nome": nome, "refresh": refresh})
+	# o apelido começa igual ao nome da conta
+	await _gravar_apelido(str(r.idToken), str(r.localId), nome)
+	_save({"uid": r.localId, "email": r.get("email", email), "conta": nome, "nome": nome, "refresh": refresh})
 	return {"ok": true}
 
 
@@ -188,10 +192,14 @@ func entrar(email: String, senha: String) -> Dictionary:
 	var r := await _json("signInWithPassword", {"email": email, "password": senha, "returnSecureToken": true})
 	if not r.ok:
 		return r
-	var nome := str(r.get("displayName", ""))
-	if nome == "":
-		nome = email.get_slice("@", 0).left(20)
-	_save({"uid": r.localId, "email": r.get("email", email), "nome": nome, "refresh": r.refreshToken})
+	var conta := str(r.get("displayName", ""))
+	if conta == "":
+		conta = email.get_slice("@", 0).left(NAME_MAX)
+	var apelido := conta
+	var doc := await _post(_fs_url("users/" + str(r.localId)), "", "application/json", HTTPClient.METHOD_GET, str(r.idToken))
+	if doc.ok and doc.get("fields") is Dictionary and doc.fields.get("apelido") is Dictionary:
+		apelido = str(doc.fields.apelido.get("stringValue", conta))
+	_save({"uid": r.localId, "email": r.get("email", email), "conta": conta, "nome": apelido, "refresh": r.refreshToken})
 	return {"ok": true}
 
 
@@ -212,24 +220,33 @@ func _id_token() -> Dictionary:
 	return r
 
 
-func trocar_nome(nome: String) -> Dictionary:
+## Apelido: de 3 a 20 caracteres, qualquer letra, pode ter espaço e repetir.
+static func apelido_invalido(nome: String) -> String:
+	var n := nome.strip_edges()
+	if n.length() < 3:
+		return "O apelido precisa ter pelo menos 3 caracteres."
+	if n.length() > NAME_MAX:
+		return "O apelido pode ter no máximo %d caracteres." % NAME_MAX
+	return ""
+
+
+func _gravar_apelido(id_token: String, uid: String, apelido: String) -> Dictionary:
+	var body := {"fields": {"apelido": {"stringValue": apelido}}}
+	return await _post(_fs_url("users/%s?updateMask.fieldPaths=apelido" % uid), JSON.stringify(body),
+		"application/json", HTTPClient.METHOD_PATCH, id_token)
+
+
+## Troca o apelido no jogo (pode ser igual ao de outros jogadores).
+func trocar_apelido(apelido: String) -> Dictionary:
+	apelido = apelido.strip_edges()
 	var t := await _id_token()
 	if not t.ok:
 		return t
-	var old_key := chave_nome(str(session().get("nome", "")))
-	var new_key := chave_nome(nome)
-	if new_key != old_key:
-		var res := await _reservar(str(t.id_token), str(t.get("user_id", session().get("uid", ""))), nome)
-		if not res.ok:
-			return res
-	var r := await _json("update", {"idToken": t.id_token, "displayName": nome, "returnSecureToken": true})
-	if r.ok and new_key != old_key and old_key != "":
-		await _liberar(str(t.id_token), old_key)
+	var uid := str(t.get("user_id", session().get("uid", "")))
+	var r := await _gravar_apelido(str(t.id_token), uid, apelido)
 	if r.ok:
 		var s := session()
-		s["nome"] = nome
-		if r.has("refreshToken"):
-			s["refresh"] = r.refreshToken
+		s["nome"] = apelido
 		_save(s)
 	return r
 
@@ -239,7 +256,7 @@ func trocar_nome(nome: String) -> Dictionary:
 static func mensagem(erro: String) -> String:
 	var e := erro.get_slice(" ", 0)
 	match e:
-		"NOME_EM_USO": return "Nome de usuário já em uso. Escolha outro."
+		"NOME_EM_USO": return "Nome da conta já em uso. Escolha outro."
 		"EMAIL_EXISTS": return "Já existe uma conta com esse e-mail. Use a aba Entrar."
 		"INVALID_EMAIL", "MISSING_EMAIL": return "Esse e-mail não é válido."
 		"WEAK_PASSWORD", "MISSING_PASSWORD": return "A senha precisa ter pelo menos 6 caracteres."

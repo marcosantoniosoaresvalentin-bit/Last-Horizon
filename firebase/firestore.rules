@@ -2,7 +2,7 @@ rules_version = '2';
 // Regras do Firestore do Last Horizon.
 // Cole em: Firebase → Firestore Database → Regras → Publicar.
 //
-// usernames/{nome}: reserva de nomes de usuário. O id do documento é o nome
+// usernames/{nome}: reserva dos nomes de conta (únicos). O id do documento é o nome
 // normalizado (minúsculo, sem acento). Qualquer um pode ver se um nome está
 // em uso; só dá para reservar um nome livre para a própria conta, e só o dono
 // pode liberar (apagar). Ninguém consegue mudar o dono de um nome.
@@ -19,6 +19,18 @@ service cloud.firestore {
         && request.resource.data.nome.size() <= 20;
       allow update: if false;
       allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+    // users/{uid}: apelido no jogo (livre, pode repetir). Qualquer jogador logado
+    // pode ver; só o dono escreve.
+    match /users/{uid} {
+      allow get: if request.auth != null;
+      allow list: if false;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['apelido'])
+        && request.resource.data.apelido is string
+        && request.resource.data.apelido.size() >= 3
+        && request.resource.data.apelido.size() <= 20;
+      allow delete: if false;
     }
   }
 }

@@ -1,6 +1,6 @@
 extends RefCounted
-## Perfil do jogador neste celular: nome de usuário e personagem escolhido.
-## (Quando as contas online estiverem ligadas, o nome também vai para a conta.)
+## Perfil do jogador neste celular: apelido no jogo e personagem escolhido.
+## Com conta, o apelido vem da conta (users/<uid>.apelido).
 
 const Conta := preload("res://scripts/conta.gd")
 const PATH := "user://perfil.json"
@@ -27,7 +27,7 @@ static func _write(d: Dictionary) -> void:
 
 
 static func nome() -> String:
-	# com conta, o nome que vale é o da conta
+	# com conta, o nome que vale é o apelido salvo na conta
 	var c := Conta.session()
 	if not c.is_empty() and str(c.get("nome", "")) != "":
 		return str(c.nome)

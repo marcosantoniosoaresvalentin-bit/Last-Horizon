@@ -95,7 +95,7 @@ func _set_mode(mode: String) -> void:
 	_fields.clear()
 	_say("")
 	if mode == "criar":
-		_field("nome", "Nome de usuário", "Letras, números, _ . -  (sem espaços)", false, Conta.NAME_MAX)
+		_field("nome", "Nome da conta (só seu, ninguém pode repetir)", "Letras, números, _ . -  (sem espaços)", false, Conta.NAME_MAX)
 	_field("email", "E-mail", "seu@email.com", false, 120)
 	_field("senha", "Senha", "Pelo menos 6 caracteres" if mode == "criar" else "Sua senha", true, 64)
 	_submit = Menu._button("Criar conta" if mode == "criar" else "Entrar", true)

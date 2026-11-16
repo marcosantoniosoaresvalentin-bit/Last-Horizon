@@ -1,9 +1,9 @@
 {
-  "version": 20,
-  "file": "update_20.zip",
-  "size": 2722978,
-  "sha256": "19cc656ec8306504826077c1876d70c0dc5adc6fe2b4b60803f433c9163aa742",
+  "version": 21,
+  "file": "update_21.zip",
+  "size": 2723283,
+  "sha256": "cb60caa39a8f0253b839954137b6cf11eac19e666f2b823de2bb4aab93ca3d96",
   "min_build": 1,
-  "notes": "Nomes de usuário únicos: aparece Nome de usuário já em uso",
+  "notes": "Nome da conta único e apelido no jogo livre",
   "date": "2026-11-16"
 }

@@ -520,18 +520,18 @@ func _page_settings() -> Control:
 	box.add_theme_constant_override("separation", 12)
 	mc.add_child(box)
 	var l := Label.new()
-	l.text = "Nome de usuário"
+	l.text = "Apelido no jogo"
 	l.add_theme_font_size_override("font_size", 22)
 	l.add_theme_color_override("font_color", C_BONE)
 	box.add_child(l)
-	box.add_child(_note("É o seu nome dentro do jogo e é só seu: ninguém pode usar um nome igual. Você pode mudar quando quiser.", C_DIM))
+	box.add_child(_note("É como você aparece dentro do jogo. Pode ser qualquer nome, até igual ao de outro jogador, e você muda quando quiser.", C_DIM))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
 	box.add_child(row)
 	var edit := LineEdit.new()
 	edit.text = Perfil.nome()
 	edit.max_length = Perfil.MAX_NAME
-	edit.placeholder_text = "Seu nome"
+	edit.placeholder_text = "Seu apelido"
 	edit.custom_minimum_size = Vector2(0, 56)
 	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	edit.add_theme_font_size_override("font_size", 22)
@@ -543,7 +543,7 @@ func _page_settings() -> Control:
 	box.add_child(msg)
 	var do_save := func():
 		var n := edit.text.strip_edges()
-		var problema := Conta.nome_invalido(n) if Conta.logged_in() else ("O nome precisa ter pelo menos 3 letras." if n.length() < 3 else "")
+		var problema := Conta.apelido_invalido(n)
 		if problema != "":
 			msg.text = problema
 			msg.add_theme_color_override("font_color", C_DANGER)
@@ -552,7 +552,7 @@ func _page_settings() -> Control:
 			save.disabled = true
 			msg.text = "Salvando na sua conta…"
 			msg.add_theme_color_override("font_color", C_DIM)
-			var r: Dictionary = await _conta.trocar_nome(n)
+			var r: Dictionary = await _conta.trocar_apelido(n)
 			if not is_instance_valid(save):
 				return
 			save.disabled = false
@@ -562,7 +562,7 @@ func _page_settings() -> Control:
 				return
 		Perfil.set_nome(n)
 		edit.text = Perfil.nome()
-		msg.text = "Nome salvo."
+		msg.text = "Apelido salvo."
 		msg.add_theme_color_override("font_color", Color(0.6, 0.85, 0.5))
 		_update_name_label()
 	save.pressed.connect(do_save)
@@ -587,6 +587,9 @@ func _page_settings() -> Control:
 		at.text = "Conta"
 		at.add_theme_font_size_override("font_size", 22)
 		ai.add_child(at)
+		var conta_nome := str(s.get("conta", ""))
+		if conta_nome != "":
+			ai.add_child(_note("Nome da conta: %s  (único, não muda)" % conta_nome, C_BONE))
 		ai.add_child(_note(str(s.get("email", "")), C_DIM))
 		var out := _button("Sair da conta")
 		out.custom_minimum_size = Vector2(190, 54)
