@@ -1,9 +1,9 @@
 {
-  "version": 19,
-  "file": "update_19.zip",
-  "size": 2721565,
-  "sha256": "9bc90691ac33763566a1bc13f9f41583fcfda114679266b666b201b740100e3a",
+  "version": 20,
+  "file": "update_20.zip",
+  "size": 2722978,
+  "sha256": "19cc656ec8306504826077c1876d70c0dc5adc6fe2b4b60803f433c9163aa742",
   "min_build": 1,
-  "notes": "Sistema de contas: criar conta (nome, e-mail, senha), entrar, esqueci a senha, trocar nome e sair",
+  "notes": "Nomes de usuário únicos: aparece Nome de usuário já em uso",
   "date": "2026-11-16"
 }

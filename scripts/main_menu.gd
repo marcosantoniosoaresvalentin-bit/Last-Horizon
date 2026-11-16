@@ -524,7 +524,7 @@ func _page_settings() -> Control:
 	l.add_theme_font_size_override("font_size", 22)
 	l.add_theme_color_override("font_color", C_BONE)
 	box.add_child(l)
-	box.add_child(_note("É o seu nome dentro do jogo. Você pode mudar quando quiser.", C_DIM))
+	box.add_child(_note("É o seu nome dentro do jogo e é só seu: ninguém pode usar um nome igual. Você pode mudar quando quiser.", C_DIM))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
 	box.add_child(row)
@@ -543,8 +543,9 @@ func _page_settings() -> Control:
 	box.add_child(msg)
 	var do_save := func():
 		var n := edit.text.strip_edges()
-		if n.length() < 3:
-			msg.text = "O nome precisa ter pelo menos 3 letras."
+		var problema := Conta.nome_invalido(n) if Conta.logged_in() else ("O nome precisa ter pelo menos 3 letras." if n.length() < 3 else "")
+		if problema != "":
+			msg.text = problema
 			msg.add_theme_color_override("font_color", C_DANGER)
 			return
 		if Conta.logged_in():

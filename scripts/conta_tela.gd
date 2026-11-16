@@ -95,7 +95,7 @@ func _set_mode(mode: String) -> void:
 	_fields.clear()
 	_say("")
 	if mode == "criar":
-		_field("nome", "Nome de usuário", "Como você vai aparecer no jogo", false, Perfil.MAX_NAME)
+		_field("nome", "Nome de usuário", "Letras, números, _ . -  (sem espaços)", false, Conta.NAME_MAX)
 	_field("email", "E-mail", "seu@email.com", false, 120)
 	_field("senha", "Senha", "Pelo menos 6 caracteres" if mode == "criar" else "Sua senha", true, 64)
 	_submit = Menu._button("Criar conta" if mode == "criar" else "Entrar", true)
@@ -169,9 +169,9 @@ func _go() -> void:
 	var email := _val("email").to_lower()
 	var senha := (_fields["senha"] as LineEdit).text
 	if _mode == "criar":
-		var nome := _val("nome")
-		if nome.length() < 3:
-			_say("O nome de usuário precisa ter pelo menos 3 letras.", C_DANGER)
+		var problema := Conta.nome_invalido(_val("nome"))
+		if problema != "":
+			_say(problema, C_DANGER)
 			return
 	if not _email_ok(email):
 		_say("Escreva um e-mail válido, como nome@gmail.com.", C_DANGER)
