@@ -1,8 +1,10 @@
 extends Node
 ## Simulação da Terra: relevo, estações do ano, água e solo.
 ##
-## - O ano tem estação chuvosa (cheia) e estação seca. Na cheia chove muito
-##   e as baixadas viram lagos; na seca o sol evapora a água e eles somem.
+## - Calendário: 1 dia = 8 minutos, 1 mês = 5 dias, 1 ano = 12 meses.
+##   Chove de acordo com o mês: muito de dezembro a abril, as chuvas param em
+##   maio e junho, seca forte de julho a setembro (quase sem chuva, falta água)
+##   e as chuvas voltam aos poucos em outubro e novembro.
 ## - A água escorre morro abaixo, empoça nos lugares fundos, infiltra no solo
 ##   e brota como nascente no pé da serra.
 ## - A argila nasce da rocha: feldspato e mica se decompõem com água e calor,
@@ -32,8 +34,13 @@ const STEPS_PER_SEC := 6.0
 const STEP_MULT := 5.0
 const STEPS_DAY := 2880           # um dia de jogo = 8 minutos
 const START_HOUR := 7.0
-const SEASON_DAYS := 4.0          # cada estação dura 4 dias de jogo
-const YEAR_DAYS := SEASON_DAYS * 2.0
+const DAYS_PER_MONTH := 5         # 1 mês do jogo = 5 dias (40 minutos jogando)
+const YEAR_DAYS := DAYS_PER_MONTH * 12   # 1 ano = 12 meses = 60 dias
+const START_MONTH := 2            # o jogo começa em 1º de março (0 = janeiro)
+const MONTHS := ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+	"Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+## Quanto chove em cada mês (0 = nada, 1 = o máximo).
+const RAIN_BY_MONTH := [0.9, 1.0, 1.0, 0.8, 0.5, 0.2, 0.05, 0.02, 0.05, 0.2, 0.45, 0.7]
 
 # terreno e água
 var ter := PackedFloat32Array()
@@ -123,25 +130,43 @@ func sun() -> float:
 	return clampf(sin((hour() - 6.0) / 12.0 * PI), 0.0, 1.0)
 
 
+## Dias passados desde 1º de janeiro do ano 1 (com fração).
+func _days() -> float:
+	return START_MONTH * DAYS_PER_MONTH + START_HOUR / 24.0 + float(steps) / STEPS_DAY
+
+
+## Dia do mês (1 a 5).
 func day() -> int:
-	return int((START_HOUR / 24.0 + float(steps) / STEPS_DAY)) + 1
+	return int(fmod(_days(), DAYS_PER_MONTH)) + 1
 
 
-## Fase do ano: 0 = começo da cheia, 0.5 = começo da seca.
-func year_phase() -> float:
-	return fmod((START_HOUR / 24.0 + float(steps) / STEPS_DAY) / YEAR_DAYS, 1.0)
+## Mês atual (0 = janeiro).
+func month() -> int:
+	return int(_days() / DAYS_PER_MONTH) % 12
 
 
-## Quanto o ano está "molhado" agora: 1 no auge da cheia, 0 no auge da seca.
+func month_name() -> String:
+	return MONTHS[month()]
+
+
+func year() -> int:
+	return int(_days() / YEAR_DAYS) + 1
+
+
+## Quanto está chovendo nesta época (0 a 1), passando suave de um mês para o outro.
 func wetness() -> float:
-	return 0.5 + 0.5 * sin(year_phase() * TAU)
+	var m := _days() / DAYS_PER_MONTH - 0.5
+	var i := floori(m)
+	var t := smoothstep(0.0, 1.0, m - i)
+	return lerpf(RAIN_BY_MONTH[posmod(i, 12)], RAIN_BY_MONTH[posmod(i + 1, 12)], t)
 
 
 func season_name() -> String:
-	var p := year_phase()
-	if p < 0.5:
-		return "Cheia" if p > 0.08 else "Começo da cheia"
-	return "Seca" if p > 0.58 else "Começo da seca"
+	match month():
+		11, 0, 1, 2, 3: return "Época das chuvas"
+		4, 5: return "Fim das chuvas"
+		6, 7, 8: return "Seca"
+		_: return "Volta das chuvas"
 
 
 # ================== LEITURA PELA TELA ==================
@@ -532,13 +557,14 @@ func _weather_step() -> void:
 		rain_t -= 1
 		if rain_t <= 0:
 			raining = false
-			# na cheia o tempo seco dura pouco; na seca dura muito
-			dry_t = int(lerpf(2600.0, 250.0, wet) * randf_range(0.6, 1.4))
+			# nas chuvas o tempo firme dura pouco; na seca passa quase um mês sem chover
+			dry_t = int(lerpf(STEPS_DAY * 4.5, 1000.0, pow(wet, 0.6)) * randf_range(0.6, 1.4))
 	else:
 		dry_t -= 1
 		if dry_t <= 0:
 			raining = true
-			rain_t = int(lerpf(120.0, 900.0, wet) * randf_range(0.6, 1.4))
+			# pancadas: algumas horas de chuva e depois para
+			rain_t = int(lerpf(100.0, 450.0, wet) * randf_range(0.6, 1.4))
 
 
 # ================== PASSO DA SIMULAÇÃO ==================
@@ -561,9 +587,9 @@ func _step(rain_now: bool, mult: float) -> void:
 	var mh := max_h
 	var season_wet := wetness()
 	# o sol da seca evapora bem mais; ao meio-dia evapora muito, à noite quase nada
-	var evap := (0.00002 if rain_now else lerpf(0.0002, 0.00006, season_wet) * (0.3 + 1.4 * sun())) * mult
+	var evap := (0.00001 if rain_now else lerpf(0.00005, 0.00003, season_wet) * (0.3 + 1.4 * sun())) * mult
 	# boa parte da chuva entra na terra; só escorre quando chove forte ou o chão está encharcado
-	var rain := 0.00045 * mult
+	var rain := 0.00038 * mult
 	var inf_max := 0.0005 * mult
 	for i in N:
 		var w := Wt[i]
@@ -700,7 +726,7 @@ func _slow_step(mult: float, season_wet: float) -> void:
 			moved[i] += keep
 			i += 1
 
-	var loss := 0.00003 * mult * lerpf(1.8, 0.7, season_wet)
+	var loss := 0.0000075 * mult * lerpf(1.8, 0.7, season_wet)
 	var grow := 0.00035 * mult
 	for c in N:
 		var w := Wt[c]
@@ -738,7 +764,7 @@ func _slow_step(mult: float, season_wet: float) -> void:
 		# lembrança de alagamento
 		WM[c] = maxf(WM[c] * (1.0 - 0.0004 * mult), 1.0 if w > 0.1 else 0.0)
 		# leito de lagoa: só água parada conta (rio correndo não); some bem devagar (dura a seca inteira)
-		BD[c] = maxf(BD[c] * (1.0 - 0.00001 * mult), 1.0 if w > 0.1 and speed < 0.2 else 0.0)
+		BD[c] = maxf(BD[c] * (1.0 - 0.0000012 * mult), 1.0 if w > 0.1 and speed < 0.2 else 0.0)
 		# superfície: molha com chuva ou água, seca com o sol (mais na seca)
 		if w > 0.02 or raining_now:
 			TP[c] = 1.0

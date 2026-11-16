@@ -1,9 +1,9 @@
 {
-  "version": 16,
-  "file": "update_16.zip",
-  "size": 2705081,
-  "sha256": "aedb2cb038afbfc660a5d9bfc58ac1eb6577167ff186a24384e994ff29dfb14d",
+  "version": 17,
+  "file": "update_17.zip",
+  "size": 2705551,
+  "sha256": "bd83e41bab674328dcda519aea3e752902ccbc2af8b2f143de96cbd4b60e62dc",
   "min_build": 1,
-  "notes": "Argila só em 5 jazidas de terra avermelhada; chuva vira filetes nos sulcos e poças com borda suave, sem lâmina de água no mapa todo",
+  "notes": "Calendário de 12 meses (1 mês = 5 dias): chuva de dezembro a abril, seca forte de julho a setembro com falta de água",
   "date": "2026-11-16"
 }

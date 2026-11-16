@@ -758,7 +758,7 @@ func _process(delta: float) -> void:
 			Diag.marcar("jogando")
 	_grass_mat.set_shader_parameter("player_pos", _player.global_position)
 	var h: float = sim.hour()
-	_clock.text = "Dia %d · %02d:%02d · %s%s" % [sim.day(), int(h), int(fmod(h, 1.0) * 60.0), sim.season_name(), " · Chovendo" if sim.raining else ""]
+	_clock.text = "%d de %s, ano %d · %02d:%02d · %s%s" % [sim.day(), sim.month_name(), sim.year(), int(h), int(fmod(h, 1.0) * 60.0), sim.season_name(), " · Chovendo" if sim.raining else ""]
 	_soil_timer -= delta
 	if _soil_timer <= 0.0:
 		_soil_timer = 2.0
