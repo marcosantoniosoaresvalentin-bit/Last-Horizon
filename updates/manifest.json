@@ -1,9 +1,9 @@
 {
-  "version": 14,
-  "file": "update_14.zip",
-  "size": 2703060,
-  "sha256": "0de7d0497cce0cc0ca3cc2bdda348036c250f2e7898e5d87e8ff7e6819dddd5b",
+  "version": 15,
+  "file": "update_15.zip",
+  "size": 2703870,
+  "sha256": "f8fed51ea20fd692e7326e8eb7b56744c5694bd7eb9ce23b2fe48fd59304b96d",
   "min_build": 1,
-  "notes": "Corrige joystick invisível, botão Menu que sumiu e erro a cada toque na tela",
+  "notes": "Ecossistema: argila só na beira das lagoas, sol seca as lagoas, fundo vira lama rachada e a chuva enche de novo",
   "date": "2026-11-16"
 }

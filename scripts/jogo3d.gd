@@ -21,8 +21,8 @@ const ANIMS := {"Idle": "parado", "Walk": "andando", "Run": "correndo"}
 const TERRAIN_SHADER := """
 shader_type spatial;
 uniform float wet = 0.0;
-uniform sampler2D soil_a : filter_linear, repeat_disable;   // R argila, G areia, B umidade, A grama
-uniform sampler2D soil_b : filter_linear, repeat_disable;   // R caulinita, G ilita, B esmectita
+uniform sampler2D soil_a : filter_linear, repeat_disable;   // R argila da beira, G areia, B umidade do solo, A grama
+uniform sampler2D soil_b : filter_linear, repeat_disable;   // R leito de lagoa, G umidade da superfície
 uniform vec2 world_size = vec2(640.0, 480.0);
 varying vec3 wpos;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -49,21 +49,22 @@ void fragment(){
 	vec4 b = texture(soil_b, uv);
 	float rock = COLOR.a;
 	float clay = a.r; float sand = a.g; float moist = a.b; float grass = a.a;
-	vec3 kao = vec3(0.70, 0.45, 0.30);   // caulinita: latossolo vermelho-amarelo
-	vec3 ili = vec3(0.52, 0.47, 0.38);   // ilita: marrom acinzentado
-	vec3 sme = vec3(0.34, 0.31, 0.26);   // esmectita: cinza escuro
-	float tsum = max(b.r + b.g + b.b, 0.01);
-	vec3 clayc = (kao * b.r + ili * b.g + sme * b.b) / tsum;
+	float bed = smoothstep(0.3, 0.7, b.r);    // leito de lagoa (com ou sem água)
+	float surf = b.g;                          // umidade da superfície
 	vec3 loam = vec3(0.34, 0.25, 0.17);
 	vec3 sandc = vec3(0.74, 0.64, 0.47);
-	vec3 soil = mix(loam, clayc, smoothstep(0.15, 0.6, clay));
-	soil = mix(soil, sandc, sand * 0.8 * (1.0 - clay));
-	float soaked = smoothstep(0.55, 0.95, moist);
+	vec3 clayc = vec3(0.47, 0.45, 0.41);       // argila cinza da beira
+	vec3 mud = vec3(0.31, 0.27, 0.21);         // lama do fundo
+	vec3 soil = mix(loam, sandc, sand * 0.8);
+	soil = mix(soil, clayc, smoothstep(0.1, 0.5, clay) * (1.0 - bed));
+	soil = mix(soil, mud, bed);
+	float soaked = smoothstep(0.5, 0.9, surf);
 	soil *= mix(1.0, 0.55, soaked);
-	// barro seco racha; a esmectita racha em placas grandes e fundas
-	float dry_clay = smoothstep(0.35, 0.7, clay) * (1.0 - soaked) * (1.0 - smoothstep(0.2, 0.6, grass));
-	float cr = cracks(wpos.xz * mix(2.2, 0.9, b.b / tsum));
-	soil = mix(soil, soil * 0.3, cr * dry_clay * (0.35 + 0.65 * b.b / tsum));
+	// fundo de lagoa que secou: a lama clareia e racha em placas
+	float dry_bed = bed * (1.0 - smoothstep(0.25, 0.6, surf)) * (1.0 - smoothstep(0.2, 0.6, grass));
+	float cr = cracks(wpos.xz * 1.1);
+	soil = mix(soil, soil * 1.35 + vec3(0.04, 0.035, 0.02), dry_bed * 0.6);
+	soil = mix(soil, soil * 0.28, cr * dry_bed);
 	// grama: verde com água no solo, cor de palha na seca
 	vec3 green = vec3(0.26, 0.36, 0.13);
 	vec3 straw = vec3(0.60, 0.54, 0.30);
@@ -198,7 +199,7 @@ var _refresh_timer := 0.0
 
 # coleta de argila
 const BAG_MAX := 30.0
-var _bag := [0.0, 0.0, 0.0]      # kg de caulinita, ilita e esmectita
+var _bag := 0.0                  # kg de argila na mochila
 var _dig_btn: Button
 var _dig_bar: ProgressBar
 var _inv_label: Label
@@ -775,18 +776,14 @@ static func _kg(v: float) -> String:
 
 
 func _bag_total() -> float:
-	return _bag[0] + _bag[1] + _bag[2]
+	return _bag
 
 
 func _update_inventory() -> void:
 	if _bag_total() <= 0.0:
 		_inv_label.text = ""
 		return
-	var parts := []
-	for k in 3:
-		if _bag[k] > 0.0:
-			parts.append("%s %s kg" % [MundoSim.CLAY_NAMES[k], _kg(_bag[k])])
-	_inv_label.text = "Mochila: " + " · ".join(parts) + "  (%s/%d kg)" % [_kg(_bag_total()), int(BAG_MAX)]
+	_inv_label.text = "Mochila: argila %s kg  (%s/%d kg)" % [_kg(_bag), _kg(_bag_total()), int(BAG_MAX)]
 
 
 func _show_toast(text: String) -> void:
@@ -822,7 +819,7 @@ func _update_dig(delta: float) -> void:
 	var ok: bool = not d.is_empty() and d.clay >= 0.35 and _player_depth() < 0.8
 	_dig_btn.visible = ok
 	if ok:
-		_dig_btn.text = "Pegar argila (%s)" % MundoSim.CLAY_NAMES[d.kind]
+		_dig_btn.text = "Pegar argila"
 
 
 func _start_dig() -> void:
@@ -863,11 +860,12 @@ func _finish_dig() -> void:
 	var purity: float = clampf(1.0 - d.sand * 0.6, 0.3, 1.0)
 	var kg: float = 2.0 * d.clay * (1.3 if wet else 0.7) * purity
 	kg = minf(kg, BAG_MAX - _bag_total())
-	_bag[d.kind] += kg
-	sim.dig(_dig_cell, kg * 0.002)
+	_bag += kg
+	# cada punhado gasta a argila da beira; ela volta a se formar devagar
+	sim.dig(_dig_cell, kg * 0.04)
 	_update_inventory()
 	var state := "molhada, macia" if wet else "seca, em torrões"
-	_show_toast("+%s kg de argila %s (%s, %d%% pura)" % [_kg(kg), MundoSim.CLAY_NAMES[d.kind], state, int(purity * 100)])
+	_show_toast("+%s kg de argila (%s, %d%% pura)" % [_kg(kg), state, int(purity * 100)])
 	_dig_check = 0.0
 
 
