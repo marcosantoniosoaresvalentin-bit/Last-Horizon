@@ -18,6 +18,7 @@ const PASSO_NOME := {
 	"enchendo lagoas": "a montagem das lagoas",
 	"carregando personagem": "o carregamento do personagem",
 	"plantando grama": "a montagem da grama",
+	"plantando arvores": "a montagem da floresta",
 	"entrando no mundo": "a entrada no mundo",
 	"jogando": "o jogo",
 }

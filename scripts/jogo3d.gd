@@ -9,6 +9,7 @@ const Mundos := preload("res://scripts/mundos.gd")
 const Perfil := preload("res://scripts/perfil.gd")
 const Calendario := preload("res://scripts/ui/calendario.gd")
 const Mochila := preload("res://scripts/ui/mochila.gd")
+const Arvores := preload("res://scripts/world/arvores.gd")
 const SAVE_EVERY := 60.0     # salva o mundo a cada minuto
 
 const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
@@ -246,6 +247,7 @@ var _w_arr := []
 var _world_id := ""
 var _cal: Control = null
 var _bag_ui: Control = null
+var _arvores: Node3D = null
 var _save_timer := SAVE_EVERY
 const DEEP := 0.12        # água funda o bastante para virar lagoa ou poça na tela; a rasa só molha o chão
 
@@ -524,6 +526,13 @@ func _on_world_ready() -> void:
 	for k in 3:
 		_grass_meshes.append(_make_grass_mesh(k))
 	_update_grass(true)
+	Diag.marcar("plantando arvores")
+	await _set_loading("Crescendo a floresta…")
+	var t0 := Time.get_ticks_msec()
+	_arvores = Arvores.new()
+	add_child(_arvores)
+	_arvores.build(self, int(sim.world_seed))
+	print("árvores: %d em %d ms" % [_arvores.trees.size(), Time.get_ticks_msec() - t0])
 	_loading.visible = false
 	_loading_bg.visible = false
 	# hora e dia não aparecem na tela (o calendário vai mostrar a data)
@@ -1056,6 +1065,8 @@ func _move_player(delta: float) -> void:
 		_play("Run" if running else "Walk", water_slow)
 	elif not _digging:
 		_play("Idle")
+	if _arvores:
+		p = _arvores.push_out(p)   # não atravessa os troncos
 	p.y = height_at(p.x, p.z) - minf(depth, 0.9) * 0.5
 	_player.position = p
 	_player.rotation.y = _face

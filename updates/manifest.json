@@ -1,9 +1,9 @@
 {
-  "version": 26,
-  "file": "update_26.zip",
-  "size": 3048481,
-  "sha256": "359095a8b1b1175352f709d921737021c4479d2cce9aa2e0ae160bfac4ca1103",
+  "version": 27,
+  "file": "update_27.zip",
+  "size": 3054311,
+  "sha256": "e0f08a4644a5612a9d9f5687e3b60cc90ca757f79ec3d52b3b2a70f206db1163",
   "min_build": 1,
-  "notes": "Mochila: tela de equipamento e inventário com o personagem em 3D e botão de mochila",
+  "notes": "Floresta de Cedrinho (árvore da Amazônia boa para tábuas e mata-junta)",
   "date": "2026-11-16"
 }
