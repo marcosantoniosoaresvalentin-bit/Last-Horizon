@@ -24,6 +24,8 @@ const GalhoGeo := preload("res://scripts/world/galho_geo.gd")
 const Pedras := preload("res://scripts/world/pedras.gd")
 const Lascar := preload("res://scripts/world/lascar.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
+const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
+const SAW_SPEED := 2.6            # quão rápido a serra acompanha o dedo (curso inteiro ≈ 0,8 s)
 const Maos := preload("res://scripts/world/maos.gd")
 const Corte2 := preload("res://scripts/world/corte.gd")
 ## Onda na água: um anel que abre e some (passos dentro d'água).
@@ -346,6 +348,9 @@ var _work := {}                   # trabalho escolhido: {i (tora apoiada), modo,
 var _sawing := false              # serrando a rodela (vai e vem sozinho até terminar ou parar)
 var _saw_t := 0.0
 var _saw_half := 0
+var _saw_ctrl: Control = null     # trilho para subir e descer o dedo (vai e vem da serra)
+var _saw_p := 0.0                 # onde a serra está: 0 puxada, 1 empurrada
+var _saw_side := 0                # último fim de curso alcançado: 1 frente, -1 trás
 const SAW_CYCLE := 1.5            # segundos por ida e volta da serra (devagar)
 var _dur := {}                    # durabilidade: id da ferramenta -> [usos que faltam de cada uma]
 var _walking := false             # o personagem indo sozinho até um lugar
@@ -2465,10 +2470,32 @@ func _begin_saw() -> void:
 		_chop_pose.saw_depth = _saw_depth(wi, rend)
 	_chop_btn.visible = true
 	_chop_btn.text = "Parar"
+	# o jogador faz o vai e vem: sobe o dedo empurra, desce puxa
+	_saw_p = 0.0
+	_saw_side = -1
+	if _saw_ctrl == null:
+		_saw_ctrl = SerraCtrl.new()
+		_saw_ctrl.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+		_saw_ctrl.offset_left = -150
+		_saw_ctrl.offset_right = -30
+		_saw_ctrl.offset_top = -470
+		_saw_ctrl.offset_bottom = -20
+		_hud.add_child(_saw_ctrl)
+	_saw_ctrl.value = 0.0
+	_saw_ctrl.visible = true
+	_saw_ctrl.queue_redraw()
+	_jump_btn.visible = false
+	for b in [_log_btn, _ctx_btn, _work_btn, _pick_btn, _vine_btn, _plant_btn]:
+		if b:
+			b.visible = false
+	_show_toast("Arraste o pegador: para cima empurra a serra, para baixo puxa.")
 
 
 func _stop_saw() -> void:
 	_sawing = false
+	if _saw_ctrl:
+		_saw_ctrl.visible = false
+	_jump_btn.visible = true
 	_chop_log = {}
 	if _chop_pose:
 		_chop_pose.sawing = false
@@ -2489,18 +2516,20 @@ func _saw_update(delta: float) -> void:
 	if wi < 0 or wi >= _apoios.rested.size() or we == 0 or _mao != "serra":
 		_stop_saw()
 		return
+	# a serra segue o dedo (com um limite de velocidade: braço de verdade)
+	var want: float = float(_saw_ctrl.value) if _saw_ctrl else _saw_p
+	_saw_p = move_toward(_saw_p, want, SAW_SPEED * delta)
 	_saw_t += delta
-	var phase := fmod(_saw_t / SAW_CYCLE, 1.0)
 	if _chop_pose:
-		_chop_pose.saw_phase = phase
+		_chop_pose.saw_pos = _saw_p * 2.0 - 1.0
 	var at: Vector3 = _chop_log.point
-	# um som a cada passada (empurrando e puxando)
-	var half := int(_saw_t / (SAW_CYCLE * 0.5))
-	if half > _saw_half:
-		_saw_half = half
-		Sons.play_at(self, "serra", at, 0.0, 0.92 if half % 2 == 0 else 1.0)
+	# chegou num fim de curso vindo do outro: uma passada (empurrando ou puxando)
+	var reached := 1 if _saw_p > 0.85 else (-1 if _saw_p < 0.15 else 0)
+	if reached != 0 and reached != _saw_side:
+		_saw_side = reached
+		Sons.play_at(self, "serra", at, 0.0, 0.92 if reached > 0 else 1.0)
 		_sawdust(at)
-		if half % 2 == 0:
+		if reached < 0:
 			# uma ida e volta inteira: o corte desce um pouco e a serra gasta
 			var end_before: Vector3 = _apoios.end_point(wi, we)
 			var dir: Vector3 = _apoios.info(wi).dir
@@ -3487,7 +3516,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn]:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl]:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:

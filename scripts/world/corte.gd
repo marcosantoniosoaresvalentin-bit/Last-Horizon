@@ -434,6 +434,7 @@ class ChopPose extends SkeletonModifier3D:
 	var down_hit := -42.0         # onde o golpe de cima para baixo para (graus): -42 chão, -16 cintura
 	var sawing := false           # serrando (vai e vem com a serra de pedra)
 	var saw_phase := 0.0          # 0 a 1: uma ida e volta
+	var saw_pos := -1.0           # -1 puxada (perto do corpo) a 1 empurrada (o jogador controla)
 	var saw_point := Vector3.ZERO # onde a serra corta (no mundo, em cima da tora)
 	var saw_depth := 0.0          # quanto o corte já desceu (m)
 	var knapping := false         # agachado batendo uma pedra na outra (modelando)
@@ -546,7 +547,7 @@ class ChopPose extends SkeletonModifier3D:
 		# a serra vai do personagem até o corte (deitada, na horizontal)
 		var flat := pt - up * pt.dot(up)
 		var dir := flat.normalized() if flat.length() > 0.05 else fwd
-		var stroke := sin(saw_phase * TAU) * 0.14     # + empurra (a serra vai para longe)
+		var stroke := saw_pos * 0.16                  # + empurra (a serra vai para longe)
 		var bar_mid := pt + up * (SAW_TEETH - saw_depth)
 		var base := bar_mid - dir * (SAW_LEN * 0.5) + dir * stroke
 		# o corpo vai junto: inclina para a frente quando empurra
