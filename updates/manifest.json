@@ -1,9 +1,9 @@
 {
-  "version": 44,
-  "file": "update_44.zip",
-  "size": 3116790,
-  "sha256": "00f110108f5342b3d5892e1bc87d4419cdc0acd2115c7fbbd3a193829cd6186c",
+  "version": 45,
+  "file": "update_45.zip",
+  "size": 3117402,
+  "sha256": "d98c6c9d2a0ff919b25111106785c894f0b1e0b0de1312f830a97ec0560b02bc",
   "min_build": 1,
-  "notes": "Buracos mais largos e fundos (até 1,2 m), com borda levantada para ver de lado; terra e tora fincada encostadas no chão de verdade (sem flutuar)",
+  "notes": "Machado e cavadeira não entram mais no corpo do personagem (colisão com tronco e pernas, inclusive correndo)",
   "date": "2026-11-17"
 }

@@ -1259,7 +1259,7 @@ func equip(id: String) -> void:
 		if _mao == "cavadeira":
 			_chop_pose.grip_low = 0.04
 			_chop_pose.grip_high = 0.4
-			_chop_pose.carry_grip = 0.5
+			_chop_pose.carry_grip = 0.22
 		else:
 			_chop_pose.grip_low = Corte.ChopPose.GRIP_LOW
 			_chop_pose.grip_high = Corte.ChopPose.GRIP_HIGH

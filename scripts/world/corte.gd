@@ -498,11 +498,12 @@ class ChopPose extends SkeletonModifier3D:
 			hp.basis = (fa_g.basis.orthonormalized() * cal.hand).scaled(hp.basis.get_scale())
 			sk.set_bone_global_pose(hb, hp)
 			var hg := sk.get_bone_global_pose(hb)
-			_set_tool(sk, Transform3D(hg.basis.orthonormalized(), hg.origin) * cal.tool)
+			var t2: Transform3D = Transform3D(hg.basis.orthonormalized(), hg.origin) * cal.tool
+			_set_tool(sk, _avoid_body(sk, t2, t2 * Vector3(0, carry_grip, 0)))
 			return
 		# pulso reto: os dedos seguem a linha do antebraço; o cabo sai da mão para a frente
 		var arm_dir := (sk.get_bone_global_pose(hb).origin - fa_g.origin).normalized()
-		var want := fwd * 0.9 - up * 0.3 if tool == "machado" else fwd * 0.45 - up * 0.9
+		var want := fwd * 0.9 - up * 0.3 if tool == "machado" else fwd * 0.75 - up * 0.45 + right * 0.45
 		var handle := _orth(want, arm_dir)
 		var g := _grip_rotate("Right", sk, handle, arm_dir)
 		if g.is_empty():
@@ -513,7 +514,7 @@ class ChopPose extends SkeletonModifier3D:
 		var center: Vector3 = hp.origin + g.offset
 		var edge := _orth(-up if tool == "machado" else fwd, handle)
 		var txf := _tool_xf(center - handle * carry_grip, handle, edge)
-		_set_tool(sk, txf)
+		_set_tool(sk, _avoid_body(sk, txf, center))
 		if not moving:
 			var hg := sk.get_bone_global_pose(hb)
 			var hand_xf := Transform3D(hg.basis.orthonormalized(), hg.origin)
@@ -672,6 +673,54 @@ class ChopPose extends SkeletonModifier3D:
 	## (tudo no espaço do esqueleto).
 	func _place_axe(sk: Skeleton3D, base: Vector3, handle: Vector3, edge: Vector3) -> void:
 		_set_tool(sk, _tool_xf(base, handle, edge))
+
+	## Não deixa a ferramenta entrar no corpo: testa pontos ao longo do cabo e da lâmina
+	## contra o tronco, o quadril e as pernas; se algum entra, gira a ferramenta em volta
+	## da mão até sair.
+	func _avoid_body(sk: Skeleton3D, txf: Transform3D, pivot: Vector3) -> Transform3D:
+		var caps := []
+		var pairs := [["Hips", "Spine2", 0.17], ["Spine2", "Neck", 0.16],
+			["LeftUpLeg", "LeftLeg", 0.1], ["LeftLeg", "LeftFoot", 0.075],
+			["RightUpLeg", "RightLeg", 0.1], ["RightLeg", "RightFoot", 0.075]]
+		for pr in pairs:
+			var a := _bone(pr[0])
+			var b := _bone(pr[1])
+			if a >= 0 and b >= 0:
+				caps.append([sk.get_bone_global_pose(a).origin, sk.get_bone_global_pose(b).origin, float(pr[2])])
+		var length := 0.62 if tool == "machado" else 1.45
+		var t := txf
+		for it in 10:
+			var worst := 0.0
+			var wp := Vector3.ZERO
+			var wn := Vector3.ZERO
+			for k in 13:
+				var y := lerpf(-0.06, length, float(k) / 12.0)
+				for side in [0.0, 0.08, -0.06]:
+					var pt: Vector3 = t * Vector3(0, y, side if y > length * 0.75 else 0.0)
+					for c in caps:
+						var A: Vector3 = c[0]
+						var B: Vector3 = c[1]
+						var ab := B - A
+						var u := clampf((pt - A).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
+						var q := A + ab * u
+						var d := pt - q
+						var pen: float = float(c[2]) + 0.02 - d.length()
+						if pen > worst:
+							worst = pen
+							wp = pt
+							wn = d.normalized() if d.length() > 0.0001 else Vector3.RIGHT
+			if worst <= 0.0:
+				break
+			var arm := wp - pivot
+			if arm.length() < 0.05:
+				break
+			var axis := arm.cross(wn)
+			if axis.length() < 0.0001:
+				break
+			var ang := atan2(worst + 0.01, arm.length())
+			var rot := Basis(axis.normalized(), ang)
+			t = Transform3D(rot * t.basis, pivot + rot * (t.origin - pivot))
+		return t
 
 	## Ferramenta no espaço do esqueleto: base do cabo, direção do cabo e do fio.
 	static func _tool_xf(base: Vector3, handle: Vector3, edge: Vector3) -> Transform3D:
