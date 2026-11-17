@@ -1,9 +1,9 @@
 {
-  "version": 34,
-  "file": "update_34.zip",
-  "size": 3080400,
-  "sha256": "ebad3b5a360d052890c6a85fe3760052e3f086ceedf3125b82b2cac0bf4631f5",
+  "version": 35,
+  "file": "update_35.zip",
+  "size": 3084871,
+  "sha256": "3176419e3082f0440101dc231be326392ab55a3e1b55b9a24577c24da2d424d9",
   "min_build": 1,
-  "notes": "Craft: menu de craft com peso da mochila, machado de pedra (todo mapa começa com um), cortar árvore com animação e a árvore tombando",
-  "date": "2026-11-16"
+  "notes": "Machado: cada toque em Cortar é um golpe lateral com as duas mãos; dedos fechados no cabo; marca do corte no tronco com lascas; árvore caída deitada em cima do chão",
+  "date": "2026-11-17"
 }

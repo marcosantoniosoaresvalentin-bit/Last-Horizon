@@ -276,8 +276,9 @@ var _act_check := 0.0
 var _chopping := false
 var _chop_tree = null
 var _chop_t := 0.0
-var _chop_hits := 0
-var _chop_done := {}             # Vector2(x, z) da árvore -> machadadas já dadas
+var _swing_on := false
+var _swing_queued := false
+var _chop_idle := 0.0
 const DEEP := 0.05        # água parada funda o bastante para virar poça ou lagoa na tela; a rasa só molha o chão
 
 
@@ -386,7 +387,7 @@ func _build_hud() -> void:
 	_hud.add_child(_seed_btn)
 
 	_chop_btn = Button.new()
-	_chop_btn.text = "Cortar árvore"
+	_chop_btn.text = "Cortar"
 	_chop_btn.add_theme_font_size_override("font_size", 22)
 	_chop_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	_chop_btn.offset_left = -300
@@ -1254,25 +1255,34 @@ func _finish_dig() -> void:
 
 # ================== CORTE DE ÁRVORE ==================
 
-const CHOP_SWING := 0.95         # segundos por machadada
 
 
-## Mostra os botões "Cortar árvore" e "Pegar ..." e anima as machadadas.
+## Mostra os botões "Cortar" e "Pegar ...". Cada toque em "Cortar" é uma machadada:
+## o personagem segura o machado com as duas mãos e bate de lado no tronco.
 func _update_chop(delta: float) -> void:
+	var pose = _chop_pose
 	if _chopping:
-		var before := fmod(_chop_t, CHOP_SWING) / CHOP_SWING
-		_chop_t += delta
-		var ph := fmod(_chop_t, CHOP_SWING) / CHOP_SWING
-		if _chop_pose:
-			_chop_pose.phase = ph
-		# a lâmina bate no tronco
-		if before < 0.68 and ph >= 0.68:
-			_chop_hits += 1
-			var need: int = _arvores.hits_to_fell(_chop_tree)
-			_dig_bar.value = float(_chop_hits) / need * 100.0
-			_chop_done[Vector2(float(_chop_tree[0]), float(_chop_tree[1]))] = _chop_hits
-			if _chop_hits >= need:
-				_finish_chop()
+		if _swing_on:
+			var before := _chop_t / Corte.ChopPose.SWING_TIME
+			_chop_t += delta
+			var ph := _chop_t / Corte.ChopPose.SWING_TIME
+			if before < Corte.ChopPose.HIT_AT and ph >= Corte.ChopPose.HIT_AT:
+				_chop_hit()
+				if not _chopping:
+					return
+			if ph >= 1.0:
+				_swing_on = false
+				_chop_idle = 0.0
+				if _swing_queued:
+					_swing_queued = false
+					_begin_swing()
+			if pose:
+				pose.phase = minf(ph, 1.0)
+		else:
+			# parado com o machado nas duas mãos; se demorar, volta a carregar com uma mão
+			_chop_idle += delta
+			if _chop_idle > 2.5:
+				_cancel_chop()
 		return
 	_act_check -= delta
 	if _act_check > 0.0:
@@ -1285,8 +1295,15 @@ func _update_chop(delta: float) -> void:
 	_chop_btn.visible = _mao == "machado" and _arvores != null and _arvores.nearest_standing(_player.position, 1.3) != null and not _digging
 
 
+## Toque no botão "Cortar": uma machadada (se já está no meio de uma, guarda a próxima).
 func _start_chop() -> void:
-	if _chopping or _mao != "machado" or _arvores == null:
+	if _mao != "machado" or _arvores == null:
+		return
+	if _chopping:
+		if _swing_on:
+			_swing_queued = true
+		else:
+			_begin_swing()
 		return
 	var t = _arvores.nearest_standing(_player.position, 1.3)
 	if t == null:
@@ -1294,24 +1311,74 @@ func _start_chop() -> void:
 	if _digging:
 		_cancel_dig()
 	_chop_tree = t
-	_chop_hits = int(_chop_done.get(Vector2(float(t[0]), float(t[1])), 0))
-	_chop_t = 0.0
 	_chopping = true
-	_chop_btn.visible = false
+	_swing_queued = false
 	_dig_bar.visible = true
-	_dig_bar.value = float(_chop_hits) / _arvores.hits_to_fell(t) * 100.0
+	_dig_bar.value = float(_arvores.cut_hits(t)) / _arvores.hits_to_fell(t) * 100.0
 	_play("Idle", 0.5)
 	if _chop_pose:
-		_chop_pose.chopping = true
+		_chop_pose.ready_pose = true
+	_begin_swing()
+
+
+func _begin_swing() -> void:
+	_swing_on = true
+	_chop_t = 0.0
+	_chop_idle = 0.0
+	if _chop_pose:
+		_chop_pose.swinging = true
 		_chop_pose.phase = 0.0
+
+
+## A lâmina bateu no tronco: conta a machadada, marca o corte e solta lascas.
+func _chop_hit() -> void:
+	var t = _chop_tree
+	if t == null:
+		return
+	var from := Vector3(_player.position.x - float(t[0]), 0, _player.position.z - float(t[1]))
+	var hits: int = _arvores.add_cut(t, from)
+	var need: int = _arvores.hits_to_fell(t)
+	_dig_bar.value = float(hits) / need * 100.0
+	_chips(_arvores.cut_point(t))
+	if hits >= need:
+		_finish_chop()
+
+
+## Lascas de madeira voando do corte.
+func _chips(at: Vector3) -> void:
+	var c := CPUParticles3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.05, 0.012, 0.03)
+	c.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.86, 0.72, 0.5)
+	c.material_override = mat
+	c.amount = 14
+	c.one_shot = true
+	c.explosiveness = 0.95
+	c.lifetime = 0.9
+	c.direction = Vector3(at.x - _player.position.x, 0.6, at.z - _player.position.z).normalized() * -1.0 + Vector3(0, 1.2, 0)
+	c.spread = 50.0
+	c.initial_velocity_min = 1.5
+	c.initial_velocity_max = 3.2
+	c.gravity = Vector3(0, -9.8, 0)
+	c.angular_velocity_min = -400.0
+	c.angular_velocity_max = 400.0
+	add_child(c)
+	c.global_position = at
+	c.emitting = true
+	get_tree().create_timer(1.5).timeout.connect(c.queue_free)
 
 
 func _cancel_chop() -> void:
 	_chopping = false
+	_swing_on = false
+	_swing_queued = false
 	_chop_tree = null
 	_dig_bar.visible = false
 	if _chop_pose:
-		_chop_pose.chopping = false
+		_chop_pose.swinging = false
+		_chop_pose.ready_pose = false
 	_act_check = 0.0
 
 
@@ -1320,7 +1387,6 @@ func _finish_chop() -> void:
 	_cancel_chop()
 	if t == null:
 		return
-	_chop_done.erase(Vector2(float(t[0]), float(t[1])))
 	var away := Vector3(float(t[0]) - _player.position.x, 0, float(t[1]) - _player.position.z)
 	_arvores.fell_by_player(t, away)
 	_show_toast("A árvore caiu!")
@@ -1420,7 +1486,7 @@ func _move_player(delta: float) -> void:
 		var to := Vector2(float(_chop_tree[0]) - p.x, float(_chop_tree[1]) - p.z)
 		_face = lerp_angle(_face, atan2(-to.x, -to.y), minf(1.0, delta * 10.0))
 		# chega na distância certa para o machado bater no tronco
-		var want: float = _arvores.trunk_radius(_chop_tree) + 0.65
+		var want: float = _arvores.trunk_radius(_chop_tree) + 0.72
 		var dist := to.length()
 		if dist > 0.01 and absf(dist - want) > 0.05:
 			var step := clampf(dist - want, -delta * 1.5, delta * 1.5)
@@ -1485,8 +1551,11 @@ func _input(e: InputEvent) -> void:
 		return   # com o calendário, a mochila ou o craft aberto, o toque não anda nem gira a câmera
 	var half := get_viewport().get_visible_rect().size.x * 0.5
 	if e is InputEventScreenTouch:
-		if e.pressed and _dig_btn.visible and _dig_btn.get_global_rect().has_point(e.position):
-			return
+		if e.pressed:
+			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn]:
+				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
+					return
 		if e.pressed:
 			if e.position.x < half and _joy_id < 0:
 				_joy_id = e.index
