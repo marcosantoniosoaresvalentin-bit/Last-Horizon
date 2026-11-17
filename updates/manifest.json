@@ -1,9 +1,9 @@
 {
-  "version": 60,
-  "file": "update_60.zip",
-  "size": 3475658,
-  "sha256": "4e797654cbfdaae48aa786ab9f7eea5d3115a2fc28538ce090ad140c91138ccd",
+  "version": 61,
+  "file": "update_61.zip",
+  "size": 3476973,
+  "sha256": "7e408572bec0c5c4eb72225eca36070502eed2f48c36613a64b63ab5bb255ceb",
   "min_build": 1,
-  "notes": "Parado no morro: cada pé pisa no chão (o quadril desce, a perna dobra e a sola acompanha a inclinação)",
+  "notes": "Postura de parado natural, pernas sem torção, agachar de joelhos com costas retas na serra e mãos no cabo",
   "date": "2026-11-17"
 }

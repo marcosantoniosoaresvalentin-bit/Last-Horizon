@@ -438,6 +438,10 @@ class ChopPose extends SkeletonModifier3D:
 	var down_hit := -42.0         # onde o golpe de cima para baixo para (graus): -42 chão, -16 cintura
 	var ground_fn: Callable       # altura do chão (x, z) -> y, para os pés pisarem no morro
 	var in_air := false
+	var relax_spine := 0.1
+	var relax_arm := -0.4
+	var relax_fore := -0.25
+	var crouch_spine := 1.0       # quanto as costas dobram ao agachar (1 = pegar no chão)
 	var sawing := false           # serrando (vai e vem com a serra de pedra)
 	var saw_phase := 0.0          # 0 a 1: uma ida e volta
 	var saw_pos := -1.0           # -1 puxada (perto do corpo) a 1 empurrada (o jogador controla)
@@ -489,7 +493,8 @@ class ChopPose extends SkeletonModifier3D:
 		if crouch > 0.001:
 			_crouch(sk, up, fwd, right)
 		elif not moving and not in_air and ground_fn.is_valid():
-			_plant_feet(sk, tb, up, fwd)
+			_plant_feet(sk, tb, up, fwd, right)
+			_relax(sk, up, fwd, right)
 		if log_node:
 			if axe:
 				axe.visible = false
@@ -558,22 +563,35 @@ class ChopPose extends SkeletonModifier3D:
 		var stroke := saw_pos * 0.16                  # + empurra (a serra vai para longe)
 		var bar_mid := pt + up * (SAW_TEETH - saw_depth)
 		var base := bar_mid - dir * (SAW_LEN * 0.5) + dir * stroke
-		# a serra desce com o corte: o corpo agacha junto para as mãos continuarem no cabo
+		# a serra desce com o corte: dobra os joelhos (costas mais retas) o quanto
+		# precisar para o cabo ficar ao alcance das mãos
 		var sb := _bone("RightArm")
 		if sb >= 0:
 			var sh := sk.get_bone_global_pose(sb).origin
 			var grip := base + dir * 0.13
 			var drop := (sh - grip).dot(up)
-			var need := clampf((drop - 0.34) / 0.4, 0.0, 1.0)
+			var need := clampf((drop - 0.4) / 0.42, 0.0, 0.8)
 			if need > crouch:
 				var old := crouch
+				var olds := crouch_spine
 				crouch = need
+				crouch_spine = 0.3
 				_crouch(sk, up, fwd, right)
 				crouch = old
-		# o corpo vai junto: inclina para a frente quando empurra
-		_rot_global(sk, "Spine1", right, -0.22 - stroke * 0.9)
-		# as duas mãos fechadas no cabo, perto da ponta (do lado de dentro do pegador)
-		_hand_on(sk, "Right", base + dir * 0.13, dir, _orth(-up * 0.4 + right * 0.5, dir), up, right)
+				crouch_spine = olds
+		# o corpo vai um pouco junto quando empurra
+		_rot_global(sk, "Spine1", right, -0.12 - stroke * 0.6)
+		# mão direita no cabo; se o braço não alcança o ponto exato, a serra vem até a mão
+		var rf := _orth(-up * 0.4 + right * 0.5, dir)
+		_hand_on(sk, "Right", base + dir * 0.13, dir, rf, up, right)
+		var g := _grip_rotate("Right", sk, dir, rf)
+		var hb := _bone("RightHand")
+		if not g.is_empty() and hb >= 0:
+			var hp := sk.get_bone_global_pose(hb)
+			var actual: Vector3 = hp.origin + hp.basis.orthonormalized() * (hp.basis.orthonormalized().inverse() * g.offset)
+			var err: Vector3 = actual - (base + dir * 0.13)
+			if err.length() < 0.35:
+				base += err
 		_hand_on(sk, "Left", base + dir * 0.31, dir, _orth(-up * 0.4 - right * 0.5, dir), up, -right)
 		_set_tool(sk, _tool_xf(base, dir, -up))
 
@@ -629,55 +647,112 @@ class ChopPose extends SkeletonModifier3D:
 	# O personagem fica com o centro na altura do chão; no morro um pé afunda e o outro
 	# fica no ar. O quadril desce até o pé mais baixo e cada perna dobra para o pé
 	# encostar no chão embaixo dele.
-	func _plant_feet(sk: Skeleton3D, tb: Basis, up: Vector3, fwd: Vector3) -> void:
+	func _plant_feet(sk: Skeleton3D, tb: Basis, up: Vector3, fwd: Vector3, right: Vector3) -> void:
 		var hb := _bone("Hips")
 		if hb < 0:
 			return
 		var gx := sk.global_transform
+		var to_sk := gx.affine_inverse()
 		var base_y := player.global_position.y
 		var pp := player.global_position
 		if absf(float(ground_fn.call(pp.x, pp.z)) - base_y) > 0.15:
 			return          # em cima de tora ou dentro d'água: não mexe nos pés
 		var feet := {}
-		var ds := {}
+		var ankle := 1.0
 		for side in ["Left", "Right"]:
 			var fb := _bone(side + "Foot")
 			if fb < 0:
 				return
-			var fp := sk.get_bone_global_pose(fb)
-			feet[side] = fp
-			var w := gx * fp.origin
-			ds[side] = clampf(float(ground_fn.call(w.x, w.z)) - base_y, -0.4, 0.4)
-		var lo := minf(minf(float(ds.Left), float(ds.Right)), 0.0)
-		if absf(float(ds.Left)) < 0.01 and absf(float(ds.Right)) < 0.01:
-			return
-		var upm := tb * Vector3.UP          # 1 m para cima, no espaço do esqueleto
+			feet[side] = sk.get_bone_global_pose(fb)
+			ankle = minf(ankle, (gx * (feet[side] as Transform3D).origin).y - base_y)
+		ankle = clampf(ankle, 0.05, 0.14)
+		# postura de parado: pés embaixo do quadril, um pouco abertos, apontando para a frente
 		var hp := sk.get_bone_global_pose(hb)
-		hp.origin += upm * lo
+		var hips_w := gx * hp.origin
+		var fw := (gx.basis * fwd).normalized()
+		var rw := (gx.basis * right).normalized()
+		fw.y = 0.0
+		rw.y = 0.0
+		fw = fw.normalized()
+		rw = rw.normalized()
+		var tgt := {}
+		var ds := {}
+		for side in feet:
+			var sg := 1.0 if side == "Right" else -1.0
+			var t := Vector3(hips_w.x, 0, hips_w.z) + rw * sg * 0.12 + fw * (0.03 if side == "Left" else -0.03)
+			var gy := float(ground_fn.call(t.x, t.z))
+			t.y = gy + ankle
+			tgt[side] = t
+			ds[side] = clampf(gy - base_y, -0.4, 0.4)
+		# altura do quadril: pernas quase esticadas (de pé, relaxado), e no morro até onde
+		# a perna do pé mais baixo alcança
+		var h := 1e9
+		for side in feet:
+			var ul := sk.get_bone_global_pose(_bone(side + "UpLeg")).origin
+			var kn := sk.get_bone_global_pose(_bone(side + "Leg")).origin
+			var an := (feet[side] as Transform3D).origin
+			var L := ul.distance_to(kn) + kn.distance_to(an)
+			var tg: Vector3 = to_sk * (tgt[side] as Vector3)
+			var rel := ul - tg
+			var v := rel.dot(up)
+			var dh := (rel - up * v).length()
+			var reach := 0.995 * L
+			h = minf(h, sqrt(maxf(reach * reach - dh * dh, 0.0)) - v)
+		h = clampf(h, -0.5, 0.3)
+		hp.origin += up * h
 		sk.set_bone_global_pose(hb, hp)
 		for side in feet:
+			var sg := 1.0 if side == "Right" else -1.0
 			var foot: Transform3D = feet[side]
-			var target := foot.origin + upm * float(ds[side])
+			var target: Vector3 = to_sk * (tgt[side] as Vector3)
+			# o pé aponta para a frente (abrindo um pouquinho para fora)
 			var toe_b := _bone(side + "ToeBase")
-			var toe_dir := fwd
+			var want_toe := (fwd + right * sg * 0.15).normalized()
+			var spin := Basis()
 			if toe_b >= 0:
-				toe_dir = sk.get_bone_global_pose(toe_b).origin - sk.get_bone_global_pose(_bone(side + "Foot")).origin
-				toe_dir -= up * toe_dir.dot(up)
-				toe_dir = toe_dir.normalized() if toe_dir.length() > 0.001 else fwd
-			_ik(sk, side + "UpLeg", side + "Leg", side + "Foot", target, target + toe_dir * 1.2 + up * 0.5)
-			# o pé deita no morro (a sola acompanha a inclinação do chão)
-			var w := gx * foot.origin
+				var cur := sk.get_bone_global_pose(toe_b).origin - foot.origin
+				cur -= up * cur.dot(up)
+				if cur.length() > 0.001:
+					var ang := cur.normalized().signed_angle_to(want_toe, up)
+					spin = Basis(up, ang)
+			_ik(sk, side + "UpLeg", side + "Leg", side + "Foot", target, target + want_toe * 1.2 + up * 0.5)
+			_untwist_leg(sk, side, want_toe)
+			# a sola acompanha a inclinação do chão
+			var w: Vector3 = tgt[side]
 			var e := 0.15
 			var nx := (float(ground_fn.call(w.x + e, w.z)) - float(ground_fn.call(w.x - e, w.z))) / (2.0 * e)
 			var nz := (float(ground_fn.call(w.x, w.z + e)) - float(ground_fn.call(w.x, w.z - e))) / (2.0 * e)
-			var nw := Vector3(-nx, 1.0, -nz).normalized()
-			var ns := (tb * nw).normalized()
+			var ns := (tb * Vector3(-nx, 1.0, -nz).normalized()).normalized()
 			var tilt := Quaternion(up, ns)
 			if tilt.get_angle() > 0.6:
 				tilt = Quaternion(tilt.get_axis(), 0.6)
 			var fp2 := sk.get_bone_global_pose(_bone(side + "Foot"))
-			fp2.basis = Basis(tilt) * foot.basis
+			fp2.basis = Basis(tilt) * spin * foot.basis
 			sk.set_bone_global_pose(_bone(side + "Foot"), fp2)
+
+	# ---------- parado: costas retas e braços soltos do lado do corpo ----------
+	func _relax(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
+		_rot_global(sk, "Spine", right, relax_spine)
+		for side in ["Left", "Right"]:
+			if side == "Right" and holding:
+				continue
+			var sb := _bone(side + "Arm")
+			var fb := _bone(side + "ForeArm")
+			var hb := _bone(side + "Hand")
+			if sb < 0 or fb < 0 or hb < 0:
+				continue
+			var sg := 1.0 if side == "Right" else -1.0
+			var sh := sk.get_bone_global_pose(sb).origin
+			var L := sh.distance_to(sk.get_bone_global_pose(fb).origin) + sk.get_bone_global_pose(fb).origin.distance_to(sk.get_bone_global_pose(hb).origin)
+			# braço solto do lado do corpo, cotovelo um pouco dobrado para trás
+			var target := sh - up * L * 0.93 + right * sg * 0.07 + fwd * 0.05
+			var hand := sk.get_bone_global_pose(hb)
+			_ik(sk, side + "Arm", side + "ForeArm", side + "Hand", target, sh - up * L * 0.45 - fwd * 0.6 + right * sg * 0.1)
+			var hp := sk.get_bone_global_pose(hb)
+			var arm_dir := (hp.origin - sk.get_bone_global_pose(fb).origin).normalized()
+			var cur := hand.basis.orthonormalized()
+			hp.basis = Basis(Quaternion((cur * Vector3.UP).normalized(), arm_dir)) * cur
+			sk.set_bone_global_pose(hb, hp)
 
 	# ---------- agachar: o quadril desce e os joelhos dobram com os pés no chão ----------
 	func _crouch(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
@@ -692,8 +767,8 @@ class ChopPose extends SkeletonModifier3D:
 		var hp := sk.get_bone_global_pose(hb)
 		hp.origin += -up * 0.42 * crouch - fwd * 0.08 * crouch
 		sk.set_bone_global_pose(hb, hp)
-		_rot_global(sk, "Spine", right, -0.6 * crouch)
-		_rot_global(sk, "Spine1", right, -0.25 * crouch)
+		_rot_global(sk, "Spine", right, -0.6 * crouch * crouch_spine)
+		_rot_global(sk, "Spine1", right, -0.25 * crouch * crouch_spine)
 		for side in feet:
 			var foot: Transform3D = feet[side]
 			# o joelho dobra para onde o pé aponta (senão o tornozelo torce)
@@ -704,6 +779,7 @@ class ChopPose extends SkeletonModifier3D:
 				toe_dir -= up * toe_dir.dot(up)
 				toe_dir = toe_dir.normalized() if toe_dir.length() > 0.001 else fwd
 			_ik(sk, side + "UpLeg", side + "Leg", side + "Foot", foot.origin, foot.origin + toe_dir * 1.2 + up * 0.5)
+			_untwist_leg(sk, side, toe_dir)
 			var fp := sk.get_bone_global_pose(_bone(side + "Foot"))
 			fp.basis = foot.basis
 			sk.set_bone_global_pose(_bone(side + "Foot"), fp)
@@ -894,6 +970,50 @@ class ChopPose extends SkeletonModifier3D:
 		var q2 := Quaternion((ge.origin - gl.origin).normalized(), (tgt - gl.origin).normalized())
 		gl.basis = Basis(q2) * gl.basis
 		sk.set_bone_global_pose(lb, gl)
+
+	## Desfaz o giro do osso em volta dele mesmo: a "frente" dele (a frente do corpo na
+	## pose de repouso) fica virada para "front" (ex.: para onde o joelho aponta).
+	func _untwist(sk: Skeleton3D, bone: String, child: String, front: Vector3, rest_front: Vector3) -> void:
+		var b := _bone(bone)
+		var c := _bone(child)
+		if b < 0 or c < 0:
+			return
+		var g := sk.get_bone_global_pose(b)
+		var axis := (sk.get_bone_global_pose(c).origin - g.origin).normalized()
+		var rest := sk.get_bone_global_rest(b).basis.orthonormalized()
+		var local_front := rest.inverse() * rest_front
+		var cur := g.basis.orthonormalized() * local_front
+		cur -= axis * cur.dot(axis)
+		var want := front - axis * front.dot(axis)
+		if cur.length() < 0.001 or want.length() < 0.001:
+			return
+		var ang := cur.normalized().signed_angle_to(want.normalized(), axis)
+		g.basis = Basis(axis, ang) * g.basis
+		sk.set_bone_global_pose(b, g)
+
+	## As duas partes da perna com a frente para o lado do joelho (sem torcer a calça).
+	func _untwist_leg(sk: Skeleton3D, side: String, knee_front: Vector3) -> void:
+		var rf := _rest_fwd(sk)
+		_untwist(sk, side + "UpLeg", side + "Leg", knee_front, rf)
+		_untwist(sk, side + "Leg", side + "Foot", knee_front, rf)
+
+	var _rf_cache := Vector3.ZERO
+
+	## A frente do personagem na pose de repouso, no espaço do esqueleto (dos dedos do pé).
+	func _rest_fwd(sk: Skeleton3D) -> Vector3:
+		if _rf_cache == Vector3.ZERO:
+			var t := _bone("LeftToeBase")
+			var f := _bone("LeftFoot")
+			var hb := _bone("Hips")
+			var up := Vector3.UP
+			if hb >= 0 and _bone("Spine") >= 0:
+				up = (sk.get_bone_global_rest(_bone("Spine")).origin - sk.get_bone_global_rest(hb).origin).normalized()
+			var v := Vector3.FORWARD
+			if t >= 0 and f >= 0:
+				v = sk.get_bone_global_rest(t).origin - sk.get_bone_global_rest(f).origin
+			v -= up * v.dot(up)
+			_rf_cache = v.normalized() if v.length() > 0.001 else Vector3.BACK
+		return _rf_cache
 
 	func _rot_global(sk: Skeleton3D, bone: String, axis: Vector3, ang: float) -> void:
 		var b := _bone(bone)
