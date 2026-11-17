@@ -1,9 +1,9 @@
 {
-  "version": 45,
-  "file": "update_45.zip",
-  "size": 3117402,
-  "sha256": "d98c6c9d2a0ff919b25111106785c894f0b1e0b0de1312f830a97ec0560b02bc",
+  "version": 46,
+  "file": "update_46.zip",
+  "size": 3120831,
+  "sha256": "7cde3ce15faec1c4eb1704c8e92e6dee0a414c7be135dd26c1f3d6165424207b",
   "min_build": 1,
-  "notes": "Machado e cavadeira não entram mais no corpo do personagem (colisão com tronco e pernas, inclusive correndo)",
+  "notes": "Sons: machadada, árvore estalando e caindo, cavadeira na terra, passos no chão e na água; ondas na água quando o personagem anda nela",
   "date": "2026-11-17"
 }

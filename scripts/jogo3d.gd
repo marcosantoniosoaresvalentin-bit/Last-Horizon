@@ -16,6 +16,21 @@ const Craft := preload("res://scripts/ui/craft.gd")
 const Icones := preload("res://scripts/ui/icones.gd")
 const Cipos := preload("res://scripts/world/cipos.gd")
 const Buracos := preload("res://scripts/world/buracos.gd")
+const Sons := preload("res://scripts/sons.gd")
+## Onda na água: um anel que abre e some (passos dentro d'água).
+const RIPPLE_SHADER := """
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled;
+uniform float age = 0.0;
+void fragment(){
+	vec2 p = UV * 2.0 - 1.0;
+	float r = length(p);
+	float ring = smoothstep(0.62, 0.8, r) * (1.0 - smoothstep(0.8, 0.98, r));
+	float inner = smoothstep(0.25, 0.45, r) * (1.0 - smoothstep(0.45, 0.6, r)) * 0.4;
+	ALBEDO = vec3(0.85, 0.9, 0.92);
+	ALPHA = (ring + inner) * (1.0 - age) * 0.55;
+}
+"""
 const SAVE_EVERY := 60.0     # salva o mundo a cada minuto
 
 const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
@@ -301,6 +316,8 @@ var _buracos: Node3D = null
 var _plant_btn: Button
 var _chop_hole := false           # cavando com a cavadeira
 var _holes_t := 0.0
+var _step_dist := 0.0
+var _ripple_mat: Shader
 var _carry := {}                  # tora no ombro (dados da tora)
 var _carry_node: Node3D = null
 var _carry_kg := 0.0
@@ -1518,6 +1535,7 @@ func _update_crouch(delta: float) -> void:
 			pass
 		elif _crouch_job == "fincar":
 			_buracos.plant(int(_crouch_target.buraco), _carry, _face)
+			Sons.play_at(self, "baque", _player.position)
 			_carry = {}
 			if _carry_node:
 				_carry_node.queue_free()
@@ -1532,6 +1550,7 @@ func _update_crouch(delta: float) -> void:
 			var r: float = _arvores.free_log_radius(_carry)
 			var c := _player.position + fwd * (r + 0.55)
 			_arvores.drop_log(_carry, c, _face)
+			Sons.play_at(self, "baque", c)
 			_carry = {}
 			if _carry_node:
 				_carry_node.queue_free()
@@ -1541,6 +1560,43 @@ func _update_crouch(delta: float) -> void:
 		_crouch_job = ""
 		_chop_pose.crouch = 0.0
 		_act_check = 0.0
+
+
+## Um passo: som no chão ou na água; na água abre uma onda em volta do pé.
+func _footstep(p: Vector3, depth: float, hard := false) -> void:
+	if depth > 0.04:
+		Sons.play_at(self, "agua", p, -4.0 if not hard else 0.0)
+		var level := p.y + depth * 2.0
+		var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
+		if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
+			level = _water_level[cell.y * MundoSim.W + cell.x]
+		var fwd := Vector3(-sin(_face), 0, -cos(_face))
+		_ripple(Vector3(p.x, level + 0.02, p.z) + fwd * 0.15, 1.1 + depth)
+		if depth > 0.15:
+			_ripple(Vector3(p.x, level + 0.02, p.z) - fwd * 0.2, 0.8)
+	else:
+		Sons.play_at(self, "passo", p, -9.0 if not hard else -3.0)
+
+
+func _ripple(pos: Vector3, size: float) -> void:
+	if _ripple_mat == null:
+		_ripple_mat = Shader.new()
+		_ripple_mat.code = RIPPLE_SHADER
+	var mi := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(1, 1)
+	mi.mesh = pm
+	var mat := ShaderMaterial.new()
+	mat.shader = _ripple_mat
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+	mi.global_position = pos
+	mi.scale = Vector3(0.25, 1, 0.25)
+	var tw := mi.create_tween().set_parallel(true)
+	tw.tween_property(mi, "scale", Vector3(size, 1, size), 1.3).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tw.tween_method(func(a: float): mat.set_shader_parameter("age", a), 0.0, 1.0, 1.3)
+	tw.chain().tween_callback(mi.queue_free)
 
 
 ## Recorta o chão e o capim nos buracos abertos perto do jogador.
@@ -1654,12 +1710,14 @@ func _chop_hit() -> void:
 		var at := _front(0.62)
 		var d: float = _buracos.dig_at(at)
 		_dirt(at)
+		Sons.play_at(self, "cavar", at)
 		_show_toast("Buraco com %d cm de fundura" % int(round(d * 100.0)) if d < Buracos.MAX_DEPTH else "O buraco já está bem fundo (80 cm)")
 		return
 	if not _chop_log.is_empty():
 		var lp: Array = _chop_log.p
 		var done: bool = _arvores.buck_hit(lp, float(_chop_log.h))
 		_chips(_chop_log.point)
+		Sons.play_at(self, "machado", _chop_log.point, 0.0, 0.92)
 		if done:
 			_show_toast("Tora cortada!")
 			_cancel_chop()
@@ -1671,6 +1729,7 @@ func _chop_hit() -> void:
 	var hits: int = _arvores.add_cut(t, from)
 	var need: int = _arvores.hits_to_fell(t)
 	_chips(_arvores.cut_point(t))
+	Sons.play_at(self, "machado", _arvores.cut_point(t))
 	if hits >= need:
 		_finish_chop()
 
@@ -1897,6 +1956,15 @@ func _move_player(delta: float) -> void:
 		p.y = feet
 	else:
 		p.y = ground
+	# passos: um som a cada passada (na água, respingo e onda)
+	var moved := Vector2(p.x - _player.position.x, p.z - _player.position.z).length()
+	var landed := _air == false and _player.position.y > p.y + 0.15
+	if not _air:
+		_step_dist += moved
+		var stride := 0.62 if moved / maxf(delta, 0.001) < 3.0 else 0.95
+		if _step_dist >= stride or landed:
+			_step_dist = 0.0
+			_footstep(p, depth, landed)
 	_player.position = p
 	_player.rotation.y = _face
 

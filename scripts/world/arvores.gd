@@ -26,6 +26,7 @@ extends Node3D
 ## Tudo fica salvo no mundo (arvores.json).
 
 const MundoSim := preload("res://scripts/mundo_sim.gd")
+const Sons := preload("res://scripts/sons.gd")
 
 const VARIANTS := 3            # modelos diferentes, para a floresta não parecer clonada
 const CHUNK := 64.0            # metros de cada bloco (para o celular desenhar só o que está perto)
@@ -1250,7 +1251,12 @@ func fell_by_player(p: Array, away: Vector3) -> void:
 		# no começo gira em cima do toco; perto do fim escorrega do toco para o chão
 		pivot.position = hinge0.lerp(hinge1, smoothstep(0.55, 1.0, clampf(a / a_end, 0.0, 1.0)))
 	var dur := clampf(1.2 + h * 0.09, 1.2, 3.2)
+	# a madeira estala e range quando começa a tombar; no fim, o baque no chão
+	Sons.play_at(self, "estalo", hinge0, 2.0)
 	tw.tween_method(fall, 0.02, a_end, dur).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func():
+		var mid := hinge1 + Vector3(sin(float(p[7])), 0, cos(float(p[7]))) * h * 0.4
+		Sons.play_at(self, "queda", mid, clampf(-6.0 + h * 0.5, -6.0, 6.0), clampf(1.3 - h * 0.025, 0.8, 1.2)))
 	tw.tween_method(fall, a_end, a_end - 0.08, 0.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tw.tween_method(fall, a_end - 0.08, a_end, 0.22).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	tw.tween_interval(0.5)
