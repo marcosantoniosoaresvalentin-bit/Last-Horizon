@@ -247,7 +247,7 @@ static func _pos(cur: PackedFloat32Array, k: int, j: int, top: bool) -> Vector3:
 static func mesh(cur: PackedFloat32Array, orig: PackedFloat32Array, seed_: int, split := false) -> ArrayMesh:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_
-	var base := Color(0.36, 0.34, 0.31).lerp(Color(0.44, 0.35, 0.24), rng.randf())    # cinza a sílex
+	var base := Color(0.22, 0.215, 0.2).lerp(Color(0.27, 0.22, 0.15), rng.randf())    # cinza a sílex
 	base = base.darkened(rng.randf_range(0.0, 0.15))
 	var fresh := base.lightened(0.1)
 	var st := SurfaceTool.new()
@@ -264,7 +264,9 @@ static func mesh(cur: PackedFloat32Array, orig: PackedFloat32Array, seed_: int, 
 					var idx := _ti(k + 1, j) if top else _bi(k + 1, j)
 					cut = clampf(absf(orig[idx] - cur[idx]) * 14.0 + maxf(0.0, orig[j] - cur[j]) * 6.0, 0.0, 1.0)
 				var h := absi(hash(Vector3i(k, j, face))) % 100
-				var col := base.lerp(fresh, cut).darkened(h * 0.0012)
+				var col := base.lerp(fresh, cut).darkened(h * 0.0012 if cut > 0.05 else 0.0)
+				# parte crua: lisa (sombra suave); parte lascada: faces retas das lascas
+				st.set_smooth_group(0 if cut <= 0.05 else 0xFFFFFFFF)
 				for tri in [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]:
 					var a: Vector3 = tri[0]
 					var b: Vector3 = tri[1]
@@ -285,6 +287,7 @@ static func mesh(cur: PackedFloat32Array, orig: PackedFloat32Array, seed_: int, 
 					st.add_vertex(a)
 					st.add_vertex(b)
 					st.add_vertex(c)
+	st.index()
 	st.generate_normals()
 	return st.commit()
 
@@ -298,7 +301,7 @@ static func material() -> StandardMaterial3D:
 		_mat.vertex_color_use_as_albedo = true
 		_mat.vertex_color_is_srgb = true
 		_mat.roughness = 0.75
-		_mat.metallic_specular = 0.4
+		_mat.metallic_specular = 0.25
 		_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return _mat
 
@@ -315,3 +318,38 @@ static func small_mesh(seed_: int, size: float) -> ArrayMesh:
 	for i in r.size():
 		r[i] *= size
 	return mesh(r, r, seed_)
+
+
+## Pedra de rio arredondada e lisa (a pedra de bater, na mão), tamanho = comprimento.
+static func cobble_mesh(seed_: int, size: float) -> ArrayMesh:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_
+	var sm := SphereMesh.new()
+	sm.radial_segments = 20
+	sm.rings = 10
+	var arr := sm.get_mesh_arrays()
+	var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var cols := PackedColorArray()
+	var ax := Vector3(0.5, rng.randf_range(0.3, 0.36), rng.randf_range(0.36, 0.42)) * size * 2.0
+	var lobes := []
+	for k in 3:
+		lobes.append([Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.5, 0.5), rng.randf_range(-1, 1)).normalized(), rng.randf_range(0.04, 0.09)])
+	var base := Color(0.42, 0.41, 0.38).darkened(rng.randf_range(0.0, 0.2))
+	for i in v.size():
+		var d := v[i].normalized()
+		var r := 1.0
+		for lb in lobes:
+			r += float(lb[1]) * pow(maxf(0.0, d.dot(lb[0] as Vector3)), 2.0)
+		v[i] = Vector3(d.x * ax.x, d.y * ax.y, d.z * ax.z) * r * 0.5
+		var spot := 0.5 + 0.5 * sin(d.x * 9.0 + d.z * 7.0 + seed_)
+		cols.append(base.lerp(base.lightened(0.18), spot * 0.5).darkened(0.12 * maxf(0.0, -d.y)))
+	arr[Mesh.ARRAY_VERTEX] = v
+	arr[Mesh.ARRAY_COLOR] = cols
+	arr[Mesh.ARRAY_NORMAL] = null
+	arr[Mesh.ARRAY_TANGENT] = null
+	var m := ArrayMesh.new()
+	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var st := SurfaceTool.new()
+	st.create_from(m, 0)
+	st.generate_normals()
+	return st.commit()

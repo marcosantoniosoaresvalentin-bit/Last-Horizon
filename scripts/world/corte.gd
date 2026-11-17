@@ -204,73 +204,8 @@ static func digger_mesh() -> ArrayMesh:
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7171
-	# cabo: galho reto e comprido, com casca
-	var sides := 8
-	var rings := 22
-	var haft_len := 1.22
-	var pts := []
-	for i in rings + 1:
-		var t := float(i) / rings
-		var c := Vector3(sin(t * 2.2) * 0.008, t * haft_len, cos(t * 1.7) * 0.005)
-		var r := lerpf(0.02, 0.018, t)
-		var ring := []
-		for k in sides:
-			var a := TAU * k / sides
-			ring.append(c + Vector3(cos(a), 0, sin(a)) * (r + rng.randf_range(-0.0012, 0.0012)))
-		pts.append(ring)
-	for i in rings:
-		for k in sides:
-			var k2 := (k + 1) % sides
-			var bark := Color(0.2, 0.13, 0.075) * rng.randf_range(0.92, 1.06)
-			if (k + i) % 5 == 0:
-				bark = Color(0.13, 0.09, 0.05)
-			bark.a = 1.0
-			_quad(st, pts[i][k], pts[i][k2], pts[i + 1][k2], pts[i + 1][k], bark)
-	var wood := Color(0.6, 0.46, 0.28)
-	var cap0: Array = pts[0]
-	for k in sides:
-		st.set_color(wood)
-		st.add_vertex(Vector3.ZERO); st.add_vertex(cap0[k]); st.add_vertex(cap0[(k + 1) % sides])
-	# lâmina de pedra: estreita onde encaixa no cabo e larga no fio (forma de pá)
-	var y0 := 1.12
-	var y1 := 1.46
-	var cols := 7
-	var rows := 6
-	var grid := []
-	for i in cols + 1:
-		var u := float(i) / cols                        # 0 no cabo, 1 no fio
-		var y := lerpf(y0, y1, u)
-		var half_w := lerpf(0.035, 0.085, pow(u, 0.8))
-		var thick := lerpf(0.016, 0.002, pow(u, 1.2))
-		var col := []
-		for j in rows + 1:
-			var v := float(j) / rows * 2.0 - 1.0
-			var x := v * half_w + rng.randf_range(-0.004, 0.004) * (1.0 - u * 0.5)
-			var yy := y - 0.025 * v * v * u + rng.randf_range(-0.003, 0.003)   # fio curvo
-			var b := thick * (1.0 - 0.6 * v * v) + rng.randf_range(-0.002, 0.002)
-			col.append([Vector3(x, yy, b), Vector3(x, yy, -b)])
-		grid.append(col)
-	var stone := Color(0.42, 0.38, 0.3)
-	for side in 2:
-		for i in cols:
-			for j in rows:
-				var a: Vector3 = grid[i][j][side]
-				var b: Vector3 = grid[i + 1][j][side]
-				var c: Vector3 = grid[i + 1][j + 1][side]
-				var d: Vector3 = grid[i][j + 1][side]
-				var cc := stone * rng.randf_range(0.85, 1.15)
-				cc = cc.lerp(Color(0.6, 0.56, 0.47), smoothstep(0.7, 1.0, float(i) / cols))
-				cc.a = 1.0
-				if side == 0:
-					_quad(st, a, b, c, d, cc)
-				else:
-					_quad(st, d, c, b, a, cc)
-	for i in cols:
-		for j in [0, rows]:
-			_quad(st, grid[i][j][0], grid[i + 1][j][0], grid[i + 1][j][1], grid[i][j][1], stone * 0.8)
-	for j in rows:
-		_quad(st, grid[cols][j][0], grid[cols][j + 1][0], grid[cols][j + 1][1], grid[cols][j][1], Color(0.62, 0.58, 0.5))
-		_quad(st, grid[0][j][1], grid[0][j + 1][1], grid[0][j + 1][0], grid[0][j][0], stone * 0.8)
+	_digger_haft(st, rng)
+	_digger_blade(st, rng)
 	# amarração de cipó: voltas no cabo e laçadas passando pela pedra
 	var vine := Color(0.17, 0.19, 0.08)
 	_helix(st, 1.05, 1.13, 0.024, 4.0, 0.0045, vine, rng)
@@ -353,6 +288,120 @@ static func _disc(st: SurfaceTool, c: Vector3, r: float, col: Color) -> void:
 		st.add_vertex(c)
 		st.add_vertex(c + Vector3(cos(a0) * r, 0, sin(a0) * r))
 		st.add_vertex(c + Vector3(cos(a1) * r, 0, sin(a1) * r))
+
+
+## Cabo da cavadeira: galho reto e comprido, com casca (y = 0 até 1,22).
+static func _digger_haft(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
+	# cabo: galho reto e comprido, com casca
+	var sides := 8
+	var rings := 22
+	var haft_len := 1.22
+	var pts := []
+	for i in rings + 1:
+		var t := float(i) / rings
+		var c := Vector3(sin(t * 2.2) * 0.008, t * haft_len, cos(t * 1.7) * 0.005)
+		var r := lerpf(0.02, 0.018, t)
+		var ring := []
+		for k in sides:
+			var a := TAU * k / sides
+			ring.append(c + Vector3(cos(a), 0, sin(a)) * (r + rng.randf_range(-0.0012, 0.0012)))
+		pts.append(ring)
+	for i in rings:
+		for k in sides:
+			var k2 := (k + 1) % sides
+			var bark := Color(0.2, 0.13, 0.075) * rng.randf_range(0.92, 1.06)
+			if (k + i) % 5 == 0:
+				bark = Color(0.13, 0.09, 0.05)
+			bark.a = 1.0
+			_quad(st, pts[i][k], pts[i][k2], pts[i + 1][k2], pts[i + 1][k], bark)
+	var wood := Color(0.6, 0.46, 0.28)
+	var cap0: Array = pts[0]
+	for k in sides:
+		st.set_color(wood)
+		st.add_vertex(Vector3.ZERO); st.add_vertex(cap0[k]); st.add_vertex(cap0[(k + 1) % sides])
+
+
+## Lâmina de pedra da cavadeira: estreita onde encaixa no cabo e larga no fio (forma
+## de pá), de y = 1,12 até 1,46 (o fio em +Y).
+static func _digger_blade(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
+	var y0 := 1.12
+	var y1 := 1.46
+	var cols := 7
+	var rows := 6
+	var grid := []
+	for i in cols + 1:
+		var u := float(i) / cols                        # 0 no cabo, 1 no fio
+		var y := lerpf(y0, y1, u)
+		var half_w := lerpf(0.035, 0.085, pow(u, 0.8))
+		var thick := lerpf(0.016, 0.002, pow(u, 1.2))
+		var col := []
+		for j in rows + 1:
+			var v := float(j) / rows * 2.0 - 1.0
+			var x := v * half_w + rng.randf_range(-0.004, 0.004) * (1.0 - u * 0.5)
+			var yy := y - 0.025 * v * v * u + rng.randf_range(-0.003, 0.003)   # fio curvo
+			var b := thick * (1.0 - 0.6 * v * v) + rng.randf_range(-0.002, 0.002)
+			col.append([Vector3(x, yy, b), Vector3(x, yy, -b)])
+		grid.append(col)
+	var stone := Color(0.42, 0.38, 0.3)
+	for side in 2:
+		for i in cols:
+			for j in rows:
+				var a: Vector3 = grid[i][j][side]
+				var b: Vector3 = grid[i + 1][j][side]
+				var c: Vector3 = grid[i + 1][j + 1][side]
+				var d: Vector3 = grid[i][j + 1][side]
+				var cc := stone * rng.randf_range(0.85, 1.15)
+				cc = cc.lerp(Color(0.6, 0.56, 0.47), smoothstep(0.7, 1.0, float(i) / cols))
+				cc.a = 1.0
+				if side == 0:
+					_quad(st, a, b, c, d, cc)
+				else:
+					_quad(st, d, c, b, a, cc)
+	for i in cols:
+		for j in [0, rows]:
+			_quad(st, grid[i][j][0], grid[i + 1][j][0], grid[i + 1][j][1], grid[i][j][1], stone * 0.8)
+	for j in rows:
+		_quad(st, grid[cols][j][0], grid[cols][j + 1][0], grid[cols][j + 1][1], grid[cols][j][1], Color(0.62, 0.58, 0.5))
+		_quad(st, grid[0][j][1], grid[0][j + 1][1], grid[0][j + 1][0], grid[0][j][0], stone * 0.8)
+
+
+## Pedra trabalhada sozinha (a que sai da modelagem e vai na ferramenta), deitada:
+## a parte fina para cima/baixo, comprimento em X, tamanho 1 no comprimento.
+static func worked_stone_mesh(kind: String) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	var xf := Transform3D.IDENTITY
+	match kind:
+		"pedra_machado":
+			rng.seed = 4242
+			# a mesma sequência do machado: o cabo antes da pedra (para sair igual)
+			var tmp := SurfaceTool.new()
+			tmp.begin(Mesh.PRIMITIVE_TRIANGLES)
+			_haft(tmp, rng)
+			_stone(st, rng)
+			# pedra do machado: z = comprimento (nuca -> fio), y = altura, x = grossura
+			var k := 1.0 / 0.21
+			xf = Transform3D(Basis(Vector3(0, k, 0), Vector3(0, 0, k), Vector3(k, 0, 0)), Vector3.ZERO) * Transform3D(Basis(), Vector3(0, -0.52, -0.058))
+		"pedra_cavadeira":
+			rng.seed = 7171
+			var tmp := SurfaceTool.new()
+			tmp.begin(Mesh.PRIMITIVE_TRIANGLES)
+			_digger_haft(tmp, rng)
+			_digger_blade(st, rng)
+			# lâmina: y = comprimento (cabo -> fio), x = largura, z = grossura
+			var k := 1.0 / 0.36
+			xf = Transform3D(Basis(Vector3(0, 0, k), Vector3(k, 0, 0), Vector3(0, k, 0)), Vector3.ZERO) * Transform3D(Basis(), Vector3(0, -1.29, 0))
+		_:
+			var blade: ArrayMesh = Lascar.mesh(Lascar.target("lamina_serra"), Lascar.rock(31), 31)
+			return blade
+	st.generate_normals()
+	var m := st.commit()
+	var out := SurfaceTool.new()
+	out.begin(Mesh.PRIMITIVE_TRIANGLES)
+	out.append_from(m, 0, xf)
+	out.generate_normals()
+	return out.commit()
 
 
 static func axe_material() -> StandardMaterial3D:

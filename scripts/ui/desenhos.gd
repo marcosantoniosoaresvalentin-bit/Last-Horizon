@@ -81,9 +81,22 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for k in 3:
 				ci.draw_line(c + Vector2(-9, 8 + k * 5) * u, c + Vector2(9, 2 + k * 5) * u, Color(0.3, 0.36, 0.14), 3.5 * u, true)
 		"pedra":
-			var pts: PackedVector2Array = P.call([[-36, 10], [-28, -16], [-6, -30], [22, -26], [38, -6], [32, 20], [8, 30], [-22, 28]])
-			ci.draw_colored_polygon(pts, Color(0.52, 0.52, 0.5))
-			ci.draw_colored_polygon(P.call([[-20, -10], [-4, -22], [16, -18], [4, -4]]), Color(0.66, 0.66, 0.63))
+			# seixo arredondado: sombra embaixo, claro em cima, umas pintas
+			var pts := PackedVector2Array()
+			for k in 24:
+				var a2 := TAU * k / 24.0
+				var rr := 1.0 + 0.06 * sin(a2 * 3.0 + 1.0)
+				pts.append(c + Vector2(cos(a2) * 38.0 * rr, sin(a2) * 28.0 * rr + 4.0) * u)
+			ci.draw_colored_polygon(pts, Color(0.36, 0.35, 0.33))
+			for k2 in 4:
+				var f2 := 1.0 - k2 * 0.2
+				var inner := PackedVector2Array()
+				for q in pts:
+					inner.append(c + Vector2(-6, -6 - k2 * 2) * u + (q - c - Vector2(0, 4) * u) * f2)
+				ci.draw_colored_polygon(inner, Color(0.42, 0.41, 0.38).lightened(k2 * 0.07))
+			ci.draw_circle(c + Vector2(-14, -10) * u, 5 * u, Color(0.68, 0.67, 0.63))
+			for sp in [Vector2(12, 8), Vector2(-4, 14), Vector2(20, -6)]:
+				ci.draw_circle(c + sp * u, 1.6 * u, Color(0.3, 0.29, 0.27))
 			ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 2.0 * u, true)
 		"galho":
 			ci.draw_line(c + Vector2(-42, 30) * u, c + Vector2(40, -26) * u, Color(0.45, 0.3, 0.17), 9.0 * u, true)
@@ -134,20 +147,18 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			var blade: PackedVector2Array = P.call([[-30, -4], [30, -6], [34, 0], [30, 6], [-30, 8], [-35, 2]])
 			if id == "lamina_serra":
 				blade = P.call([[-42, -10], [42, -12], [46, 0], [42, 12], [-42, 14], [-47, 2]])
-			var stone := Color(0.62, 0.48, 0.26)
-			ci.draw_colored_polygon(blade, stone)
 			var y0 := 8.0 if id == "serra" else 14.0
 			var x0 := -30.0 if id == "serra" else -42.0
 			var x1 := 30.0 if id == "serra" else 42.0
-			var k := 0
-			var x := x0
-			while x < x1:
-				ci.draw_colored_polygon(P.call([[x, y0 - 1], [x + 5, y0 - 1], [x + 2.5, y0 + 6]]), stone.darkened(0.1))
-				x += 5.0
-				k += 1
-			ci.draw_polyline(blade + PackedVector2Array([blade[0]]), ink, 1.6 * u, true)
-			for f in 4:
-				ci.draw_line(c + Vector2(x0 + 8 + f * (x1 - x0 - 16) / 3.0, -4) * u, c + Vector2(x0 + 14 + f * (x1 - x0 - 16) / 3.0, 4) * u, stone.lightened(0.15), 1.5 * u, true)
+			# a lâmina de pedra com os dentes embaixo (um polígono só, lascado)
+			var outline := [[x0, -6.0 if id == "serra" else -12.0], [x1, -8.0 if id == "serra" else -14.0], [x1 + 4.0, 0.0]]
+			var x := x1
+			while x > x0:
+				outline.append([x, y0])
+				outline.append([x - 2.5, y0 + 6.0])
+				x -= 5.0
+			outline.append([x0 - 5.0, 2.0])
+			flint(ci, P.call(outline), Color(0.44, 0.4, 0.33), 13, u, [3, 4])
 			if id == "serra":
 				ci.draw_line(c + Vector2(-46, -12) * u, c + Vector2(46, -12) * u, Color(0.4, 0.27, 0.15), 7 * u, true)
 				for e in [-42.0, 42.0]:
@@ -155,20 +166,13 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				for e in [-18.0, 0.0, 18.0]:
 					ci.draw_line(c + Vector2(e - 3, -16) * u, c + Vector2(e + 3, 4) * u, Color(0.3, 0.36, 0.14), 3 * u, true)
 		"pedra_machado":
-			var head: PackedVector2Array = P.call([[-34, -10], [-10, -30], [24, -26], [42, -4], [30, 22], [-6, 28], [-30, 14]])
-			ci.draw_colored_polygon(head, Color(0.5, 0.5, 0.47))
-			ci.draw_colored_polygon(P.call([[30, 22], [42, -4], [46, 0], [34, 24]]), Color(0.72, 0.72, 0.68))
-			for f in 5:
-				var a := TAU * f / 5.0
-				ci.draw_arc(c + Vector2(cos(a) * 14, sin(a) * 10) * u, 9 * u, a, a + 2.2, 6, Color(0.4, 0.4, 0.38), 1.5 * u, true)
-			ci.draw_polyline(head + PackedVector2Array([head[0]]), ink, 2.0 * u, true)
+			# cabeça de machado de pedra lascada: nuca estreita (esq.), fio largo e curvo (dir.)
+			flint(ci, P.call([[-40, -6], [-30, -16], [-10, -24], [14, -30], [34, -30], [44, -14], [46, 4], [40, 22], [30, 30], [8, 24], [-12, 16], [-32, 10], [-42, 4]]),
+				Color(0.2, 0.21, 0.19), 3, u, [9, 10])
 		"pedra_cavadeira":
-			var bl: PackedVector2Array = P.call([[-14, -40], [14, -40], [26, 10], [16, 40], [-16, 40], [-26, 10]])
-			ci.draw_colored_polygon(bl, Color(0.58, 0.52, 0.42))
-			ci.draw_colored_polygon(P.call([[-16, 40], [16, 40], [14, 34], [-14, 34]]), Color(0.74, 0.7, 0.6))
-			for f in 4:
-				ci.draw_arc(c + Vector2(-8 + (f % 2) * 16, -18 + f * 12) * u, 8 * u, 0.3, 2.6, 6, Color(0.46, 0.42, 0.34), 1.5 * u, true)
-			ci.draw_polyline(bl + PackedVector2Array([bl[0]]), ink, 2.0 * u, true)
+			# lâmina de cavadeira: estreita em cima (onde encaixa no cabo), larga e chata embaixo
+			flint(ci, P.call([[-12, -42], [12, -42], [16, -24], [26, -2], [34, 20], [30, 36], [12, 42], [-12, 42], [-30, 36], [-34, 20], [-26, -2], [-16, -24]]),
+				Color(0.47, 0.43, 0.35), 5, u, [6, 7])
 		_:
 			return false
 	return true
@@ -209,3 +213,34 @@ static func balde(ci: CanvasItem, c: Vector2, s: float) -> void:
 		var hw := lerpf(34.0, 29.0, (y + 18.0) / 60.0)
 		ci.draw_line(c + Vector2(-hw - 1, y) * u, c + Vector2(hw + 1, y + 1.5) * u, Color(0.78, 0.62, 0.4), 3.6 * u, true)
 	ci.draw_polyline(body + PackedVector2Array([body[0]]), ink, 2.0 * u, true)
+
+
+## Pedra lascada: o contorno pintado com facetas (cada lasca um tom), luz em cima,
+## a beirada clara (o fio) e contorno escuro.
+static func flint(ci: CanvasItem, pts: PackedVector2Array, base: Color, seed_: int, u: float, edge: Array) -> void:
+	var ink := Color(0.08, 0.07, 0.06)
+	ci.draw_colored_polygon(pts, base.darkened(0.25))
+	var cen := Vector2.ZERO
+	for q in pts:
+		cen += q
+	cen /= pts.size()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_
+	var n := pts.size()
+	# anel de lascas na beirada (o fio) e lascas maiores para dentro
+	for i in n:
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[(i + 1) % n]
+		var ia := cen + (a - cen) * rng.randf_range(0.45, 0.62)
+		var ib := cen + (b - cen) * rng.randf_range(0.45, 0.62)
+		var lit := clampf(0.5 - ((a + b) * 0.5 - cen).normalized().dot(Vector2(0.6, 0.8)) * 0.5, 0.0, 1.0)
+		var col := base.lerp(base.lightened(0.45), lit * rng.randf_range(0.6, 1.0)).darkened(rng.randf_range(0.0, 0.15))
+		ci.draw_colored_polygon(PackedVector2Array([a, b, ib, ia]), col)
+		ci.draw_polyline(PackedVector2Array([ia, ib]), base.darkened(0.45), 1.0 * u, true)
+		ci.draw_colored_polygon(PackedVector2Array([ia, ib, cen]), base.lerp(base.lightened(0.3), rng.randf() * 0.6))
+	# fio: beirada clara (afiada)
+	for ei in edge:
+		var e0: Vector2 = pts[int(ei) % n]
+		var e1: Vector2 = pts[(int(ei) + 1) % n]
+		ci.draw_line(e0, e1, base.lightened(0.6), 3.0 * u, true)
+	ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 2.0 * u, true)

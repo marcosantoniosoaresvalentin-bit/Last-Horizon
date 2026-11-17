@@ -24,7 +24,8 @@ const GalhoGeo := preload("res://scripts/world/galho_geo.gd")
 const Pedras := preload("res://scripts/world/pedras.gd")
 const Lascar := preload("res://scripts/world/lascar.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
-const KNAP_ERR := 0.006           # chance de a pedra rachar a cada batida (no chão é mais difícil)
+const Maos := preload("res://scripts/world/maos.gd")
+const Corte2 := preload("res://scripts/world/corte.gd")
 ## Onda na água: um anel que abre e some (passos dentro d'água).
 const RIPPLE_SHADER := """
 shader_type spatial;
@@ -338,6 +339,7 @@ var _pedras: Node3D = null
 var _knap := {}                   # modelando pedra no chão: ver _knap_start
 var _knap_ui: Control = null
 var _knap_mi: MeshInstance3D = null
+var _knap_hand: Node3D = null
 var _knap_rng := RandomNumberGenerator.new()
 var _work_menu: Control = null
 var _work := {}                   # trabalho escolhido: {i (tora apoiada), modo, e (ponta), stage, fix}
@@ -1351,11 +1353,12 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 	elif id in Lascar.KINDS:
 		var mi := MeshInstance3D.new()
 		var sz := r if r > 0.0 else 0.17
-		mi.mesh = Lascar.finished_mesh(id, 11)
-		mi.material_override = Lascar.material()
+		mi.mesh = Corte2.worked_stone_mesh(id)       # a mesma pedra que vai na ferramenta
+		mi.material_override = Lascar.material() if id == "lamina_serra" else Corte2.axe_material()
+		sz *= 1.2
 		mi.scale = Vector3(sz, sz, sz)
 		mi.rotation.y = randf() * TAU
-		mi.position.y = -Lascar.bottom(Lascar.target(id)) * sz
+		mi.position.y = -mi.mesh.get_aabb().position.y * sz
 		node.add_child(mi)
 	elif id == "balde":
 		var mi := MeshInstance3D.new()
@@ -1522,7 +1525,7 @@ func equip(id: String) -> void:
 		elif _mao == "serra":
 			mi.mesh = Corte.saw_mesh()
 		elif _mao == "pedra":
-			mi.mesh = Lascar.small_mesh(77, 0.1)       # pedra de bater, na palma da mão
+			mi.mesh = Lascar.cobble_mesh(77, 0.1)      # pedra de bater, na palma da mão
 		else:
 			mi.mesh = Corte.axe_mesh()
 	_act_check = 0.0
@@ -1731,7 +1734,7 @@ func _update_ctx_btn() -> void:
 		elif _galhos.nearest(_player.position, 1.3, false) >= 0:
 			_ctx_action = "galho"
 			_ctx_btn.text = "Pegar galho"
-		elif _pedras and _pedras.nearest(_player.position, 1.1) >= 0:
+		elif _pedras and _pedras.nearest(_player.position, 1.1, true) >= 0:
 			_ctx_action = "pedra"
 			_ctx_btn.text = "Pegar pedra"
 		elif _apoios.nearest_rested(_player.position, 1.6) >= 0:
@@ -1748,7 +1751,7 @@ func _ctx_press() -> void:
 		return
 	match _ctx_action:
 		"pedra":
-			var i: int = _pedras.nearest(_player.position, 1.1)
+			var i: int = _pedras.nearest(_player.position, 1.1, true)
 			if i < 0:
 				return
 			_face_to(_pedras.point_of(i))
@@ -2582,19 +2585,22 @@ func _knap_start(i: int, kind: String) -> void:
 	p.kind = kind
 	_knap_rng.seed = int(p.seed) + int(p.get("spots", 0)) * 131
 	_knap = {"i": i, "kind": kind, "cur": cur, "tgt": tgt, "orig": orig, "sel": false, "hits": 0,
-		"need": _knap_rng.randi_range(3, 7), "done": int(p.get("spots", 0)), "K": int(Lascar.KINDS[kind].spots),
-		"ex0": maxf(Lascar.excess(orig, tgt), 0.0001), "anim": -1.0}
+		"done": int(p.get("spots", 0)), "K": int(Lascar.KINDS[kind].spots),
+		"ex0": maxf(Lascar.excess(orig, tgt), 0.0001), "anim": -1.0, "t": 0.0, "ending": -1.0}
 	_knap.spot = Lascar.next_spot(cur, tgt)
+	_knap_new_spot()
 	_face_to(_pedras.point_of(i))
 	_pedras.hide_stone(i)
 	_knap_mi = MeshInstance3D.new()
 	_knap_mi.material_override = Lascar.material()
 	add_child(_knap_mi)
 	_knap_refresh_mesh()
-	if _chop_pose:
-		_chop_pose.crouch = 1.0
-		_chop_pose.knapping = true
-		_chop_pose.knap_lift = 0.35
+	# só a mão aparece (o corpo some, para não ficar na frente da câmera)
+	_player.visible = false
+	_knap_hand = Maos.right_hand(Color(0.4, 0.27, 0.2), Color(0.1, 0.14, 0.18))
+	add_child(_knap_hand)
+	_knap_camera(1.0)
+	_place_knap_hand(0.0)
 	_play("Idle", 0.5)
 	_build_knap_ui()
 	_grass_mat.set_shader_parameter("flat_spot", Vector4(_knap_mi.global_position.x, 0, _knap_mi.global_position.z, 2.2))
@@ -2617,6 +2623,66 @@ func _knap_progress() -> float:
 	return clampf(1.0 - Lascar.excess(_knap.cur, _knap.tgt) / float(_knap.ex0), 0.0, 1.0)
 
 
+## Ponto novo: quantas batidas pede e a dificuldade da barrinha (cada lugar é diferente:
+## o marcador anda mais rápido ou mais devagar, o verde é maior ou menor).
+func _knap_new_spot() -> void:
+	var pr := _knap_progress()
+	_knap.sel = false
+	_knap.hits = 0
+	_knap.need = _knap_rng.randi_range(1, 3)
+	_knap.speed = _knap_rng.randf_range(0.45, 1.25) * (1.0 + 0.5 * pr)      # idas e voltas por segundo
+	_knap.gw = _knap_rng.randf_range(0.12, 0.3) * (1.0 - 0.35 * pr)         # largura do verde (0 a 1)
+	_knap.gc = _knap_rng.randf_range(0.25, 0.75)                            # onde fica o verde
+	_knap.t = _knap_rng.randf() * 4.0
+
+
+## Onde está o marcador amarelo na barrinha (0 a 1, vai e volta).
+func _knap_marker() -> float:
+	var x := fmod(float(_knap.t) * float(_knap.speed), 2.0)
+	return x if x <= 1.0 else 2.0 - x
+
+
+func _knap_in_green(m: float) -> bool:
+	return absf(m - float(_knap.gc)) <= float(_knap.gw) * 0.5
+
+
+## A mão com a pedra de bater: parada do lado (fora da pedra), e na batida vai até o
+## ponto, levanta, desce e volta. a = 0 a 1 (momento da batida), < 0 parada.
+func _place_knap_hand(a: float) -> void:
+	if _knap_hand == null or _knap_mi == null:
+		return
+	var c := _knap_mi.global_position
+	var cam_b := _cam.global_transform.basis
+	var right := cam_b.x
+	right.y = 0.0
+	right = right.normalized()
+	var back := cam_b.z
+	back.y = 0.0
+	back = back.normalized()
+	var idle := c + right * 0.21 + back * 0.04 + Vector3.UP * 0.05
+	var spot := _knap_spot_world()
+	var hit := spot
+	var p := idle
+	var tilt := 0.0
+	if a >= 0.0:
+		var above := spot + Vector3.UP * 0.13 + back * 0.03
+		if a < 0.4:
+			p = idle.lerp(above, smoothstep(0.0, 1.0, a / 0.4))
+			tilt = lerpf(0.0, -0.35, a / 0.4)
+		elif a < 0.55:
+			p = above.lerp(hit, pow((a - 0.4) / 0.15, 2.0))
+			tilt = lerpf(-0.35, 0.25, (a - 0.4) / 0.15)
+		else:
+			p = hit.lerp(idle, smoothstep(0.0, 1.0, (a - 0.55) / 0.45))
+			tilt = lerpf(0.25, 0.0, (a - 0.55) / 0.45)
+	# a mão entra pela frente da câmera (de baixo da tela), virada para a pedra
+	var fwd := -back
+	var b := Basis(right, Vector3.UP, back) * Basis(Vector3.RIGHT, tilt)
+	b = b.rotated(Vector3.UP, -0.35)
+	_knap_hand.global_transform = Transform3D(b, p - b * Maos.CONTACT)
+	var _u := fwd
+
+
 func _build_knap_ui() -> void:
 	_knap_ui = Control.new()
 	_knap_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -2635,7 +2701,7 @@ func _build_knap_ui() -> void:
 		return pc
 	var info: PanelContainer = box.call(16, 16, 380, 120, Control.PRESET_TOP_LEFT)
 	var il := Label.new()
-	il.text = "MODELAGEM DE PEDRA\nToque no ponto marcado na pedra e depois em BATER. No chão é mais difícil: a pedra pode rachar."
+	il.text = "MODELAGEM DE PEDRA\nToque no ponto da pedra. Depois toque em BATER quando o marcador estiver no VERDE. No vermelho a pedra quebra!"
 	il.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	il.add_theme_font_size_override("font_size", 15)
 	info.add_child(il)
@@ -2679,6 +2745,17 @@ func _build_knap_ui() -> void:
 	mk.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mk.draw.connect(func(): _draw_knap_marker(mk))
 	_knap_ui.add_child(mk)
+	# barrinha do tempo da batida: embaixo, no meio
+	var tb := Control.new()
+	tb.name = "tb"
+	tb.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	tb.offset_left = -270
+	tb.offset_right = 270
+	tb.offset_top = -110
+	tb.offset_bottom = -30
+	tb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tb.draw.connect(func(): _draw_knap_bar(tb))
+	_knap_ui.add_child(tb)
 	var hit := Icones.IconButton.new()
 	hit.text = "Bater"
 	hit.add_theme_font_size_override("font_size", 22)
@@ -2701,6 +2778,32 @@ func _build_knap_ui() -> void:
 		_show_toast("A pedra fica do jeito que está. Dá para continuar depois.")
 		_knap_end())
 	_knap_ui.add_child(out)
+
+
+func _draw_knap_bar(tb: Control) -> void:
+	if _knap.is_empty():
+		return
+	var w := tb.size.x
+	var r := Rect2(Vector2(0, 34), Vector2(w, 34))
+	var font := ThemeDB.fallback_font
+	var txt := "Bata quando o marcador estiver no verde" if bool(_knap.sel) else "Toque no ponto da pedra"
+	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	tb.draw_rect(Rect2(Vector2(w * 0.5 - tw * 0.5 - 10, 0), Vector2(tw + 20, 28)), Color(0.05, 0.05, 0.04, 0.85))
+	tb.draw_string(font, Vector2(w * 0.5 - tw * 0.5, 21), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.95, 0.8))
+	tb.draw_rect(r.grow(4), Color(0.05, 0.05, 0.04, 0.9))
+	# vermelho com o verde no meio (as beiradas do verde vão clareando)
+	var n := 60
+	for k in n:
+		var u := (k + 0.5) / n
+		var d := absf(u - float(_knap.gc)) - float(_knap.gw) * 0.5
+		var col := Color(0.2, 0.75, 0.2) if d <= 0.0 else Color(0.8, 0.12, 0.1).lerp(Color(0.85, 0.55, 0.1), clampf(1.0 - d / 0.08, 0.0, 1.0) * 0.6)
+		tb.draw_rect(Rect2(r.position + Vector2(w * k / n, 0), Vector2(w / n + 0.5, r.size.y)), col)
+	tb.draw_rect(r, Color(0, 0, 0, 0.8), false, 2.0)
+	# o marcador amarelo (para no lugar do toque durante a batida)
+	var m: float = float(_knap.get("frozen", 0.5)) if float(_knap.anim) >= 0.0 else _knap_marker()
+	var x := r.position.x + m * w
+	tb.draw_rect(Rect2(Vector2(x - 4, r.position.y - 7), Vector2(8, r.size.y + 14)), Color(1.0, 0.85, 0.15))
+	tb.draw_rect(Rect2(Vector2(x - 4, r.position.y - 7), Vector2(8, r.size.y + 14)), Color(0.2, 0.12, 0.0), false, 2.0)
 
 
 func _draw_knap_marker(mk: Control) -> void:
@@ -2743,23 +2846,24 @@ func _knap_input(e: InputEvent) -> void:
 
 
 func _knap_hit() -> void:
-	if _knap.is_empty() or float(_knap.anim) >= 0.0:
+	if _knap.is_empty() or float(_knap.anim) >= 0.0 or float(_knap.ending) >= 0.0:
 		return
 	if not bool(_knap.sel):
 		_show_toast("Toque primeiro no ponto marcado na pedra.")
 		return
+	# acertou o verde? (o marcador para onde estava na hora do toque)
+	var m := _knap_marker()
+	_knap.frozen = m
+	_knap.ok = _knap_in_green(m)
 	_knap.anim = 0.0
 
 
-func _knap_camera(delta: float) -> void:
+func _knap_camera(_delta: float) -> void:
 	var c := _knap_mi.global_position
 	var toward := Vector3(_player.position.x - c.x, 0, _player.position.z - c.z).normalized()
-	var side := Vector3(-toward.z, 0, toward.x)
-	# de cima da pedra, olhando para baixo: o personagem fica embaixo da tela e as mãos
-	# entram por baixo (a cabeça dele não fica na frente)
-	var want := c + toward * 0.1 - side * 0.05 + Vector3.UP * 0.85
-	_cam.position = _cam.position.lerp(want, minf(1.0, delta * 6.0))
-	_cam.look_at(c + toward * 0.04, -toward)
+	# de cima, do lado de onde o personagem está (ele está escondido: só a mão aparece)
+	_cam.global_position = c + toward * 0.5 + Vector3.UP * 0.66
+	_cam.look_at(c + toward * 0.02)
 
 
 func _update_knap(delta: float) -> void:
@@ -2768,25 +2872,27 @@ func _update_knap(delta: float) -> void:
 	for b in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _jump_btn]:
 		if b:
 			b.visible = false
+	if float(_knap.ending) >= 0.0:
+		_knap.ending = float(_knap.ending) - delta
+		if float(_knap.ending) < 0.0:
+			var i := int(_knap.i)
+			_knap_end()
+			if i < _pedras.items.size():
+				_pedras.take(i)          # a pedra quebrou: perdeu
+		return
 	var a := float(_knap.anim)
-	var lift := 0.35
 	if a >= 0.0:
 		var before := a
-		a += delta / 0.5
-		if a < 0.35:
-			lift = lerpf(0.35, 1.0, smoothstep(0.0, 1.0, a / 0.35))
-		elif a < 0.5:
-			lift = lerpf(1.0, 0.0, pow((a - 0.35) / 0.15, 2.0))
-		else:
-			lift = lerpf(0.0, 0.35, smoothstep(0.0, 1.0, (a - 0.5) / 0.5))
-		if before < 0.5 and a >= 0.5:
+		a += delta / 0.55
+		if before < 0.55 and a >= 0.55:
 			_knap_impact()
 			if _knap.is_empty():
 				return
 		_knap.anim = -1.0 if a >= 1.0 else a
-	if _chop_pose:
-		_chop_pose.knap_lift = lift
-		_chop_pose.knap_point = _knap_spot_world()
+		_place_knap_hand(minf(a, 1.0) if a < 1.0 else -1.0)
+	else:
+		_knap.t = float(_knap.t) + delta
+		_place_knap_hand(-1.0)
 	var pr := _knap_progress()
 	var pl := _knap_ui.find_child("pl", true, false) as Label
 	var bar := _knap_ui.find_child("bar", true, false) as ProgressBar
@@ -2794,28 +2900,29 @@ func _update_knap(delta: float) -> void:
 		pl.text = "Progresso da modelagem   %d%%" % int(pr * 100.0)
 	if bar:
 		bar.value = pr * 100.0
-	var mk := _knap_ui.find_child("mk", true, false) as Control
-	if mk:
-		mk.queue_redraw()
+	for n in ["mk", "tb"]:
+		var c := _knap_ui.find_child(n, true, false) as Control
+		if c:
+			c.queue_redraw()
 
 
 ## A pedra de bater chegou na pedra do chão.
 func _knap_impact() -> void:
 	var w := _knap_spot_world()
-	Sons.play_at(self, "pedra_bate", w, 0.0, randf_range(0.95, 1.1))
-	_stone_chips(w, 6)
-	_knap.hits = int(_knap.hits) + 1
 	var i := int(_knap.i)
-	# no chão a batida é torta: às vezes a pedra racha no meio e não serve mais
-	if _knap_rng.randf() < KNAP_ERR * (0.6 + _knap_progress()):
+	if not bool(_knap.ok):
+		# bateu no vermelho: a pedra quebra e não serve mais para nada
 		_pedras.items[i].rachada = true
 		_pedras.items[i].kind = ""
 		Sons.play_at(self, "pedra_racha", w, 2.0)
-		_stone_chips(w, 20)
-		_pedras.set_radii(i, _knap.cur)
-		_show_toast("A pedra rachou no meio! Não serve mais para modelar.")
-		_knap_end()
+		_stone_chips(w, 24)
+		_knap_mi.mesh = Lascar.mesh(_knap.cur, _knap.orig, int(_pedras.items[i].seed), true)
+		_show_toast("Bateu fora do verde: a pedra quebrou! Perdeu a pedra.")
+		_knap.ending = 1.6
 		return
+	Sons.play_at(self, "pedra_bate", w, 0.0, randf_range(0.95, 1.1))
+	_stone_chips(w, 6)
+	_knap.hits = int(_knap.hits) + 1
 	if int(_knap.hits) < int(_knap.need):
 		return
 	# soltou uma lasca: a pedra vai tomando forma (aos poucos)
@@ -2832,9 +2939,7 @@ func _knap_impact() -> void:
 	_pedras.set_radii(i, cur)
 	_knap_refresh_mesh()
 	_knap.spot = Lascar.next_spot(cur, _knap.tgt)
-	_knap.sel = false
-	_knap.hits = 0
-	_knap.need = _knap_rng.randi_range(3, 7)
+	_knap_new_spot()
 
 
 func _knap_finish() -> void:
@@ -2857,6 +2962,10 @@ func _knap_end() -> void:
 		_knap_mi.queue_free()
 	_knap_mi = null
 	_knap = {}
+	if _knap_hand:
+		_knap_hand.queue_free()
+	_knap_hand = null
+	_player.visible = true
 	_grass_mat.set_shader_parameter("flat_spot", Vector4.ZERO)
 	if _pedras:
 		_pedras.hide_stone(-1)

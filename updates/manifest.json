@@ -1,9 +1,9 @@
 {
-  "version": 54,
-  "file": "update_54.zip",
-  "size": 3464172,
-  "sha256": "38083beca6c231d77f4fe61cd609aaf32976ed55d050481de4d691d7dce56ab0",
+  "version": 55,
+  "file": "update_55.zip",
+  "size": 3468803,
+  "sha256": "611180e024b24bc6c2048c7e90d96335b7bc715a73be692f53f9b2df2f29776f",
   "min_build": 1,
-  "notes": "Colocar com câmera de cima e prévia visível, forquilha alinhada, mãos no cabo da serra, lâmina de pedra, galhos da árvore caída para cima e mochila fixa",
+  "notes": "Modelar pedra: barrinha de tempo (verde acerta, vermelho quebra), só a mão aparece, pedras prontas iguais às das ferramentas e ícones novos",
   "date": "2026-11-17"
 }
