@@ -36,7 +36,7 @@ static func _bone(parent: Node3D, a: Vector3, b: Vector3, r: float, mat: Materia
 
 
 ## Monta a mão direita segurando a pedra de bater (Node3D com as peças).
-static func right_hand(skin: Color, sleeve: Color) -> Node3D:
+static func right_hand(skin: Color, sleeve: Color, with_stone := true) -> Node3D:
 	var root := Node3D.new()
 	var sk := _mat(skin, 0.65)
 	var cl := _mat(sleeve, 0.9)
@@ -46,12 +46,12 @@ static func right_hand(skin: Color, sleeve: Color) -> Node3D:
 	var cy := CylinderMesh.new()
 	cy.top_radius = 0.05
 	cy.bottom_radius = 0.056
-	cy.height = 0.34
+	cy.height = 1.1
 	sl.mesh = cy
 	sl.material_override = cl
 	var d := (Vector3(0.012, 0.05, 0.48) - Vector3(0.006, 0.03, 0.18)).normalized()
 	var x := d.cross(Vector3.RIGHT).normalized()
-	sl.transform = Transform3D(Basis(x, d, x.cross(d).normalized()), Vector3(0.009, 0.04, 0.33))
+	sl.transform = Transform3D(Basis(x, d, x.cross(d).normalized()), Vector3(0.012, 0.06, 0.71))
 	root.add_child(sl)
 	# palma (meio achatada) e as costas da mão
 	var palm := MeshInstance3D.new()
@@ -76,6 +76,8 @@ static func right_hand(skin: Color, sleeve: Color) -> Node3D:
 	# polegar (do lado esquerdo da mão direita), segurando a pedra pelo lado
 	_bone(root, Vector3(-0.035, -0.005, 0.005), Vector3(-0.05, -0.03, -0.03), 0.012, sk)
 	_bone(root, Vector3(-0.05, -0.03, -0.03), Vector3(-0.04, -0.05, -0.06), 0.011, sk)
+	if not with_stone:
+		return root
 	# a pedra de bater, presa na mão
 	var st := MeshInstance3D.new()
 	st.mesh = Lascar.cobble_mesh(77, 0.1)

@@ -15,8 +15,8 @@ extends Node3D
 ##    do papel deles (possibilidades até haver registros confirmados para a espécie).
 ##  - Se a árvore de apoio morre ou é derrubada, a titica morre junto. Seca forte
 ##    mata mudas.
-## Coleta: só raízes maduras e no máximo metade delas por planta (o resto fica para a
-## planta continuar viva). Raiz colhida volta a crescer.
+## Coleta: o jogador puxa as raízes que quiser e pode até arrancar o pé inteiro
+## (aí a planta acaba). Raiz colhida volta a crescer se o pé ficar.
 
 const MAX_PLANTS := 320
 const START_PLANTS := 70
@@ -243,8 +243,8 @@ func harvest_target(pos: Vector3, reach: float) -> Dictionary:
 	var best := {}
 	var bd := reach
 	for pl in plants:
-		if int(pl.dead) >= 0 or _free_roots(pl).is_empty():
-			continue          # morta ou sem raiz para arrancar
+		if int(pl.dead) >= 0 and float(last_day - int(pl.dead)) > 30.0:
+			continue          # já secou
 		var d := Vector2(float(pl.x) - pos.x, float(pl.z) - pos.z).length()
 		if d < bd:
 			bd = d
@@ -269,27 +269,89 @@ func mature_roots(pl: Dictionary) -> Array:
 	return out
 
 
-## Arranca uma raiz (a maior que tiver). O jogador pode arrancar quantas quiser:
-## se arrancar todas, a titica morre (cuidar da mata é com ele).
+## Lugares para puxar: cada raiz pendurada (pega na altura da mão) e o próprio pé
+## (o caule perto do chão: arrancando ele, a planta acaba).
+## [{kind: "raiz"/"caule", i (índice da raiz), pos (no mundo), top (de onde cai)}]
+func pull_spots(pl: Dictionary) -> Array:
+	var out := []
+	var host = _host_of(pl)
+	var x := float(pl.x)
+	var z := float(pl.z)
+	var gy: float = _jogo.height_at(x, z)
+	if host != null and float(pl.climb) >= 0.6 and int(pl.dead) < 0:
+		var a0 := float(pl.a0)
+		for i in pl.roots.size():
+			var rt: Array = pl.roots[i]
+			if int(rt[3]) >= 0 or float(rt[2]) <= 0.2:
+				continue
+			var at := float(rt[1])
+			var length := float(rt[2])
+			var ang := a0 + at * 0.32 + float(rt[0])
+			var start: Vector3 = _arv.trunk_point(host, at, ang, 0.03)
+			var hy := clampf(1.25, at - length + 0.1, at)
+			var t := (at - hy) / maxf(length, 0.01)
+			var pos: Vector3 = _arv.trunk_point(host, maxf(hy, 0.0), ang, 0.08 + 0.12 * t)
+			pos.y = start.y - length * t
+			out.append({"kind": "raiz", "i": i, "pos": pos, "top": start, "len": length})
+	# o pé (caule): fica por último quando ainda tem raiz, mas sempre dá para arrancar
+	var sp := Vector3(x, gy + 0.15, z)
+	if host != null and float(pl.climb) >= 0.6:
+		var a0 := float(pl.a0)
+		sp = _arv.trunk_point(host, 0.9, a0 + 0.9 * 0.32, 0.03)
+	out.append({"kind": "caule", "i": -1, "pos": sp, "top": sp + Vector3(0, minf(float(pl.climb), 6.0), 0), "len": float(pl.climb)})
+	return out
+
+
+## Puxa a raiz i (sai inteira). Devolve o comprimento dela.
+func pull_root(pl: Dictionary, i: int) -> float:
+	if i < 0 or i >= pl.roots.size():
+		return 0.0
+	var rt: Array = pl.roots[i]
+	var length := float(rt[2])
+	rt[3] = last_day
+	rt[2] = 0.0
+	_rebuild()
+	return length
+
+
+## Arranca o pé inteiro: a planta acaba (o jogador decide se deixa algum para a mata).
+func pull_stem(pl: Dictionary) -> void:
+	plants.erase(pl)
+	_rebuild()
+
+
+## Mantido para compatibilidade: arranca a maior raiz (ou o pé, se não tiver mais).
 func harvest(pl: Dictionary) -> String:
 	var free := _free_roots(pl)
 	if free.is_empty():
+		pull_stem(pl)
 		return ""
-	var rt: Array = free[0]
-	for r in free:
-		if float(r[2]) > float(rt[2]):
-			rt = r
-	rt[3] = last_day
-	rt[2] = 0.0
-	if _free_roots(pl).is_empty() and mature_roots(pl).is_empty():
-		var growing := false
-		for r in pl.roots:
-			if int(r[3]) < 0 and float(r[2]) > 0.0:
-				growing = true
-		if not growing:
-			pl.dead = last_day        # arrancou tudo: a planta morre
-	_rebuild()
+	var best := 0
+	for i in pl.roots.size():
+		if pl.roots[i] in free and float(pl.roots[i][2]) > float(pl.roots[best][2]):
+			best = i
+	pull_root(pl, best)
 	return ""
+
+
+## Rolo de cipó (o que cai no chão para pegar).
+static func coil_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var col := Color(0.42, 0.33, 0.2)
+	var prev := Vector3.ZERO
+	var n := 60
+	for k in n + 1:
+		var t := float(k) / n
+		var a := t * TAU * 3.2
+		var r := 0.09 + 0.012 * sin(t * 17.0)
+		var p := Vector3(cos(a) * r, 0.012 + t * 0.03, sin(a) * r)
+		if k > 0:
+			_tube(st, prev, p, 0.006, col.darkened(0.08 * (k % 2)))
+		prev = p
+	_tube(st, prev, prev + Vector3(0.12, -0.02, 0.05), 0.005, col)
+	st.generate_normals()
+	return st.commit()
 
 
 # ================== SALVAR ==================

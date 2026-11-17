@@ -1,9 +1,9 @@
 {
-  "version": 63,
-  "file": "update_63.zip",
-  "size": 3477253,
-  "sha256": "51883a8263ee98c269b6447d9562dcfe1c27d370e18ce3d9a289403548f00849",
+  "version": 64,
+  "file": "update_64.zip",
+  "size": 3480960,
+  "sha256": "31dc960bebbe0f2a2f5f66ce78fb234841521ec9c056fca902e6cddb6fff62ab",
   "min_build": 1,
-  "notes": "Craft com tamanho fixo: selecionar uma receita não muda mais o tamanho da tela",
+  "notes": "Coletar cipó com as mãos: escolhe o cipó, arrasta o dedo para baixo e ele cai no chão; dá para arrancar o pé inteiro",
   "date": "2026-11-17"
 }

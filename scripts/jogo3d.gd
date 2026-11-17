@@ -342,6 +342,9 @@ var _knap := {}                   # modelando pedra no chão: ver _knap_start
 var _knap_ui: Control = null
 var _knap_mi: MeshInstance3D = null
 var _knap_hand: Node3D = null
+var _vine := {}                   # puxando cipó: {pl, spots, sel, anim, drag (y do toque), tid}
+var _vine_ui: Control = null
+var _vine_hand: Node3D = null
 var _knap_rng := RandomNumberGenerator.new()
 var _work_menu: Control = null
 var _work := {}                   # trabalho escolhido: {i (tora apoiada), modo, e (ponta), stage, fix}
@@ -1168,6 +1171,7 @@ func _process(delta: float) -> void:
 	_update_crouch(delta)
 	_update_placing()
 	_update_knap(delta)
+	_update_vine(delta)
 	_holes_t -= delta
 	if _holes_t <= 0.0:
 		_holes_t = 1.0
@@ -1447,6 +1451,12 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 		mi.scale = Vector3(sz, sz, sz)
 		mi.rotation.y = float(dur[1]) if dur.size() == 2 else randf() * TAU
 		mi.position.y = -mi.mesh.get_aabb().position.y * sz
+		node.add_child(mi)
+	elif id == "cipo":
+		var mi := MeshInstance3D.new()
+		mi.mesh = Cipos.coil_mesh()
+		mi.material_override = Balde.material()
+		mi.rotation.y = randf() * TAU
 		node.add_child(mi)
 	elif id == "balde":
 		var mi := MeshInstance3D.new()
@@ -1913,7 +1923,7 @@ func _update_log_btn() -> void:
 		elif _apoios != null and _apoios.nearest_rested(_player.position, 1.6) >= 0:
 			_work_btn.visible = true
 			_work_btn.text = "Trabalhar"
-	_vine_btn.visible = _cipos != null and _carry.is_empty() and _crouch_job == "" and not _chopping and not _cipos.harvest_target(_player.position, 1.6).is_empty()
+	_vine_btn.visible = _cipos != null and _carry.is_empty() and _crouch_job == "" and not _chopping and _vine.is_empty() and _knap.is_empty() and not _cipos.harvest_target(_player.position, 1.6).is_empty()
 	if _crouch_job != "" or _chopping or _air:
 		_log_btn.visible = false
 		return
@@ -1952,20 +1962,293 @@ func _log_action() -> void:
 
 ## Arranca uma raiz aérea madura de cipó-titica (coleta limitada: a planta não morre).
 func _collect_vine() -> void:
-	if _cipos == null or _crouch_job != "" or not _carry.is_empty():
+	if _cipos == null or _crouch_job != "" or not _carry.is_empty() or not _vine.is_empty():
 		return
 	var pl: Dictionary = _cipos.harvest_target(_player.position, 1.6)
 	if pl.is_empty():
 		return
-	var why: String = _cipos.harvest(pl)
-	if why != "":
-		_show_toast(why)
+	_vine_start(pl)
+
+
+# ================== PUXAR CIPÓ (com as mãos) ==================
+
+func _vine_start(pl: Dictionary) -> void:
+	_face_to(Vector3(float(pl.x), 0, float(pl.z)))
+	var away := Vector3(_player.position.x - float(pl.x), 0, _player.position.z - float(pl.z))
+	_vine = {"pl": pl, "spots": _cipos.pull_spots(pl), "sel": -1, "anim": -1.0, "drag": -1.0, "tid": -2,
+		"orbit": atan2(away.z, away.x), "orbit_to": atan2(away.z, away.x), "dx": -1.0}
+	_player.visible = false
+	_vine_hand = Maos.right_hand(Color(0.4, 0.27, 0.2), Color(0.1, 0.14, 0.18), false)
+	add_child(_vine_hand)
+	_play("Idle", 0.5)
+	_vine_camera()
+	_vine_ui = Control.new()
+	_vine_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_vine_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(_vine_ui)
+	var info := PanelContainer.new()
+	info.offset_left = 16
+	info.offset_top = 16
+	info.offset_right = 400
+	info.offset_bottom = 110
+	info.add_theme_stylebox_override("panel", Mochila._box(Color(0.05, 0.05, 0.04, 0.82), Color(1, 1, 1, 0.18), 2, 8))
+	info.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var il := Label.new()
+	il.text = "COLETAR CIPÓ\nToque no cipó e arraste o dedo para BAIXO. Arraste para o lado para dar a volta na árvore."
+	il.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	il.add_theme_font_size_override("font_size", 15)
+	info.add_child(il)
+	_vine_ui.add_child(info)
+	var mk := Control.new()
+	mk.name = "mk"
+	mk.set_anchors_preset(Control.PRESET_FULL_RECT)
+	mk.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mk.draw.connect(func(): _draw_vine_marks(mk))
+	_vine_ui.add_child(mk)
+	var out := Icones.IconButton.new()
+	out.text = "Sair"
+	out.add_theme_font_size_override("font_size", 20)
+	out.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	out.offset_left = 30
+	out.offset_top = -160
+	out.offset_right = 160
+	out.offset_bottom = -30
+	out.pressed.connect(_vine_end)
+	_vine_ui.add_child(out)
+
+
+func _vine_end() -> void:
+	if _vine_ui:
+		_vine_ui.queue_free()
+	_vine_ui = null
+	if _vine_hand:
+		_vine_hand.queue_free()
+	_vine_hand = null
+	_vine = {}
+	_player.visible = true
+	_act_check = 0.0
+
+
+## Câmera na altura dos olhos, olhando para o tronco onde estão os cipós (gira em volta).
+func _vine_camera() -> void:
+	var pl: Dictionary = _vine.pl
+	var c := Vector3(float(pl.x), 0, float(pl.z))
+	var o := float(_vine.orbit)
+	var away := Vector3(cos(o), 0, sin(o))
+	var gy := height_at(c.x, c.z)
+	_cam.global_position = c + away * 1.35 + Vector3(0, gy + 1.45, 0)
+	_cam.look_at(c + Vector3(0, gy + 0.85, 0))
+	# o personagem (escondido) fica onde a câmera está, para a mão sair do lado certo
+	var pp := c + away * 1.0
+	_player.position = Vector3(pp.x, _player.position.y, pp.z)
+
+
+## O cipó está do lado da árvore que a câmera vê?
+func _vine_visible(i: int) -> bool:
+	var pl: Dictionary = _vine.pl
+	var w: Vector3 = _vine.spots[i].pos
+	var d := Vector2(w.x - float(pl.x), w.z - float(pl.z))
+	var o := float(_vine.orbit)
+	if d.length() < 0.05:
+		return true
+	return d.normalized().dot(Vector2(cos(o), sin(o))) > -0.15
+
+
+func _vine_spot_screen(i: int) -> Vector2:
+	var w: Vector3 = _vine.spots[i].pos
+	if _cam.is_position_behind(w) or not _vine_visible(i):
+		return Vector2(-9999, -9999)
+	return _cam.unproject_position(w)
+
+
+func _draw_vine_marks(mk: Control) -> void:
+	if _vine.is_empty() or float(_vine.anim) >= 0.0:
 		return
-	var dropped := add_item("cipo", 1)
-	_show_toast("+1 cipó-titica" + (" (mochila cheia: caiu no chão)" if dropped > 0 else ""))
-	_face = atan2(-(float(pl.x) - _player.position.x), -(float(pl.z) - _player.position.z))
-	_crouch_job = "puxar"
-	_crouch_t = 0.0
+	var font := ThemeDB.fallback_font
+	for i in _vine.spots.size():
+		var p := _vine_spot_screen(i)
+		var sel: bool = int(_vine.sel) == i
+		var r := 15.0 + (3.0 * sin(Time.get_ticks_msec() / 160.0) if sel else 0.0)
+		var pts := PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0), p + Vector2(0, r), p + Vector2(-r, 0)])
+		if sel:
+			mk.draw_circle(p, r * 1.6, Color(1.0, 0.75, 0.2, 0.25))
+			mk.draw_colored_polygon(pts, Color(1.0, 0.78, 0.2, 0.9))
+		mk.draw_polyline(pts + PackedVector2Array([pts[0]]), Color(1, 1, 1, 0.95) if not sel else Color(0.3, 0.18, 0.02), 3.0, true)
+	if int(_vine.sel) >= 0:
+		var p := _vine_spot_screen(int(_vine.sel))
+		var txt := "Arraste para baixo"
+		var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+		var lb := Rect2(p + Vector2(-tw * 0.5 - 8, -60), Vector2(tw + 16, 28))
+		mk.draw_rect(lb, Color(0.05, 0.05, 0.04, 0.85))
+		mk.draw_rect(lb, Color(1.0, 0.78, 0.2, 0.9), false, 2.0)
+		mk.draw_string(font, lb.position + Vector2(8, 20), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.95, 0.8))
+		# setinha para baixo
+		var ax := p.x + tw * 0.5 + 30
+		mk.draw_line(Vector2(ax, p.y - 40), Vector2(ax, p.y + 30), Color(1, 0.85, 0.3, 0.9), 4.0, true)
+		mk.draw_colored_polygon(PackedVector2Array([Vector2(ax - 10, p.y + 22), Vector2(ax + 10, p.y + 22), Vector2(ax, p.y + 38)]), Color(1, 0.85, 0.3, 0.9))
+
+
+func _vine_input(e: InputEvent) -> void:
+	if float(_vine.anim) >= 0.0:
+		return
+	var pos := Vector2.INF
+	var pressed := false
+	var released := false
+	var tid := -2
+	if e is InputEventScreenTouch:
+		pos = e.position
+		tid = e.index
+		pressed = e.pressed
+		released = not e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		tid = -1
+		pressed = e.pressed
+		released = not e.pressed
+	elif e is InputEventScreenDrag:
+		pos = e.position
+		tid = e.index
+	elif e is InputEventMouseMotion and (e.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		pos = e.position
+		tid = -1
+	if pos == Vector2.INF:
+		return
+	if pressed:
+		_vine.dx = pos.x
+		# tocou num cipó? seleciona e já começa a contar o arrasto dali
+		var best := -1
+		var bd := 75.0
+		for i in _vine.spots.size():
+			var d := pos.distance_to(_vine_spot_screen(i))
+			if d < bd:
+				bd = d
+				best = i
+		if best >= 0:
+			_vine.sel = best
+		_vine.drag = pos.y if int(_vine.sel) >= 0 else -1.0
+		_vine.tid = tid
+		return
+	if released:
+		_vine.drag = -1.0
+		_vine.dx = -1.0
+		return
+	# arrastando para o lado (sem estar puxando um cipó): dá a volta na árvore
+	if float(_vine.dx) >= 0.0 and float(_vine.drag) < 0.0:
+		var o := float(_vine.orbit) + (pos.x - float(_vine.dx)) * 0.006
+		_vine.orbit = o
+		_vine.orbit_to = o
+		_vine.dx = pos.x
+		return
+	if float(_vine.dx) >= 0.0 and absf(pos.x - float(_vine.dx)) > 60.0 and float(_vine.drag) >= 0.0 and absf(pos.y - float(_vine.drag)) < 40.0:
+		_vine.drag = -1.0        # foi para o lado: vira giro
+		return
+	# arrastando para baixo com um cipó escolhido: puxa
+	if int(_vine.sel) >= 0 and float(_vine.drag) >= 0.0 and tid == int(_vine.tid):
+		if pos.y - float(_vine.drag) > 110.0:
+			_vine.drag = -1.0
+			_vine.anim = 0.0
+			Sons.play_at(self, "passo", _vine.spots[int(_vine.sel)].pos, -4.0, 0.7)
+
+
+## A mão: parada embaixo, na batida vai até o cipó, fecha e puxa para baixo.
+func _place_vine_hand(a: float) -> void:
+	if _vine_hand == null:
+		return
+	var cb := _cam.global_transform.basis
+	var cam := _cam.global_position
+	var idle := cam - cb.z * 0.75 + cb.x * 0.3 - cb.y * 0.36
+	var p := idle
+	if a >= 0.0 and int(_vine.sel) >= 0:
+		var sp: Vector3 = _vine.spots[int(_vine.sel)].pos
+		var reach := sp + cb.z * 0.05
+		if a < 0.35:
+			p = idle.lerp(reach, smoothstep(0.0, 1.0, a / 0.35))
+		elif a < 0.75:
+			p = reach + Vector3.DOWN * 0.55 * smoothstep(0.0, 1.0, (a - 0.35) / 0.4)
+		else:
+			p = (reach + Vector3.DOWN * 0.55).lerp(idle, smoothstep(0.0, 1.0, (a - 0.75) / 0.25))
+	var b := Basis(cb.x, cb.y, cb.z) * Basis(Vector3.RIGHT, -0.5)
+	_vine_hand.global_transform = Transform3D(b, p - b * Vector3(0, -0.02, -0.06))
+
+
+func _update_vine(delta: float) -> void:
+	if _vine.is_empty():
+		return
+	for b in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _jump_btn]:
+		if b:
+			b.visible = false
+	var a := float(_vine.anim)
+	if a >= 0.0:
+		var before := a
+		a += delta / 1.1
+		if before < 0.72 and a >= 0.72:
+			_vine_pull_now()
+			if _vine.is_empty():
+				return
+		_vine.anim = -1.0 if a >= 1.0 else a
+	else:
+		# nenhum cipó à vista: a câmera dá a volta sozinha até o mais perto
+		var any := false
+		for i in _vine.spots.size():
+			if _vine_visible(i):
+				any = true
+				break
+		if not any and not _vine.spots.is_empty():
+			var w: Vector3 = _vine.spots[0].pos
+			var pl: Dictionary = _vine.pl
+			_vine.orbit_to = atan2(w.z - float(pl.z), w.x - float(pl.x))
+		_vine.orbit = lerp_angle(float(_vine.orbit), float(_vine.orbit_to), minf(1.0, delta * 3.0))
+	_place_vine_hand(a if a < 1.0 else -1.0)
+	var mk := _vine_ui.find_child("mk", true, false) as Control
+	if mk:
+		mk.queue_redraw()
+
+
+## Um rolo de cipó caindo de "at" até o chão, do lado do jogador.
+func _drop_vine_coil(at: Vector3, top: Vector3, k: int) -> void:
+	var toward := Vector3(_player.position.x - at.x, 0, _player.position.z - at.z).normalized()
+	var land := Vector3(at.x, 0, at.z) + toward * 0.35 + toward.rotated(Vector3.UP, PI * 0.5) * (k * 0.22 - 0.1)
+	var piece := MeshInstance3D.new()
+	piece.mesh = Cipos.coil_mesh()
+	piece.material_override = Balde.material()
+	add_child(piece)
+	var gy := height_at(land.x, land.z)
+	piece.global_position = Vector3(land.x, maxf(at.y, top.y * 0.3 + at.y * 0.7) + k * 0.2, land.z)
+	var tw := piece.create_tween()
+	var fall := clampf(sqrt(maxf(piece.global_position.y - gy, 0.1) / 4.9), 0.3, 1.0)
+	tw.tween_property(piece, "global_position", Vector3(land.x, gy, land.z), fall).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.parallel().tween_property(piece, "rotation", Vector3(0, randf() * TAU, 0), fall)
+	tw.tween_callback(func():
+		piece.queue_free()
+		_add_ground("cipo", 1, land.x, land.z)
+		Sons.play_at(self, "baque", Vector3(land.x, gy, land.z), -20.0, 1.7))
+
+
+## O cipó solta: cai no chão (dá para ver ele caindo) e fica lá para pegar.
+func _vine_pull_now() -> void:
+	var sp: Dictionary = _vine.spots[int(_vine.sel)]
+	var pl: Dictionary = _vine.pl
+	var at: Vector3 = sp.pos
+	if str(sp.kind) == "raiz":
+		_cipos.pull_root(pl, int(sp.i))
+	else:
+		_cipos.pull_stem(pl)
+	Sons.play_at(self, "estalo", at, -16.0, 1.9)
+	var n := 1
+	if str(sp.kind) != "raiz":
+		# arrancou o pé: as raízes que ainda estavam nele vêm junto
+		for q in _vine.spots:
+			if str(q.kind) == "raiz":
+				n += 1
+	for k in n:
+		_drop_vine_coil(at, sp.top, k)
+	_vine.sel = -1
+	_vine.spots = _cipos.pull_spots(pl) if _cipos.plants.has(pl) else []
+	if _vine.spots.is_empty():
+		var tm := get_tree().create_timer(1.0)
+		tm.timeout.connect(func():
+			if not _vine.is_empty():
+				_vine_end())
 
 
 ## Agacha, pega (ou larga) a tora embaixo e levanta: 1,1 s no total.
@@ -3428,7 +3711,7 @@ func _move_player(delta: float) -> void:
 			_stop_saw()
 		else:
 			amount = 0.0
-	if not _knap.is_empty():
+	if not _knap.is_empty() or not _vine.is_empty():
 		amount = 0.0
 	if _crouch_job != "":
 		amount = 0.0           # abaixado pegando ou largando a tora
@@ -3555,6 +3838,9 @@ func _move_player(delta: float) -> void:
 	if not _knap.is_empty():
 		_knap_camera(delta)
 		return
+	if not _vine.is_empty():
+		_vine_camera()
+		return
 	# câmera em terceira pessoa, atrás do personagem
 	var target := p + Vector3(0, 1.55, 0)
 	var pitch := _pitch
@@ -3614,6 +3900,9 @@ func _open_calendar() -> void:
 func _input(e: InputEvent) -> void:
 	if not _knap.is_empty():
 		_knap_input(e)
+		return
+	if not _vine.is_empty():
+		_vine_input(e)
 		return   # modelando pedra: o personagem não anda nem gira a câmera
 	if _cal != null or _bag_ui != null or _craft_ui != null or _work_menu != null:
 		return   # com o calendário, a mochila ou o craft aberto, o toque não anda nem gira a câmera
