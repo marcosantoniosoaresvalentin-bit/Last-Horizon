@@ -721,9 +721,11 @@ func _build_log(p: Array, v: int, s: float, day: int) -> void:
 		_log_segs.append([A, B, _radius_of(m, (h0 + minf(h1, float(m.H) * 0.62)) * 0.5, 0.0) * s])
 		if absf(h1 - float(m.H)) > 0.0001:
 			continue
-		# a copa fica com o último pedaço
-		for b in m.branches:
-			_piece(node, b, bark_m)
+		# a copa fica com o último pedaço (menos os galhos que o jogador já cortou)
+		var gone: Array = p[12] if p.size() > 12 and p[12] is Array else []
+		for bi in m.branches.size():
+			if not gone.has(bi):
+				_piece(node, m.branches[bi], bark_m)
 		if green and age < GREEN_FALLEN_DAYS:
 			var f := age / GREEN_FALLEN_DAYS
 			var yellow := Color(0.62, 0.5, 0.12)
@@ -731,9 +733,52 @@ func _build_log(p: Array, v: int, s: float, day: int) -> void:
 			var color := yellow.lerp(brown, clampf((f - 0.35) / 0.4, 0.0, 1.0))
 			color.a = clampf(f / 0.35, 0.0, 1.0)
 			for i in m.clusters.size():
+				if gone.has(int(m.cluster_owner[i])):
+					continue
 				if f < _hash_range(p, 0.45, 1.0, 140 + i):
 					var mi := _piece(node, m.clusters[i], _leaves)
 					mi.set_instance_shader_parameter("tint", color)
+
+
+## Galhos da árvore derrubada ao alcance do machado: {p, i, a, b (pontas no mundo)} ou {}.
+func felled_branch_target(pos: Vector3, reach: float) -> Dictionary:
+	var best := {}
+	var bd := reach
+	for p in plants:
+		if int(p[5]) != FALLEN or p.size() < 10 or not p[9] is Array or _falling.has(p):
+			continue
+		var m: Dictionary = _models[int(p[4]) % VARIANTS]
+		var gone: Array = p[12] if p.size() > 12 and p[12] is Array else []
+		for pc in log_piece_xfs(p):
+			if absf(float(pc[1]) - float(m.H) * height_of(p, last_day) / float(m.height)) > 0.01:
+				continue          # só o pedaço da copa tem galhos
+			var xf: Transform3D = pc[2]
+			for i in m.axes.size():
+				if gone.has(i):
+					continue
+				var a: Vector3 = xf * (m.axes[i][0] as Vector3)
+				var b: Vector3 = xf * (m.axes[i][1] as Vector3)
+				# corta perto do tronco: o ponto a 40% do galho
+				var c := a.lerp(b, 0.25)
+				if c.y - _jogo.surface_at(c.x, c.z) > 2.2:
+					continue          # alto demais para alcançar
+				var d := Vector2(pos.x - c.x, pos.z - c.z).length()
+				if d < bd:
+					bd = d
+					best = {"p": p, "i": i, "a": a, "b": b, "point": c}
+	return best
+
+
+## Corta o galho da árvore caída: some da árvore (com as folhas dele) e devolve as
+## pontas no mundo (para ele cair no chão como galho grande).
+func cut_branch(p: Array, i: int) -> void:
+	if p.size() < 13:
+		p.resize(13)
+	var gone: Array = p[12] if p[12] is Array else []
+	if not gone.has(i):
+		gone.append(i)
+	p[12] = gone
+	_rebuild_logs()
 
 
 ## Pedaços da tora: [[de, até (altura no modelo), deslocamento (m) ao longo da tora], ...]
@@ -2049,7 +2094,12 @@ func _make_tree(seed_: int) -> Dictionary:
 	model.trunk = _mesh([core] + branches)
 	model.crown = _mesh(clusters)
 	model.branches = branches.map(func(pc): return _mesh([pc]))
-	model.clusters = clusters.filter(func(pc): return pc.v.size() > 0).map(func(pc): return _mesh([pc]))
+	model.clusters = []
+	model.cluster_owner = []          # de qual galho é cada cacho de folhas (nb = topo)
+	for ci in clusters.size():
+		if (clusters[ci] as Piece).v.size() > 0:
+			model.clusters.append(_mesh([clusters[ci]]))
+			model.cluster_owner.append(ci)
 	model.axes = axes
 	model.height = (model.crown as Mesh).get_aabb().end.y
 	model.r0 = r0

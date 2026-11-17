@@ -57,6 +57,14 @@ class IconButton extends Button:
 
 static func kind_for(text: String) -> String:
 	var t := text.to_lower()
+	if t.begins_with("cortar galho"):
+		return "cortar_galho"
+	if t.begins_with("pegar galho"):
+		return "pegar_galho"
+	if t.contains("forquilha"):
+		return "forquilha"
+	if t.begins_with("apoiar"):
+		return "apoiar"
 	if t.begins_with("cavar"):
 		return "cavar"
 	if t.begins_with("fincar"):
@@ -184,6 +192,30 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 					else P.call([[-10, y0 - 8], [-10, y0 + 6], [-20, y0 + 6], [0, y0 + 24], [20, y0 + 6], [10, y0 + 6], [10, y0 - 8]])
 				ci.draw_colored_polygon(arr, col.call(Color(0.98, 0.62, 0.25) if up else Color(0.55, 0.8, 0.45)))
 				ci.draw_polyline(arr + PackedVector2Array([arr[0]]), ink, 2 * u, true)
+		"cortar_galho", "pegar_galho":
+			# galho no chão (com galhinho); cortar: machado em cima; pegar: seta para cima
+			ci.draw_line(c + Vector2(-44, 28) * u, c + Vector2(40, 12) * u, col.call(BARK), 9 * u, true)
+			ci.draw_line(c + Vector2(-6, 21) * u, c + Vector2(8, 2) * u, col.call(BARK), 5 * u, true)
+			ci.draw_circle(c + Vector2(40, 12) * u, 4.5 * u, col.call(WOOD_LIGHT))
+			if k == "cortar_galho":
+				if shadow:
+					ci.draw_line(c + Vector2(-20, 14) * u, c + Vector2(18, -44) * u, sh, 10 * u, true)
+				else:
+					Desenhos.item(ci, "machado", c + Vector2(0, -18) * u, s * 0.66)
+			else:
+				var arr: PackedVector2Array = P.call([[-8, -6], [-8, -20], [-18, -20], [2, -40], [22, -20], [12, -20], [12, -6]])
+				ci.draw_colored_polygon(arr, col.call(Color(0.98, 0.62, 0.25)))
+				ci.draw_polyline(arr + PackedVector2Array([arr[0]]), ink, 2 * u, true)
+		"forquilha", "apoiar":
+			# X de galhos amarrado; apoiar: tora deitada em cima
+			ci.draw_line(c + Vector2(-34, 42) * u, c + Vector2(22, -24) * u, col.call(BARK), 8 * u, true)
+			ci.draw_line(c + Vector2(34, 42) * u, c + Vector2(-22, -24) * u, col.call(BARK), 8 * u, true)
+			ci.draw_circle(c + Vector2(0, 16) * u, 7 * u, col.call(Color(0.25, 0.3, 0.12)))
+			if k == "apoiar":
+				var lg: PackedVector2Array = P.call([[-46, -30], [36, -30], [36, -6], [-46, -6]])
+				ci.draw_colored_polygon(lg, col.call(BARK.lightened(0.1)))
+				ci.draw_polyline(lg + PackedVector2Array([lg[0]]), ink, 2 * u, true)
+				ci.draw_circle(c + Vector2(36, -18) * u, 12 * u, col.call(WOOD_LIGHT))
 		"cavar":
 			# chão com buraco e a cavadeira cravada
 			ci.draw_colored_polygon(P.call([[-46, 22], [46, 22], [46, 46], [-46, 46]]), col.call(Color(0.42, 0.3, 0.18)))

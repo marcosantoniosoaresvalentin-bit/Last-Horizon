@@ -17,6 +17,8 @@ const Icones := preload("res://scripts/ui/icones.gd")
 const Cipos := preload("res://scripts/world/cipos.gd")
 const Buracos := preload("res://scripts/world/buracos.gd")
 const Sons := preload("res://scripts/sons.gd")
+const Galhos := preload("res://scripts/world/galhos.gd")
+const Apoios := preload("res://scripts/world/apoios.gd")
 ## Onda na água: um anel que abre e some (passos dentro d'água).
 const RIPPLE_SHADER := """
 shader_type spatial;
@@ -317,6 +319,12 @@ var _log_btn: Button
 var _vine_btn: Button
 var _cipos: Node3D = null
 var _buracos: Node3D = null
+var _galhos: Node3D = null
+var _apoios: Node3D = null
+var _ctx_btn: Button
+var _ctx_action := ""
+var _chop_branch := {}           # cortando um galho (da árvore caída ou do chão)
+var _branch_hits := 0
 var _plant_btn: Button
 var _chop_hole := false           # cavando com a cavadeira
 var _holes_t := 0.0
@@ -463,6 +471,16 @@ func _build_hud() -> void:
 	_jump_btn.offset_bottom = -16
 	_jump_btn.pressed.connect(_jump)
 	_hud.add_child(_jump_btn)
+
+	_ctx_btn = Icones.IconButton.new()
+	_ctx_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_ctx_btn.offset_left = -290
+	_ctx_btn.offset_top = -426
+	_ctx_btn.offset_right = -160
+	_ctx_btn.offset_bottom = -296
+	_ctx_btn.visible = false
+	_ctx_btn.pressed.connect(_ctx_press)
+	_hud.add_child(_ctx_btn)
 
 	_plant_btn = Icones.IconButton.new()
 	_plant_btn.text = "Fincar tora"
@@ -719,6 +737,12 @@ func _on_world_ready() -> void:
 	_arvores.fall_done_hook = _cipos._rebuild
 	_buracos = Buracos.new()
 	add_child(_buracos)
+	_galhos = Galhos.new()
+	add_child(_galhos)
+	_galhos.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/galhos.json" if _world_id != "" else "")
+	_apoios = Apoios.new()
+	add_child(_apoios)
+	_apoios.build(self, _arvores, Mundos.dir(_world_id) + "/apoios.json" if _world_id != "" else "")
 	_buracos.changed_hook = _update_holes
 	_buracos.build(self, _arvores, Mundos.dir(_world_id) + "/buracos.json" if _world_id != "" else "")
 	if not _pending_carry.is_empty():
@@ -1033,6 +1057,8 @@ func _process(delta: float) -> void:
 		_arvores.tick()   # quando vira o dia: sementes, brotos, crescimento
 		if _cipos:
 			_cipos.tick()
+		if _galhos:
+			_galhos.tick()
 	_save_timer -= delta
 	if _save_timer <= 0.0:
 		_save_world()
@@ -1091,6 +1117,10 @@ func _save_world() -> void:
 		_cipos.save(Mundos.dir(_world_id) + "/cipos.json")
 	if _buracos:
 		_buracos.save(Mundos.dir(_world_id) + "/buracos.json")
+	if _galhos:
+		_galhos.save(Mundos.dir(_world_id) + "/galhos.json")
+	if _apoios:
+		_apoios.save(Mundos.dir(_world_id) + "/apoios.json")
 	Mundos.touch(_world_id, _game_date())
 
 
@@ -1461,6 +1491,9 @@ func _update_chop(delta: float) -> void:
 		if _arvores.nearest_standing(_player.position, 1.3) != null:
 			_chop_btn.visible = true
 			_chop_btn.text = "Cortar"
+		elif not _branch_target().is_empty():
+			_chop_btn.visible = true
+			_chop_btn.text = "Cortar galho"
 		elif not _arvores.log_target(_player.position, 1.6).is_empty():
 			_chop_btn.visible = true
 			_chop_btn.text = "Cortar tora"
@@ -1468,9 +1501,78 @@ func _update_chop(delta: float) -> void:
 
 # ================== PEGAR, CARREGAR E LARGAR TORA ==================
 
+## Botão de ação do lugar: pegar galho, apoiar a tora nas forquilhas, pegar a tora
+## de cima delas ou recolher uma forquilha.
+func _update_ctx_btn() -> void:
+	_ctx_action = ""
+	if _crouch_job == "" and not _chopping and not _air and _galhos != null and _apoios != null:
+		if not _carry.is_empty():
+			if not _apoios.pair_for(_player.position, _arvores.free_log_length(_carry)).is_empty():
+				_ctx_action = "apoiar"
+				_ctx_btn.text = "Apoiar tora"
+		elif _galhos.nearest(_player.position, 1.3, false) >= 0:
+			_ctx_action = "galho"
+			_ctx_btn.text = "Pegar galho"
+		elif _apoios.nearest_rested(_player.position, 1.6) >= 0:
+			_ctx_action = "tora_apoiada"
+			_ctx_btn.text = "Pegar tora"
+		elif _apoios.nearest_fork(_player.position, 1.2) >= 0:
+			_ctx_action = "forquilha"
+			_ctx_btn.text = "Pegar forquilha"
+	_ctx_btn.visible = _ctx_action != ""
+
+
+func _ctx_press() -> void:
+	if _ctx_action == "" or _crouch_job != "":
+		return
+	match _ctx_action:
+		"galho":
+			var i: int = _galhos.nearest(_player.position, 1.3, false)
+			if i < 0:
+				return
+			_face_to(_galhos.point_of(i))
+			_crouch_target = {"galho": i}
+			_crouch_job = "galho"
+		"forquilha":
+			var i: int = _apoios.nearest_fork(_player.position, 1.2)
+			if i < 0:
+				return
+			_crouch_target = {"forquilha": i}
+			_crouch_job = "forquilha_pegar"
+		"apoiar":
+			var pr: Array = _apoios.pair_for(_player.position, _arvores.free_log_length(_carry))
+			if pr.is_empty():
+				return
+			_crouch_target = {"par": pr}
+			_crouch_job = "apoiar"
+		"tora_apoiada":
+			var i: int = _apoios.nearest_rested(_player.position, 1.6)
+			if i < 0:
+				return
+			_crouch_target = {"apoiada": i}
+			_crouch_job = "tora_apoiada"
+	_crouch_t = 0.0
+	_act_check = 0.0
+
+
+func _face_to(at: Vector3) -> void:
+	_face = atan2(-(at.x - _player.position.x), -(at.z - _player.position.z))
+
+
+## Mochila: usar a forquilha (o personagem põe ela no chão, na frente).
+func use_fork() -> bool:
+	if item_qtd("forquilha") <= 0 or not _carry.is_empty() or _crouch_job != "":
+		return false
+	_crouch_target = {}
+	_crouch_job = "forquilha_por"
+	_crouch_t = 0.0
+	return true
+
+
 func _update_log_btn() -> void:
 	if _arvores == null:
 		return
+	_update_ctx_btn()
 	_vine_btn.visible = _cipos != null and _carry.is_empty() and _crouch_job == "" and not _chopping and not _cipos.harvest_target(_player.position, 1.6).is_empty()
 	if _crouch_job != "" or _chopping or _air:
 		_log_btn.visible = false
@@ -1534,10 +1636,35 @@ func _update_crouch(delta: float) -> void:
 	_crouch_t += delta
 	var T := 1.1
 	var mid := 0.5
-	_chop_pose.crouch = smoothstep(0.0, mid, _crouch_t) if _crouch_t < mid else 1.0 - smoothstep(mid, T, _crouch_t)
+	var amp := 0.35 if _crouch_job in ["apoiar", "tora_apoiada"] else 1.0   # na altura da cintura: abaixa pouco
+	_chop_pose.crouch = amp * (smoothstep(0.0, mid, _crouch_t) if _crouch_t < mid else 1.0 - smoothstep(mid, T, _crouch_t))
 	if before < mid and _crouch_t >= mid:
 		if _crouch_job == "puxar":
 			pass
+		elif _crouch_job == "galho":
+			_galhos.take(int(_crouch_target.galho))
+			var dropped := add_item("galho", 1)
+			_show_toast("+1 galho" + (" (mochila cheia: caiu no chão)" if dropped > 0 else ""))
+		elif _crouch_job == "forquilha_pegar":
+			_apoios.take_fork(int(_crouch_target.forquilha))
+			add_item("forquilha", 1)
+			_show_toast("Forquilha de volta na mochila")
+		elif _crouch_job == "forquilha_por":
+			remove_item("forquilha", 1)
+			_apoios.place(_front(0.9), _face + PI * 0.5)
+			Sons.play_at(self, "baque", _front(0.9), -6.0)
+		elif _crouch_job == "apoiar":
+			var pr: Array = _crouch_target.par
+			_apoios.rest(_carry, int(pr[0]), int(pr[1]))
+			Sons.play_at(self, "baque", _player.position)
+			_carry = {}
+			if _carry_node:
+				_carry_node.queue_free()
+			_carry_node = null
+			_chop_pose.log_node = null
+			_show_toast("Tora apoiada nas forquilhas")
+		elif _crouch_job == "tora_apoiada":
+			_hold_log(_apoios.take_rested(int(_crouch_target.apoiada)))
 		elif _crouch_job == "fincar":
 			_buracos.plant(int(_crouch_target.buraco), _carry, _face)
 			Sons.play_at(self, "baque", _player.position)
@@ -1655,6 +1782,19 @@ func _hold_log(fl: Dictionary) -> void:
 		_chop_pose.log_r = _arvores.free_log_radius(fl)
 
 
+## Galho para cortar: da copa da árvore derrubada ou galho grande caído no chão.
+func _branch_target() -> Dictionary:
+	if _arvores == null or _galhos == null:
+		return {}
+	var fb: Dictionary = _arvores.felled_branch_target(_player.position, 1.6)
+	if not fb.is_empty():
+		return {"kind": "arvore", "p": fb.p, "i": fb.i, "a": fb.a, "b": fb.b, "point": fb.point}
+	var gi: int = _galhos.nearest(_player.position, 1.5, true)
+	if gi >= 0:
+		return {"kind": "chao", "i": gi, "point": _galhos.point_of(gi)}
+	return {}
+
+
 ## Pulo: sobe uns 60 cm (dá para passar por cima de uma tora ou subir nela).
 func _jump() -> void:
 	if _air or _chopping or _digging or not _carry.is_empty() or _crouch_job != "":
@@ -1690,17 +1830,23 @@ func _start_chop() -> void:
 		return
 	var t = _arvores.nearest_standing(_player.position, 1.3)
 	_chop_log = {}
+	_chop_branch = {}
 	if t == null:
-		var lg: Dictionary = _arvores.log_target(_player.position, 1.6)
-		if lg.is_empty():
-			return
-		_chop_log = lg
+		var br := _branch_target()
+		if not br.is_empty():
+			_chop_branch = br
+			_branch_hits = 0
+		else:
+			var lg: Dictionary = _arvores.log_target(_player.position, 1.6)
+			if lg.is_empty():
+				return
+			_chop_log = lg
 	if _digging:
 		_cancel_dig()
 	_chop_tree = t
 	_chopping = true
 	if _chop_pose:
-		_chop_pose.vertical = not _chop_log.is_empty()
+		_chop_pose.vertical = not _chop_log.is_empty() or not _chop_branch.is_empty()
 	_swing_queued = false
 	_play("Idle", 0.5)
 	if _chop_pose:
@@ -1719,6 +1865,28 @@ func _begin_swing() -> void:
 
 ## A lâmina bateu no tronco: conta a machadada, marca o corte e solta lascas.
 func _chop_hit() -> void:
+	if not _chop_branch.is_empty():
+		var at: Vector3 = _chop_branch.point
+		_chips(at)
+		Sons.play_at(self, "machado", at, -2.0, 1.12)
+		if _chop_branch.kind == "arvore":
+			_branch_hits += 1
+			if _branch_hits >= 3:
+				# o galho sai da árvore e cai no chão inteiro (depois corta em 2 e pega)
+				var a: Vector3 = _chop_branch.a
+				var b: Vector3 = _chop_branch.b
+				_arvores.cut_branch(_chop_branch.p, int(_chop_branch.i))
+				var c := (a + b) * 0.5
+				_galhos.add(c.x, c.z, atan2(b.z - a.z, b.x - a.x), minf((b - a).length(), 4.0), 0.07, false, true)
+				_galhos._rebuild()
+				Sons.play_at(self, "baque", c, -4.0)
+				_show_toast("O galho caiu. Corte em 2 para pegar.")
+				_cancel_chop()
+		else:
+			if _galhos.chop(int(_chop_branch.i)):
+				_show_toast("Galho cortado em 2. Agora dá para pegar.")
+				_cancel_chop()
+		return
 	if _chop_hole:
 		var at := _front(0.62)
 		var d: float = _buracos.dig_at(at)
@@ -1803,6 +1971,7 @@ func _cancel_chop() -> void:
 	_swing_queued = false
 	_chop_tree = null
 	_chop_log = {}
+	_chop_branch = {}
 	_chop_hole = false
 	if _chop_pose:
 		_chop_pose.digging = false
@@ -1917,7 +2086,15 @@ func _move_player(delta: float) -> void:
 		_play("Run" if running else "Walk", water_slow)
 	elif not _digging:
 		_play("Idle")
-	if _chopping and not _chop_log.is_empty():
+	if _chopping and not _chop_branch.is_empty():
+		var bp: Vector3 = _chop_branch.point
+		var tl := Vector2(bp.x - p.x, bp.z - p.z)
+		_face = lerp_angle(_face, atan2(-tl.x, -tl.y), minf(1.0, delta * 10.0))
+		if tl.length() > 0.7:
+			var stp := minf(tl.length() - 0.65, delta * 1.5)
+			p.x += tl.x / tl.length() * stp
+			p.z += tl.y / tl.length() * stp
+	elif _chopping and not _chop_log.is_empty():
 		# de lado para a tora, de frente para o ponto do corte
 		var axp: Vector3 = _chop_log.axis
 		var al: Vector3 = _chop_log.along
@@ -1949,6 +2126,8 @@ func _move_player(delta: float) -> void:
 		p = _arvores.push_out(p, feet)   # não atravessa troncos e toras (pulando passa por cima)
 	if _buracos:
 		p = _buracos.push_out(p)          # nem as toras fincadas
+	if _apoios:
+		p = _apoios.push_out(p)           # nem as forquilhas e a tora em cima delas
 	# chão: o terreno ou o topo de uma tora (dá para subir pulando e andar em cima)
 	var ground := height_at(p.x, p.z) - minf(depth, 0.9) * 0.5
 	if _arvores:
@@ -2038,7 +2217,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn]:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn]:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:

@@ -414,6 +414,12 @@ func _use() -> void:
 	if it.id in ["machado", "cavadeira"]:
 		_equip()
 		return
+	if it.id == "forquilha" and _game:
+		if _game.use_fork():
+			fechar()
+		else:
+			_say("Largue a tora antes de pôr a forquilha.")
+		return
 	if it.id == "semente" and _game:
 		if _game.put_seed_from_bag(true):
 			fechar()

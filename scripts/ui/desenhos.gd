@@ -72,6 +72,14 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				var t := 0.1 + k * 0.08
 				var pa := c + Vector2(-14, 18).lerp(Vector2(42, -44), t) * u
 				ci.draw_line(pa + Vector2(-6, -6) * u, pa + Vector2(6, 6) * u, Color(0.45, 0.4, 0.18), 3.0 * u, true)
+		"forquilha":
+			# dois galhos cruzados em X, amarrados com cipó no meio
+			for sg in [1.0, -1.0]:
+				ci.draw_line(c + Vector2(-34 * sg, 40) * u, c + Vector2(26 * sg, -40) * u, Color(0.4, 0.28, 0.16), 8.0 * u, true)
+				ci.draw_line(c + Vector2(-34 * sg, 40) * u, c + Vector2(26 * sg, -40) * u, ink, 1.0 * u, true)
+				ci.draw_circle(c + Vector2(26 * sg, -40) * u, 4.0 * u, Color(0.65, 0.52, 0.34))
+			for k in 3:
+				ci.draw_line(c + Vector2(-9, 8 + k * 5) * u, c + Vector2(9, 2 + k * 5) * u, Color(0.3, 0.36, 0.14), 3.5 * u, true)
 		"pedra":
 			var pts: PackedVector2Array = P.call([[-36, 10], [-28, -16], [-6, -30], [22, -26], [38, -6], [32, 20], [8, 30], [-22, 28]])
 			ci.draw_colored_polygon(pts, Color(0.52, 0.52, 0.5))

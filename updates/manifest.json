@@ -1,9 +1,9 @@
 {
-  "version": 48,
-  "file": "update_48.zip",
-  "size": 3329706,
-  "sha256": "80680b3bbddff71a591e8549e4d700ded9f63d3e90274f89327e2a6c268b907f",
+  "version": 49,
+  "file": "update_49.zip",
+  "size": 3338660,
+  "sha256": "8e4da9afb74c663dde049c71f9040cea440e4c18952497200d9c9a1f00bb5bb0",
   "min_build": 1,
-  "notes": "Som novo do machado (machado de verdade batendo em tora); passos na corrida no ritmo certo e sem embolar",
+  "notes": "Galhos caídos perto das árvores secando (corta em 2 com o machado e pega); cortar os galhos da árvore derrubada; forquilha (2 galhos + 2 cipós) que se põe no chão em X; apoiar a tora em duas forquilhas",
   "date": "2026-11-17"
 }
