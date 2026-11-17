@@ -6,55 +6,202 @@ extends RefCounted
 ## o machado por cima da cabeça e descem com força no tronco.
 
 
-## Modelo 3D do machado de pedra: cabo de madeira (+Y a partir da mão) e cabeça
-## de pedra lascada amarrada com cipó. O fio da lâmina aponta para +Z.
+## Modelo 3D do machado de pedra, como os antigos: um galho como cabo, uma pedra
+## lascada encaixada perto da ponta e amarrada com cipó (voltas em cima e embaixo
+## da pedra e cruzando por cima dela). O cabo vai de y = 0 (ponta de baixo) até
+## 0,64 m; a pedra fica perto de y = 0,52 e o fio aponta para +Z.
 static func axe_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	# cabo: um pouco abaixo da mão até 0,62 m
-	_box(st, Vector3(0, 0.23, 0), Vector3(0.032, 0.62, 0.032), Color(0.45, 0.29, 0.16))
-	# cabeça de pedra: grossa atrás, afinando para o fio
-	var stone := Color(0.46, 0.46, 0.44)
-	_box(st, Vector3(0, 0.5, 0.02), Vector3(0.05, 0.12, 0.09), stone)
-	_box(st, Vector3(0, 0.5, 0.1), Vector3(0.03, 0.15, 0.09), stone.lightened(0.12))
-	_box(st, Vector3(0, 0.5, 0.16), Vector3(0.012, 0.17, 0.04), Color(0.68, 0.68, 0.64))
-	# amarração de cipó
-	_box(st, Vector3(0, 0.44, 0.0), Vector3(0.045, 0.025, 0.045), Color(0.4, 0.36, 0.16))
-	_box(st, Vector3(0, 0.56, 0.0), Vector3(0.045, 0.025, 0.045), Color(0.4, 0.36, 0.16))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	_haft(st, rng)
+	_stone(st, rng)
+	_lashing(st, rng)
 	st.generate_normals()
 	return st.commit()
 
 
-static func _box(st: SurfaceTool, c: Vector3, size: Vector3, col: Color) -> void:
-	var h := size * 0.5
-	var faces := [
-		[Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1)],
-		[Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 1, 0)],
-		[Vector3(0, 1, 0), Vector3(0, 0, 1), Vector3(1, 0, 0)],
-		[Vector3(0, -1, 0), Vector3(1, 0, 0), Vector3(0, 0, 1)],
-		[Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 1, 0)],
-		[Vector3(0, 0, -1), Vector3(0, 1, 0), Vector3(1, 0, 0)],
-	]
+## Cabo: galho torto com casca, nós e a ponta cortada clara.
+static func _haft(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
+	var rings := 18
+	var sides := 9
+	var top_y := 0.64
+	var pts := []
+	for i in rings + 1:
+		var t := float(i) / rings
+		var y := t * top_y
+		# curvinha natural do galho
+		var c := Vector3(sin(t * 2.6) * 0.012 - 0.006, y, cos(t * 1.9) * 0.006)
+		var r := lerpf(0.019, 0.016, t)
+		if absf(t - 0.33) < 0.04:
+			r += 0.004       # um nó no galho
+		var ring := []
+		for k in sides:
+			var a := TAU * k / sides
+			var bump := rng.randf_range(-0.0015, 0.0015)
+			ring.append(c + Vector3(cos(a), 0, sin(a)) * (r + bump))
+		pts.append(ring)
+	for i in rings:
+		for k in sides:
+			var k2 := (k + 1) % sides
+			var shade := rng.randf_range(0.92, 1.06)
+			var bark := Color(0.2, 0.13, 0.075) * shade
+			if (k + i) % 5 == 0:
+				bark = Color(0.13, 0.09, 0.05)   # fissura escura da casca
+			bark.a = 1.0
+			_quad(st, pts[i][k], pts[i][k2], pts[i + 1][k2], pts[i + 1][k], bark)
+	# pontas cortadas (madeira clara)
+	var wood := Color(0.6, 0.46, 0.28)
+	for end in [0, rings]:
+		var ring: Array = pts[end]
+		var c := Vector3.ZERO
+		for p in ring:
+			c += p
+		c /= ring.size()
+		for k in sides:
+			var k2 := (k + 1) % sides
+			st.set_color(wood)
+			if end == 0:
+				st.add_vertex(c); st.add_vertex(ring[k]); st.add_vertex(ring[k2])
+			else:
+				st.add_vertex(c); st.add_vertex(ring[k2]); st.add_vertex(ring[k])
+
+
+## Pedra lascada: grossa atrás, afinando até o fio; facetas irregulares de lascamento.
+static func _stone(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
+	var cy := 0.52
+	var cols := 7      # de trás (z = -0.045) até o fio (z = 0.16)
+	var rows := 6      # ao longo da altura
+	var grid := []
+	for i in cols + 1:
+		var u := float(i) / cols
+		var z := lerpf(-0.045, 0.16, u)
+		# formato de gota: nuca estreita e arredondada, fio largo
+		var half_h := lerpf(0.028, 0.07, pow(u, 0.7)) + sin(u * PI) * 0.006
+		var thick := lerpf(0.026, 0.002, pow(u, 0.8))  # afina até o fio
+		var col := []
+		for j in rows + 1:
+			var v := float(j) / rows * 2.0 - 1.0
+			var y := cy + v * half_h * (1.0 - 0.18 * u * v * v) + rng.randf_range(-0.003, 0.003)
+			var bulge := thick * (1.0 - 0.55 * v * v)
+			var jit := rng.randf_range(-0.006, 0.006) * (1.0 - u * 0.7)
+			# fio curvo (mais para fora no meio) e nuca arredondada
+			var zz := z - 0.028 * v * v * u - 0.02 * v * v * (1.0 - u) * (1.0 - u)
+			col.append([Vector3(bulge + jit, y, zz + rng.randf_range(-0.003, 0.003) * (1.0 - u)),
+				Vector3(-bulge - jit * 0.7, y, zz + rng.randf_range(-0.003, 0.003) * (1.0 - u))])
+		grid.append(col)
+	var base := Color(0.13, 0.135, 0.12)      # basalto escuro, meio esverdeado
+	for side in 2:
+		for i in cols:
+			for j in rows:
+				var a: Vector3 = grid[i][j][side]
+				var b: Vector3 = grid[i + 1][j][side]
+				var c: Vector3 = grid[i + 1][j + 1][side]
+				var d: Vector3 = grid[i][j + 1][side]
+				# cada lasca com um tom; perto do fio a pedra é mais clara (gasta de amolar)
+				var tone := rng.randf_range(0.85, 1.15)
+				var col := base * tone
+				if rng.randf() < 0.25:
+					col = col.lerp(Color(0.2, 0.15, 0.1), 0.5)   # manchas de ferrugem da pedra
+				col = col.lerp(Color(0.3, 0.3, 0.28), smoothstep(0.65, 1.0, float(i) / cols))
+				col.a = 1.0
+				if side == 0:
+					_quad(st, a, b, c, d, col)
+				else:
+					_quad(st, d, c, b, a, col)
+	# bordas: em cima, embaixo, a nuca e o fio
+	var edge_c := Color(0.34, 0.34, 0.31)
+	for i in cols:
+		for j in [0, rows]:
+			var a0: Vector3 = grid[i][j][0]
+			var a1: Vector3 = grid[i][j][1]
+			var b0: Vector3 = grid[i + 1][j][0]
+			var b1: Vector3 = grid[i + 1][j][1]
+			if j == 0:
+				_quad(st, a1, b1, b0, a0, base * 0.9)
+			else:
+				_quad(st, a0, b0, b1, a1, base * 0.9)
+	for j in rows:
+		var n0: Vector3 = grid[0][j][0]
+		var n1: Vector3 = grid[0][j][1]
+		var m0: Vector3 = grid[0][j + 1][0]
+		var m1: Vector3 = grid[0][j + 1][1]
+		_quad(st, n0, m0, m1, n1, base * 0.85)
+		var e0: Vector3 = grid[cols][j][0]
+		var e1: Vector3 = grid[cols][j][1]
+		var f0: Vector3 = grid[cols][j + 1][0]
+		var f1: Vector3 = grid[cols][j + 1][1]
+		_quad(st, e1, f1, f0, e0, edge_c)
+
+
+## Amarração de cipó: voltas apertadas no cabo, embaixo e em cima da pedra, e um
+## "X" cruzando por cima da pedra dos dois lados.
+static func _lashing(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
+	var vine := Color(0.17, 0.19, 0.08)
+	var r := 0.0042
+	# voltas embaixo da pedra
+	_helix(st, 0.455, 0.478, 0.0225, 3.2, r, vine, rng)
+	# voltas em cima da pedra
+	_helix(st, 0.565, 0.588, 0.021, 3.0, r, vine.darkened(0.08), rng)
+	# o "X" por cima da pedra, dos dois lados
+	for sx in [1.0, -1.0]:
+		var x: float = sx * 0.03
+		var path1 := [Vector3(x * 0.8, 0.47, -0.022), Vector3(x, 0.50, 0.0), Vector3(x * 0.95, 0.535, 0.022), Vector3(x * 0.8, 0.572, 0.012)]
+		var path2 := [Vector3(x * 0.8, 0.47, 0.016), Vector3(x, 0.505, 0.022), Vector3(x * 0.95, 0.54, 0.0), Vector3(x * 0.8, 0.572, -0.02)]
+		_tube(st, path1, r, vine.lightened(0.05), rng)
+		_tube(st, path2, r, vine, rng)
+	# pontinha do cipó solta, depois do nó
+	_tube(st, [Vector3(0.02, 0.45, 0.012), Vector3(0.03, 0.43, 0.03), Vector3(0.028, 0.415, 0.05)], r * 0.8, vine.darkened(0.15), rng)
+
+
+static func _helix(st: SurfaceTool, y0: float, y1: float, rad: float, turns: float, r: float, col: Color, rng: RandomNumberGenerator) -> void:
+	var path := []
+	var n := int(turns * 12)
+	for i in n + 1:
+		var t := float(i) / n
+		var a := t * turns * TAU
+		path.append(Vector3(cos(a) * rad - 0.004, lerpf(y0, y1, t), sin(a) * rad * 1.15))
+	_tube(st, path, r, col, rng)
+
+
+## Tubo seguindo um caminho (o cipó).
+static func _tube(st: SurfaceTool, path: Array, r: float, col: Color, rng: RandomNumberGenerator) -> void:
+	var sides := 5
+	var rings := []
+	for i in path.size():
+		var p: Vector3 = path[i]
+		var d: Vector3 = (path[mini(i + 1, path.size() - 1)] - path[maxi(i - 1, 0)]).normalized()
+		var a := d.cross(Vector3.UP)
+		if a.length() < 0.1:
+			a = d.cross(Vector3.RIGHT)
+		a = a.normalized()
+		var b := d.cross(a).normalized()
+		var ring := []
+		for k in sides:
+			var ang := TAU * k / sides
+			ring.append(p + (a * cos(ang) + b * sin(ang)) * r)
+		rings.append(ring)
+	for i in rings.size() - 1:
+		var c := col * rng.randf_range(0.85, 1.12)
+		c.a = 1.0
+		for k in sides:
+			var k2 := (k + 1) % sides
+			_quad(st, rings[i][k], rings[i + 1][k], rings[i + 1][k2], rings[i][k2], c)
+
+
+static func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Color) -> void:
 	st.set_color(col)
-	for f in faces:
-		var n: Vector3 = f[0]
-		var a: Vector3 = f[1]
-		var b: Vector3 = f[2]
-		var o := c + n * h
-		var pa := a * h
-		var pb := b * h
-		var p0 := o - pa - pb
-		var p1 := o + pa - pb
-		var p2 := o + pa + pb
-		var p3 := o - pa + pb
-		for p in [p0, p2, p1, p0, p3, p2]:
-			st.add_vertex(p)
+	st.add_vertex(a); st.add_vertex(b); st.add_vertex(c)
+	st.add_vertex(a); st.add_vertex(c); st.add_vertex(d)
 
 
 static func axe_material() -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = 0.85
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return m
 
 
@@ -67,8 +214,8 @@ static func axe_material() -> StandardMaterial3D:
 class ChopPose extends SkeletonModifier3D:
 	const SWING_TIME := 0.8       # segundos por machadada
 	const HIT_AT := 0.55          # momento da machadada em que a lâmina bate no tronco
-	const GRIP_LOW := 0.02        # mão esquerda: na ponta do cabo
-	const GRIP_HIGH := 0.2        # mão direita: mais perto da cabeça do machado
+	const GRIP_LOW := 0.03        # mão esquerda: bem na ponta do cabo (só no golpe)
+	const GRIP_HIGH := 0.115      # mão direita: quase na ponta, deixando lugar para a esquerda
 	var player: Node3D            # para saber para onde o personagem está virado
 	var axe: Node3D               # o machado
 	var holding := false          # machado equipado
@@ -125,13 +272,14 @@ class ChopPose extends SkeletonModifier3D:
 		var hand := sk.get_bone_global_pose(hb)
 		# cabo apontando para baixo e um pouco para a frente; o fio para a frente
 		var handle := (fwd * 0.72 - up * 0.69).normalized()
-		var edge := (fwd - handle * fwd.dot(handle)).normalized()
+		# o fio do machado virado para baixo
+		var edge := (-up - handle * (-up).dot(handle)).normalized()
 		# a mão fecha em volta do cabo: o cabo atravessa a palma (eixo X da mão)
 		var palm := right.cross(handle).normalized()      # palma virada para dentro
 		_set_hand(sk, hb, handle, palm)
 		hand = sk.get_bone_global_pose(hb)
 		var grip := _grip_point(hand)
-		_place_axe(sk, grip - handle * 0.3, handle, edge)
+		_place_axe(sk, grip - handle * GRIP_HIGH, handle, edge)
 
 	# ---------- golpe com as duas mãos ----------
 	func _two_hands(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3, ang_deg: float) -> void:
@@ -260,4 +408,4 @@ class ChopPose extends SkeletonModifier3D:
 	func blade_point() -> Vector3:
 		if axe == null:
 			return Vector3.ZERO
-		return axe.global_transform * Vector3(0, 0.5, 0.17)
+		return axe.global_transform * Vector3(0, 0.52, 0.16)
