@@ -18,27 +18,71 @@ var _jogo: Node
 var _arv: Node
 var _nodes: Array = []
 var _soil_mat: StandardMaterial3D
-var _pit_mat: StandardMaterial3D
+var changed_hook := Callable()   # avisa o jogo quando os buracos mudam (para recortar o chão)
 
 
 func build(jogo: Node, arvores: Node, save_path := "") -> void:
 	_jogo = jogo
 	_arv = arvores
-	_soil_mat = StandardMaterial3D.new()
-	_soil_mat.vertex_color_use_as_albedo = true
-	_soil_mat.vertex_color_is_srgb = true
-	_soil_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_soil_mat.roughness = 1.0
-	_soil_mat.metallic_specular = 0.0
-	# o fundo do buraco não pega luz do céu: fica escuro de verdade
-	_pit_mat = StandardMaterial3D.new()
-	_pit_mat.vertex_color_use_as_albedo = true
-	_pit_mat.vertex_color_is_srgb = true
-	_pit_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_pit_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_soil_mat = _make_soil_material()
 	if save_path != "":
 		_load(save_path)
 	_rebuild()
+
+
+## Terra com textura (grãos, torrões e relevo), aplicada de todos os lados (triplanar).
+## A cor de cada ponto (mais escura no fundo, faixas de camadas) multiplica a textura.
+static func _make_soil_material() -> StandardMaterial3D:
+	var n := FastNoiseLite.new()
+	n.seed = 31
+	n.noise_type = FastNoiseLite.TYPE_CELLULAR
+	n.frequency = 0.09
+	n.fractal_octaves = 3
+	var ramp := Gradient.new()
+	ramp.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
+	ramp.colors = PackedColorArray([Color(0.48, 0.42, 0.36), Color(0.66, 0.59, 0.5), Color(0.8, 0.72, 0.62)])
+	var alb := NoiseTexture2D.new()
+	alb.width = 256
+	alb.height = 256
+	alb.seamless = true
+	alb.noise = n
+	alb.color_ramp = ramp
+	var nrm := NoiseTexture2D.new()
+	nrm.width = 256
+	nrm.height = 256
+	nrm.seamless = true
+	nrm.noise = n
+	nrm.as_normal_map = true
+	nrm.bump_strength = 6.0
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = alb
+	m.normal_enabled = true
+	m.normal_texture = nrm
+	m.uv1_triplanar = true
+	m.uv1_scale = Vector3(3, 3, 3)
+	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.roughness = 1.0
+	m.metallic_specular = 0.0
+	return m
+
+
+## Buracos abertos perto de um ponto, para o chão e o capim não serem desenhados neles:
+## [Vector4(x, z, raio da abertura, 0)], no máximo n.
+func open_holes_near(pos: Vector3, n: int) -> Array:
+	var list := []
+	for h in holes:
+		if int(h.get("tora", -1)) >= 0:
+			continue
+		var d := Vector2(float(h.x) - pos.x, float(h.z) - pos.z).length()
+		if d < 80.0:
+			list.append([d, Vector4(float(h.x), float(h.z), float(h.r) * 0.88, 0.0)])
+	list.sort_custom(func(a, b): return a[0] < b[0])
+	var out := []
+	for i in mini(n, list.size()):
+		out.append(list[i][1])
+	return out
 
 
 # ================== CAVAR ==================
@@ -114,20 +158,18 @@ func _rebuild() -> void:
 			n.free()
 	_nodes.clear()
 	if holes.is_empty() and posts.is_empty():
+		if changed_hook.is_valid():
+			changed_hook.call()
 		return
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var pit := SurfaceTool.new()
-	pit.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for h in holes:
-		_hole_geo(st, pit, h)
-	for pair in [[st, _soil_mat], [pit, _pit_mat]]:
-		var mi := MeshInstance3D.new()
-		mi.mesh = (pair[0] as SurfaceTool).commit()
-		mi.material_override = pair[1]
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(mi)
-		_nodes.append(mi)
+		_hole_geo(st, h)
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = _soil_mat
+	add_child(mi)
+	_nodes.append(mi)
 	for po in posts:
 		var n: Node3D = _arv.free_log_node(po.log)
 		add_child(n)
@@ -137,82 +179,139 @@ func _rebuild() -> void:
 		# em pé: o eixo da tora (que é +X) vira para cima; a ponta de baixo no fundo do buraco
 		n.transform = Transform3D(Basis(Vector3.UP, float(po.yaw)) * Basis(Quaternion(Vector3.RIGHT, Vector3.UP)),
 			Vector3(float(po.x), gy - float(po.d) + L * 0.5, float(po.z)))
+	if changed_hook.is_valid():
+		changed_hook.call()
 
 
-## Buraco: a boca escura (mais escura no meio, quanto mais fundo), a borda de terra
-## solta e o montinho de terra tirada do lado. Se tem tora fincada, a terra fica socada em volta.
-func _hole_geo(st: SurfaceTool, pit: SurfaceTool, h: Dictionary) -> void:
+## Cor da terra numa fundura (m abaixo da superfície): camada escura de cima (húmus),
+## depois terra amarelada/avermelhada, com faixas; e mais escura no fundo (pouca luz).
+static func _soil_color(depth: float, hole_d: float, k: int) -> Color:
+	var top := Color(0.2, 0.15, 0.1)
+	var sub := Color(0.36, 0.26, 0.17)
+	var c := top.lerp(sub, smoothstep(0.05, 0.3, depth))
+	c = c.darkened(0.08 * float(int(depth * 14.0) % 2))           # faixas das camadas
+	c = c.darkened(0.06 * float((k * 7) % 3) / 2.0)
+	var shade := clampf(depth / maxf(hole_d, 0.05), 0.0, 1.0)
+	return c.darkened(0.55 * shade * shade + 0.1)                  # o fundo pega pouca luz
+
+
+## Buraco de verdade: paredes de terra descendo até o fundo (o chão é recortado na
+## boca), borda de terra solta e o monte de terra tirada do lado. Com tora fincada,
+## a terra fica socada em volta da tora.
+func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 	var x := float(h.x)
 	var z := float(h.z)
 	var r := float(h.r)
 	var d := float(h.d)
 	var filled := int(h.get("tora", -1)) >= 0
-	var seg := 16
-	var rim := Color(0.2, 0.14, 0.085)
-	var deep := clampf(d / 0.4, 0.0, 1.0)
-	var dark := Color(0.12, 0.085, 0.05).lerp(Color(0.012, 0.009, 0.006), deep)
-	if filled:
-		dark = Color(0.2, 0.15, 0.09)
+	var seg := 18
 	var hsh := absi(hash(Vector2(x, z)))
-	var ring := []
-	var ring_out := []
-	for k in seg:
+	var gy: float = _jogo.height_at(x, z)
+	var rims := []
+	for k in seg + 1:
 		var a := TAU * k / seg
-		var rr := r * (0.9 + 0.2 * float((hsh >> (k % 16)) % 10) / 10.0)
+		var rr := r * (0.92 + 0.16 * float((hsh >> (k % 18)) % 10) / 10.0)
 		var p := Vector2(x + cos(a) * rr, z + sin(a) * rr)
-		ring.append(Vector3(p.x, _jogo.height_at(p.x, p.y) + 0.015, p.y))
-		var po := Vector2(x + cos(a) * rr * 1.45, z + sin(a) * rr * 1.45)
-		ring_out.append(Vector3(po.x, _jogo.height_at(po.x, po.y) + 0.02, po.y))
-	var center := Vector3(x, _jogo.height_at(x, z) + 0.012, z)
-	var mid_c := dark.lerp(rim, 0.25)
-	for k in seg:
-		var k2 := (k + 1) % seg
-		var m0: Vector3 = center.lerp(ring[k], 0.6)
-		var m1: Vector3 = center.lerp(ring[k2], 0.6)
-		_tri(pit, center, m0, m1, dark, dark, dark)
-		_tri(pit, m0, ring[k], ring[k2], dark, mid_c, mid_c)
-		_tri(pit, m0, ring[k2], m1, dark, mid_c, dark)
-		# borda de terra solta
-		_tri(st, ring[k], ring_out[k], ring_out[k2], mid_c, rim, rim)
-		_tri(st, ring[k], ring_out[k2], ring[k2], mid_c, rim, mid_c)
+		rims.append([a, rr, _jogo.height_at(p.x, p.y), p])
 	if filled:
+		# terra socada em volta da tora
+		var c := Vector3(x, gy + 0.03, z)
+		for k in seg:
+			var A: Array = rims[k]
+			var B: Array = rims[k + 1]
+			var pa := Vector3(A[3].x, float(A[2]) + 0.02, A[3].y)
+			var pb := Vector3(B[3].x, float(B[2]) + 0.02, B[3].y)
+			_tri(st, c, pa, pb, Color(0.3, 0.22, 0.14), Color(0.34, 0.25, 0.16), Color(0.34, 0.25, 0.16))
 		return
-	# montinho da terra tirada, do lado
+	# paredes: de cima (na altura do chão) até o fundo, afinando um pouco; anéis no meio
+	var levels := 5
+	for k in seg:
+		var A: Array = rims[k]
+		var B: Array = rims[k + 1]
+		for l in levels:
+			var t0 := float(l) / levels
+			var t1 := float(l + 1) / levels
+			var pts := []
+			for pair in [[A, t0], [B, t0], [B, t1], [A, t1]]:
+				var rim: Array = pair[0]
+				var t: float = pair[1]
+				var a: float = rim[0]
+				var rad: float = float(rim[1]) * lerpf(1.0, 0.82, t)
+				var top: float = rim[2]
+				var bottom := gy - d
+				var y := lerpf(top + 0.01, bottom, t)
+				var wob := 0.012 * sin(a * 5.0 + t * 9.0 + float(hsh % 7))
+				pts.append([Vector3(x + cos(a) * (rad + wob), y, z + sin(a) * (rad + wob)), top - y])
+			var c0 := _soil_color(pts[0][1], d, k)
+			var c1 := _soil_color(pts[1][1], d, k + 1)
+			var c2 := _soil_color(pts[2][1], d, k + 1)
+			var c3 := _soil_color(pts[3][1], d, k)
+			_tri(st, pts[0][0], pts[1][0], pts[2][0], c0, c1, c2, true, Vector3(x, 0, z))
+			_tri(st, pts[0][0], pts[2][0], pts[3][0], c0, c2, c3, true, Vector3(x, 0, z))
+	# fundo do buraco (terra solta, escura)
+	var bc := Vector3(x, gy - d - 0.01, z)
+	var dark := _soil_color(d, d, 0).darkened(0.1)
+	for k in seg:
+		var A: Array = rims[k]
+		var B: Array = rims[k + 1]
+		var pa := Vector3(x + cos(float(A[0])) * float(A[1]) * 0.82, gy - d, z + sin(float(A[0])) * float(A[1]) * 0.82)
+		var pb := Vector3(x + cos(float(B[0])) * float(B[1]) * 0.82, gy - d, z + sin(float(B[0])) * float(B[1]) * 0.82)
+		_tri(st, bc, pa, pb, dark.darkened(0.15), dark, dark)
+	# borda: terra solta pisada em volta da boca
+	var loose := Color(0.27, 0.2, 0.13)
+	for k in seg:
+		var A: Array = rims[k]
+		var B: Array = rims[k + 1]
+		var ia := Vector3(A[3].x, float(A[2]) + 0.012, A[3].y)
+		var ib := Vector3(B[3].x, float(B[2]) + 0.012, B[3].y)
+		var oa2 := Vector2(x + cos(float(A[0])) * float(A[1]) * 1.5, z + sin(float(A[0])) * float(A[1]) * 1.5)
+		var ob2 := Vector2(x + cos(float(B[0])) * float(B[1]) * 1.5, z + sin(float(B[0])) * float(B[1]) * 1.5)
+		var oa := Vector3(oa2.x, _jogo.height_at(oa2.x, oa2.y) + 0.02, oa2.y)
+		var ob := Vector3(ob2.x, _jogo.height_at(ob2.x, ob2.y) + 0.02, ob2.y)
+		_tri(st, ia, oa, ob, loose.darkened(0.15), loose, loose)
+		_tri(st, ia, ob, ib, loose.darkened(0.15), loose, loose.darkened(0.15))
+	# monte da terra tirada, do lado: redondo, com torrões
 	var vol := PI * r * r * d
-	var mh := clampf(vol * 6.0, 0.03, 0.3)
-	var mr := clampf(r * 1.2 + vol * 2.0, 0.15, 0.6)
+	var mh := clampf(vol * 5.0, 0.04, 0.32)
+	var mr := clampf(r * 1.1 + vol * 2.2, 0.18, 0.65)
 	var a0 := float(hsh % 628) / 100.0
-	var mc := Vector2(x + cos(a0) * (r * 1.5 + mr * 0.8), z + sin(a0) * (r * 1.5 + mr * 0.8))
-	var top := Vector3(mc.x, _jogo.height_at(mc.x, mc.y) + mh, mc.y)
-	var base := []
-	for k in 10:
-		var a := TAU * k / 10.0
-		var rr := mr * (0.8 + 0.3 * float((hsh >> k) % 7) / 7.0)
-		var pp := Vector2(mc.x + cos(a) * rr, mc.y + sin(a) * rr)
-		base.append(Vector3(pp.x, _jogo.height_at(pp.x, pp.y) + 0.01, pp.y))
-	var soil := Color(0.27, 0.19, 0.11)
-	for k in 10:
-		var k2 := (k + 1) % 10
-		var midp: Vector3 = (base[k] + base[k2] + top * 2.0) * 0.25
-		midp.y += mh * 0.15
-		_tri(st, base[k], midp, base[k2], soil.darkened(0.1), soil, soil.darkened(0.1))
-		_tri(st, midp, top, base[k2], soil, soil.lightened(0.08), soil.darkened(0.1))
-		_tri(st, base[k], top, midp, soil.darkened(0.1), soil.lightened(0.08), soil)
+	var mc := Vector2(x + cos(a0) * (r * 1.6 + mr * 0.8), z + sin(a0) * (r * 1.6 + mr * 0.8))
+	var ms := 14
+	var rings := 4
+	var grid := []
+	for i in rings + 1:
+		var t := float(i) / rings
+		var row := []
+		for k in ms + 1:
+			var a := TAU * k / ms
+			var bump := 1.0 + 0.18 * sin(a * 3.0 + float(hsh % 5)) + 0.1 * sin(a * 7.0)
+			var rad := mr * (1.0 - t) * bump
+			var p := Vector2(mc.x + cos(a) * rad, mc.y + sin(a) * rad)
+			var hgt := mh * sqrt(maxf(0.0, 1.0 - (1.0 - t) * (1.0 - t))) * (0.9 + 0.2 * float((hsh >> ((i * 3 + k) % 20)) % 5) / 5.0)
+			row.append(Vector3(p.x, _jogo.height_at(p.x, p.y) + 0.01 + hgt, p.y))
+		grid.append(row)
+	var soil := Color(0.31, 0.23, 0.15)
+	for i in rings:
+		for k in ms:
+			var c_a := soil.darkened(0.12 * float((i + k) % 2))
+			_tri(st, grid[i][k], grid[i][k + 1], grid[i + 1][k + 1], c_a, c_a, soil)
+			_tri(st, grid[i][k], grid[i + 1][k + 1], grid[i + 1][k], c_a, soil, soil)
 
 
-static func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, ca: Color, cb: Color, cc: Color) -> void:
+## Triângulo com cor por ponto. inward: a normal aponta para o meio do buraco (paredes).
+static func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, ca: Color, cb: Color, cc: Color, inward := false, center := Vector3.ZERO) -> void:
 	var n := (b - a).cross(c - a).normalized()
-	if n.y < 0.0:
+	if inward:
+		var mid := (a + b + c) / 3.0
+		var to_c := Vector3(center.x - mid.x, 0, center.z - mid.z)
+		if n.dot(to_c) < 0.0:
+			n = -n
+	elif n.y < 0.0:
 		n = -n
-	st.set_normal(n)
-	st.set_color(ca)
-	st.add_vertex(a)
-	st.set_normal(n)
-	st.set_color(cb)
-	st.add_vertex(b)
-	st.set_normal(n)
-	st.set_color(cc)
-	st.add_vertex(c)
+	for pair in [[a, ca], [b, cb], [c, cc]]:
+		st.set_normal(n)
+		st.set_color(pair[1])
+		st.add_vertex(pair[0])
 
 
 # ================== SALVAR ==================

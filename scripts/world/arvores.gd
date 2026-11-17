@@ -761,20 +761,10 @@ func _buck_end(p: Array, a_up: float, h_at: float, sign: float) -> Dictionary:
 		"rough": 0.45, "sign": sign}
 
 
-## Tamanho das toras de cada árvore (m): o comprimento que dá no máximo 50 kg na
-## parte mais grossa. Árvore fina dá toras mais compridas; grossa, mais curtas.
-func piece_len(p: Array) -> float:
-	var m: Dictionary = _models[int(p[4]) % VARIANTS]
-	var s: float = height_of(p, last_day) / float(m.height)
-	var cut := _cut_from(p, p[9], s)
-	# mede com a mesma conta de peso usada para pegar: encurta até dar no máximo ~49 kg
-	var L := 1.2
-	while L > 0.15:
-		var fl := {"v": int(p[4]), "s": s, "h0": float(cut.h), "h1": float(cut.h) + L / s}
-		if free_log_kg(fl) <= CARRY_MAX_KG * 0.98:
-			break
-		L -= 0.02
-	return L
+## Tamanho das toras (m): 2 metros, para ficarem altas fincadas nos buracos
+## (com 80 cm enterrados sobra 1,2 m para fora: a base das construções).
+func piece_len(_p: Array) -> float:
+	return 2.0
 
 
 ## Machadadas para cortar a tora num ponto (tora grossa pede mais).

@@ -1,9 +1,9 @@
 {
-  "version": 42,
-  "file": "update_42.zip",
-  "size": 3114891,
-  "sha256": "d4e6495040a0566c8f547fd278d9eb8e537d56e0f8cfaec7f6a8767915a13861",
+  "version": 43,
+  "file": "update_43.zip",
+  "size": 3116509,
+  "sha256": "4b661b68fd8199f1984caa31b7ef1a52bc98807bcdfc5d89cad867af39c43a70",
   "min_build": 1,
-  "notes": "Cavadeira de pedra: cava buracos em qualquer lugar (mais fundo no mesmo lugar) e finca toras em pé; titica cai junto com a árvore cortada; machado firme na mão ao correr",
+  "notes": "Buraco de verdade (chão aberto, paredes de terra até o fundo, sem capim dentro) e terra realista; toras de 2 m para os esteios ficarem altos",
   "date": "2026-11-17"
 }

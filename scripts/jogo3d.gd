@@ -36,6 +36,9 @@ uniform float wet = 0.0;
 uniform sampler2D soil_a : filter_linear, repeat_disable;   // R jazida de argila, G areia, B umidade do solo, A grama
 uniform sampler2D soil_b : filter_linear, repeat_disable;   // R leito de lagoa, G umidade da superfície, B filete de enxurrada
 uniform vec2 world_size = vec2(640.0, 480.0);
+// buracos cavados perto do jogador: (x, z, raio, 0). O chão não é desenhado dentro deles.
+uniform vec4 holes[32];
+uniform int hole_n = 0;
 varying vec3 wpos;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 vec2 hash2(vec2 p){ return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
@@ -56,6 +59,9 @@ float cracks(vec2 p){
 }
 void vertex(){ wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment(){
+	for (int i = 0; i < hole_n; i++) {
+		if (distance(wpos.xz, holes[i].xy) < holes[i].z) { discard; }
+	}
 	vec2 uv = wpos.xz / world_size;
 	vec4 a = texture(soil_a, uv);
 	vec4 b = texture(soil_b, uv);
@@ -111,8 +117,14 @@ uniform float wet = 0.0;
 uniform vec3 player_pos = vec3(0.0);
 uniform float fade_start = 26.0;
 uniform float fade_end = 34.0;
+uniform vec4 holes[32];
+uniform int hole_n = 0;
 void vertex(){
 	vec3 root = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	// não cresce capim dentro dos buracos (nem logo na beira)
+	for (int i = 0; i < hole_n; i++) {
+		if (distance(root.xz, holes[i].xy) < holes[i].z * 1.35) { VERTEX *= 0.0; }
+	}
 	// a grama encolhe perto da borda da área desenhada, sem "pular" na tela
 	float shrink = 1.0 - smoothstep(fade_start, fade_end, distance(root.xz, player_pos.xz));
 	VERTEX.y *= shrink;
@@ -288,6 +300,7 @@ var _cipos: Node3D = null
 var _buracos: Node3D = null
 var _plant_btn: Button
 var _chop_hole := false           # cavando com a cavadeira
+var _holes_t := 0.0
 var _carry := {}                  # tora no ombro (dados da tora)
 var _carry_node: Node3D = null
 var _carry_kg := 0.0
@@ -684,6 +697,7 @@ func _on_world_ready() -> void:
 	_arvores.fall_done_hook = _cipos._rebuild
 	_buracos = Buracos.new()
 	add_child(_buracos)
+	_buracos.changed_hook = _update_holes
 	_buracos.build(self, _arvores, Mundos.dir(_world_id) + "/buracos.json" if _world_id != "" else "")
 	if not _pending_carry.is_empty():
 		_hold_log(_pending_carry)
@@ -1002,6 +1016,10 @@ func _process(delta: float) -> void:
 		_seed_btn.visible = _arvores.nearest_seed(_player.position, 1.6) >= 0
 	_update_chop(delta)
 	_update_crouch(delta)
+	_holes_t -= delta
+	if _holes_t <= 0.0:
+		_holes_t = 1.0
+		_update_holes()
 	# a grama vai sendo refeita aos poucos, acompanhando as estações
 	_refresh_timer -= delta
 	if _refresh_timer <= 0.0 and _grass_queue.is_empty() and not _grass_chunks.is_empty():
@@ -1441,9 +1459,6 @@ func _log_action() -> void:
 	if t.is_empty():
 		return
 	var kg: float = _arvores.free_log_kg(t.log)
-	if kg > Arvores.CARRY_MAX_KG:
-		_show_toast("Pesada demais. Corte em toras menores com o machado.")
-		return
 	if _digging:
 		_cancel_dig()
 	_crouch_target = t
@@ -1509,6 +1524,21 @@ func _update_crouch(delta: float) -> void:
 		_crouch_job = ""
 		_chop_pose.crouch = 0.0
 		_act_check = 0.0
+
+
+## Recorta o chão e o capim nos buracos abertos perto do jogador.
+func _update_holes() -> void:
+	if _buracos == null or _player == null:
+		return
+	var list: Array = _buracos.open_holes_near(_player.position, 32)
+	var arr := []
+	for v in list:
+		arr.append(v)
+	while arr.size() < 32:
+		arr.append(Vector4(-9999, -9999, 0, 0))
+	for m in [_terrain_mat, _grass_mat]:
+		m.set_shader_parameter("holes", arr)
+		m.set_shader_parameter("hole_n", list.size())
 
 
 func _front(dist: float) -> Vector3:
@@ -1790,7 +1820,7 @@ func _move_player(delta: float) -> void:
 		var running := amount > 0.85 and _carry.is_empty()
 		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow
 		if not _carry.is_empty():
-			sp *= lerpf(0.9, 0.45, clampf(_carry_kg / Arvores.CARRY_MAX_KG, 0.0, 1.0))   # tora pesada: anda devagar
+			sp *= lerpf(0.9, 0.4, clampf(_carry_kg / 300.0, 0.0, 1.0))   # tora pesada: anda devagar
 		p += move * sp * delta
 		p.x = clampf(p.x, 1.0, MundoSim.W * CELL - 1.0)
 		p.z = clampf(p.z, 1.0, MundoSim.H * CELL - 1.0)
