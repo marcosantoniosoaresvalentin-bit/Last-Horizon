@@ -352,6 +352,7 @@ var _saw_ctrl: Control = null     # trilho para subir e descer o dedo (vai e vem
 var _saw_p := 0.0                 # onde a serra está: 0 puxada, 1 empurrada
 var _saw_side := 0                # último fim de curso alcançado: 1 frente, -1 trás
 const SAW_CYCLE := 1.5            # segundos por ida e volta da serra (devagar)
+var _rodelas: Array = []          # formato de cada rodela da mochila (raios em volta)
 var _dur := {}                    # durabilidade: id da ferramenta -> [usos que faltam de cada uma]
 var _walking := false             # o personagem indo sozinho até um lugar
 var _walk_target := Vector3.ZERO
@@ -1219,7 +1220,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "dur": _dur}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "dur": _dur, "rodelas": _rodelas}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1248,6 +1249,8 @@ func _load_player() -> void:
 		# a serra de pedra também chegou numa atualização: uma para testar
 		if not bool(d.get("ganhou_serra", false)) and not _itens.has("serra"):
 			_itens["serra"] = 1
+	if d.get("rodelas") is Array:
+		_rodelas = d.rodelas
 	if d.has("dur") and d.dur is Dictionary:
 		for k in d.dur:
 			if d.dur[k] is Array:
@@ -1280,8 +1283,65 @@ static func _kg(v: float) -> String:
 func _bag_total() -> float:
 	var t := _bag + _seeds * Arvores.SEED_KG
 	for id in _itens:
+		if id == "rodela":
+			continue
 		t += Itens.kg(id) * int(_itens[id])
+	for pf in _rodelas_fix():
+		t += Balde.rodela_kg(pf, Apoios.SLICE)
 	return t
+
+
+## Largura da rodela (o maior diâmetro, m).
+static func _rodela_diam(pf: Array) -> float:
+	var d := 0.0
+	var n := pf.size()
+	for i in n / 2:
+		d = maxf(d, float(pf[i]) + float(pf[i + n / 2]))
+	return d
+
+
+## Formatos das rodelas da mochila (uma por rodela; as que vieram sem formato ganham uma redonda).
+func _rodelas_fix() -> Array:
+	var q := int(_itens.get("rodela", 0))
+	while _rodelas.size() < q:
+		_rodelas.append(_round_profile(0.16))
+	while _rodelas.size() > q:
+		_rodelas.pop_back()
+	return _rodelas
+
+
+static func _round_profile(r: float) -> Array:
+	var out := []
+	for k in 24:
+		out.append(r)
+	return out
+
+
+## Põe uma rodela (com o formato dela) na mochila; se não couber, cai no chão.
+func add_rodela(pf: Array) -> bool:
+	_rodelas_fix()
+	if _bag_total() + Balde.rodela_kg(pf, Apoios.SLICE) > BAG_MAX + 0.0001:
+		var fwd := Vector3(-sin(_face), 0, -cos(_face))
+		var pos := _player.position + fwd * 0.7
+		_add_ground("rodela", 1, pos.x, pos.z, 0.0, pf)
+		return false
+	_itens["rodela"] = int(_itens.get("rodela", 0)) + 1
+	_rodelas.append(pf)
+	return true
+
+
+## Solta no chão uma rodela desse formato.
+func drop_rodela(pf: Array) -> void:
+	_rodelas_fix()
+	var key := str(pf)
+	for i in _rodelas.size():
+		if str(_rodelas[i]) == key:
+			_rodelas.remove_at(i)
+			remove_item("rodela", 1, false)
+			var fwd := Vector3(-sin(_face), 0, -cos(_face))
+			var pos := _player.position + fwd * 0.8
+			_add_ground("rodela", 1, pos.x, pos.z, 0.0, pf)
+			return
 
 
 func item_qtd(id: String) -> int:
@@ -1290,10 +1350,14 @@ func item_qtd(id: String) -> int:
 	return int(_itens.get(id, 0))
 
 
-func remove_item(id: String, qtd: int) -> void:
+func remove_item(id: String, qtd: int, fix_rodelas := true) -> void:
 	if id == "semente":
 		_seeds = maxi(0, _seeds - qtd)
 		return
+	if id == "rodela" and fix_rodelas:
+		_rodelas_fix()
+		for k in mini(qtd, _rodelas.size()):
+			_rodelas.pop_back()
 	var n := int(_itens.get(id, 0)) - qtd
 	if n > 0:
 		_itens[id] = n
@@ -1306,6 +1370,12 @@ func remove_item(id: String, qtd: int) -> void:
 ## Põe itens na mochila; o que não couber cai no chão do lado do jogador.
 ## Devolve quantos foram para o chão.
 func add_item(id: String, qtd: int) -> int:
+	if id == "rodela":
+		var lost := 0
+		for k in qtd:
+			if not add_rodela(_round_profile(0.16)):
+				lost += 1
+		return lost
 	var kg := Itens.kg(id)
 	var fit := qtd
 	if kg > 0.0:
@@ -1323,6 +1393,10 @@ func add_item(id: String, qtd: int) -> int:
 ## Solta itens no chão na frente do jogador (from_bag: tira da mochila).
 func drop_item(id: String, qtd: int, from_bag := true) -> void:
 	var dv := []
+	if id == "rodela" and from_bag:
+		for k in mini(qtd, item_qtd("rodela")):
+			drop_rodela(_rodelas_fix()[_rodelas.size() - 1])
+		return
 	if from_bag:
 		qtd = mini(qtd, item_qtd(id))
 		if qtd <= 0:
@@ -1350,19 +1424,27 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 	if id == "rodela":
 		if r <= 0.0:
 			r = 0.16
+		if dur.size() != 24:
+			dur = _round_profile(r)        # rodela: o "dur" leva o formato dela
 		var mi := MeshInstance3D.new()
-		mi.mesh = Balde.rodela_mesh(r, Apoios.SLICE)
+		mi.mesh = Balde.rodela_profile_mesh(dur, Apoios.SLICE)
 		mi.material_override = Balde.material()
 		mi.position.y = Apoios.SLICE * 0.5
 		node.add_child(mi)
 	elif id in Lascar.KINDS:
 		var mi := MeshInstance3D.new()
 		var sz := r if r > 0.0 else 0.17
-		mi.mesh = Corte2.worked_stone_mesh(id)       # a mesma pedra que vai na ferramenta
-		mi.material_override = Lascar.material() if id == "lamina_serra" else Corte2.axe_material()
-		sz *= 1.2
+		if dur.size() == 2:
+			# a pedra que acabou de ser modelada: do jeitinho que ficou (mesmo formato e cor)
+			var o := Lascar.rock(int(dur[0]))
+			mi.mesh = Lascar.mesh(Lascar.fit_target(o, id), o, int(dur[0]))
+			mi.material_override = Lascar.material()
+		else:
+			mi.mesh = Corte2.worked_stone_mesh(id)       # a mesma pedra que vai na ferramenta
+			mi.material_override = Lascar.material() if id == "lamina_serra" else Corte2.axe_material()
+			sz *= 1.2
 		mi.scale = Vector3(sz, sz, sz)
-		mi.rotation.y = randf() * TAU
+		mi.rotation.y = float(dur[1]) if dur.size() == 2 else randf() * TAU
 		mi.position.y = -mi.mesh.get_aabb().position.y * sz
 		node.add_child(mi)
 	elif id == "balde":
@@ -1389,6 +1471,8 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 		node.add_child(mi)
 	node.position = Vector3(x, height_at(x, z), z)
 	_chao.append({"id": id, "qtd": qtd, "x": x, "z": z, "node": node, "r": r, "dur": dur})
+	if id == "rodela":
+		_chao[_chao.size() - 1]["perfil"] = dur
 
 
 func _nearest_ground(r: float) -> int:
@@ -1422,6 +1506,17 @@ func _pick_ground_now(i: int) -> void:
 	if i < 0 or i >= _chao.size():
 		return
 	var g: Dictionary = _chao[i]
+	if str(g.id) == "rodela":
+		var pf: Array = g.get("perfil", _round_profile(float(g.get("r", 0.16))))
+		if _bag_total() + Balde.rodela_kg(pf, Apoios.SLICE) > BAG_MAX + 0.0001:
+			_show_toast("A mochila está cheia (%d kg)." % int(BAG_MAX))
+			return
+		add_rodela(pf)
+		g.node.queue_free()
+		_chao.remove_at(i)
+		_show_toast("+1 rodela (Ø %d cm)" % int(round(_rodela_diam(pf) * 100.0)))
+		_act_check = 0.0
+		return
 	var kg := Itens.kg(str(g.id))
 	var fit := int(g.qtd)
 	if kg > 0.0:
@@ -2233,9 +2328,9 @@ func _walk_arrived() -> void:
 
 
 ## A rodela solta da ponta e cai no chão (gira de em pé para deitada).
-func _drop_rodela(at: Vector3, out: Vector3, r: float) -> void:
-	var land := at + Vector3(out.x, 0, out.z).normalized() * 0.3
-	_add_ground("rodela", 1, land.x, land.z, r)
+func _drop_rodela(at: Vector3, out: Vector3, r: float, pf := []) -> void:
+	var land := at + Vector3(out.x, 0, out.z).normalized() * (0.3 + r)
+	_add_ground("rodela", 1, land.x, land.z, r, pf)
 	var g: Dictionary = _chao[_chao.size() - 1]
 	var node: Node3D = g.node
 	var end_pos := node.position
@@ -2533,10 +2628,11 @@ func _saw_update(delta: float) -> void:
 			# uma ida e volta inteira: o corte desce um pouco e a serra gasta
 			var end_before: Vector3 = _apoios.end_point(wi, we)
 			var dir: Vector3 = _apoios.info(wi).dir
+			var pf: Array = _arvores.free_log_end_profile(_apoios.rested[wi].log, we)
 			var rad: float = _apoios.slice_stroke(wi, we)
 			var broke := wear("serra")
 			if rad > 0.0:
-				_drop_rodela(end_before - dir * float(we) * Apoios.SLICE * 0.5, dir * float(we), rad)
+				_drop_rodela(end_before - dir * float(we) * Apoios.SLICE * 0.5, dir * float(we), rad, pf)
 				_stop_saw()
 				_work = {}
 				_show_toast("A rodela soltou. Pegue ela!")
@@ -2975,6 +3071,12 @@ func _knap_impact() -> void:
 	# soltou uma lasca: a pedra vai tomando forma (aos poucos)
 	var cur: PackedFloat32Array = _knap.cur
 	Lascar.flake(cur, _knap.tgt, int(_knap.spot), _knap_rng)
+	# a pedra inteira vai chegando no formato: na última lasca ela fica pronta, sem pular
+	var tg: PackedFloat32Array = _knap.tgt
+	var left := maxi(int(_knap.K) - int(_knap.done), 1)
+	var g := 1.0 / float(left)
+	for q in cur.size():
+		cur[q] = lerpf(cur[q], tg[q], g)
 	_knap.cur = cur
 	_knap.done = int(_knap.done) + 1
 	_pedras.items[i].spots = int(_knap.done)
@@ -2997,7 +3099,7 @@ func _knap_finish() -> void:
 	var size := float(p.s)
 	_knap_end()
 	_pedras.take(i)
-	_add_ground(kind, 1, c.x, c.z, size)
+	_add_ground(kind, 1, c.x, c.z, size, [int(p.seed), float(p.yaw)])
 	_show_toast("%s pronta! Pegue ela do chão." % Lascar.KINDS[kind].nome)
 
 

@@ -80,6 +80,7 @@ var _jogo: Node
 var _rng := RandomNumberGenerator.new()
 var stumps: Array = []             # tocos: [x, z, dia do corte, raio em cima, raio embaixo, altura]
 var _stump_top_mat: Material
+var _bark_2s: StandardMaterial3D
 var cuts := {}                     # Vector2(x, z) da árvore -> [machadadas, lado do corte]
 var _cut_nodes := {}
 var _cut_mat: Material
@@ -112,6 +113,11 @@ func build(jogo: Node, seed_: int, save_path := "") -> void:
 		_generate(seed_)
 	trees = plants
 	_rebuild()
+	# toras já cortadas de jogos antigos ainda presas na árvore caída: caem no chão agora
+	for p in plants:
+		if int(p[5]) == FALLEN and p.size() > 10 and p[10] is Array and (p[10] as Array).size() > 1 and p[9] is Array:
+			_release_pieces(p)
+	_rebuild_logs()
 
 
 ## Chamado pelo jogo todo quadro: quando vira o dia, roda o ciclo das árvores.
@@ -733,12 +739,12 @@ func _build_log(p: Array, v: int, s: float, day: int) -> void:
 			holders[bi] = hold
 			var st := branch_state(p, bi)
 			if int(st[0]) == 0 and int(st[1]) == 0:
-				_piece(hold, m.branches[bi], bark_m)
+				_piece(hold, m.branches[bi], bark_material() if age < 200 else bark_m)
 			else:
 				var up_model := ((node.transform.basis * hold.transform.basis).inverse() * Vector3.UP).normalized()
 				var bd := GalhoGeo.Builder.new()
 				_branch_partial(bd, m, bi, st, up_model, h0)
-				_trunk_node(hold, bd.commit(), bark_m)
+				_trunk_node(hold, bd.commit(), bark_material() if age < 200 else bark_m)
 		if green and age < GREEN_FALLEN_DAYS:
 			var color := fallen_leaf_tint(p)
 			for i in m.clusters.size():
@@ -1116,8 +1122,108 @@ func buck_hit(p: Array, h_at: float) -> bool:
 				break
 		p[10] = pieces
 		p[11] = null
+		_release_pieces(p)
 	_rebuild_logs()
 	return done
+
+
+## Os pedaços de tora já cortados (todos menos o da copa) se soltam da árvore: caem no
+## chão e, no morro, rolam até onde não tem mais inclinação.
+func _release_pieces(p: Array) -> void:
+	var v := int(p[4]) % VARIANTS
+	var m: Dictionary = _models[v]
+	var h := height_of(p, last_day)
+	var s: float = h / float(m.height)
+	var cut := _cut_from(p, p[9], s)
+	var xf := _log_xf(p, h, s, cut)
+	var along := (xf * _axis_of(m, float(m.H)) - xf * _axis_of(m, float(cut.h))).normalized()
+	var a_up := _log_up_angle(xf)
+	var keep := []
+	for pc in log_pieces(p):
+		if absf(float(pc[1]) - float(m.H)) < 0.0001:
+			keep.append(pc)
+			continue
+		var off: Vector3 = along * float(pc[2])
+		var A: Vector3 = xf * _axis_of(m, float(pc[0])) + off
+		var B: Vector3 = xf * _axis_of(m, float(pc[1])) + off
+		var bot: Dictionary = cut if absf(float(pc[0]) - float(cut.h)) < 0.0001 else _buck_end(p, a_up, float(pc[0]), 1.0)
+		var fl := {"v": v, "s": s, "h0": float(pc[0]), "h1": float(pc[1]), "bot": bot,
+			"top": _buck_end(p, a_up, float(pc[1]), -1.0), "pos": [0, 0, 0], "yaw": 0.0, "dia": int(p[6])}
+		var d := B - A
+		var c := (A + B) * 0.5
+		fl.pos = [c.x, c.y, c.z]
+		fl.yaw = atan2(-d.z, d.x)
+		roll_log(fl, Transform3D(Basis(Quaternion(Vector3.RIGHT, d.normalized())), c))
+	p[10] = keep
+
+
+## Onde a tora para no chão: rola de lado (perpendicular ao comprimento) morro abaixo
+## enquanto o chão for inclinado. Devolve [centro final, quanto rolou (m)].
+func _settle(fl: Dictionary) -> Array:
+	var c := Vector2(float(fl.pos[0]), float(fl.pos[2]))
+	var dir := Vector2(cos(float(fl.yaw)), -sin(float(fl.yaw)))
+	var n := Vector2(-dir.y, dir.x)
+	var L := free_log_length(fl)
+	var dist := 0.0
+	for _it in 220:
+		var hp := 0.0
+		var hm := 0.0
+		for t in [-0.35, 0.0, 0.35]:
+			var q: Vector2 = c + dir * L * t
+			hp += _jogo.height_at(q.x + n.x * 0.4, q.y + n.y * 0.4)
+			hm += _jogo.height_at(q.x - n.x * 0.4, q.y - n.y * 0.4)
+		var slope := (hp - hm) / 3.0 / 0.8
+		if absf(slope) < 0.14:
+			break          # plano o bastante: para
+		var step := n * (-signf(slope)) * 0.15
+		var nc := c + step
+		if nc.x < 2.0 or nc.y < 2.0 or nc.x > MundoSim.W * _jogo.CELL - 2.0 or nc.y > MundoSim.H * _jogo.CELL - 2.0:
+			break
+		c = nc
+		dist += 0.15
+	return [c, dist]
+
+
+## Põe a tora solta no chão a partir de onde ela estava (start, no mundo): ela cai,
+## rola morro abaixo se for o caso, e só então fica parada como tora solta.
+func roll_log(fl: Dictionary, start: Transform3D) -> void:
+	var res := _settle(fl)
+	var c: Vector2 = res[0]
+	var dist: float = res[1]
+	var r := free_log_radius(fl)
+	var L := free_log_length(fl)
+	var dir := Vector3(cos(float(fl.yaw)), 0, -sin(float(fl.yaw)))
+	var e1 := Vector3(c.x, 0, c.y) - dir * L * 0.5
+	var e2 := Vector3(c.x, 0, c.y) + dir * L * 0.5
+	e1.y = _jogo.height_at(e1.x, e1.z) + r * 0.9
+	e2.y = _jogo.height_at(e2.x, e2.z) + r * 0.9
+	var d := (e2 - e1).normalized()
+	var mid := (e1 + e2) * 0.5
+	fl.pos = [mid.x, mid.y, mid.z]
+	var n := free_log_node(fl)
+	add_child(n)
+	n.transform = start
+	# primeiro cai no chão onde está, depois rola
+	var p0 := Vector3(float(start.origin.x), 0, float(start.origin.z))
+	p0.y = _jogo.height_at(p0.x, p0.z) + r * 0.9
+	var b0 := Basis(Quaternion(Vector3.RIGHT, d))
+	var fall_t := clampf(sqrt(maxf(start.origin.y - p0.y, 0.05) / 4.9), 0.12, 0.6)
+	var roll_t := dist / 2.2
+	var ang := dist / maxf(r, 0.05)
+	var rdir := signf(Vector3(mid.x - p0.x, 0, mid.z - p0.z).dot(Vector3(-d.z, 0, d.x)))
+	var tw := n.create_tween()
+	tw.tween_method(func(t: float) -> void:
+		n.transform = start.interpolate_with(Transform3D(b0, p0), t * t), 0.0, 1.0, fall_t)
+	tw.tween_callback(func(): Sons.play_at(self, "baque", p0, clampf(-10.0 + r * 20.0, -10.0, 0.0), 0.9))
+	if roll_t > 0.05:
+		tw.tween_method(func(t: float) -> void:
+			var pos := p0.lerp(mid, t)
+			pos.y = _jogo.height_at(pos.x, pos.z) + r * 0.9
+			n.transform = Transform3D(Basis(d, -ang * t * rdir) * b0, pos), 0.0, 1.0, roll_t).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	tw.tween_callback(func():
+		n.queue_free()
+		free_logs.append(fl)
+		_rebuild_logs())
 
 
 func _rebuild_logs() -> void:
@@ -1694,7 +1800,10 @@ func _trunk_build(m: Dictionary, h0: float, h1: float, notches: Array, s: float,
 
 ## Material de casca (usado também nas forquilhas e nos galhos do chão).
 func bark_material() -> Material:
-	return _bark
+	if _bark_2s == null:
+		_bark_2s = (_bark as StandardMaterial3D).duplicate()
+		_bark_2s.cull_mode = BaseMaterial3D.CULL_DISABLED     # galho cortado: visível de todo lado
+	return _bark_2s
 
 
 func leaf_material() -> Material:
@@ -1801,6 +1910,16 @@ func free_log_max_radius(fl: Dictionary) -> float:
 	for k in 9:
 		r = maxf(r, free_log_radius_at(fl, k / 8.0))
 	return r
+
+
+## Formato da ponta da tora (raio em 24 ângulos, em cm redondos): a rodela sai assim.
+func free_log_end_profile(fl: Dictionary, e: int) -> Array:
+	var m: Dictionary = _models[int(fl.v) % VARIANTS]
+	var h := float(fl.h1) if e > 0 else float(fl.h0)
+	var out := []
+	for k in 24:
+		out.append(snappedf(_radius_of(m, h, TAU * k / 24.0) * float(fl.s), 0.01))
+	return out
 
 
 ## Raio da tora solta numa das pontas (e = 1: ponta h1; -1: ponta h0).
@@ -1940,8 +2059,10 @@ func take_log(target: Dictionary) -> Dictionary:
 func drop_log(fl: Dictionary, center: Vector3, yaw: float) -> void:
 	fl.pos = [center.x, center.y, center.z]
 	fl.yaw = yaw
-	free_logs.append(fl)
-	_rebuild_logs()
+	var d := Vector3(cos(yaw), 0, -sin(yaw))
+	var c := center
+	c.y = _jogo.height_at(c.x, c.z) + free_log_radius(fl) * 0.9
+	roll_log(fl, Transform3D(Basis(Quaternion(Vector3.RIGHT, d)), c))
 
 
 ## Altura do topo de uma tora embaixo do jogador (para ficar em pé em cima dela), ou -1e9.

@@ -247,7 +247,11 @@ static func saw_mesh() -> ArrayMesh:
 	# encaixada embaixo do cabo: comprimento ao longo do cabo, dentes para +Z
 	var blade: ArrayMesh = Lascar.mesh(Lascar.target("lamina_serra"), Lascar.rock(31), 31)
 	var bx := Transform3D(Basis(Vector3(0, 0.6, 0), Vector3(-0.22, 0, 0), Vector3(0, 0, 0.3)), Vector3(0, 0.65, 0.052))
-	st.append_from(blade, 0, bx)
+	# a lâmina vem indexada: sem índice (senão o cabo, que já está no st, se perde)
+	var flat := SurfaceTool.new()
+	flat.create_from(blade, 0)
+	flat.deindex()
+	st.append_from(flat.commit(), 0, bx)
 	# amarração de cipó prendendo a lâmina no cabo
 	for y in [0.4, 0.52, 0.65, 0.78, 0.9]:
 		var ring := []

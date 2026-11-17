@@ -153,6 +153,48 @@ static func rodela_mesh(r: float, th: float) -> Mesh:
 	return st.commit()
 
 
+## Rodela no formato do tronco de onde ela saiu (pf = raio em cada ângulo, em volta):
+## árvore grande dá rodela com as sapopemas (as raízes de tábua) para fora.
+static func rodela_profile_mesh(pf: Array, th: float) -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := pf.size()
+	var wood := Color(0.38, 0.28, 0.17)
+	var bark := Color(0.22, 0.16, 0.1)
+	var top := Vector3(0, th * 0.5, 0)
+	for i in n:
+		var a0 := TAU * i / n
+		var a1 := TAU * (i + 1) / n
+		var p0 := Vector3(cos(a0), 0, sin(a0)) * float(pf[i])
+		var p1 := Vector3(cos(a1), 0, sin(a1)) * float(pf[(i + 1) % n])
+		for k in 4:
+			var f0 := k / 4.0
+			var f1 := (k + 1) / 4.0
+			var col := wood.darkened(0.045 * (k % 2))
+			if k == 3:
+				col = col.lerp(bark, 0.25)
+			for sgn in [1.0, -1.0]:
+				var y: Vector3 = top * sgn
+				var j := func(a: float, f: float) -> Vector3:
+					return Vector3(0, (sin(a * 5.0 + f * 9.0 + sgn) * 0.5 + sin(f * 23.0 + a * 2.0) * 0.5) * th * 0.22 * f, 0)
+				if sgn > 0:
+					_quad(st, y + p0 * f0 + j.call(a0, f0), y + p0 * f1 + j.call(a0, f1), y + p1 * f1 + j.call(a1, f1), y + p1 * f0 + j.call(a1, f0), col)
+				else:
+					_quad(st, y + p0 * f0 + j.call(a0, f0), y + p1 * f0 + j.call(a1, f0), y + p1 * f1 + j.call(a1, f1), y + p0 * f1 + j.call(a0, f1), col)
+		_quad(st, -top + p0, -top + p1, top + p1, top + p0, bark.darkened(0.08 * (i % 2)))
+	st.generate_normals()
+	return st.commit()
+
+
+## Peso da rodela (kg): área do formato x grossura x madeira verde.
+static func rodela_kg(pf: Array, th: float) -> float:
+	var n := pf.size()
+	var area := 0.0
+	for i in n:
+		area += 0.5 * float(pf[i]) * float(pf[(i + 1) % n]) * sin(TAU / n)
+	return area * th * 520.0
+
+
 static func _disc(st: SurfaceTool, c: Vector3, r: float, th: float, wood: Color, bark: Color, rings := false) -> void:
 	var seg := 28
 	for i in seg:

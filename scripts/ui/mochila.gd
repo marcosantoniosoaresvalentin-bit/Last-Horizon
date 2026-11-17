@@ -351,6 +351,21 @@ func _refresh() -> void:
 	if _game:
 		for id in _game._itens:
 			var n := int(_game._itens[id])
+			if id == "rodela":
+				# cada formato de rodela no seu espaço (só junta se for igualzinha)
+				var groups := {}
+				var order := []
+				for pf in _game._rodelas_fix():
+					var key := str(pf)
+					if not groups.has(key):
+						groups[key] = {"id": "rodela", "perfil": pf, "qtd": 0, "kg": 0.0,
+							"nome": "Rodela Ø %d cm" % int(round(_game._rodela_diam(pf) * 100.0))}
+						order.append(key)
+					groups[key].qtd = int(groups[key].qtd) + 1
+					groups[key].kg = float(groups[key].kg) + _game.Balde.rodela_kg(pf, 0.05)
+				for key in order:
+					_items.append(groups[key])
+				continue
 			_items.append({"id": id, "nome": Itens.nome(id), "kg": Itens.kg(id) * n, "qtd": n})
 	var total: float = _game._bag_total() if _game else 0.0
 	var cap: float = _game.BAG_MAX if _game else 30.0
@@ -408,7 +423,8 @@ func _select(i: int) -> void:
 		var dur := ""
 		if _game and Itens.dur_max(str(it.id)) > 0:
 			dur = " · Durabilidade %d%%" % int(round(float(_game.tool_dur(str(it.id))) * 100.0))
-		_say("%s · %s kg%s · %s" % [it.nome, Itens.kg_txt(Itens.kg(str(it.id))), dur, Itens.ITENS[it.id].desc])
+		var each: float = float(it.kg) / maxf(float(it.get("qtd", 1)), 1.0) if it.has("perfil") else Itens.kg(str(it.id))
+		_say("%s · %s kg%s · %s" % [it.nome, Itens.kg_txt(each), dur, Itens.ITENS[it.id].desc])
 	else:
 		_say("%s · %s kg" % [it.nome, ("%.1f" % float(it.kg)).replace(".", ",")])
 
@@ -469,6 +485,12 @@ func _drop() -> void:
 	if it.id == "argila" and _game:
 		_game._bag = 0.0
 		_game._update_inventory()
+	elif _game and it.has("perfil"):
+		_game.drop_rodela(it.perfil)
+		_selected = -1
+		_refresh()
+		_say("Você soltou 1 %s no chão." % str(it.nome).to_lower())
+		return
 	elif _game and it.id != "semente":
 		_game.drop_item(str(it.id), 1)
 		_selected = -1

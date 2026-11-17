@@ -243,13 +243,22 @@ func harvest_target(pos: Vector3, reach: float) -> Dictionary:
 	var best := {}
 	var bd := reach
 	for pl in plants:
-		if int(pl.dead) >= 0 or (pl.roots as Array).is_empty() or _host_of(pl) == null:
-			continue          # morta, sem raiz ou a árvore de apoio caiu
+		if int(pl.dead) >= 0 or _free_roots(pl).is_empty():
+			continue          # morta ou sem raiz para arrancar
 		var d := Vector2(float(pl.x) - pos.x, float(pl.z) - pos.z).length()
 		if d < bd:
 			bd = d
 			best = pl
 	return best
+
+
+## Raízes que ainda estão na planta (qualquer tamanho).
+func _free_roots(pl: Dictionary) -> Array:
+	var out := []
+	for rt in pl.roots:
+		if int(rt[3]) < 0 and float(rt[2]) > 0.2:
+			out.append(rt)
+	return out
 
 
 func mature_roots(pl: Dictionary) -> Array:
@@ -260,24 +269,25 @@ func mature_roots(pl: Dictionary) -> Array:
 	return out
 
 
-## Arranca uma raiz madura. Devolve "" se deu certo ou o motivo de não poder.
+## Arranca uma raiz (a maior que tiver). O jogador pode arrancar quantas quiser:
+## se arrancar todas, a titica morre (cuidar da mata é com ele).
 func harvest(pl: Dictionary) -> String:
-	var ripe := mature_roots(pl)
-	if ripe.is_empty():
-		return "As raízes ainda não chegaram no chão. Espere crescerem."
-	var taken := 0
-	var alive := 0
-	for rt in pl.roots:
-		if int(rt[3]) >= 0:
-			taken += 1
-		elif float(rt[2]) >= float(rt[1]) - 0.3:
-			alive += 1
-	# coleta limitada: deixa pelo menos metade das raízes maduras na planta
-	if taken + 1 > (taken + alive) / 2:
-		return "Deixe as outras raízes para a titica não morrer. Elas voltam a crescer."
-	var rt: Array = ripe[_rng.randi() % ripe.size()]
+	var free := _free_roots(pl)
+	if free.is_empty():
+		return ""
+	var rt: Array = free[0]
+	for r in free:
+		if float(r[2]) > float(rt[2]):
+			rt = r
 	rt[3] = last_day
 	rt[2] = 0.0
+	if _free_roots(pl).is_empty() and mature_roots(pl).is_empty():
+		var growing := false
+		for r in pl.roots:
+			if int(r[3]) < 0 and float(r[2]) > 0.0:
+				growing = true
+		if not growing:
+			pl.dead = last_day        # arrancou tudo: a planta morre
 	_rebuild()
 	return ""
 

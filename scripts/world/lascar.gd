@@ -43,25 +43,36 @@ static func rock(seed_: int) -> PackedFloat32Array:
 	rng.seed = seed_
 	var st := PackedFloat32Array()
 	st.resize(SIZE)
-	var ax := rng.randf_range(0.56, 0.63)
-	var az := rng.randf_range(0.46, 0.53)
-	var lobes := []
-	for k in 4:
-		lobes.append([rng.randf() * TAU, rng.randf_range(0.03, 0.08), rng.randi_range(2, 4)])
+	var ax := rng.randf_range(0.55, 0.64)
+	var az := rng.randf_range(0.42, 0.52)
+	# contorno: elipse com calombos grandes e lascas pequenas (pedra de rio meio quebrada)
+	var harm := []
+	for k in 7:
+		harm.append([rng.randf() * TAU, rng.randf_range(0.015, 0.06) / (1.0 + k * 0.35), k + 2])
 	for j in N:
 		var a := _ang(j)
 		var r := 1.0 / sqrt(pow(cos(a) / ax, 2) + pow(sin(a) / az, 2))
-		for lb in lobes:
-			r += float(lb[1]) * cos((a - float(lb[0])) * int(lb[2]))
+		for hm in harm:
+			r += float(hm[1]) * cos((a - float(hm[0])) * int(hm[2]))
+		r *= 1.0 + rng.randf_range(-0.02, 0.02)
 		st[j] = r
-	var ht := rng.randf_range(0.2, 0.25)
-	var hb := rng.randf_range(0.15, 0.2)
+	# cima abaulado e irregular (faces e quinas), embaixo mais chato (assentado no chão)
+	var ht := rng.randf_range(0.24, 0.32)
+	var hb := rng.randf_range(0.1, 0.15)
+	var tilt := Vector2(rng.randf_range(-0.06, 0.06), rng.randf_range(-0.06, 0.06))
+	var ph := [rng.randf() * TAU, rng.randf() * TAU, rng.randf() * TAU]
 	for k in R + 1:
-		var prof := pow(maxf(0.0, 1.0 - _rho(k) * _rho(k)), 0.55)
+		var rho := _rho(k)
+		var prof := pow(maxf(0.0, 1.0 - rho * rho), 0.5)
 		for j in N:
-			var bump := 1.0 + 0.12 * sin(_ang(j) * 3.0 + seed_ % 7) * _rho(k)
-			st[_ti(k, j)] = ht * prof * bump
-			st[_bi(k, j)] = -hb * prof * bump
+			var a := _ang(j)
+			var x := cos(a) * rho
+			var z := sin(a) * rho
+			var bump := 1.0 + 0.16 * sin(a * 3.0 + float(ph[0])) * rho + 0.08 * sin(a * 7.0 + float(ph[1])) * rho \
+				+ 0.06 * sin(x * 9.0 + z * 5.0 + float(ph[2]))
+			var jit := rng.randf_range(-0.02, 0.02) * rho
+			st[_ti(k, j)] = maxf(0.0, ht * prof * bump + (tilt.x * x + tilt.y * z) * 0.3 + jit)
+			st[_bi(k, j)] = -hb * pow(prof, 0.35) * (1.0 + 0.1 * sin(a * 2.0 + float(ph[2])))
 	return st
 
 
@@ -247,7 +258,8 @@ static func _pos(cur: PackedFloat32Array, k: int, j: int, top: bool) -> Vector3:
 static func mesh(cur: PackedFloat32Array, orig: PackedFloat32Array, seed_: int, split := false) -> ArrayMesh:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_
-	var base := Color(0.22, 0.215, 0.2).lerp(Color(0.27, 0.22, 0.15), rng.randf())    # cinza a sílex
+	var base := Color(0.27, 0.265, 0.25).lerp(Color(0.3, 0.26, 0.2), rng.randf() * 0.6)    # cinza a sílex
+	base = base.lerp(Color(0.2, 0.2, 0.21), rng.randf() * 0.5)
 	base = base.darkened(rng.randf_range(0.0, 0.15))
 	var fresh := base.lightened(0.1)
 	var st := SurfaceTool.new()
@@ -263,10 +275,19 @@ static func mesh(cur: PackedFloat32Array, orig: PackedFloat32Array, seed_: int, 
 				if orig.size() == cur.size():
 					var idx := _ti(k + 1, j) if top else _bi(k + 1, j)
 					cut = clampf(absf(orig[idx] - cur[idx]) * 14.0 + maxf(0.0, orig[j] - cur[j]) * 6.0, 0.0, 1.0)
-				var h := absi(hash(Vector3i(k, j, face))) % 100
-				var col := base.lerp(fresh, cut).darkened(h * 0.0012 if cut > 0.05 else 0.0)
-				# parte crua: lisa (sombra suave); parte lascada: faces retas das lascas
-				st.set_smooth_group(0 if cut <= 0.05 else 0xFFFFFFFF)
+				var h := absi(hash(Vector3i(k, j, face) + Vector3i(seed_, 0, 0))) % 1000
+				var col := base.lerp(fresh, cut)
+				if cut <= 0.05:
+					# pedra crua: pintas escuras e claras, liquen cinza-esverdeado em cima, terra embaixo
+					col = col.darkened(float(h % 100) * 0.0018).lightened(0.08 if h % 7 == 0 else 0.0)
+					if top and h % 11 == 0 and k >= 1:
+						col = col.lerp(Color(0.42, 0.45, 0.35), 0.45)
+					if not top:
+						col = col.lerp(Color(0.2, 0.15, 0.1), 0.45)
+				else:
+					col = col.darkened(float(h % 100) * 0.0012)
+				# faces retas (pedra com quinas, não uma bolinha lisa)
+				st.set_smooth_group(0xFFFFFFFF)
 				for tri in [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]:
 					var a: Vector3 = tri[0]
 					var b: Vector3 = tri[1]

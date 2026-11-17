@@ -46,7 +46,7 @@ func _generate() -> void:
 		for k in n:
 			var px := clampf(x + _rng.randf_range(-1.5, 1.5), 2.0, w - 2.0)
 			var pz := clampf(z + _rng.randf_range(-1.5, 1.5), 2.0, h - 2.0)
-			add(px, pz, _rng.randf() * TAU, _rng.randf_range(0.13, 0.22), _rng.randi())
+			add(px, pz, _rng.randf() * TAU, _rng.randf_range(0.22, 0.36), _rng.randi())
 
 
 func add(x: float, z: float, yaw: float, size: float, seed_: int) -> void:
@@ -176,4 +176,7 @@ func _load(path: String) -> bool:
 	if not d is Dictionary:
 		return false
 	items = d.get("pedras", [])
+	for p in items:
+		if float(p.s) < 0.2 and str(p.get("kind", "")) == "" and not p.has("cur"):
+			p.s = float(p.s) * 1.6          # as pedras ficaram maiores numa atualização
 	return true

@@ -9,7 +9,7 @@ var value := 0.5
 var _drag := -1            # índice do toque arrastando (-2 = mouse)
 var _grab_off := 0.0
 
-const PAD := 46.0          # espaço das setas em cima e embaixo
+const PAD := 34.0          # espaço nas pontas
 const KNOB_H := 58.0
 
 
@@ -35,63 +35,57 @@ func _set_from_y(y: float) -> void:
 
 func _gui_input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
-		if e.pressed and _drag == -1:
+		if e.pressed and _drag == -1 and _on_knob(e.position.y):
 			_drag = e.index
-			_grab(e.position.y)
+			_grab_off = _knob_y() - e.position.y
 		elif not e.pressed and e.index == _drag:
 			_drag = -1
+			queue_redraw()
 		accept_event()
 	elif e is InputEventScreenDrag and e.index == _drag:
 		_set_from_y(e.position.y + _grab_off)
 		accept_event()
 	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
-		if e.pressed and _drag == -1:
+		if e.pressed and _drag == -1 and _on_knob(e.position.y):
 			_drag = -2
-			_grab(e.position.y)
+			_grab_off = _knob_y() - e.position.y
 		elif not e.pressed and _drag == -2:
 			_drag = -1
+			queue_redraw()
 		accept_event()
 	elif e is InputEventMouseMotion and _drag == -2:
 		_set_from_y(e.position.y + _grab_off)
 		accept_event()
 
 
-## Pegou no pegador: arrasta sem pular. Pegou fora: o pegador vem para o dedo.
-func _grab(y: float) -> void:
-	var ky := _knob_y()
-	_grab_off = ky - y if absf(ky - y) < KNOB_H * 0.7 else 0.0
-	_set_from_y(y + _grab_off)
+## Só pega se o dedo encostar no pegador (tocar no trilho não faz nada).
+func _on_knob(y: float) -> bool:
+	return absf(y - _knob_y()) < KNOB_H * 0.75
 
 
 func _draw() -> void:
 	var w := size.x
 	var h := size.y
-	var dark := Color(0.07, 0.06, 0.05, 0.88)
-	var rim := Color(0.55, 0.45, 0.3, 0.9)
-	# corpo (cantos chanfrados)
-	var c := 18.0
-	var body := PackedVector2Array([Vector2(c, 0), Vector2(w - c, 0), Vector2(w, c), Vector2(w, h - c),
-		Vector2(w - c, h), Vector2(c, h), Vector2(0, h - c), Vector2(0, c)])
-	draw_colored_polygon(body, dark)
-	draw_polyline(body + PackedVector2Array([body[0]]), rim, 3.0, true)
-	# setas
-	var up_c := Color(0.95, 0.88, 0.7, 0.95 if value < 0.97 else 0.35)
-	var dn_c := Color(0.95, 0.88, 0.7, 0.95 if value > 0.03 else 0.35)
-	var cx := w * 0.5
-	draw_colored_polygon(PackedVector2Array([Vector2(cx, 12), Vector2(cx + 22, 36), Vector2(cx - 22, 36)]), up_c)
-	draw_colored_polygon(PackedVector2Array([Vector2(cx, h - 12), Vector2(cx - 22, h - 36), Vector2(cx + 22, h - 36)]), dn_c)
-	# trilho com marquinhas
+	# corpo comprido e arredondado (cápsula)
+	var r := w * 0.5
+	var body := PackedVector2Array()
+	for k in 17:
+		var a := PI + PI * k / 16.0
+		body.append(Vector2(r + cos(a) * r, r + sin(a) * r))
+	for k in 17:
+		var a := PI * k / 16.0
+		body.append(Vector2(r + cos(a) * r, h - r + sin(a) * r))
+	draw_colored_polygon(body, Color(0.07, 0.06, 0.05, 0.85))
+	draw_polyline(body + PackedVector2Array([body[0]]), Color(0.55, 0.45, 0.3, 0.9), 3.0, true)
+	# risco no meio (o caminho do pegador)
 	var t := _track()
-	draw_rect(t, Color(0.02, 0.02, 0.02, 0.9))
-	draw_rect(t, Color(0.3, 0.26, 0.2), false, 2.0)
-	var n := 7
-	for k in n:
-		var y := t.position.y + 14 + (t.size.y - 28) * k / (n - 1)
-		draw_line(Vector2(t.position.x + 8, y), Vector2(t.end.x - 8, y), Color(1, 1, 1, 0.12), 3.0)
-	# pegador de madeira (o cabo da serra)
+	var cx := w * 0.5
+	draw_line(Vector2(cx, t.position.y), Vector2(cx, t.end.y), Color(0, 0, 0, 0.8), 8.0, true)
+	draw_line(Vector2(cx, t.position.y), Vector2(cx, t.end.y), Color(1, 1, 1, 0.18), 2.0, true)
+	# pegador de madeira (o que se arrasta)
 	var ky := _knob_y()
-	var kr := Rect2(Vector2(6, ky - KNOB_H * 0.5), Vector2(w - 12, KNOB_H))
-	var wood := Color(0.55, 0.38, 0.22) if _drag == -1 else Color(0.72, 0.52, 0.3)
+	var kr := Rect2(Vector2(10, ky - KNOB_H * 0.5), Vector2(w - 20, KNOB_H))
+	var wood := Color(0.55, 0.38, 0.22) if _drag == -1 else Color(0.74, 0.54, 0.32)
 	draw_rect(kr, wood)
 	draw_rect(Rect2(kr.position, Vector2(kr.size.x, 8)), wood.lightened(0.2))
 	for k in 3:
