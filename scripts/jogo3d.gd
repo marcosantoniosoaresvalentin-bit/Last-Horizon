@@ -2629,9 +2629,9 @@ func _knap_new_spot() -> void:
 	var pr := _knap_progress()
 	_knap.sel = false
 	_knap.hits = 0
-	_knap.need = _knap_rng.randi_range(1, 3)
-	_knap.speed = _knap_rng.randf_range(0.45, 1.25) * (1.0 + 0.5 * pr)      # idas e voltas por segundo
-	_knap.gw = _knap_rng.randf_range(0.12, 0.3) * (1.0 - 0.35 * pr)         # largura do verde (0 a 1)
+	_knap.need = _knap_rng.randi_range(1, 2)
+	_knap.speed = _knap_rng.randf_range(0.22, 0.5) * (1.0 + 0.3 * pr)       # idas e voltas por segundo
+	_knap.gw = _knap_rng.randf_range(0.22, 0.36) * (1.0 - 0.2 * pr)         # largura do verde (0 a 1)
 	_knap.gc = _knap_rng.randf_range(0.25, 0.75)                            # onde fica o verde
 	_knap.t = _knap_rng.randf() * 4.0
 
@@ -2642,8 +2642,15 @@ func _knap_marker() -> float:
 	return x if x <= 1.0 else 2.0 - x
 
 
+const KNAP_EDGE := 0.08            # faixa laranja do lado do verde: "quase" (não quebra)
+
+
 func _knap_in_green(m: float) -> bool:
-	return absf(m - float(_knap.gc)) <= float(_knap.gw) * 0.5
+	return absf(m - float(_knap.gc)) <= float(_knap.gw) * 0.5 + 0.01
+
+
+func _knap_near(m: float) -> bool:
+	return absf(m - float(_knap.gc)) <= float(_knap.gw) * 0.5 + KNAP_EDGE
 
 
 ## A mão com a pedra de bater: parada do lado (fora da pedra), e na batida vai até o
@@ -2701,7 +2708,7 @@ func _build_knap_ui() -> void:
 		return pc
 	var info: PanelContainer = box.call(16, 16, 380, 120, Control.PRESET_TOP_LEFT)
 	var il := Label.new()
-	il.text = "MODELAGEM DE PEDRA\nToque no ponto da pedra. Depois toque em BATER quando o marcador estiver no VERDE. No vermelho a pedra quebra!"
+	il.text = "MODELAGEM DE PEDRA\nToque no ponto da pedra e em BATER com o marcador no VERDE. Laranja: quase (não quebra). Vermelho: a pedra quebra!"
 	il.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	il.add_theme_font_size_override("font_size", 15)
 	info.add_child(il)
@@ -2764,6 +2771,7 @@ func _build_knap_ui() -> void:
 	hit.offset_top = -190
 	hit.offset_right = -30
 	hit.offset_bottom = -30
+	hit.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS     # conta na hora que o dedo encosta
 	hit.pressed.connect(_knap_hit)
 	_knap_ui.add_child(hit)
 	var out := Icones.IconButton.new()
@@ -2796,7 +2804,7 @@ func _draw_knap_bar(tb: Control) -> void:
 	for k in n:
 		var u := (k + 0.5) / n
 		var d := absf(u - float(_knap.gc)) - float(_knap.gw) * 0.5
-		var col := Color(0.2, 0.75, 0.2) if d <= 0.0 else Color(0.8, 0.12, 0.1).lerp(Color(0.85, 0.55, 0.1), clampf(1.0 - d / 0.08, 0.0, 1.0) * 0.6)
+		var col := Color(0.2, 0.75, 0.2) if d <= 0.0 else (Color(0.92, 0.55, 0.1) if d <= KNAP_EDGE else Color(0.8, 0.12, 0.1))
 		tb.draw_rect(Rect2(r.position + Vector2(w * k / n, 0), Vector2(w / n + 0.5, r.size.y)), col)
 	tb.draw_rect(r, Color(0, 0, 0, 0.8), false, 2.0)
 	# o marcador amarelo (para no lugar do toque durante a batida)
@@ -2851,10 +2859,20 @@ func _knap_hit() -> void:
 	if not bool(_knap.sel):
 		_show_toast("Toque primeiro no ponto marcado na pedra.")
 		return
-	# acertou o verde? (o marcador para onde estava na hora do toque)
+	# acertou o verde? (conta onde o marcador estava um instante antes do toque:
+	# o celular demora um pouquinho para avisar o toque)
+	_knap.t = float(_knap.t) - 0.06
 	var m := _knap_marker()
 	_knap.frozen = m
-	_knap.ok = _knap_in_green(m)
+	if _knap_in_green(m):
+		_knap.ok = true
+	elif _knap_near(m):
+		# laranja: quase! não quebra, mas a batida não conta
+		_show_toast("Quase! Bata no verde.")
+		Sons.play_at(self, "pedra_bate", _knap_spot_world(), -8.0, 1.2)
+		return
+	else:
+		_knap.ok = false
 	_knap.anim = 0.0
 
 

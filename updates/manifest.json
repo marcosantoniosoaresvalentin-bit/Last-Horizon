@@ -1,9 +1,9 @@
 {
-  "version": 55,
-  "file": "update_55.zip",
-  "size": 3468803,
-  "sha256": "611180e024b24bc6c2048c7e90d96335b7bc715a73be692f53f9b2df2f29776f",
+  "version": 56,
+  "file": "update_56.zip",
+  "size": 3469018,
+  "sha256": "959102babab08da1262f9b640fa444051771f9af90bde90758d77023435acd05",
   "min_build": 1,
-  "notes": "Modelar pedra: barrinha de tempo (verde acerta, vermelho quebra), só a mão aparece, pedras prontas iguais às das ferramentas e ícones novos",
+  "notes": "Modelagem de pedra mais fácil: marcador mais lento, verde maior, faixa laranja de quase e Bater conta na hora do toque",
   "date": "2026-11-17"
 }
