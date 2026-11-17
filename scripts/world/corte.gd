@@ -444,6 +444,7 @@ class ChopPose extends SkeletonModifier3D:
 	var crouch_spine := 1.0       # quanto as costas dobram ao agachar (1 = pegar no chão)
 	var sawing := false           # serrando (vai e vem com a serra de pedra)
 	var saw_phase := 0.0          # 0 a 1: uma ida e volta
+	var saw_axis := Vector3.ZERO     # direção da tora (no mundo), para a serra cruzar ela
 	var saw_pos := -1.0           # -1 puxada (perto do corpo) a 1 empurrada (o jogador controla)
 	var saw_point := Vector3.ZERO # onde a serra corta (no mundo, em cima da tora)
 	var saw_depth := 0.0          # quanto o corte já desceu (m)
@@ -560,6 +561,15 @@ class ChopPose extends SkeletonModifier3D:
 		# a serra vai do personagem até o corte (deitada, na horizontal)
 		var flat := pt - up * pt.dot(up)
 		var dir := flat.normalized() if flat.length() > 0.05 else fwd
+		# a serra corta atravessada na tora: o cabo fica perpendicular ao comprimento dela
+		if saw_axis != Vector3.ZERO:
+			var ax := (sk.global_transform.affine_inverse().basis * saw_axis)
+			ax -= up * ax.dot(up)
+			if ax.length() > 0.01:
+				var perp := ax.normalized().cross(up).normalized()
+				if perp.dot(dir) < 0.0:
+					perp = -perp
+				dir = perp
 		var stroke := saw_pos * 0.16                  # + empurra (a serra vai para longe)
 		var bar_mid := pt + up * (SAW_TEETH - saw_depth)
 		var base := bar_mid - dir * (SAW_LEN * 0.5) + dir * stroke
@@ -581,17 +591,9 @@ class ChopPose extends SkeletonModifier3D:
 				crouch_spine = olds
 		# o corpo vai um pouco junto quando empurra
 		_rot_global(sk, "Spine1", right, -0.12 - stroke * 0.6)
-		# mão direita no cabo; se o braço não alcança o ponto exato, a serra vem até a mão
+		# a serra fica sempre no corte; as mãos vão até o cabo
 		var rf := _orth(-up * 0.4 + right * 0.5, dir)
 		_hand_on(sk, "Right", base + dir * 0.13, dir, rf, up, right)
-		var g := _grip_rotate("Right", sk, dir, rf)
-		var hb := _bone("RightHand")
-		if not g.is_empty() and hb >= 0:
-			var hp := sk.get_bone_global_pose(hb)
-			var actual: Vector3 = hp.origin + hp.basis.orthonormalized() * (hp.basis.orthonormalized().inverse() * g.offset)
-			var err: Vector3 = actual - (base + dir * 0.13)
-			if err.length() < 0.35:
-				base += err
 		_hand_on(sk, "Left", base + dir * 0.31, dir, _orth(-up * 0.4 - right * 0.5, dir), up, -right)
 		_set_tool(sk, _tool_xf(base, dir, -up))
 

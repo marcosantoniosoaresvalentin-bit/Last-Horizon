@@ -2563,6 +2563,7 @@ func _begin_saw() -> void:
 	if _chop_pose:
 		_chop_pose.sawing = true
 		_chop_pose.saw_point = sp + Vector3.UP * rend
+		_chop_pose.saw_axis = inf.dir
 		_chop_pose.saw_depth = _saw_depth(wi, rend)
 	_chop_btn.visible = true
 	_chop_btn.text = "Parar"

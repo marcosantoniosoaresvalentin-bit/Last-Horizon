@@ -1,9 +1,9 @@
 {
-  "version": 61,
-  "file": "update_61.zip",
-  "size": 3476973,
-  "sha256": "7e408572bec0c5c4eb72225eca36070502eed2f48c36613a64b63ab5bb255ceb",
+  "version": 62,
+  "file": "update_62.zip",
+  "size": 3477036,
+  "sha256": "07ab907ac2db6a0f798e868d17c17d8bb8017b9b375f9e5bf5b84575c6d7f1d0",
   "min_build": 1,
-  "notes": "Postura de parado natural, pernas sem torção, agachar de joelhos com costas retas na serra e mãos no cabo",
+  "notes": "Serra sempre no lugar do corte, atravessada na tora",
   "date": "2026-11-17"
 }
