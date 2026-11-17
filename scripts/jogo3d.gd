@@ -1454,9 +1454,13 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 		node.add_child(mi)
 	elif id == "cipo":
 		var mi := MeshInstance3D.new()
-		mi.mesh = Cipos.coil_mesh()
+		if r > 0.3:
+			mi.mesh = Cipos.strand_mesh(r, absi(hash(Vector2(x, z))) % 100)     # o fio inteiro, comprido
+			mi.rotation.y = float(dur[0]) if dur.size() > 0 else randf() * TAU
+		else:
+			mi.mesh = Cipos.coil_mesh()
+			mi.rotation.y = randf() * TAU
 		mi.material_override = Balde.material()
-		mi.rotation.y = randf() * TAU
 		node.add_child(mi)
 	elif id == "balde":
 		var mi := MeshInstance3D.new()
@@ -2204,24 +2208,39 @@ func _update_vine(delta: float) -> void:
 		mk.queue_redraw()
 
 
-## Um rolo de cipó caindo de "at" até o chão, do lado do jogador.
+## O fio inteiro de cipó solta lá de cima e tomba no chão (puxado de baixo pela mão),
+## ficando comprido deitado no chão, do lado do jogador.
 func _drop_vine_coil(at: Vector3, top: Vector3, k: int) -> void:
-	var toward := Vector3(_player.position.x - at.x, 0, _player.position.z - at.z).normalized()
-	var land := Vector3(at.x, 0, at.z) + toward * 0.35 + toward.rotated(Vector3.UP, PI * 0.5) * (k * 0.22 - 0.1)
-	var piece := MeshInstance3D.new()
-	piece.mesh = Cipos.coil_mesh()
-	piece.material_override = Balde.material()
-	add_child(piece)
-	var gy := height_at(land.x, land.z)
-	piece.global_position = Vector3(land.x, maxf(at.y, top.y * 0.3 + at.y * 0.7) + k * 0.2, land.z)
-	var tw := piece.create_tween()
-	var fall := clampf(sqrt(maxf(piece.global_position.y - gy, 0.1) / 4.9), 0.3, 1.0)
-	tw.tween_property(piece, "global_position", Vector3(land.x, gy, land.z), fall).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
-	tw.parallel().tween_property(piece, "rotation", Vector3(0, randf() * TAU, 0), fall)
+	var L := clampf(top.y - height_at(at.x, at.z), 0.8, 9.0)
+	var toward := Vector3(_player.position.x - at.x, 0, _player.position.z - at.z)
+	if toward.length() < 0.05:
+		toward = Vector3(1, 0, 0)
+	toward = toward.normalized().rotated(Vector3.UP, (k - 0.5) * 0.35 if k > 0 else 0.0)
+	var foot := Vector3(at.x, height_at(at.x, at.z), at.z)
+	var yaw := atan2(-toward.z, toward.x)          # o fio deitado vai do pé da árvore para fora
+	var seed_ := absi(hash(Vector2(foot.x + k, foot.z))) % 100
+	var pivot := Node3D.new()
+	add_child(pivot)
+	pivot.global_position = foot
+	var mi := MeshInstance3D.new()
+	mi.mesh = Cipos.strand_mesh(L, seed_)
+	mi.material_override = Balde.material()
+	mi.position = Vector3(L * 0.5, 0, 0)            # a ponta de baixo fica no pivô
+	pivot.add_child(mi)
+	# começa em pé (pendurado até onde estava preso) e tomba para o chão
+	var up_b := Basis(Vector3.UP, yaw) * Basis(Vector3.FORWARD, -PI * 0.5 + 0.05)
+	var down_b := Basis(Vector3.UP, yaw) * Basis(Vector3.FORWARD, -atan2(height_at(foot.x + toward.x * L, foot.z + toward.z * L) - foot.y, L))
+	pivot.basis = up_b
+	var fall := clampf(0.5 + L * 0.08, 0.6, 1.3)
+	var tw := pivot.create_tween()
+	tw.tween_method(func(t: float) -> void:
+		pivot.basis = Basis(Quaternion(up_b).slerp(Quaternion(down_b), t * t)), 0.0, 1.0, fall)
+	var mid := foot + toward * L * 0.5
 	tw.tween_callback(func():
-		piece.queue_free()
-		_add_ground("cipo", 1, land.x, land.z)
-		Sons.play_at(self, "baque", Vector3(land.x, gy, land.z), -20.0, 1.7))
+		pivot.queue_free()
+		_add_ground("cipo", 1, mid.x, mid.z, L, [yaw])
+		Sons.play_at(self, "baque", mid, -18.0, 1.6)
+		Sons.play_at(self, "passo", mid, -10.0, 0.6))
 
 
 ## O cipó solta: cai no chão (dá para ver ele caindo) e fica lá para pegar.
@@ -2234,14 +2253,14 @@ func _vine_pull_now() -> void:
 	else:
 		_cipos.pull_stem(pl)
 	Sons.play_at(self, "estalo", at, -16.0, 1.9)
-	var n := 1
+	var tops := [sp.top]
 	if str(sp.kind) != "raiz":
 		# arrancou o pé: as raízes que ainda estavam nele vêm junto
 		for q in _vine.spots:
 			if str(q.kind) == "raiz":
-				n += 1
-	for k in n:
-		_drop_vine_coil(at, sp.top, k)
+				tops.append(q.top)
+	for k in tops.size():
+		_drop_vine_coil(at, tops[k], k)
 	_vine.sel = -1
 	_vine.spots = _cipos.pull_spots(pl) if _cipos.plants.has(pl) else []
 	if _vine.spots.is_empty():

@@ -287,6 +287,8 @@ func pull_spots(pl: Dictionary) -> Array:
 			var at := float(rt[1])
 			var length := float(rt[2])
 			var ang := a0 + at * 0.32 + float(rt[0])
+			if at - length > 1.9:
+				continue          # raiz ainda curta, lá no alto: a mão não alcança
 			var start: Vector3 = _arv.trunk_point(host, at, ang, 0.03)
 			var hy := clampf(1.25, at - length + 0.1, at)
 			var t := (at - hy) / maxf(length, 0.01)
@@ -332,6 +334,25 @@ func harvest(pl: Dictionary) -> String:
 			best = i
 	pull_root(pl, best)
 	return ""
+
+
+## Fio de cipó comprido (L metros) deitado ao longo de X, centrado na origem, meio
+## torto (como cai no chão).
+static func strand_mesh(L: float, seed_ := 0) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var col := Color(0.4, 0.31, 0.19)
+	var n := maxi(8, int(L / 0.15))
+	var prev := Vector3.ZERO
+	for k in n + 1:
+		var t := float(k) / n
+		var x := (t - 0.5) * L
+		var p := Vector3(x, 0.014, sin(t * L * 2.3 + seed_) * 0.05 + sin(t * 7.0 + seed_ * 0.7) * 0.03)
+		if k > 0:
+			_tube(st, prev, p, 0.011, col.darkened(0.08 * (k % 2)))
+		prev = p
+	st.generate_normals()
+	return st.commit()
 
 
 ## Rolo de cipó (o que cai no chão para pegar).

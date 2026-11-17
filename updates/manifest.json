@@ -1,9 +1,9 @@
 {
-  "version": 64,
-  "file": "update_64.zip",
-  "size": 3480960,
-  "sha256": "31dc960bebbe0f2a2f5f66ce78fb234841521ec9c056fca902e6cddb6fff62ab",
+  "version": 65,
+  "file": "update_65.zip",
+  "size": 3481503,
+  "sha256": "196fc981c51ea65c1676e222e1a6c8c98419485ec9b2e310a0a1513557aaf45b",
   "min_build": 1,
-  "notes": "Coletar cipó com as mãos: escolhe o cipó, arrasta o dedo para baixo e ele cai no chão; dá para arrancar o pé inteiro",
+  "notes": "Coletar cipó: puxa de baixo e o fio inteiro solta lá de cima e cai comprido no chão",
   "date": "2026-11-17"
 }
