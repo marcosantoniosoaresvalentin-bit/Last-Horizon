@@ -243,8 +243,8 @@ func harvest_target(pos: Vector3, reach: float) -> Dictionary:
 	var best := {}
 	var bd := reach
 	for pl in plants:
-		if int(pl.dead) >= 0 or (pl.roots as Array).is_empty():
-			continue
+		if int(pl.dead) >= 0 or (pl.roots as Array).is_empty() or _host_of(pl) == null:
+			continue          # morta, sem raiz ou a árvore de apoio caiu
 		var d := Vector2(float(pl.x) - pos.x, float(pl.z) - pos.z).length()
 		if d < bd:
 			bd = d
@@ -315,20 +315,69 @@ func _rebuild() -> void:
 		if int(p[5]) != 2:
 			_tree_cache[Vector2(float(p[0]), float(p[1]))] = p
 	var month := _month_of(last_day)
+	var all := {}
+	for p in _arv.plants:
+		all[Vector2(float(p[0]), float(p[1]))] = p
 	for pl in plants:
 		var host = _host_of(pl)
+		if host == null and pl.host != null:
+			# a árvore caiu: se foi derrubada pelo jogador, o cipó fica no toco e na tora
+			var t = all.get(Vector2(float(pl.host[0]), float(pl.host[1])))
+			if t != null and t.size() > 9 and t[9] is Array:
+				_draw_on_felled(pl, t, month)
+			continue
 		if host == null and int(pl.dead) < 0:
 			continue
+		_add_mesh(_plant_mesh(pl, host, month), Transform3D.IDENTITY)
+
+
+func _add_mesh(mesh: ArrayMesh, xf: Transform3D) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = _mat
+	mi.visibility_range_end = VIEW
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.transform = xf
+	add_child(mi)
+	_nodes.append(mi)
+	return mi
+
+
+## Cipó de árvore derrubada: o pé (até a altura do corte) fica no toco; o resto foi
+## junto com a tora e fica agarrado nela (em cada pedaço que ainda está lá).
+func _draw_on_felled(pl: Dictionary, tree: Array, month: int) -> void:
+	if _arv._falling.has(tree):
+		_add_mesh(_plant_mesh(pl, tree, month, 0.0, _arv.CUT_H, false), Transform3D.IDENTITY)
+		return
+	_add_mesh(_plant_mesh(pl, tree, month, 0.0, _arv.CUT_H, false), Transform3D.IDENTITY)
+	var stand: Transform3D = _arv.stand_xf(tree)
+	for pc in _arv.log_piece_xfs(tree):
+		var lo := maxf(float(pc[0]), _arv.CUT_H)
+		var hi := float(pc[1])
+		if hi <= lo:
+			continue
+		var xf: Transform3D = pc[2]
+		_add_mesh(_plant_mesh(pl, tree, month, lo, hi, false), xf * stand.affine_inverse())
+
+
+## Parte do cipó que cai junto com a árvore (desenhada dentro do nó que tomba).
+func attach_falling(tree: Array, node: Node3D) -> void:
+	var month := _month_of(last_day)
+	var stand: Transform3D = _arv.stand_xf(tree)
+	var model_from_world := stand.affine_inverse()
+	for pl in plants:
+		if pl.host == null or absf(float(pl.host[0]) - float(tree[0])) > 0.01 or absf(float(pl.host[1]) - float(tree[1])) > 0.01:
+			continue
 		var mi := MeshInstance3D.new()
-		mi.mesh = _plant_mesh(pl, host, month)
+		mi.mesh = _plant_mesh(pl, tree, month, _arv.CUT_H, 1e9, false)
 		mi.material_override = _mat
-		mi.visibility_range_end = VIEW
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(mi)
-		_nodes.append(mi)
+		# o nó que tomba trabalha nas medidas do modelo da árvore
+		mi.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE), Vector3.ZERO) * model_from_world
+		node.add_child(mi)
+	_rebuild()
 
 
-func _plant_mesh(pl: Dictionary, host, month: int) -> ArrayMesh:
+func _plant_mesh(pl: Dictionary, host, month: int, y_lo := 0.0, y_hi := 1e9, with_roots := true) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var dead := int(pl.dead) >= 0
@@ -352,17 +401,19 @@ func _plant_mesh(pl: Dictionary, host, month: int) -> ArrayMesh:
 		return st.commit()
 	# caule subindo em espiral pela casca, com folhas alternadas coladas no tronco
 	var a0 := float(pl.a0)
-	var prev := Vector3(x, gy, z)
-	var steps := maxi(2, int(climb / 0.22))
+	var top := minf(climb, y_hi)
+	if top <= y_lo + 0.02:
+		return st.commit()
+	var steps := maxi(2, int((top - y_lo) / 0.22))
 	var path := []
 	for i in steps + 1:
-		var y := climb * i / steps
+		var y := lerpf(y_lo, top, float(i) / steps)
 		var ang := a0 + y * 0.32 + sin(y * 1.7) * 0.15
 		path.append(_arv.trunk_point(host, y, ang, 0.015))
 	for i in path.size() - 1:
 		_tube(st, path[i], path[i + 1], 0.011, stem_c)
 	for i in range(1, path.size(), 1):
-		var y := climb * i / steps
+		var y := lerpf(y_lo, top, float(i) / steps)
 		var ang := a0 + y * 0.32
 		var p: Vector3 = path[i]
 		var on: Vector3 = _arv.trunk_point(host, y, ang, 0.2) - p
@@ -371,7 +422,7 @@ func _plant_mesh(pl: Dictionary, host, month: int) -> ArrayMesh:
 		var side := Vector3.UP.cross(on).normalized() * (1.0 if i % 2 == 0 else -1.0)
 		var dirl := (Vector3.UP * 0.6 + side * 0.8 + on * 0.25).normalized()
 		_leaf(st, p + on * 0.02, dirl, on, 0.24, 0.05, leaf_c.lerp(Color(0.2, 0.38, 0.12), float((hsh + i) % 3) * 0.15))
-	if dead:
+	if dead or not with_roots:
 		return st.commit()
 	# raízes aéreas: descem retas do caule até o chão (as titicas)
 	for rt in pl.roots:

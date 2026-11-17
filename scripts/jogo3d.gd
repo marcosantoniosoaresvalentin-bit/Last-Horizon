@@ -15,6 +15,7 @@ const Corte := preload("res://scripts/world/corte.gd")
 const Craft := preload("res://scripts/ui/craft.gd")
 const Icones := preload("res://scripts/ui/icones.gd")
 const Cipos := preload("res://scripts/world/cipos.gd")
+const Buracos := preload("res://scripts/world/buracos.gd")
 const SAVE_EVERY := 60.0     # salva o mundo a cada minuto
 
 const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
@@ -284,6 +285,9 @@ var _jump_btn: Button
 var _log_btn: Button
 var _vine_btn: Button
 var _cipos: Node3D = null
+var _buracos: Node3D = null
+var _plant_btn: Button
+var _chop_hole := false           # cavando com a cavadeira
 var _carry := {}                  # tora no ombro (dados da tora)
 var _carry_node: Node3D = null
 var _carry_kg := 0.0
@@ -424,6 +428,17 @@ func _build_hud() -> void:
 	_jump_btn.offset_bottom = -16
 	_jump_btn.pressed.connect(_jump)
 	_hud.add_child(_jump_btn)
+
+	_plant_btn = Icones.IconButton.new()
+	_plant_btn.text = "Fincar tora"
+	_plant_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_plant_btn.offset_left = -150
+	_plant_btn.offset_top = -426
+	_plant_btn.offset_right = -30
+	_plant_btn.offset_bottom = -296
+	_plant_btn.visible = false
+	_plant_btn.pressed.connect(_plant_log)
+	_hud.add_child(_plant_btn)
 
 	_vine_btn = Icones.IconButton.new()
 	_vine_btn.text = "Coletar cipó"
@@ -665,6 +680,11 @@ func _on_world_ready() -> void:
 	_cipos = Cipos.new()
 	add_child(_cipos)
 	_cipos.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/cipos.json" if _world_id != "" else "")
+	_arvores.fell_hook = _cipos.attach_falling
+	_arvores.fall_done_hook = _cipos._rebuild
+	_buracos = Buracos.new()
+	add_child(_buracos)
+	_buracos.build(self, _arvores, Mundos.dir(_world_id) + "/buracos.json" if _world_id != "" else "")
 	if not _pending_carry.is_empty():
 		_hold_log(_pending_carry)
 		_pending_carry = {}
@@ -1012,6 +1032,8 @@ func _save_world() -> void:
 		_arvores.save(Mundos.dir(_world_id) + "/arvores.json")
 	if _cipos:
 		_cipos.save(Mundos.dir(_world_id) + "/cipos.json")
+	if _buracos:
+		_buracos.save(Mundos.dir(_world_id) + "/buracos.json")
 	Mundos.touch(_world_id, _game_date())
 
 
@@ -1023,7 +1045,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1032,7 +1054,7 @@ func _save_player() -> void:
 
 func _load_player() -> void:
 	# todo mapa novo começa com um machado de pedra na mochila
-	_itens = {"machado": 1}
+	_itens = {"machado": 1, "cavadeira": 1}
 	if _world_id == "" or not sim.loaded_from_save:
 		return
 	var path := Mundos.dir(_world_id) + "/jogador.json"
@@ -1046,6 +1068,9 @@ func _load_player() -> void:
 		for k in d.itens:
 			if Itens.ITENS.has(k) and int(d.itens[k]) > 0:
 				_itens[k] = int(d.itens[k])
+		# a cavadeira chegou numa atualização: quem já jogava ganha uma para testar
+		if not bool(d.get("ganhou_cavadeira", false)) and not _itens.has("cavadeira"):
+			_itens["cavadeira"] = 1
 	if d.has("chao") and d.chao is Array:
 		for g in d.chao:
 			if g is Dictionary and Itens.ITENS.has(str(g.get("id", ""))):
@@ -1188,12 +1213,24 @@ func _pick_ground() -> void:
 
 
 ## Equipa uma ferramenta da mochila na mão ("" guarda).
+## Só uma ferramenta na mão de cada vez (equipar outra guarda a anterior).
 func equip(id: String) -> void:
 	_mao = id if id != "" and item_qtd(id) > 0 else ""
-	if _chop_pose:
-		_chop_pose.holding = _mao == "machado"
-	if _mao != "machado" and _chopping:
+	if _chopping:
 		_cancel_chop()
+	if _chop_pose:
+		_chop_pose.holding = _mao in ["machado", "cavadeira"]
+		_chop_pose.tool = _mao if _mao != "" else "machado"
+		if _mao == "cavadeira":
+			_chop_pose.grip_low = 0.04
+			_chop_pose.grip_high = 0.4
+			_chop_pose.carry_grip = 0.5
+		else:
+			_chop_pose.grip_low = Corte.ChopPose.GRIP_LOW
+			_chop_pose.grip_high = Corte.ChopPose.GRIP_HIGH
+			_chop_pose.carry_grip = Corte.ChopPose.GRIP_HIGH
+	if _axe_node is MeshInstance3D:
+		(_axe_node as MeshInstance3D).mesh = Corte.digger_mesh() if _mao == "cavadeira" else Corte.axe_mesh()
 	_act_check = 0.0
 
 
@@ -1360,6 +1397,9 @@ func _update_chop(delta: float) -> void:
 		_pick_btn.text = "Pegar %s" % Itens.nome(str(_chao[gi].id)).to_lower()
 	_chop_btn.visible = false
 	_update_log_btn()
+	if _mao == "cavadeira" and not _digging and not _air and _carry.is_empty() and _crouch_job == "" and _player_depth() < 0.3:
+		_chop_btn.visible = true
+		_chop_btn.text = "Cavar"
 	if _mao == "machado" and _arvores != null and not _digging and not _air and _carry.is_empty() and _crouch_job == "":
 		if _arvores.nearest_standing(_player.position, 1.3) != null:
 			_chop_btn.visible = true
@@ -1381,7 +1421,9 @@ func _update_log_btn() -> void:
 	if not _carry.is_empty():
 		_log_btn.visible = true
 		_log_btn.text = "Largar tora"
+		_plant_btn.visible = _buracos != null and _buracos.hole_near(_front(0.6), 0.9) >= 0
 		return
+	_plant_btn.visible = false
 	var t: Dictionary = _arvores.pick_target(_player.position, 1.3)
 	_log_btn.visible = not t.is_empty()
 	if not t.is_empty():
@@ -1442,6 +1484,14 @@ func _update_crouch(delta: float) -> void:
 	if before < mid and _crouch_t >= mid:
 		if _crouch_job == "puxar":
 			pass
+		elif _crouch_job == "fincar":
+			_buracos.plant(int(_crouch_target.buraco), _carry, _face)
+			_carry = {}
+			if _carry_node:
+				_carry_node.queue_free()
+			_carry_node = null
+			_chop_pose.log_node = null
+			_show_toast("Tora fincada!")
 		elif _crouch_job == "pegar":
 			var fl: Dictionary = _arvores.take_log(_crouch_target)
 			_hold_log(fl)
@@ -1459,6 +1509,24 @@ func _update_crouch(delta: float) -> void:
 		_crouch_job = ""
 		_chop_pose.crouch = 0.0
 		_act_check = 0.0
+
+
+func _front(dist: float) -> Vector3:
+	return _player.position + Vector3(-sin(_face), 0, -cos(_face)) * dist
+
+
+## Finca a tora do ombro no buraco que está na frente (fica em pé, base das construções).
+func _plant_log() -> void:
+	if _carry.is_empty() or _crouch_job != "" or _buracos == null:
+		return
+	var i: int = _buracos.hole_near(_front(0.6), 0.9)
+	if i < 0:
+		return
+	var h: Dictionary = _buracos.holes[i]
+	_face = atan2(-(float(h.x) - _player.position.x), -(float(h.z) - _player.position.z))
+	_crouch_target = {"buraco": i}
+	_crouch_job = "fincar"
+	_crouch_t = 0.0
 
 
 func _hold_log(fl: Dictionary) -> void:
@@ -1481,13 +1549,28 @@ func _jump() -> void:
 
 ## Toque no botão "Cortar": uma machadada (se já está no meio de uma, guarda a próxima).
 func _start_chop() -> void:
-	if _mao != "machado" or _arvores == null:
+	if (_mao != "machado" and _mao != "cavadeira") or _arvores == null:
 		return
 	if _chopping:
 		if _swing_on:
 			_swing_queued = true
 		else:
 			_begin_swing()
+		return
+	if _mao == "cavadeira":
+		if _digging:
+			_cancel_dig()
+		_chop_hole = true
+		_chop_tree = null
+		_chop_log = {}
+		_chopping = true
+		_swing_queued = false
+		_play("Idle", 0.5)
+		if _chop_pose:
+			_chop_pose.digging = true
+			_chop_pose.vertical = false
+			_chop_pose.ready_pose = true
+		_begin_swing()
 		return
 	var t = _arvores.nearest_standing(_player.position, 1.3)
 	_chop_log = {}
@@ -1520,6 +1603,12 @@ func _begin_swing() -> void:
 
 ## A lâmina bateu no tronco: conta a machadada, marca o corte e solta lascas.
 func _chop_hit() -> void:
+	if _chop_hole:
+		var at := _front(0.62)
+		var d: float = _buracos.dig_at(at)
+		_dirt(at)
+		_show_toast("Buraco com %d cm de fundura" % int(round(d * 100.0)) if d < Buracos.MAX_DEPTH else "O buraco já está bem fundo (80 cm)")
+		return
 	if not _chop_log.is_empty():
 		var lp: Array = _chop_log.p
 		var done: bool = _arvores.buck_hit(lp, float(_chop_log.h))
@@ -1537,6 +1626,30 @@ func _chop_hit() -> void:
 	_chips(_arvores.cut_point(t))
 	if hits >= need:
 		_finish_chop()
+
+
+## Terra voando da cavadeira.
+func _dirt(at: Vector3) -> void:
+	var c := CPUParticles3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.04, 0.03, 0.04)
+	c.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.33, 0.24, 0.15)
+	c.material_override = mat
+	c.amount = 16
+	c.one_shot = true
+	c.explosiveness = 0.9
+	c.lifetime = 0.8
+	c.direction = Vector3(0, 1, 0)
+	c.spread = 40.0
+	c.initial_velocity_min = 1.2
+	c.initial_velocity_max = 2.4
+	c.gravity = Vector3(0, -9.8, 0)
+	add_child(c)
+	c.global_position = Vector3(at.x, height_at(at.x, at.z) + 0.05, at.z)
+	c.emitting = true
+	get_tree().create_timer(1.3).timeout.connect(c.queue_free)
 
 
 ## Lascas de madeira voando do corte.
@@ -1571,7 +1684,9 @@ func _cancel_chop() -> void:
 	_swing_queued = false
 	_chop_tree = null
 	_chop_log = {}
+	_chop_hole = false
 	if _chop_pose:
+		_chop_pose.digging = false
 		_chop_pose.vertical = false
 		_chop_pose.swinging = false
 		_chop_pose.ready_pose = false
@@ -1659,6 +1774,8 @@ func _move_player(delta: float) -> void:
 			amount = 0.0
 	if _crouch_job != "":
 		amount = 0.0           # abaixado pegando ou largando a tora
+	if _chop_pose:
+		_chop_pose.moving = amount > 0.12
 	var p := _player.position
 	var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
 	var depth := 0.0
@@ -1711,6 +1828,8 @@ func _move_player(delta: float) -> void:
 	var feet := _player.position.y
 	if _arvores:
 		p = _arvores.push_out(p, feet)   # não atravessa troncos e toras (pulando passa por cima)
+	if _buracos:
+		p = _buracos.push_out(p)          # nem as toras fincadas
 	# chão: o terreno ou o topo de uma tora (dá para subir pulando e andar em cima)
 	var ground := height_at(p.x, p.z) - minf(depth, 0.9) * 0.5
 	if _arvores:
@@ -1789,7 +1908,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn]:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn]:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:

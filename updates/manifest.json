@@ -1,9 +1,9 @@
 {
-  "version": 41,
-  "file": "update_41.zip",
-  "size": 3107650,
-  "sha256": "0b6fec30ae048d2a90e3f96cf3ad82eb6a84727cf93d7dbf42b291cd170eceef",
+  "version": 42,
+  "file": "update_42.zip",
+  "size": 3114891,
+  "sha256": "d4e6495040a0566c8f547fd278d9eb8e537d56e0f8cfaec7f6a8767915a13861",
   "min_build": 1,
-  "notes": "Cipó-titica: nasce de semente, sobe nas árvores, solta raízes aéreas até o chão, dá flores e frutos, aves e pequenos animais espalham as sementes; coleta limitada das raízes",
+  "notes": "Cavadeira de pedra: cava buracos em qualquer lugar (mais fundo no mesmo lugar) e finca toras em pé; titica cai junto com a árvore cortada; machado firme na mão ao correr",
   "date": "2026-11-17"
 }

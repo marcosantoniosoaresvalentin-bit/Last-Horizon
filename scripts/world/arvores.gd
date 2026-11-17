@@ -83,6 +83,8 @@ var _cut_nodes := {}
 var _cut_mat: Material
 var _chips_mat: Material
 var _falling: Array = []
+var fell_hook := Callable()          # avisado quando uma árvore começa a tombar (cipós)
+var fall_done_hook := Callable()
 var _log_nodes := {}               # tora derrubada pelo jogador -> nó desenhado
 var free_logs: Array = []          # pedaços de tora soltos (levados pelo jogador): ver _free_log
 var _free_nodes: Array = []
@@ -875,6 +877,8 @@ func _rebuild_logs() -> void:
 			var v := int(p[4]) % VARIANTS
 			var s: float = height_of(p, last_day) / float(_models[v].height)
 			_build_log(p, v, s, last_day)
+	if fall_done_hook.is_valid():
+		fall_done_hook.call()     # o cipó agarrado nas toras acompanha
 
 
 ## Dados do corte guardados na árvore derrubada ([machadadas, lado]).
@@ -1094,6 +1098,32 @@ func trunk_point(p: Array, y: float, ang: float, out := 0.0) -> Vector3:
 	return w + (d.normalized() * out if d.length() > 0.0001 else Vector3.ZERO)
 
 
+## Transformação do modelo da árvore para o mundo, com ela em pé.
+func stand_xf(p: Array) -> Transform3D:
+	var m: Dictionary = _models[int(p[4]) % VARIANTS]
+	var s: float = height_of(p, last_day) / float(m.height)
+	var x := float(p[0])
+	var z := float(p[1])
+	var rot := fmod(x * 12.9898 + z * 78.233, TAU)
+	return Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), Vector3(x, _jogo.height_at(x, z) - 0.15, z))
+
+
+## Pedaços da tora derrubada: [de (m do chão, em pé), até, transformação modelo->mundo].
+func log_piece_xfs(p: Array) -> Array:
+	var out := []
+	if p.size() < 10 or not p[9] is Array:
+		return out
+	var m: Dictionary = _models[int(p[4]) % VARIANTS]
+	var h := height_of(p, last_day)
+	var s: float = h / float(m.height)
+	var cut := _cut_from(p, p[9], s)
+	var xf := _log_xf(p, h, s, cut)
+	var along := (xf * _axis_of(m, float(m.H)) - xf * _axis_of(m, float(cut.h))).normalized()
+	for pc in log_pieces(p):
+		out.append([float(pc[0]) * s, float(pc[1]) * s, Transform3D(xf.basis, xf.origin + along * float(pc[2]))])
+	return out
+
+
 ## Árvore em pé (viva ou secando) por posição, para o cipó saber onde está apoiado.
 func standing_at(x: float, z: float) -> Variant:
 	for p in plants:
@@ -1211,6 +1241,9 @@ func fell_by_player(p: Array, away: Vector3) -> void:
 			_piece(tree, b, _bark if alive else _bark_dead)
 		if alive:
 			_piece(tree, m.crown, _leaves)
+		# o cipó que subia nela cai junto, agarrado no tronco
+		if fell_hook.is_valid():
+			fell_hook.call(p, tree)
 	pivot.position = hinge0
 	var rest := _rest_pose(p, h)
 	var axis: Vector3 = rest[1]
@@ -1234,7 +1267,9 @@ func fell_by_player(p: Array, away: Vector3) -> void:
 	tw.tween_callback(func():
 		_falling.erase(p)
 		pivot.queue_free()
-		_rebuild())
+		_rebuild()
+		if fall_done_hook.is_valid():
+			fall_done_hook.call())
 
 
 # ================== TRONCO SOB MEDIDA (corte, toco e tora) ==================

@@ -196,6 +196,90 @@ static func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector
 	st.add_vertex(a); st.add_vertex(c); st.add_vertex(d)
 
 
+## Cavadeira dos antigos: cabo comprido de galho (1,2 m) e, na ponta, uma lâmina
+## larga de pedra lascada (como uma pá) amarrada com cipó. Cabo de y = 0 (ponta de
+## cima, onde a mão segura) até 1,2 m; a lâmina vai até ~1,45 m (o fio em +Y).
+static func digger_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7171
+	# cabo: galho reto e comprido, com casca
+	var sides := 8
+	var rings := 22
+	var haft_len := 1.22
+	var pts := []
+	for i in rings + 1:
+		var t := float(i) / rings
+		var c := Vector3(sin(t * 2.2) * 0.008, t * haft_len, cos(t * 1.7) * 0.005)
+		var r := lerpf(0.02, 0.018, t)
+		var ring := []
+		for k in sides:
+			var a := TAU * k / sides
+			ring.append(c + Vector3(cos(a), 0, sin(a)) * (r + rng.randf_range(-0.0012, 0.0012)))
+		pts.append(ring)
+	for i in rings:
+		for k in sides:
+			var k2 := (k + 1) % sides
+			var bark := Color(0.2, 0.13, 0.075) * rng.randf_range(0.92, 1.06)
+			if (k + i) % 5 == 0:
+				bark = Color(0.13, 0.09, 0.05)
+			bark.a = 1.0
+			_quad(st, pts[i][k], pts[i][k2], pts[i + 1][k2], pts[i + 1][k], bark)
+	var wood := Color(0.6, 0.46, 0.28)
+	var cap0: Array = pts[0]
+	for k in sides:
+		st.set_color(wood)
+		st.add_vertex(Vector3.ZERO); st.add_vertex(cap0[k]); st.add_vertex(cap0[(k + 1) % sides])
+	# lâmina de pedra: estreita onde encaixa no cabo e larga no fio (forma de pá)
+	var y0 := 1.12
+	var y1 := 1.46
+	var cols := 7
+	var rows := 6
+	var grid := []
+	for i in cols + 1:
+		var u := float(i) / cols                        # 0 no cabo, 1 no fio
+		var y := lerpf(y0, y1, u)
+		var half_w := lerpf(0.035, 0.085, pow(u, 0.8))
+		var thick := lerpf(0.016, 0.002, pow(u, 1.2))
+		var col := []
+		for j in rows + 1:
+			var v := float(j) / rows * 2.0 - 1.0
+			var x := v * half_w + rng.randf_range(-0.004, 0.004) * (1.0 - u * 0.5)
+			var yy := y - 0.025 * v * v * u + rng.randf_range(-0.003, 0.003)   # fio curvo
+			var b := thick * (1.0 - 0.6 * v * v) + rng.randf_range(-0.002, 0.002)
+			col.append([Vector3(x, yy, b), Vector3(x, yy, -b)])
+		grid.append(col)
+	var stone := Color(0.42, 0.38, 0.3)
+	for side in 2:
+		for i in cols:
+			for j in rows:
+				var a: Vector3 = grid[i][j][side]
+				var b: Vector3 = grid[i + 1][j][side]
+				var c: Vector3 = grid[i + 1][j + 1][side]
+				var d: Vector3 = grid[i][j + 1][side]
+				var cc := stone * rng.randf_range(0.85, 1.15)
+				cc = cc.lerp(Color(0.6, 0.56, 0.47), smoothstep(0.7, 1.0, float(i) / cols))
+				cc.a = 1.0
+				if side == 0:
+					_quad(st, a, b, c, d, cc)
+				else:
+					_quad(st, d, c, b, a, cc)
+	for i in cols:
+		for j in [0, rows]:
+			_quad(st, grid[i][j][0], grid[i + 1][j][0], grid[i + 1][j][1], grid[i][j][1], stone * 0.8)
+	for j in rows:
+		_quad(st, grid[cols][j][0], grid[cols][j + 1][0], grid[cols][j + 1][1], grid[cols][j][1], Color(0.62, 0.58, 0.5))
+		_quad(st, grid[0][j][1], grid[0][j + 1][1], grid[0][j + 1][0], grid[0][j][0], stone * 0.8)
+	# amarração de cipó: voltas no cabo e laçadas passando pela pedra
+	var vine := Color(0.17, 0.19, 0.08)
+	_helix(st, 1.05, 1.13, 0.024, 4.0, 0.0045, vine, rng)
+	for sx in [1.0, -1.0]:
+		_tube(st, [Vector3(sx * 0.02, 1.1, 0.012), Vector3(sx * 0.03, 1.16, 0.018), Vector3(sx * 0.024, 1.2, 0.0), Vector3(sx * 0.03, 1.16, -0.018), Vector3(sx * 0.02, 1.1, -0.012)], 0.004, vine.lightened(0.06), rng)
+	st.generate_normals()
+	return st.commit()
+
+
 static func axe_material() -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
@@ -223,7 +307,14 @@ class ChopPose extends SkeletonModifier3D:
 	var ready_pose := false            # duas mãos no cabo, esperando o próximo toque
 	var phase := 0.0
 	var vertical := false         # golpe de cima para baixo (cortar tora deitada)
+	var digging := false          # cavando com a cavadeira
 	var crouch := 0.0             # 0 em pé, 1 agachado (pegar ou largar a tora)
+	var moving := false           # andando/correndo (o jogo avisa)
+	var tool := "machado"         # ferramenta na mão: "machado" ou "cavadeira"
+	var grip_low := GRIP_LOW
+	var grip_high := GRIP_HIGH
+	var carry_grip := GRIP_HIGH
+	var _carry_cal := {}          # ferramenta -> pegada gravada parado (mão no antebraço, ferramenta na mão)
 	var log_node: Node3D = null   # tora no ombro
 	var log_r := 0.2
 	var _b := {}
@@ -270,7 +361,9 @@ class ChopPose extends SkeletonModifier3D:
 		_close_fingers(sk, "Right")
 		if swinging or ready_pose:
 			_close_fingers(sk, "Left")
-			if vertical:
+			if digging:
+				_two_hands_dig(sk, up, fwd, right, phase if swinging else 0.0)
+			elif vertical:
 				_two_hands_down(sk, up, fwd, right, down_angle(phase) if swinging else -30.0)
 			else:
 				_two_hands(sk, up, fwd, right, swing_angle(phase) if swinging else -25.0)
@@ -289,6 +382,37 @@ class ChopPose extends SkeletonModifier3D:
 			return lerpf(-42.0, -34.0, (p - HIT_AT) / (0.65 - HIT_AT))
 		return lerpf(-34.0, -30.0, smoothstep(0.0, 1.0, (p - 0.65) / 0.35))
 
+	# ---------- cavar: levanta a cavadeira e crava no chão, depois alavanca ----------
+	func _two_hands_dig(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3, p: float) -> void:
+		var lift := 0.0     # quanto a ferramenta sobe
+		var tilt := -78.0   # inclinação do cabo (graus; -90 = de pé)
+		if p < 0.4:
+			lift = smoothstep(0.0, 1.0, p / 0.4) * 0.28
+			tilt = lerpf(-74.0, -70.0, p / 0.4)
+		elif p < HIT_AT:
+			var t := (p - 0.4) / (HIT_AT - 0.4)
+			lift = lerpf(0.28, -0.08, t * t)               # crava
+			tilt = lerpf(-70.0, -80.0, t)
+		elif p < 0.8:
+			var t := (p - HIT_AT) / (0.8 - HIT_AT)
+			lift = -0.08
+			tilt = lerpf(-80.0, -62.0, smoothstep(0.0, 1.0, t))   # alavanca a terra
+		else:
+			var t := (p - 0.8) / 0.2
+			lift = lerpf(-0.08, 0.0, t)
+			tilt = lerpf(-62.0, -74.0, t)
+		var e := deg_to_rad(tilt)
+		var dir := (fwd * cos(e) + up * sin(e)).normalized()
+		var edge := fwd
+		# a ponta de cima do cabo (onde as mãos seguram) fica na altura do peito
+		var tip_ground := fwd * 0.62 + up * (-0.04)
+		var base := tip_ground - dir * 1.42 + up * lift
+		_rot_global(sk, "Spine1", right, -0.2 if p > 0.45 and p < 0.8 else -0.08)
+		var fingers := _orth(-up * 0.3 + fwd * 0.7, dir)
+		_hand_on(sk, "Right", base + dir * grip_high, dir, fingers, up, right)
+		_hand_on(sk, "Left", base + dir * grip_low, dir, fingers, up, -right)
+		_set_tool(sk, _tool_xf(base, dir, edge))
+
 	# ---------- golpe de cima para baixo (tora no chão) ----------
 	func _two_hands_down(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3, e_deg: float) -> void:
 		var e := deg_to_rad(e_deg)
@@ -302,8 +426,8 @@ class ChopPose extends SkeletonModifier3D:
 		_rot_global(sk, "Spine1", right, lerpf(0.1, -0.38, low) if e_deg < 60.0 else 0.1)
 		var out := Vector3(base.x - chest.x, 0, base.z - chest.z)
 		var fingers := _orth(-up * 0.4 + out.normalized() * 0.5 - fwd * 0.3, dir)
-		_hand_on(sk, "Right", base + dir * GRIP_HIGH, dir, fingers, up, right)
-		_hand_on(sk, "Left", base + dir * GRIP_LOW, dir, fingers, up, -right)
+		_hand_on(sk, "Right", base + dir * grip_high, dir, fingers, up, right)
+		_hand_on(sk, "Left", base + dir * grip_low, dir, fingers, up, -right)
 		_place_axe(sk, base, dir, edge)
 
 	# ---------- agachar: o quadril desce e os joelhos dobram com os pés no chão ----------
@@ -361,22 +485,40 @@ class ChopPose extends SkeletonModifier3D:
 	func _carry(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
 		# antebraço um pouco dobrado, como quem segura peso
 		_rot_global(sk, "RightForeArm", right, deg_to_rad(20.0))
-		# pulso reto: os dedos seguem a linha do antebraço; o cabo sai da mão para a frente
 		var fa := _bone("RightForeArm")
-		var hb0 := _bone("RightHand")
-		var arm_dir := (sk.get_bone_global_pose(hb0).origin - sk.get_bone_global_pose(fa).origin).normalized()
-		var handle := _orth(fwd * 0.9 - up * 0.3, arm_dir)
-		var fingers := arm_dir
-		var g := _grip_rotate("Right", sk, handle, fingers)
+		var hb := _bone("RightHand")
+		if fa < 0 or hb < 0:
+			return
+		var fa_g := sk.get_bone_global_pose(fa)
+		# Depois de gravada (parado), a pegada não muda: a mão fica firme no antebraço e a
+		# ferramenta presa na mão, mesmo com o braço balançando na corrida.
+		if _carry_cal.has(tool):
+			var cal: Dictionary = _carry_cal[tool]
+			var hp := sk.get_bone_global_pose(hb)
+			hp.basis = (fa_g.basis.orthonormalized() * cal.hand).scaled(hp.basis.get_scale())
+			sk.set_bone_global_pose(hb, hp)
+			var hg := sk.get_bone_global_pose(hb)
+			_set_tool(sk, Transform3D(hg.basis.orthonormalized(), hg.origin) * cal.tool)
+			return
+		# pulso reto: os dedos seguem a linha do antebraço; o cabo sai da mão para a frente
+		var arm_dir := (sk.get_bone_global_pose(hb).origin - fa_g.origin).normalized()
+		var want := fwd * 0.9 - up * 0.3 if tool == "machado" else fwd * 0.45 - up * 0.9
+		var handle := _orth(want, arm_dir)
+		var g := _grip_rotate("Right", sk, handle, arm_dir)
 		if g.is_empty():
 			return
-		var hb := _bone("RightHand")
 		var hp := sk.get_bone_global_pose(hb)
 		hp.basis = g.basis
 		sk.set_bone_global_pose(hb, hp)
 		var center: Vector3 = hp.origin + g.offset
-		var edge := _orth(-up, handle)
-		_place_axe(sk, center - handle * GRIP_HIGH, handle, edge)
+		var edge := _orth(-up if tool == "machado" else fwd, handle)
+		var txf := _tool_xf(center - handle * carry_grip, handle, edge)
+		_set_tool(sk, txf)
+		if not moving:
+			var hg := sk.get_bone_global_pose(hb)
+			var hand_xf := Transform3D(hg.basis.orthonormalized(), hg.origin)
+			_carry_cal[tool] = {"hand": fa_g.basis.orthonormalized().inverse() * hg.basis.orthonormalized(),
+				"tool": hand_xf.affine_inverse() * txf}
 
 	# ---------- golpe com as duas mãos ----------
 	func _two_hands(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3, ang_deg: float) -> void:
@@ -397,8 +539,8 @@ class ChopPose extends SkeletonModifier3D:
 		out.y = 0.0
 		var fingers := _orth(-up * 0.75 + out.normalized() * 0.6, dir)
 		# mão direita quase na ponta, esquerda bem na ponta
-		_hand_on(sk, "Right", base + dir * GRIP_HIGH, dir, fingers, up, right)
-		_hand_on(sk, "Left", base + dir * GRIP_LOW, dir, fingers, up, -right)
+		_hand_on(sk, "Right", base + dir * grip_high, dir, fingers, up, right)
+		_hand_on(sk, "Left", base + dir * grip_low, dir, fingers, up, -right)
 		_place_axe(sk, base, dir, edge)
 
 	static func _orth(v: Vector3, axis: Vector3) -> Vector3:
@@ -529,12 +671,19 @@ class ChopPose extends SkeletonModifier3D:
 	## Machado: base do cabo em "base", cabo apontando para "handle", fio para "edge"
 	## (tudo no espaço do esqueleto).
 	func _place_axe(sk: Skeleton3D, base: Vector3, handle: Vector3, edge: Vector3) -> void:
-		if axe == null:
-			return
+		_set_tool(sk, _tool_xf(base, handle, edge))
+
+	## Ferramenta no espaço do esqueleto: base do cabo, direção do cabo e do fio.
+	static func _tool_xf(base: Vector3, handle: Vector3, edge: Vector3) -> Transform3D:
 		var y := handle.normalized()
 		var z := (edge - y * edge.dot(y)).normalized()
 		var x := y.cross(z).normalized()
-		var gx := sk.global_transform * Transform3D(Basis(x, y, z), base)
+		return Transform3D(Basis(x, y, z), base)
+
+	func _set_tool(sk: Skeleton3D, txf: Transform3D) -> void:
+		if axe == null:
+			return
+		var gx := sk.global_transform * txf
 		gx.basis = gx.basis.orthonormalized()
 		axe.global_transform = gx
 

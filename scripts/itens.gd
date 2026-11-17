@@ -7,6 +7,8 @@ extends RefCounted
 const ITENS := {
 	"machado": {"nome": "Machado de Pedra", "kg": 1.6, "cat": "Ferramentas",
 		"desc": "Corta árvores. Equipe na mochila e chegue perto do tronco.", "ferramenta": true},
+	"cavadeira": {"nome": "Cavadeira de Pedra", "kg": 2.2, "cat": "Ferramentas",
+		"desc": "Cava buracos em qualquer lugar. Cavando no mesmo lugar o buraco fica mais fundo.", "ferramenta": true},
 	"argila": {"nome": "Argila", "kg": 1.0, "cat": "Recursos", "desc": "Barro da beira das lagoas."},
 	"semente": {"nome": "Semente de Cedrinho", "kg": 0.002, "cat": "Recursos", "desc": "Plante em terra boa: brota em uns 100 dias."},
 	"pedra": {"nome": "Pedra", "kg": 0.8, "cat": "Recursos", "desc": "Pedra lascada, boa para ferramentas."},
@@ -19,6 +21,7 @@ const CATEGORIAS := ["Tudo", "Armas", "Munição", "Equipamentos", "Ferramentas"
 ## Receitas que dá para fazer com as mãos (sem bancada).
 const RECEITAS_MAO := [
 	{"id": "machado", "qtd": 1, "ingredientes": [["pedra", 2], ["galho", 1], ["cipo", 2]]},
+	{"id": "cavadeira", "qtd": 1, "ingredientes": [["pedra", 1], ["galho", 1], ["cipo", 3]]},
 ]
 
 

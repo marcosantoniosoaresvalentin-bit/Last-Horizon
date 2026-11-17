@@ -60,6 +60,18 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for k in 3:
 				var y := -30 + k * 6
 				ci.draw_line(c + Vector2(6 + k * 2, y) * u, c + Vector2(22 + k * 2, y - 10) * u, Color(0.45, 0.4, 0.18), 3.0 * u, true)
+		"cavadeira":
+			# cabo comprido na diagonal e lâmina larga de pedra (como pá) amarrada com cipó
+			ci.draw_line(c + Vector2(42, -44) * u, c + Vector2(-14, 18) * u, Color(0.4, 0.26, 0.14), 7.0 * u, true)
+			ci.draw_line(c + Vector2(42, -44) * u, c + Vector2(-14, 18) * u, ink, 1.2 * u, true)
+			var blade: PackedVector2Array = P.call([[-10, 10], [-22, 22], [-46, 30], [-40, 44], [-30, 46], [-12, 36], [2, 18]])
+			ci.draw_colored_polygon(blade, Color(0.58, 0.52, 0.42))
+			ci.draw_colored_polygon(P.call([[-46, 30], [-40, 44], [-34, 45], [-42, 30]]), Color(0.74, 0.7, 0.6))
+			ci.draw_polyline(blade + PackedVector2Array([blade[0]]), ink, 2.0 * u, true)
+			for k in 3:
+				var t := 0.1 + k * 0.08
+				var pa := c + Vector2(-14, 18).lerp(Vector2(42, -44), t) * u
+				ci.draw_line(pa + Vector2(-6, -6) * u, pa + Vector2(6, 6) * u, Color(0.45, 0.4, 0.18), 3.0 * u, true)
 		"pedra":
 			var pts: PackedVector2Array = P.call([[-36, 10], [-28, -16], [-6, -30], [22, -26], [38, -6], [32, 20], [8, 30], [-22, 28]])
 			ci.draw_colored_polygon(pts, Color(0.52, 0.52, 0.5))

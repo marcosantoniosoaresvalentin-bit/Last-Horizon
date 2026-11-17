@@ -57,6 +57,10 @@ class IconButton extends Button:
 
 static func kind_for(text: String) -> String:
 	var t := text.to_lower()
+	if t.begins_with("cavar"):
+		return "cavar"
+	if t.begins_with("fincar"):
+		return "fincar"
 	if t.begins_with("cortar tora"):
 		return "cortar_tora"
 	if t.begins_with("cortar"):
@@ -180,6 +184,26 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 					else P.call([[-10, y0 - 8], [-10, y0 + 6], [-20, y0 + 6], [0, y0 + 24], [20, y0 + 6], [10, y0 + 6], [10, y0 - 8]])
 				ci.draw_colored_polygon(arr, col.call(Color(0.98, 0.62, 0.25) if up else Color(0.55, 0.8, 0.45)))
 				ci.draw_polyline(arr + PackedVector2Array([arr[0]]), ink, 2 * u, true)
+		"cavar":
+			# chão com buraco e a cavadeira cravada
+			ci.draw_colored_polygon(P.call([[-46, 22], [46, 22], [46, 46], [-46, 46]]), col.call(Color(0.42, 0.3, 0.18)))
+			ci.draw_line(c + Vector2(-46, 22) * u, c + Vector2(46, 22) * u, col.call(Color(0.3, 0.45, 0.16)), 5 * u, true)
+			ci.draw_colored_polygon(P.call([[-30, 22], [-2, 22], [-8, 36], [-24, 36]]), col.call(Color(0.08, 0.06, 0.04)))
+			if shadow:
+				ci.draw_line(c + Vector2(30, -46) * u, c + Vector2(0, 20) * u, sh, 10 * u, true)
+			else:
+				Desenhos.item(ci, "cavadeira", c + Vector2(10, -10) * u, s * 0.85)
+		"fincar":
+			# tora em pé enterrada no chão, com seta para baixo
+			ci.draw_colored_polygon(P.call([[-46, 20], [46, 20], [46, 46], [-46, 46]]), col.call(Color(0.42, 0.3, 0.18)))
+			ci.draw_line(c + Vector2(-46, 20) * u, c + Vector2(46, 20) * u, col.call(Color(0.3, 0.45, 0.16)), 5 * u, true)
+			var lg: PackedVector2Array = P.call([[-16, -30], [10, -30], [10, 36], [-16, 36]])
+			ci.draw_colored_polygon(lg, col.call(BARK))
+			ci.draw_polyline(lg + PackedVector2Array([lg[0]]), ink, 2.5 * u, true)
+			ci.draw_colored_polygon(P.call([[-16, -30], [10, -30], [6, -36], [-12, -36]]), col.call(WOOD_LIGHT))
+			var arr: PackedVector2Array = P.call([[28, -40], [38, -40], [38, -20], [46, -20], [33, -4], [20, -20], [28, -20]])
+			ci.draw_colored_polygon(arr, col.call(Color(0.55, 0.8, 0.45)))
+			ci.draw_polyline(arr + PackedVector2Array([arr[0]]), ink, 2 * u, true)
 		"cipo":
 			# rolo de raiz de titica com uma folha
 			for ring in 3:
