@@ -5,7 +5,9 @@ extends Node3D
 ##   sementes longe, onde passa; é o único jeito do cipó nascer em lugar novo.
 ## - O ano todo o bando precisa de cipó adulto por perto (frutos, brotos e folhas):
 ##   sem cipó ao alcance, passa fome e os macacos vão morrendo.
-## - Bando bem alimentado tem filhotes (em novembro).
+## - Reprodução: de outubro a março as fêmeas adultas (4 anos ou mais) bem alimentadas
+##   podem emprenhar; a gestação dura uns 5 a 6 meses e nasce um filhote só. O filhote
+##   anda agarrado nas costas da mãe nos primeiros 6 meses. Com fome, perde a gestação.
 ## Perto do jogador, os macacos aparecem: andam de quatro, sobem nos troncos e sentam.
 
 const Modelo := preload("res://scripts/world/macaco_modelo.gd")
@@ -15,7 +17,8 @@ const STARVE_DAYS := 15       # dias sem cipó até começarem a morrer
 const MAX_TROOP := 14
 const SHOW := 80.0            # perto assim do jogador o bando aparece
 
-## Bando: {x, z (árvore onde está), fome (dias sem comida), membros: [{nasc (dia)}]}
+## Bando: {x, z (árvore onde está), fome (dias sem comida),
+##   membros: [{id, nasc (dia), sexo ("f"/"m"), gravida_ate (dia do parto ou -1), mae (id ou -1)}]}
 var troops: Array = []
 var last_day := 0
 var _jogo: Node
@@ -23,6 +26,9 @@ var _arv: Node
 var _cip: Node
 var _rng := RandomNumberGenerator.new()
 var _agents := {}             # índice do bando -> [agentes]
+var _next_id := 1
+const ADULT_F := 1460         # dias: fêmea pode ter filhote a partir dos 4 anos
+const CARRY_DAYS := 180       # filhote nas costas da mãe
 
 
 func build(jogo: Node, arvores: Node, cipos: Node, seed_: int, save_path := "") -> void:
@@ -63,8 +69,18 @@ func _generate() -> void:
 		used.append(Vector2(float(best.x), float(best.z)))
 		var mem := []
 		for k in _rng.randi_range(6, 9):
-			mem.append({"nasc": last_day - _rng.randi_range(200, 6000)})
+			mem.append(_member(last_day - _rng.randi_range(600, 6000), -1))
+		# uma mãe já com filhote nas costas
+		for m in mem:
+			if m.sexo == "f" and last_day - int(m.nasc) >= ADULT_F:
+				mem.append(_member(last_day - _rng.randi_range(20, 120), int(m.id)))
+				break
 		troops.append({"x": float(best.x), "z": float(best.z), "fome": 0, "membros": mem})
+
+
+func _member(nasc: int, mae: int) -> Dictionary:
+	_next_id += 1
+	return {"id": _next_id, "nasc": nasc, "sexo": "f" if _rng.randf() < 0.5 else "m", "gravida_ate": -1, "mae": mae}
 
 
 func tick() -> void:
@@ -99,13 +115,30 @@ func _day(day: int) -> void:
 			t.fome = 0
 		var mem: Array = t.membros
 		if int(t.fome) > STARVE_DAYS and not mem.is_empty() and _rng.randf() < 0.12:
-			mem.remove_at(_rng.randi() % mem.size())          # morreu de fome
+			# morreu de fome (os filhotes primeiro)
+			var young := 0
+			for i in mem.size():
+				if int(mem[i].nasc) > int(mem[young].nasc):
+					young = i
+			mem.remove_at(young if _rng.randf() < 0.6 else _rng.randi() % mem.size())
 		if not mem.is_empty() and _rng.randf() < 0.0003 * mem.size():
 			mem.remove_at(_rng.randi() % mem.size())          # velhice, doença, gavião...
-		# filhotes em novembro, se o bando está bem alimentado
-		if month == 11 and int(t.fome) == 0 and mem.size() >= 2 and mem.size() < MAX_TROOP \
-				and near.size() >= mem.size() / 2 and _rng.randf() < 0.02:
-			mem.append({"nasc": day})
+		var breeding := month >= 10 or month <= 3
+		var born := []
+		for m in mem:
+			var ga := int(m.get("gravida_ate", -1))
+			if ga >= 0:
+				if int(t.fome) > STARVE_DAYS:
+					m.gravida_ate = -1                         # com fome, perde a gestação
+				elif day >= ga:
+					m.gravida_ate = -1
+					born.append(_member(day, int(m.id)))       # nasce um filhote só
+				continue
+			if breeding and str(m.get("sexo", "")) == "f" and day - int(m.nasc) >= ADULT_F and int(t.fome) == 0 \
+					and mem.size() + born.size() < MAX_TROOP and not _has_baby(mem, int(m.id), day) \
+					and _rng.randf() < 0.008:
+				m.gravida_ate = day + _rng.randi_range(150, 180)   # gestação de 5 a 6 meses
+		mem.append_array(born)
 		if mem.is_empty():
 			continue          # o bando acabou
 		# muda de árvore: vai para uma que tem cipó (andam uns 1 a 3 km por dia)
@@ -130,6 +163,13 @@ func _day(day: int) -> void:
 					_cip.drop_seed(float(pl.x) + cos(a) * d, float(pl.z) + sin(a) * d, day)
 		keep.append(t)
 	troops = keep
+
+
+func _has_baby(mem: Array, mid: int, day: int) -> bool:
+	for c in mem:
+		if int(c.get("mae", -1)) == mid and day - int(c.nasc) < 365:
+			return true
+	return false
 
 
 func count() -> int:
@@ -187,7 +227,11 @@ func _new_agent(t: Dictionary, m: Dictionary) -> Dictionary:
 	n.scale = Vector3(s, s, s)
 	var p := _ground_spot(t)
 	n.global_position = p
-	return {"node": n, "pos": p, "state": "sentar", "timer": _rng.randf_range(1.0, 6.0), "goal": p, "h": 0.0, "ang": 0.0, "top": 0.0}
+	var ride := -1
+	if age < CARRY_DAYS:
+		ride = int(m.get("mae", -1))
+	return {"node": n, "pos": p, "state": "sentar", "timer": _rng.randf_range(1.0, 6.0), "goal": p, "h": 0.0, "ang": 0.0, "top": 0.0,
+		"id": int(m.get("id", -1)), "ride": ride}
 
 
 func _ground_spot(t: Dictionary) -> Vector3:
@@ -205,7 +249,19 @@ func update(delta: float) -> void:
 	for i in _agents:
 		var t: Dictionary = troops[int(i)]
 		var host = _tree_at(float(t.x), float(t.z))
+		var by_id := {}
 		for a in _agents[i]:
+			by_id[int(a.id)] = a
+		for a in _agents[i]:
+			var mom = by_id.get(int(a.ride))
+			if mom != null:
+				# filhote nas costas da mãe
+				var n: Node3D = a.node
+				var bp: Node3D = (mom.node as Node3D).back_point
+				n.global_transform = bp.global_transform.scaled_local(n.scale)
+				n.mode = "ride"
+				a.pos = n.global_position
+				continue
 			_agent_step(a, t, host, pp, delta)
 
 
@@ -303,5 +359,14 @@ func _load(path: String) -> bool:
 	if not d is Dictionary:
 		return false
 	troops = d.get("bandos", [])
+	for t in troops:
+		for m in t.membros:
+			if not m.has("id"):
+				_next_id += 1
+				m.id = _next_id
+				m.sexo = "f" if _rng.randf() < 0.5 else "m"
+				m.gravida_ate = -1
+				m.mae = -1
+			_next_id = maxi(_next_id, int(m.id))
 	last_day = mini(int(d.get("dia", last_day)), last_day)
 	return true
