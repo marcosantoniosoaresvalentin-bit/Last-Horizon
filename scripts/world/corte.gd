@@ -223,6 +223,8 @@ class ChopPose extends SkeletonModifier3D:
 	var ready_pose := false            # duas mãos no cabo, esperando o próximo toque
 	var phase := 0.0
 	var _b := {}
+	var thumb_axis := Vector3.BACK
+	var thumb_angs := [1.0, 0.9, 0.7]
 
 	func _bone(n: String) -> int:
 		if not _b.has(n):
@@ -254,32 +256,30 @@ class ChopPose extends SkeletonModifier3D:
 		var up: Vector3 = (tb * Vector3.UP).normalized()
 		var fwd: Vector3 = (tb * -player.global_transform.basis.z).normalized()
 		var right: Vector3 = (tb * player.global_transform.basis.x).normalized()
-		if swinging or ready_pose:
-			_two_hands(sk, up, fwd, right, swing_angle(phase) if swinging else -25.0)
-		else:
-			_carry(sk, up, fwd, right)
 		_close_fingers(sk, "Right")
 		if swinging or ready_pose:
 			_close_fingers(sk, "Left")
+			_two_hands(sk, up, fwd, right, swing_angle(phase) if swinging else -25.0)
+		else:
+			_carry(sk, up, fwd, right)
 
 	# ---------- carregando com uma mão ----------
 	func _carry(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
-		var hb := _bone("RightHand")
-		if hb < 0:
-			return
 		# antebraço um pouco dobrado, como quem segura peso
 		_rot_global(sk, "RightForeArm", right, deg_to_rad(20.0))
-		var hand := sk.get_bone_global_pose(hb)
-		# cabo apontando para baixo e um pouco para a frente; o fio para a frente
+		# cabo saindo da mão para a frente e para baixo; o fio virado para baixo
 		var handle := (fwd * 0.72 - up * 0.69).normalized()
-		# o fio do machado virado para baixo
-		var edge := (-up - handle * (-up).dot(handle)).normalized()
-		# a mão fecha em volta do cabo: o cabo atravessa a palma (eixo X da mão)
-		var palm := right.cross(handle).normalized()      # palma virada para dentro
-		_set_hand(sk, hb, handle, palm)
-		hand = sk.get_bone_global_pose(hb)
-		var grip := _grip_point(hand)
-		_place_axe(sk, grip - handle * GRIP_HIGH, handle, edge)
+		var fingers := _orth(-up * 0.8 - fwd * 0.2, handle)
+		var g := _grip_rotate("Right", sk, handle, fingers)
+		if g.is_empty():
+			return
+		var hb := _bone("RightHand")
+		var hp := sk.get_bone_global_pose(hb)
+		hp.basis = g.basis
+		sk.set_bone_global_pose(hb, hp)
+		var center: Vector3 = hp.origin + g.offset
+		var edge := _orth(-up, handle)
+		_place_axe(sk, center - handle * GRIP_HIGH, handle, edge)
 
 	# ---------- golpe com as duas mãos ----------
 	func _two_hands(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3, ang_deg: float) -> void:
@@ -289,51 +289,78 @@ class ChopPose extends SkeletonModifier3D:
 		var lift := 0.18 * clampf(-ang_deg / 118.0, 0.0, 1.0)
 		dir = (dir + up * (lift - 0.12)).normalized()
 		# para onde a lâmina vai (o fio aponta para o lado do movimento)
-		var edge := (-fwd * sin(a) - right * cos(a)).normalized()
-		edge = (edge - dir * edge.dot(dir)).normalized()
+		var edge := _orth(-fwd * sin(a) - right * cos(a), dir)
 		var chest := up * (1.08 + lift * 0.6) + fwd * 0.08
 		var base := chest + (fwd * cos(a * 0.75) - right * sin(a * 0.75)).normalized() * 0.2 - right * 0.04
 		# o tronco gira junto com o machado
 		_rot_global(sk, "Spine1", up, a * 0.22)
 		_rot_global(sk, "Spine2", up, a * 0.12)
-		# mão direita mais perto da cabeça, esquerda na ponta; palmas uma de cada lado
-		var r_grip := base + dir * GRIP_HIGH
-		var l_grip := base + dir * GRIP_LOW
-		_hand_on(sk, "Right", r_grip, dir, edge, up, right)
-		_hand_on(sk, "Left", l_grip, -dir, -edge, up, -right)
+		# os dedos fecham por cima do cabo, apontando para baixo e para fora do corpo
+		var out := (base - chest)
+		out.y = 0.0
+		var fingers := _orth(-up * 0.75 + out.normalized() * 0.6, dir)
+		# mão direita quase na ponta, esquerda bem na ponta
+		_hand_on(sk, "Right", base + dir * GRIP_HIGH, dir, fingers, up, right)
+		_hand_on(sk, "Left", base + dir * GRIP_LOW, dir, fingers, up, -right)
 		_place_axe(sk, base, dir, edge)
 
-	## Põe uma mão fechada no cabo: braço por cinemática inversa até o pulso certo.
-	func _hand_on(sk: Skeleton3D, side: String, grip: Vector3, along: Vector3, palm: Vector3, up: Vector3, out: Vector3) -> void:
+	static func _orth(v: Vector3, axis: Vector3) -> Vector3:
+		var o := v - axis * v.dot(axis)
+		return o.normalized() if o.length() > 0.0001 else axis.cross(Vector3.UP).normalized()
+
+	## Mede a mão de verdade (pelos ossos): de onde é o mindinho para o indicador
+	## (por onde o cabo atravessa), para onde os dedos apontam e o centro da mão
+	## fechada (o centro do círculo que o dedo do meio faz ao dobrar).
+	## Devolve a rotação que deixa o cabo passando por dentro da mão:
+	## {basis: orientação nova da mão, offset: do pulso até o centro do punho}.
+	func _grip_rotate(side: String, sk: Skeleton3D, handle: Vector3, fingers: Vector3) -> Dictionary:
+		var hb := _bone(side + "Hand")
+		var i1 := _bone(side + "HandIndex1")
+		var p1 := _bone(side + "HandPinky1")
+		var m1 := _bone(side + "HandMiddle1")
+		var m2 := _bone(side + "HandMiddle2")
+		var m3 := _bone(side + "HandMiddle3")
+		if hb < 0 or i1 < 0 or p1 < 0 or m1 < 0 or m2 < 0 or m3 < 0:
+			return {}
+		var hp := sk.get_bone_global_pose(hb)
+		var w := hp.origin
+		var across := (sk.get_bone_global_pose(i1).origin - sk.get_bone_global_pose(p1).origin).normalized()
+		var M1 := sk.get_bone_global_pose(m1).origin
+		var M2 := sk.get_bone_global_pose(m2).origin
+		var M3 := sk.get_bone_global_pose(m3).origin
+		var f_cur := _orth(M1 - w, across)
+		var cur := Basis(across, f_cur, across.cross(f_cur))
+		var f_des := _orth(fingers, handle)
+		var des := Basis(handle, f_des, handle.cross(f_des))
+		var r := des * cur.inverse()
+		var center := _circumcenter(M1, M2, M3)
+		return {"basis": r * hp.basis, "offset": r * (center - w)}
+
+	static func _circumcenter(a: Vector3, b: Vector3, c: Vector3) -> Vector3:
+		var ab := b - a
+		var ac := c - a
+		var n := ab.cross(ac)
+		var n2 := n.length_squared()
+		if n2 < 1e-12:
+			return (a + b + c) / 3.0
+		return a + (n.cross(ab) * ac.length_squared() + ac.cross(n) * ab.length_squared()) / (2.0 * n2)
+
+	## Põe uma mão fechada no cabo: gira a mão para o cabo passar por dentro do punho
+	## e leva o braço (cinemática inversa) até o pulso ficar no lugar certo.
+	func _hand_on(sk: Skeleton3D, side: String, grip: Vector3, along: Vector3, fingers: Vector3, up: Vector3, out: Vector3) -> void:
 		var hb := _bone(side + "Hand")
 		if hb < 0:
 			return
-		var basis := _hand_basis(side, along, palm)
-		# do pulso até o meio da mão fechada
-		var wrist := grip - basis.y * 0.075 - basis.z * 0.03
+		var g := _grip_rotate(side, sk, along, fingers)
+		if g.is_empty():
+			return
+		var wrist: Vector3 = grip - g.offset
 		var sh := sk.get_bone_global_pose(_bone(side + "Arm")).origin
 		var pole := sh - up * 0.8 + out * 0.5
 		_ik(sk, side + "Arm", side + "ForeArm", side + "Hand", wrist, pole)
-		var g := sk.get_bone_global_pose(hb)
-		g.basis = basis.scaled(g.basis.get_scale())
-		sk.set_bone_global_pose(hb, g)
-
-	## Orientação da mão segurando o cabo: o cabo atravessa a palma pelo eixo X
-	## (na mão direita o X vai do mindinho para o indicador; na esquerda é o contrário).
-	func _hand_basis(side: String, along: Vector3, palm: Vector3) -> Basis:
-		var x := along if side == "Right" else -along
-		var z := (palm - x * palm.dot(x)).normalized()
-		var y := z.cross(x).normalized()
-		return Basis(x, y, z)
-
-	func _set_hand(sk: Skeleton3D, hb: int, handle: Vector3, palm: Vector3) -> void:
-		var g := sk.get_bone_global_pose(hb)
-		g.basis = _hand_basis("Right", handle, palm).scaled(g.basis.get_scale())
-		sk.set_bone_global_pose(hb, g)
-
-	func _grip_point(hand: Transform3D) -> Vector3:
-		var b := hand.basis.orthonormalized()
-		return hand.origin + b.y * 0.075 + b.z * 0.03
+		var hp := sk.get_bone_global_pose(hb)
+		hp.basis = g.basis
+		sk.set_bone_global_pose(hb, hp)
 
 	## Cinemática inversa de dois ossos (ombro-cotovelo-pulso).
 	func _ik(sk: Skeleton3D, upper: String, lower: String, end: String, target: Vector3, pole: Vector3) -> void:
@@ -390,7 +417,9 @@ class ChopPose extends SkeletonModifier3D:
 			var b := _bone("%sHandThumb%d" % [side, k + 1])
 			if b < 0:
 				continue
-			sk.set_bone_pose_rotation(b, sk.get_bone_pose_rotation(b) * Quaternion(Vector3.RIGHT, [0.35, 0.5, 0.4][k]))
+			# o polegar dobra por cima do cabo (na mão esquerda o eixo é espelhado)
+			var ang: float = thumb_angs[k] * (1.0 if side == "Right" else -1.0)
+			sk.set_bone_pose_rotation(b, sk.get_bone_pose_rotation(b) * Quaternion(thumb_axis.normalized(), ang))
 
 	## Machado: base do cabo em "base", cabo apontando para "handle", fio para "edge"
 	## (tudo no espaço do esqueleto).

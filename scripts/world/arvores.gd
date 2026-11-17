@@ -68,6 +68,7 @@ var _seed_mesh: Mesh
 var _litter_mesh: Mesh
 var _bark: Material
 var _bark_dead: Material
+var _bark_log: Material
 var _leaves: Material
 var _litter: Material
 var _seed_mat: Material
@@ -523,6 +524,9 @@ func _rebuild() -> void:
 		var v := int(p[4]) % VARIANTS
 		var s: float = h / float(_models[v].height)
 		var key := Vector3i(ck.x, ck.y, v)
+		if st == FALLEN and p.size() > 9 and p[9] is Array:
+			_build_log(p, v, s, day)        # derrubada pelo jogador: só a parte de cima do corte
+			continue
 		if st == FALLEN and p.size() > 8 and int(p[8]) == 1 and day - int(p[6]) < GREEN_FALLEN_DAYS:
 			_build_fallen_green(p, v, s, day)
 			continue
@@ -537,6 +541,9 @@ func _rebuild() -> void:
 			_grid[gk] = []
 		_grid[gk].append(Vector3(x, z, TRUNK_HIT * s + 0.3))
 		var xf := Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), Vector3(x, y - 0.05, z))
+		if cuts.has(_cut_key(p)):
+			_build_cut_tree(p, v, xf, s, day)    # com a boca do machado escavada
+			continue
 		if _alive_now(p, day):
 			if not full.has(key):
 				full[key] = []
@@ -550,7 +557,6 @@ func _rebuild() -> void:
 		for p in plants:
 			if int(p[5]) != FALLEN and cuts.has(_cut_key(p)):
 				live[_cut_key(p)] = true
-				_rebuild_cut(p)
 		for k in cuts.keys():
 			if not live.has(k):
 				cuts.erase(k)    # árvore caiu ou sumiu: o corte vai junto
@@ -558,11 +564,48 @@ func _rebuild() -> void:
 		_add_mm(_models[key.z].trunk, full[key], _bark, VIEW_DIST)
 		_add_mm(_models[key.z].crown, full[key], _leaves, VIEW_DIST)
 	for key in logs:
-		_add_mm(_models[key.z].core, logs[key], _bark_dead, VIEW_DIST)
+		_add_mm(_models[key.z].core, logs[key], _bark_log, VIEW_DIST)
 	for key in small:
 		_add_mm(_sapling[0], small[key], _bark, SMALL_VIEW)
 		_add_mm(_sapling[1], small[key], _leaves, SMALL_VIEW)
 	_rebuild_seeds()
+
+
+## Árvore em pé que já levou machadadas: o tronco desenhado sozinho, com a boca escavada.
+func _build_cut_tree(p: Array, v: int, xf: Transform3D, s: float, day: int) -> void:
+	var m: Dictionary = _models[v]
+	var cut := _cut_info(p)
+	var mesh := _trunk_build(m, 0.0, float(m.H), cut, s)
+	var root: Node3D
+	if _alive_now(p, day):
+		root = Node3D.new()
+		root.transform = xf
+		add_child(root)
+		_trunk_node(root, mesh, _bark)
+		for b in m.branches:
+			_piece(root, b, _bark)
+		_piece(root, m.crown, _leaves)
+	else:
+		root = _build_dying(p, v, xf, s, day, mesh)
+		_instances.erase(root)
+	_cut_nodes[_cut_key(p)] = root
+
+
+## Só uma árvore mudou (mais uma machadada): refaz só ela.
+func _rebuild_cut(p: Array) -> void:
+	var k := _cut_key(p)
+	if _cut_nodes.has(k) and is_instance_valid(_cut_nodes[k]):
+		_cut_nodes[k].free()
+	_cut_nodes.erase(k)
+	var day := last_day
+	var h := height_of(p, day)
+	var v := int(p[4]) % VARIANTS
+	var s: float = h / float(_models[v].height)
+	var x := float(p[0])
+	var z := float(p[1])
+	var rot := fmod(x * 12.9898 + z * 78.233, TAU)
+	var xf := Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), Vector3(x, _jogo.height_at(x, z) - 0.15, z))
+	_build_cut_tree(p, v, xf, s, day)
 
 
 func _stump_life(st_: Array) -> float:
@@ -570,104 +613,85 @@ func _stump_life(st_: Array) -> float:
 	return lerpf(STUMP_LIFE_MIN, STUMP_LIFE_MAX, (hsh % 1009) / 1009.0)
 
 
-## O toco: casca dos lados, madeira cortada em cima com os anéis.
-## Com o tempo a madeira escurece, a casca seca, cresce musgo, o topo esfarela
-## e o toco vai baixando até sumir.
+## O toco: a parte de baixo do próprio tronco (com as raízes), do chão até o corte,
+## com a ponta lascada. Com o tempo a madeira escurece, a casca seca, o topo
+## esfarela e vai baixando até o toco sumir.
 func _build_stump(st_: Array, day: int) -> void:
+	if st_.size() < 6 or not st_[5] is Dictionary:
+		return
 	var x := float(st_[0])
 	var z := float(st_[1])
-	var rt := float(st_[3])
-	var rb := float(st_[4])
+	var v := int(st_[3]) % VARIANTS
+	var s := float(st_[4])
+	var cut: Dictionary = st_[5]
+	var m: Dictionary = _models[v]
 	var t := clampf(float(day - int(st_[2])) / _stump_life(st_), 0.0, 1.0)
-	var hgt := float(st_[5]) * lerpf(1.0, 0.3, smoothstep(0.45, 1.0, t))
-	var rough := smoothstep(0.35, 0.9, t) * rt * 0.9     # topo esfarelando
-	var hsh := absi(hash(Vector2(x, z)))
-	var SEG := 16
-	var side := SurfaceTool.new()
-	side.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var top := SurfaceTool.new()
-	top.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var fresh := Color(0.86, 0.72, 0.5)
-	var grey := Color(0.5, 0.42, 0.32)
-	var rot := Color(0.22, 0.16, 0.11)
-	var moss := Color(0.26, 0.32, 0.14)
-	var wood := fresh.lerp(grey, smoothstep(0.0, 0.3, t)).lerp(rot, smoothstep(0.3, 0.8, t))
-	var y0: float = _jogo.height_at(x, z)
-	var ring_top := []
-	for i in SEG + 1:
-		var a := TAU * i / SEG
-		var dir := Vector3(cos(a), 0, sin(a))
-		var jag := 0.0
-		if rough > 0.0:
-			jag = (float((hsh >> (i % 16)) % 100) / 100.0) * rough
-		ring_top.append(Vector3(x, y0 + hgt - jag, z) + dir * rt)
-	# lados: duas faixas (pé alargado e corpo)
-	var rows := []
-	for i in SEG + 1:
-		var a := TAU * i / SEG
-		var dir := Vector3(cos(a), 0, sin(a))
-		# raízes (sapopemas) no pé do toco
-		var fin := pow(maxf(0.0, cos(a * 5.0 + float(hsh % 100))), 8.0) * rb * 0.6
-		var pb := Vector3(x, 0, z) + dir * (rb + fin)
-		pb.y = _jogo.height_at(pb.x, pb.z) - 0.08
-		var pm := Vector3(x, y0 + 0.25, z) + dir * lerpf(rb + fin * 0.4, rt, 0.55)
-		rows.append([pb, pm, ring_top[i], dir])
-	for i in SEG:
-		var a0: Array = rows[i]
-		var a1: Array = rows[i + 1]
-		var u0 := float(i) / SEG * 2.0
-		var u1 := float(i + 1) / SEG * 2.0
-		for k in 2:
-			var p00: Vector3 = a0[k]
-			var p01: Vector3 = a0[k + 1]
-			var p10: Vector3 = a1[k]
-			var p11: Vector3 = a1[k + 1]
-			var v0: float = [0.0, 0.08][k]
-			var v1: float = [0.08, hgt / 3.0][k]
-			for q in [[p00, a0[3], u0, v0], [p11, a1[3], u1, v1], [p01, a0[3], u0, v1],
-					[p00, a0[3], u0, v0], [p10, a1[3], u1, v0], [p11, a1[3], u1, v1]]:
-				side.set_normal(q[1])
-				side.set_uv(Vector2(q[2], q[3]))
-				side.add_vertex(q[0])
-	# topo: anéis da madeira (do centro para fora), com a casca em volta
-	var center := Vector3(x, y0 + hgt - rough * 0.3, z)
-	var rings := 4
-	for i in SEG:
-		var a0: Vector3 = ring_top[i]
-		var a1: Vector3 = ring_top[i + 1]
-		for r in rings:
-			var f0 := float(r) / rings
-			var f1 := float(r + 1) / rings
-			var q00 := center.lerp(a0, f0)
-			var q01 := center.lerp(a0, f1)
-			var q10 := center.lerp(a1, f0)
-			var q11 := center.lerp(a1, f1)
-			var c := wood.darkened(0.12 if r % 2 == 1 else 0.0)
-			if r == rings - 1:
-				c = wood.darkened(0.35)        # casca na borda do corte
-			c = c.lerp(moss, smoothstep(0.55, 0.95, t) * (0.3 + 0.4 * float((hsh >> (i % 12)) % 2)))
-			top.set_color(c)
-			top.set_normal(Vector3.UP)
-			for pt in [q00, q01, q11, q00, q11, q10]:
-				top.add_vertex(pt)
+	var top := float(cut.h) * lerpf(1.0, 0.4, smoothstep(0.45, 1.0, t))
+	var tint := Color(1, 1, 1).lerp(Color(0.62, 0.58, 0.55), smoothstep(0.0, 0.3, t)).lerp(Color(0.32, 0.27, 0.22), smoothstep(0.3, 0.85, t))
+	var mesh := _trunk_build(m, 0.0, top, cut, s, true, false, tint)
+	var rot := fmod(x * 12.9898 + z * 78.233, TAU)
 	var root := Node3D.new()
+	root.transform = Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), Vector3(x, _jogo.height_at(x, z) - 0.15, z))
 	add_child(root)
 	_instances.append(root)
-	var mi := MeshInstance3D.new()
-	mi.mesh = side.commit()
-	mi.material_override = _bark if t < 0.4 else _bark_dead
-	mi.visibility_range_end = VIEW_DIST
-	root.add_child(mi)
-	var mt := MeshInstance3D.new()
-	mt.mesh = top.commit()
-	mt.material_override = _stump_top_mat
-	mt.visibility_range_end = VIEW_DIST
-	root.add_child(mt)
-	# o jogador não atravessa o toco
+	_trunk_node(root, mesh, _bark if t < 0.4 else _bark_dead)
 	var gk := Vector2i(floori(x / 8.0), floori(z / 8.0))
 	if not _grid.has(gk):
 		_grid[gk] = []
-	_grid[gk].append(Vector3(x, z, rt * 1.1 + 0.3))
+	_grid[gk].append(Vector3(x, z, _radius_of(m, top, 0.0) * s * 1.1 + 0.3))
+
+
+## Onde a tora derrubada fica no chão (transformação do modelo para o mundo).
+func _log_xf(p: Array, h: float, s: float, cut: Dictionary) -> Transform3D:
+	var m: Dictionary = _models[int(p[4]) % VARIANTS]
+	var x := float(p[0])
+	var z := float(p[1])
+	var rot := fmod(x * 12.9898 + z * 78.233, TAU)
+	var rest := _rest_pose(p, h)
+	var away := Vector3(sin(float(p[7])), 0, cos(float(p[7])))
+	var b := Basis(rest[1], rest[2]) * Basis(Vector3.UP, rot).scaled(Vector3(s, s, s))
+	# a ponta cortada fica logo depois do toco, encostada nele
+	var hinge: Vector3 = rest[0] + away * (trunk_radius(p) * 1.35 + 0.12)
+	return Transform3D(b, hinge - b * _axis_of(m, float(cut.h)))
+
+
+## Tora derrubada pelo jogador: do corte para cima, com a ponta lascada, os galhos
+## e (se caiu verde) a copa secando aos poucos.
+func _build_log(p: Array, v: int, s: float, day: int) -> void:
+	var m: Dictionary = _models[v]
+	var h := height_of(p, day)
+	var c: Array = p[9]
+	var cut := _cut_from(p, c, s)
+	var root := Node3D.new()
+	root.transform = _log_xf(p, h, s, cut)
+	add_child(root)
+	_instances.append(root)
+	var green := p.size() > 8 and int(p[8]) == 1
+	var age := float(day - int(p[6]))
+	_trunk_node(root, _trunk_build(m, float(cut.h), float(m.H), cut, s, false, true), _bark if age < 200 else _bark_dead)
+	for b in m.branches:
+		_piece(root, b, _bark if age < 200 else _bark_dead)
+	if green and age < GREEN_FALLEN_DAYS:
+		var f := age / GREEN_FALLEN_DAYS
+		var yellow := Color(0.62, 0.5, 0.12)
+		var brown := Color(0.48, 0.3, 0.13)
+		var color := yellow.lerp(brown, clampf((f - 0.35) / 0.4, 0.0, 1.0))
+		color.a = clampf(f / 0.35, 0.0, 1.0)
+		for i in m.clusters.size():
+			if f < _hash_range(p, 0.45, 1.0, 140 + i):
+				var mi := _piece(root, m.clusters[i], _leaves)
+				mi.set_instance_shader_parameter("tint", color)
+
+
+## Dados do corte guardados na árvore derrubada ([machadadas, lado]).
+func _cut_from(p: Array, c: Array, s: float) -> Dictionary:
+	var m: Dictionary = _models[int(p[4]) % VARIANTS]
+	var rot := fmod(float(p[0]) * 12.9898 + float(p[1]) * 78.233, TAU)
+	var A := float(c[1])
+	var local := Basis(Vector3.UP, rot).inverse() * Vector3(sin(A), 0, cos(A))
+	return {"h": CUT_H / s, "ac": atan2(local.z, local.x), "depth": 0.74,
+		"up": 0.26 / s, "down": 0.05 / s, "open": 1.4,
+		"seed": absi(hash(Vector2(float(p[0]), float(p[1])))) % 100000, "s": s}
 
 
 ## Como o tronco caído fica deitado: em cima do chão (não afundado) e acompanhando
@@ -714,7 +738,7 @@ func _build_fallen_green(p: Array, v: int, s: float, day: int) -> void:
 
 
 ## Árvore morrendo ou seca: monta peça por peça conforme a fase.
-func _build_dying(p: Array, v: int, xf: Transform3D, s: float, day: int) -> void:
+func _build_dying(p: Array, v: int, xf: Transform3D, s: float, day: int, core_mesh: ArrayMesh = null) -> Node3D:
 	var m: Dictionary = _models[v]
 	var ph := phase_of(p, day)
 	var leaf: float = ph.leaf
@@ -724,7 +748,10 @@ func _build_dying(p: Array, v: int, xf: Transform3D, s: float, day: int) -> void
 	add_child(root)
 	_instances.append(root)
 	var bark_m: Material = _bark if leaf < 0.6 else _bark_dead
-	_piece(root, m.core, bark_m)
+	if core_mesh:
+		_trunk_node(root, core_mesh, bark_m)
+	else:
+		_piece(root, m.core, bark_m)
 	# galhos: na fase final vão caindo um por um (e ficam no chão)
 	var nb: int = m.branches.size()
 	for i in nb:
@@ -766,6 +793,7 @@ func _build_dying(p: Array, v: int, xf: Transform3D, s: float, day: int) -> void
 			li.rotation.y = a
 			li.set_instance_shader_parameter("amount", amount)
 			root.add_child(li)
+	return root
 
 
 func _piece(parent: Node3D, mesh: Mesh, mat: Material) -> MeshInstance3D:
@@ -877,10 +905,14 @@ func cut_hits(p: Array) -> int:
 ## Uma machadada: aprofunda o corte do lado de onde o jogador está batendo.
 func add_cut(p: Array, from: Vector3) -> int:
 	var k := _cut_key(p)
+	var first := not cuts.has(k)
 	var c: Array = cuts.get(k, [0, atan2(from.x, from.z)])
 	c[0] = int(c[0]) + 1
 	cuts[k] = c
-	_rebuild_cut(p)
+	if first:
+		_rebuild()          # sai do desenho em grupo e passa a ser desenhada sozinha
+	else:
+		_rebuild_cut(p)
 	return int(c[0])
 
 
@@ -888,74 +920,11 @@ func add_cut(p: Array, from: Vector3) -> int:
 func cut_point(p: Array) -> Vector3:
 	var c: Array = cuts.get(_cut_key(p), [0, 0.0])
 	var a := float(c[1])
-	var r := trunk_radius(p)
+	var info := _cut_info(p)
+	var r := trunk_radius(p) * (1.0 - float(info.get("depth", 0.0)) * 0.8)
 	var x := float(p[0]) + sin(a) * r
 	var z := float(p[1]) + cos(a) * r
 	return Vector3(x, _jogo.height_at(float(p[0]), float(p[1])) + CUT_H, z)
-
-
-## O corte: uma boca em "V" de madeira clara aberta no lado do tronco, que vai
-## ficando mais funda e mais larga a cada machadada.
-func _cut_node(p: Array) -> Node3D:
-	var c: Array = cuts.get(_cut_key(p), [0, 0.0])
-	var hits := int(c[0])
-	if hits <= 0:
-		return null
-	var prog := clampf(float(hits) / hits_to_fell(p), 0.0, 1.0)
-	var r := trunk_radius(p)
-	var a := float(c[1])
-	var root := Node3D.new()
-	root.position = Vector3(float(p[0]), _jogo.height_at(float(p[0]), float(p[1])) + CUT_H, float(p[1]))
-	root.rotation.y = a
-	var depth := r * (0.25 + 0.75 * prog)          # até onde a lâmina já entrou
-	var half_h := r * (0.18 + 0.35 * prog)         # altura da boca
-	var half_w := r * (0.55 + 0.4 * prog)          # largura da boca na casca
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var out := r * 1.02
-	var inner := r - depth
-	# boca: duas faces (de cima e de baixo) que se encontram no fundo do corte
-	var tl := Vector3(-half_w, half_h, out)
-	var tr := Vector3(half_w, half_h, out)
-	var bl := Vector3(-half_w, -half_h, out)
-	var br := Vector3(half_w, -half_h, out)
-	var dl := Vector3(-half_w * 0.75, 0, inner)
-	var dr := Vector3(half_w * 0.75, 0, inner)
-	var wood := Color(0.86, 0.72, 0.5)
-	var dark := Color(0.62, 0.48, 0.3)
-	var push := depth + 0.03     # o shader desenha a boca "na frente" da casca
-	for tri in [[tl, dl, tr, wood], [tr, dl, dr, wood], [bl, br, dl, dark], [br, dr, dl, dark],
-			[tl, bl, dl, dark.darkened(0.3)], [tr, dr, br, dark.darkened(0.3)]]:
-		st.set_color(tri[3])
-		st.set_uv(Vector2(push, r))
-		st.add_vertex(tri[0]); st.add_vertex(tri[1]); st.add_vertex(tri[2])
-	st.generate_normals()
-	var mi := MeshInstance3D.new()
-	mi.mesh = st.commit()
-	mi.material_override = _cut_mat
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	root.add_child(mi)
-	# lascas e serragem no chão em volta
-	if hits >= 2:
-		var chips := MeshInstance3D.new()
-		var pm := PlaneMesh.new()
-		pm.size = Vector2(0.5 + prog * 0.8, 0.4 + prog * 0.6)
-		chips.mesh = pm
-		chips.material_override = _chips_mat
-		chips.position = Vector3(0, -CUT_H + 0.03, r + 0.35)
-		root.add_child(chips)
-	return root
-
-
-func _rebuild_cut(p: Array) -> void:
-	var k := _cut_key(p)
-	if _cut_nodes.has(k) and is_instance_valid(_cut_nodes[k]):
-		_cut_nodes[k].free()
-	_cut_nodes.erase(k)
-	var n := _cut_node(p)
-	if n:
-		add_child(n)
-		_cut_nodes[k] = n
 
 
 ## Quantas machadadas para derrubar: muda sai com 2, árvore grande pede umas 14.
@@ -970,67 +939,263 @@ func fell_by_player(p: Array, away: Vector3) -> void:
 	var day := last_day
 	var h := height_of(p, day)
 	var v := int(p[4]) % VARIANTS
-	var s: float = h / float(_models[v].height)
+	var m: Dictionary = _models[v]
+	var s: float = h / float(m.height)
 	var x := float(p[0])
 	var z := float(p[1])
-	var y: float = _jogo.height_at(x, z) - 0.05
+	var y: float = _jogo.height_at(x, z) - 0.15
 	var rot := fmod(x * 12.9898 + z * 78.233, TAU)
 	away.y = 0.0
 	if away.length() < 0.01:
 		away = Vector3(1, 0, 0)
 	away = away.normalized()
-	# vira "caindo": some do desenho normal enquanto a animação roda
 	var alive := _alive_now(p, day)
-	# fica o toco: do chão até onde o machado bateu
-	var r_top := trunk_radius(p)
-	if r_top >= 0.04 and not (alive and h < SAPLING_MAX_H):
-		var mm: Dictionary = _models[v]
-		var r_base := s * float(mm.r0) * 1.5
-		stumps.append([x, z, day, r_top, maxf(r_base, r_top * 1.1), CUT_H * 0.92])
-	if alive and h >= SAPLING_MAX_H:
-		if p.size() < 9:
-			p.resize(9)
-		p[8] = 1   # caiu verde: as folhas secam aos poucos no chão
+	var small := alive and h < SAPLING_MAX_H
+	var c: Array = cuts.get(_cut_key(p), [1, atan2(-away.x, -away.z)])
+	if p.size() < 10:
+		p.resize(10)
+	p[8] = 1 if alive and not small else 0   # caiu verde: as folhas secam aos poucos no chão
 	p[5] = FALLEN
 	p[6] = day
 	p[7] = atan2(away.x, away.z)
+	var cut := {}
+	if not small:
+		p[9] = [int(c[0]), float(c[1])]
+		cut = _cut_from(p, p[9], s)
+		# fica o toco: a parte de baixo do tronco, do chão até o corte
+		stumps.append([x, z, day, v, s, cut])
+	cuts.erase(_cut_key(p))
 	_falling.append(p)
 	_rebuild()
+	# a parte de cima tomba girando em volta do corte
 	var pivot := Node3D.new()
-	pivot.position = Vector3(x, y, z)
 	add_child(pivot)
 	var tree := Node3D.new()
-	tree.basis = Basis(Vector3.UP, rot).scaled(Vector3(s, s, s))
 	pivot.add_child(tree)
-	var m: Dictionary = _models[v]
-	if h < SAPLING_MAX_H and alive:
+	var hinge0: Vector3
+	if small:
+		tree.basis = Basis(Vector3.UP, rot).scaled(Vector3(h, h, h))
 		_piece(tree, _sapling[0], _bark)
 		_piece(tree, _sapling[1], _leaves)
-		tree.basis = Basis(Vector3.UP, rot).scaled(Vector3(h, h, h))
-	elif alive:
-		_piece(tree, m.trunk, _bark)
-		_piece(tree, m.crown, _leaves)
+		hinge0 = Vector3(x, y + 0.1, z)
 	else:
-		_piece(tree, m.core, _bark_dead)
+		var bt := Basis(Vector3.UP, rot).scaled(Vector3(s, s, s))
+		var cut_pt := _axis_of(m, float(cut.h))
+		tree.basis = bt
+		tree.position = -(bt * cut_pt)
+		hinge0 = Vector3(x, y, z) + bt * cut_pt
+		_trunk_node(tree, _trunk_build(m, float(cut.h), float(m.H), cut, s, false, true), _bark if alive else _bark_dead)
 		for b in m.branches:
-			_piece(tree, b, _bark_dead)
+			_piece(tree, b, _bark if alive else _bark_dead)
+		if alive:
+			_piece(tree, m.crown, _leaves)
+	pivot.position = hinge0
 	var rest := _rest_pose(p, h)
 	var axis: Vector3 = rest[1]
 	var a_end: float = rest[2]
-	var y_end: float = rest[0].y
+	var hinge1: Vector3 = hinge0
+	if not small:
+		var lx := _log_xf(p, h, s, cut)
+		hinge1 = lx * _axis_of(m, float(cut.h))
+	else:
+		hinge1 = rest[0]
 	var tw := pivot.create_tween()
 	var fall := func(a: float) -> void:
 		pivot.basis = Basis(axis, a)
-		pivot.position.y = lerpf(y, y_end, clampf(a / a_end, 0.0, 1.0))
+		# no começo gira em cima do toco; perto do fim escorrega do toco para o chão
+		pivot.position = hinge0.lerp(hinge1, smoothstep(0.55, 1.0, clampf(a / a_end, 0.0, 1.0)))
 	var dur := clampf(1.2 + h * 0.09, 1.2, 3.2)
 	tw.tween_method(fall, 0.02, a_end, dur).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.tween_method(fall, a_end, a_end - 0.1, 0.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.tween_method(fall, a_end - 0.1, a_end, 0.22).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-	tw.tween_interval(0.6)
+	tw.tween_method(fall, a_end, a_end - 0.08, 0.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_method(fall, a_end - 0.08, a_end, 0.22).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.tween_interval(0.5)
 	tw.tween_callback(func():
 		_falling.erase(p)
 		pivot.queue_free()
 		_rebuild())
+
+
+# ================== TRONCO SOB MEDIDA (corte, toco e tora) ==================
+
+## Eixo do tronco do modelo (igual ao usado para gerar a árvore).
+static func _axis_of(m: Dictionary, h: float) -> Vector3:
+	var H := float(m.H)
+	var lean: Vector2 = m.lean
+	var t := h / H
+	return Vector3(lean.x * t * t + sin(h * 0.21) * 0.08, h, lean.y * t * t + cos(h * 0.17) * 0.08)
+
+
+static func _radius_of(m: Dictionary, h: float, a: float) -> float:
+	var H := float(m.H)
+	var r0 := float(m.r0)
+	var taper := lerpf(r0, r0 * 0.42, clampf(h / H, 0.0, 1.0))
+	var flare := 1.0 + 0.55 * exp(-h * 1.4)
+	var fin := pow(maxf(0.0, cos(a * 5 + float(m.fin_phase))), 8.0) * maxf(0.0, 1.0 - h / 1.8) * 1.1
+	return taper * flare + fin
+
+
+## Quanto a madeira já foi tirada (0 a 1 do raio) num ponto do tronco, pela boca do corte.
+static func _notch_at(cut: Dictionary, h: float, a: float) -> float:
+	if cut.is_empty() or float(cut.depth) <= 0.0:
+		return 0.0
+	var da := absf(wrapf(a - float(cut.ac), -PI, PI))
+	var side := 1.0 - smoothstep(float(cut.open) * 0.55, float(cut.open), da)
+	if side <= 0.0:
+		return 0.0
+	var dh := h - float(cut.h)
+	var prof := 0.0
+	if dh >= 0.0:
+		prof = 1.0 - dh / float(cut.up)           # face de cima: inclinada
+	else:
+		prof = 1.0 - (-dh) / float(cut.down)      # face de baixo: quase reta
+	if prof <= 0.0:
+		return 0.0
+	# machado de pedra: o corte sai torto e lascado
+	var hsh := absi(hash(Vector3i(int(cut.seed), int(a * 9.0), int(h * 40.0))))
+	var rough := 1.0 + ((hsh % 1000) / 1000.0 - 0.5) * 0.35
+	return clampf(float(cut.depth) * prof * side * rough, 0.0, 0.97)
+
+
+## Altura (no modelo) da ponta quebrada do corte em cada ângulo: do lado da boca
+## o corte é mais baixo e liso; do outro lado a madeira rachou e ficou com lascas.
+static func _break_at(cut: Dictionary, a: float, s: float) -> float:
+	var da := absf(wrapf(a - float(cut.ac), -PI, PI))
+	var hinge := smoothstep(0.6, PI, da)          # 0 na boca, 1 do lado oposto
+	var hsh := absi(hash(Vector2i(int(cut.seed), int(round(a * 40.0)))))
+	var spike := (hsh % 1000) / 1000.0
+	return (hinge * 0.07 + spike * spike * 0.08 * (0.3 + hinge)) / s
+
+
+## Monta um pedaço do tronco do modelo, de h0 até h1 (alturas do modelo), com a boca
+## do corte escavada e, se pedir, a ponta de cima/de baixo quebrada no corte.
+## Duas superfícies: 0 = casca (usa a textura), 1 = madeira (cor nos vértices).
+func _trunk_build(m: Dictionary, h0: float, h1: float, cut: Dictionary, s: float, broken_top := false, broken_bottom := false, wood_tint := Color(1, 1, 1)) -> ArrayMesh:
+	var SEG := 26
+	var hs: Array = []
+	var RINGS := 22
+	var H := float(m.H)
+	for ri in RINGS + 1:
+		var hh := H * pow(float(ri) / RINGS, 1.35)
+		if hh > h0 + 0.001 and hh < h1 - 0.001:
+			hs.append(hh)
+	if not cut.is_empty():
+		var lo := float(cut.h) - float(cut.down) * 1.3
+		var hi := float(cut.h) + float(cut.up) * 1.2
+		for k in 13:
+			var hh := lerpf(lo, hi, k / 12.0)
+			if hh > h0 + 0.001 and hh < h1 - 0.001:
+				hs.append(hh)
+	hs.append(h0)
+	hs.append(h1)
+	hs.sort()
+	var rings: Array = []
+	for hh in hs:
+		var ring := []
+		for si in SEG + 1:
+			var a := TAU * si / SEG
+			var y: float = hh
+			if broken_top and absf(hh - h1) < 0.0001:
+				y = h1 + _break_at(cut, a, s)
+			elif broken_bottom and absf(hh - h0) < 0.0001:
+				y = h0 + _break_at(cut, a, s)
+			var c := _axis_of(m, y)
+			var cut_frac := _notch_at(cut, y, a)
+			var r := _radius_of(m, y, a) * (1.0 - cut_frac)
+			ring.append([c + Vector3(cos(a) * r, 0, sin(a) * r), Vector2(float(si) / SEG * 2.0, y / 3.0), cut_frac, c])
+		rings.append(ring)
+	var bark := SurfaceTool.new()
+	bark.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var wood := SurfaceTool.new()
+	wood.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var light := Color(0.55, 0.41, 0.25) * wood_tint
+	var heart := Color(0.4, 0.27, 0.15) * wood_tint
+	var any_wood := false
+	for ri in rings.size() - 1:
+		for si in SEG:
+			var q := [rings[ri][si], rings[ri + 1][si], rings[ri][si + 1], rings[ri][si + 1], rings[ri + 1][si], rings[ri + 1][si + 1]]
+			var deep := maxf(maxf(q[0][2], q[1][2]), maxf(q[2][2], q[5][2]))
+			if deep > 0.06:
+				any_wood = true
+				for v in q:
+					var col := light.lerp(heart, clampf(float(v[2]) * 1.3, 0.0, 1.0))
+					col.a = 1.0
+					wood.set_color(col)
+					wood.add_vertex(v[0])
+			else:
+				for v in q:
+					var out: Vector3 = (v[0] - v[3])
+					out.y = 0.0
+					bark.set_normal(out.normalized() if out.length() > 0.0001 else Vector3.RIGHT)
+					bark.set_uv(v[1])
+					bark.add_vertex(v[0])
+	# pontas: madeira com os anéis (a de baixo do tronco inteiro fica enterrada)
+	for end in [[h1, true, broken_top], [h0, false, broken_bottom]]:
+		var hh: float = end[0]
+		if not end[1] and h0 <= 0.001:
+			continue
+		var ring: Array = rings[rings.size() - 1] if end[1] else rings[0]
+		var center: Vector3 = _axis_of(m, hh + (0.03 / s if end[2] else 0.0))
+		any_wood = true
+		for si in SEG:
+			var a0: Vector3 = ring[si][0]
+			var a1: Vector3 = ring[si + 1][0]
+			for k in 3:
+				var f0 := k / 3.0
+				var f1 := (k + 1) / 3.0
+				var col := light.lerp(heart, 0.5 - k * 0.15) if k < 2 else light
+				if end[2]:
+					col = col.darkened(0.08 * (si % 3))   # lascas
+				col.a = 1.0
+				wood.set_color(col)
+				var p00 := center.lerp(a0, f0)
+				var p01 := center.lerp(a0, f1)
+				var p10 := center.lerp(a1, f0)
+				var p11 := center.lerp(a1, f1)
+				if end[1]:
+					for v in [p00, p11, p01, p00, p10, p11]:
+						wood.add_vertex(v)
+				else:
+					for v in [p00, p01, p11, p00, p11, p10]:
+						wood.add_vertex(v)
+	bark.index()
+	var mesh := bark.commit()
+	if any_wood:
+		wood.generate_normals()
+		mesh = wood.commit(mesh)
+	return mesh
+
+
+func _trunk_node(parent: Node3D, mesh: ArrayMesh, bark_mat: Material) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.visibility_range_end = VIEW_DIST
+	mi.set_surface_override_material(0, bark_mat)
+	if mesh.get_surface_count() > 1:
+		mi.set_surface_override_material(1, _stump_top_mat)
+	parent.add_child(mi)
+	return mi
+
+
+## Dados do corte de uma árvore no espaço do modelo (para escavar o tronco).
+func _cut_info(p: Array) -> Dictionary:
+	var c: Array = cuts.get(_cut_key(p), [])
+	if c.is_empty():
+		var st_ = p[9] if p.size() > 9 else null
+		if st_ is Array:
+			c = st_
+		else:
+			return {}
+	var v := int(p[4]) % VARIANTS
+	var m: Dictionary = _models[v]
+	var h := height_of(p, last_day)
+	var s: float = h / float(m.height)
+	var rot := fmod(float(p[0]) * 12.9898 + float(p[1]) * 78.233, TAU)
+	var A := float(c[1])
+	var local := Basis(Vector3.UP, rot).inverse() * Vector3(sin(A), 0, cos(A))
+	var prog := clampf(float(c[0]) / hits_to_fell(p), 0.0, 1.0)
+	return {"h": CUT_H / s, "ac": atan2(local.z, local.x), "depth": 0.12 + 0.62 * prog,
+		"up": (0.1 + 0.16 * prog) / s, "down": 0.05 / s, "open": 0.85 + 0.55 * prog,
+		"seed": absi(hash(Vector2(float(p[0]), float(p[1])))) % 100000, "s": s}
 
 
 ## O jogador não atravessa os troncos: empurra a posição para fora.
@@ -1064,7 +1229,9 @@ func _make_materials() -> void:
 	_chips_mat = chm
 	var stm := StandardMaterial3D.new()
 	stm.vertex_color_use_as_albedo = true
+	stm.vertex_color_is_srgb = true
 	stm.roughness = 0.9
+	stm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_stump_top_mat = stm
 	# casca: cinza-amarronzada, com fissuras compridas no sentido do tronco
 	var bn := FastNoiseLite.new()
@@ -1099,6 +1266,10 @@ func _make_materials() -> void:
 	var dead: StandardMaterial3D = bark.duplicate()
 	dead.albedo_color = Color(0.62, 0.6, 0.58)
 	_bark_dead = dead
+	# tronco caído inteiro (que caiu sozinho): sem esconder o lado de dentro nas pontas
+	var lg: StandardMaterial3D = dead.duplicate()
+	lg.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_bark_log = lg
 
 	var sh := Shader.new()
 	sh.code = LEAF_SHADER
@@ -1442,6 +1613,8 @@ func _make_tree(seed_: int) -> Dictionary:
 	model.height = (model.crown as Mesh).get_aabb().end.y
 	model.r0 = r0
 	model.H = H
+	model.lean = lean
+	model.fin_phase = fin_phase
 	return model
 
 

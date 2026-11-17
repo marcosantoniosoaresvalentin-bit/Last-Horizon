@@ -1313,8 +1313,6 @@ func _start_chop() -> void:
 	_chop_tree = t
 	_chopping = true
 	_swing_queued = false
-	_dig_bar.visible = true
-	_dig_bar.value = float(_arvores.cut_hits(t)) / _arvores.hits_to_fell(t) * 100.0
 	_play("Idle", 0.5)
 	if _chop_pose:
 		_chop_pose.ready_pose = true
@@ -1338,7 +1336,6 @@ func _chop_hit() -> void:
 	var from := Vector3(_player.position.x - float(t[0]), 0, _player.position.z - float(t[1]))
 	var hits: int = _arvores.add_cut(t, from)
 	var need: int = _arvores.hits_to_fell(t)
-	_dig_bar.value = float(hits) / need * 100.0
 	_chips(_arvores.cut_point(t))
 	if hits >= need:
 		_finish_chop()
@@ -1375,7 +1372,6 @@ func _cancel_chop() -> void:
 	_swing_on = false
 	_swing_queued = false
 	_chop_tree = null
-	_dig_bar.visible = false
 	if _chop_pose:
 		_chop_pose.swinging = false
 		_chop_pose.ready_pose = false

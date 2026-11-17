@@ -1,9 +1,9 @@
 {
-  "version": 36,
-  "file": "update_36.zip",
-  "size": 3088195,
-  "sha256": "e4fc6de4517179a8e5d9b2a6928aa674952aac6e63cfb0bf9a25e3f1c54023c7",
+  "version": 37,
+  "file": "update_37.zip",
+  "size": 3090110,
+  "sha256": "9717d48640aaf28bf4236c40cc431da8a378e37c6cf7990cc03788f14adeb510",
   "min_build": 1,
-  "notes": "Toco da árvore cortada (apodrece em 2,5 a 4 anos e some); machado de pedra novo com cabo de galho e amarração de cipó; mão direita quase na ponta do cabo e a esquerda na ponta no golpe; fio para baixo ao carregar",
+  "notes": "Corte de árvore refeito: mãos fechadas no cabo (dedos e polegar), a machadada escava o tronco, cai só a parte de cima e fica o toco com raiz e ponta lascada; tronco caído sem buraco; sem barrinha na tela",
   "date": "2026-11-17"
 }
