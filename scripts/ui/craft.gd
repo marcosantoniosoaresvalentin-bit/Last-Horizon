@@ -245,22 +245,27 @@ func _build() -> void:
 	dmc.add_child(dv)
 	_detail = dv
 	_d_name = _label("", 32)
+	_d_name.clip_text = true
+	_d_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	dv.add_child(_d_name)
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 14)
 	dv.add_child(top)
 	_d_icon = ItemIcon.new()
 	_d_icon.custom_minimum_size = Vector2(130, 110)
+	top.custom_minimum_size = Vector2(0, 140)
+	top.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	top.add_child(_d_icon)
 	var tv := VBoxContainer.new()
 	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	tv.alignment = BoxContainer.ALIGNMENT_CENTER
 	top.add_child(tv)
 	_d_desc = _label("", 19, C_TEXT, false)
-	_d_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_fixed(_d_desc, 3, 84)
 	tv.add_child(_d_desc)
 	_peso = _label("", 18, C_DIM, false)
-	_peso.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_fixed(_peso, 2, 58)
+	_peso.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	tv.add_child(_peso)
 	var line := ColorRect.new()
 	line.color = C_LINE
@@ -286,6 +291,7 @@ func _build() -> void:
 		slot.custom_minimum_size = Vector2(70, 62)
 		slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		slot.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		slot.clip_contents = true
 		slot.add_theme_stylebox_override("panel", Mochila._box(Color(0.03, 0.03, 0.03, 0.75), Color(1, 1, 1, 0.22), 2, 6))
 		var ic := ItemIcon.new()
 		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -293,6 +299,7 @@ func _build() -> void:
 		var q := _label("", 18)
 		q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		q.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+		q.clip_text = true
 		q.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 		q.add_theme_constant_override("outline_size", 4)
 		slot.add_child(q)
@@ -349,7 +356,7 @@ func _build() -> void:
 	bottom.add_child(_craft_btn)
 	_msg = _label("", 18, C_DIM, false)
 	_msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_fixed(_msg, 1, 28)
 	dv.add_child(_msg)
 
 	# ---------- voltar ----------
@@ -401,6 +408,16 @@ func _pick_cat(c: String) -> void:
 	_refresh()
 
 
+func _fixed(l: Label, lines: int, h: float) -> void:
+	# tamanho fixo: o texto quebra até "lines" linhas e o resto é cortado com "…"
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.max_lines_visible = lines
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.clip_text = true
+	l.custom_minimum_size = Vector2(10, h)
+	l.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+
+
 func _fill_list() -> void:
 	for c in _list.get_children():
 		c.queue_free()
@@ -431,9 +448,13 @@ func _fill_list() -> void:
 		tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tv.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		h.add_child(tv)
-		tv.add_child(_label(Itens.nome(r.id), 23))
+		var nm := _label(Itens.nome(r.id), 23)
+		nm.clip_text = true
+		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		tv.add_child(nm)
 		var d := _label("%s kg · %s" % [Itens.kg_txt(Itens.kg(r.id)), _short(r.id)], 16, C_DIM, false)
-		d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		d.clip_text = true
+		d.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		tv.add_child(d)
 		b.pressed.connect(func():
 			_sel = i
@@ -516,12 +537,12 @@ func _refresh() -> void:
 	# peso: quanto o item pesa e se vai caber na mochila (o que não couber vai para o chão)
 	var each := Itens.kg(id)
 	var after := total - (used_kg if ok else 0.0) + each * made
-	var txt := "Peso: %s kg cada · %d = %s kg" % [Itens.kg_txt(each), made, Itens.kg_txt(each * made)]
+	var txt := "Peso: %s kg" % Itens.kg_txt(each * made)
 	if after <= cap + 0.0001:
-		_peso.text = txt + "\nCabe na mochila (fica com %s / %d kg)" % [Itens.kg_txt(after), int(cap)]
+		_peso.text = txt + " · cabe na mochila (fica %s / %d kg)" % [Itens.kg_txt(after), int(cap)]
 		_peso.add_theme_color_override("font_color", C_GREEN)
 	else:
-		_peso.text = txt + "\nNão cabe na mochila: o que sobrar vai cair no chão"
+		_peso.text = txt + " · não cabe: o que sobrar cai no chão"
 		_peso.add_theme_color_override("font_color", C_ORANGE)
 	_craft_btn.disabled = not ok
 	if ok:

@@ -1,9 +1,9 @@
 {
-  "version": 62,
-  "file": "update_62.zip",
-  "size": 3477036,
-  "sha256": "07ab907ac2db6a0f798e868d17c17d8bb8017b9b375f9e5bf5b84575c6d7f1d0",
+  "version": 63,
+  "file": "update_63.zip",
+  "size": 3477253,
+  "sha256": "51883a8263ee98c269b6447d9562dcfe1c27d370e18ce3d9a289403548f00849",
   "min_build": 1,
-  "notes": "Serra sempre no lugar do corte, atravessada na tora",
+  "notes": "Craft com tamanho fixo: selecionar uma receita não muda mais o tamanho da tela",
   "date": "2026-11-17"
 }
