@@ -96,6 +96,76 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				pts.append(c + Vector2(lerpf(-40, 40, t), sin(t * TAU * 2.0) * 16.0 + (t - 0.5) * 20.0) * u)
 			ci.draw_polyline(pts, Color(0.36, 0.42, 0.17), 6.0 * u, true)
 			ci.draw_polyline(pts, Color(0.5, 0.56, 0.25), 2.0 * u, true)
+		"cipo_trancado":
+			# trança de 3 raízes de titica (zigue-zague cruzado) com as pontas amarradas
+			for k in 2:
+				var pts := PackedVector2Array()
+				for i in 41:
+					var t := i / 40.0
+					var x := lerpf(-42, 42, t)
+					var y := sin(t * TAU * 3.0 + k * PI) * 9.0 + (t - 0.5) * -40.0
+					pts.append(c + Vector2(x, y) * u)
+				ci.draw_polyline(pts, Color(0.42, 0.33, 0.18).darkened(k * 0.18), 8.0 * u, true)
+				ci.draw_polyline(pts, Color(0.66, 0.54, 0.32).darkened(k * 0.18), 3.0 * u, true)
+			for e in [Vector2(-42, 20), Vector2(42, -20)]:
+				ci.draw_circle(c + e * u, 7.0 * u, Color(0.3, 0.36, 0.14))
+		"rodela":
+			# fatia redonda de tora: casca em volta, madeira clara e os anéis
+			ci.draw_circle(c + Vector2(4, 6) * u, 40.0 * u, Color(0.3, 0.22, 0.14))
+			ci.draw_circle(c, 40.0 * u, Color(0.38, 0.27, 0.16))
+			ci.draw_circle(c, 33.0 * u, Color(0.78, 0.63, 0.42))
+			for r in [26.0, 19.0, 12.0, 6.0]:
+				ci.draw_arc(c + Vector2(1, 1) * u, r * u, 0, TAU, 32, Color(0.62, 0.46, 0.28), 1.8 * u, true)
+			ci.draw_line(c + Vector2(2, 0) * u, c + Vector2(28, 14) * u, Color(0.45, 0.32, 0.2), 1.6 * u, true)
+			ci.draw_arc(c, 40.0 * u, 0, TAU, 40, ink, 2.0 * u, true)
+		"ripa":
+			# tábua fina e comprida, com veios
+			var rp: PackedVector2Array = P.call([[-44, 22], [-36, 34], [44, -22], [36, -34]])
+			ci.draw_colored_polygon(rp, Color(0.7, 0.54, 0.34))
+			ci.draw_colored_polygon(P.call([[-44, 22], [-36, 34], [-32, 32], [-40, 20]]), Color(0.86, 0.72, 0.5))
+			for k in 3:
+				var o := -5.0 + k * 5.0
+				ci.draw_line(c + Vector2(-36 + o, 26 + o * 0.2) * u, c + Vector2(36 + o, -26 + o * 0.2) * u, Color(0.55, 0.4, 0.24), 1.2 * u, true)
+			ci.draw_polyline(rp + PackedVector2Array([rp[0]]), ink, 2.0 * u, true)
+		"balde":
+			balde(ci, c, s)
 		_:
 			return false
 	return true
+
+
+## Balde de ripas com aros de cipó e alça de cipó trançado.
+static func balde(ci: CanvasItem, c: Vector2, s: float) -> void:
+	var u := s / 100.0
+	var ink := Color(0.12, 0.08, 0.05)
+	var P := func(arr: Array) -> PackedVector2Array:
+		var out := PackedVector2Array()
+		for p in arr:
+			out.append(c + Vector2(p[0], p[1]) * u)
+		return out
+	# alça (cipó trançado) por trás
+	var arc := PackedVector2Array()
+	for i in 25:
+		var a := PI + PI * i / 24.0
+		arc.append(c + Vector2(cos(a) * 30.0, -18.0 + sin(a) * 34.0) * u)
+	ci.draw_polyline(arc, Color(0.36, 0.28, 0.15), 6.0 * u, true)
+	for i in range(0, 24, 2):
+		ci.draw_line(arc[i], arc[i + 1], Color(0.62, 0.5, 0.3), 2.5 * u, true)
+	# corpo de ripas (um pouco mais largo em cima)
+	var body: PackedVector2Array = P.call([[-34, -18], [34, -18], [29, 42], [-29, 42]])
+	ci.draw_colored_polygon(body, Color(0.46, 0.36, 0.25))
+	for k in 7:
+		var t := (k + 1) / 8.0
+		ci.draw_line(c + Vector2(lerpf(-34, 34, t), -18) * u, c + Vector2(lerpf(-29, 29, t), 42) * u, Color(0.3, 0.23, 0.15), 1.5 * u, true)
+	# boca (elipse escura) e as duas ripas altas com o furo da alça
+	ci.draw_colored_polygon(P.call([[-34, -18], [-20, -24], [20, -24], [34, -18], [20, -13], [-20, -13]]), Color(0.2, 0.15, 0.1))
+	for sx in [-1.0, 1.0]:
+		var ear: PackedVector2Array = P.call([[30 * sx, -32], [38 * sx, -32], [38 * sx, -10], [30 * sx, -10]])
+		ci.draw_colored_polygon(ear, Color(0.44, 0.34, 0.23))
+		ci.draw_polyline(ear + PackedVector2Array([ear[0]]), ink, 1.5 * u, true)
+		ci.draw_circle(c + Vector2(34 * sx, -25) * u, 2.2 * u, Color(0.1, 0.07, 0.05))
+	# aros de cipó: dois em cima, dois no meio, dois embaixo
+	for y in [-12.0, -6.0, 12.0, 18.0, 32.0, 37.0]:
+		var hw := lerpf(34.0, 29.0, (y + 18.0) / 60.0)
+		ci.draw_line(c + Vector2(-hw - 1, y) * u, c + Vector2(hw + 1, y + 1.5) * u, Color(0.78, 0.62, 0.4), 3.6 * u, true)
+	ci.draw_polyline(body + PackedVector2Array([body[0]]), ink, 2.0 * u, true)

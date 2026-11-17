@@ -19,6 +19,7 @@ const Buracos := preload("res://scripts/world/buracos.gd")
 const Sons := preload("res://scripts/sons.gd")
 const Galhos := preload("res://scripts/world/galhos.gd")
 const Apoios := preload("res://scripts/world/apoios.gd")
+const Balde := preload("res://scripts/world/balde.gd")
 ## Onda na água: um anel que abre e some (passos dentro d'água).
 const RIPPLE_SHADER := """
 shader_type spatial;
@@ -323,6 +324,13 @@ var _galhos: Node3D = null
 var _apoios: Node3D = null
 var _ctx_btn: Button
 var _ctx_action := ""
+var _work_btn: Button             # "Trabalhar" na tora apoiada nas forquilhas
+var _work_menu: Control = null
+var _work := {}                   # trabalho escolhido: {i (tora apoiada), modo, e (ponta), stage, fix}
+var _walking := false             # o personagem indo sozinho até um lugar
+var _walk_target := Vector3.ZERO
+var _walk_t := 0.0
+var _walk_next := ""
 var _chop_branch := {}           # cortando um galho (da árvore caída ou do chão)
 var _branch_hits := 0
 var _plant_btn: Button
@@ -481,6 +489,19 @@ func _build_hud() -> void:
 	_ctx_btn.visible = false
 	_ctx_btn.pressed.connect(_ctx_press)
 	_hud.add_child(_ctx_btn)
+
+	# "Trabalhar": no meio da tela, perto da tora apoiada nas forquilhas
+	_work_btn = Icones.IconButton.new()
+	_work_btn.text = "Trabalhar"
+	_work_btn.add_theme_font_size_override("font_size", 22)
+	_work_btn.set_anchors_preset(Control.PRESET_CENTER)
+	_work_btn.offset_left = -70
+	_work_btn.offset_right = 70
+	_work_btn.offset_top = 70
+	_work_btn.offset_bottom = 210
+	_work_btn.visible = false
+	_work_btn.pressed.connect(_open_work_menu)
+	_hud.add_child(_work_btn)
 
 	_plant_btn = Icones.IconButton.new()
 	_plant_btn.text = "Fincar tora"
@@ -1130,7 +1151,7 @@ func _save_player() -> void:
 	var p := _player.position
 	var chao := []
 	for g in _chao:
-		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z})
+		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0)})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
 		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
@@ -1161,7 +1182,7 @@ func _load_player() -> void:
 	if d.has("chao") and d.chao is Array:
 		for g in d.chao:
 			if g is Dictionary and Itens.ITENS.has(str(g.get("id", ""))):
-				_add_ground(str(g.id), int(g.get("qtd", 1)), float(g.get("x", 0.0)), float(g.get("z", 0.0)))
+				_add_ground(str(g.id), int(g.get("qtd", 1)), float(g.get("x", 0.0)), float(g.get("z", 0.0)), float(g.get("r", 0.0)))
 	equip(str(d.get("mao", "")))
 	var tora = d.get("tora", {})
 	if tora is Dictionary and tora.has("v"):
@@ -1239,10 +1260,23 @@ func drop_item(id: String, qtd: int, from_bag := true) -> void:
 	_add_ground(id, qtd, pos.x, pos.z)
 
 
-func _add_ground(id: String, qtd: int, x: float, z: float) -> void:
+func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0) -> void:
 	var node := Node3D.new()
 	add_child(node)
-	if id == "machado":
+	if id == "rodela":
+		if r <= 0.0:
+			r = 0.16
+		var mi := MeshInstance3D.new()
+		mi.mesh = Balde.rodela_mesh(r, Apoios.SLICE)
+		mi.material_override = Balde.material()
+		mi.position.y = Apoios.SLICE * 0.5
+		node.add_child(mi)
+	elif id == "balde":
+		var mi := MeshInstance3D.new()
+		mi.mesh = Balde.mesh()
+		mi.material_override = Balde.material()
+		node.add_child(mi)
+	elif id == "machado":
 		var mi := MeshInstance3D.new()
 		mi.mesh = Corte.axe_mesh()
 		mi.material_override = Corte.axe_material()
@@ -1260,7 +1294,7 @@ func _add_ground(id: String, qtd: int, x: float, z: float) -> void:
 		mi.position.y = 0.06
 		node.add_child(mi)
 	node.position = Vector3(x, height_at(x, z), z)
-	_chao.append({"id": id, "qtd": qtd, "x": x, "z": z, "node": node})
+	_chao.append({"id": id, "qtd": qtd, "x": x, "z": z, "node": node, "r": r})
 
 
 func _nearest_ground(r: float) -> int:
@@ -1275,9 +1309,23 @@ func _nearest_ground(r: float) -> int:
 	return best
 
 
+## Pegar o item do chão: o personagem se abaixa e pega.
 func _pick_ground() -> void:
+	if _crouch_job != "" or _chopping or not _carry.is_empty():
+		return
 	var i := _nearest_ground(1.8)
 	if i < 0:
+		return
+	var g: Dictionary = _chao[i]
+	_face_to(Vector3(float(g.x), 0, float(g.z)))
+	_crouch_target = {"chao": i}
+	_crouch_job = "chao"
+	_crouch_t = 0.0
+	_pick_btn.visible = false
+
+
+func _pick_ground_now(i: int) -> void:
+	if i < 0 or i >= _chao.size():
 		return
 	var g: Dictionary = _chao[i]
 	var kg := Itens.kg(str(g.id))
@@ -1481,12 +1529,20 @@ func _update_chop(delta: float) -> void:
 	var gi := _nearest_ground(1.8)
 	_pick_btn.visible = gi >= 0
 	if gi >= 0:
-		_pick_btn.text = "Pegar %s" % Itens.nome(str(_chao[gi].id)).to_lower()
+		_pick_btn.text = "Pegar %s" % Itens.nome(str(_chao[gi].id)).to_lower().split(" de ")[0]
 	_chop_btn.visible = false
 	_update_log_btn()
 	if _mao == "cavadeira" and not _digging and not _air and _carry.is_empty() and _crouch_job == "" and _player_depth() < 0.3:
 		_chop_btn.visible = true
 		_chop_btn.text = "Cavar"
+	if not _work.is_empty() and str(_work.get("stage", "")) == "pronto":
+		var sp: Vector3 = _apoios.slice_point(int(_work.i), int(_work.e)) if int(_work.i) < _apoios.rested.size() else Vector3(1e9, 0, 1e9)
+		if Vector2(sp.x - _player.position.x, sp.z - _player.position.z).length() > 3.0:
+			_work = {}      # foi embora: sai do modo de cortar rodela
+		elif _mao == "machado" and _crouch_job == "" and not _air:
+			_chop_btn.visible = true
+			_chop_btn.text = "Cortar rodela"
+			return
 	if _mao == "machado" and _arvores != null and not _digging and not _air and _carry.is_empty() and _crouch_job == "":
 		if _arvores.nearest_standing(_player.position, 1.3) != null:
 			_chop_btn.visible = true
@@ -1573,6 +1629,8 @@ func _update_log_btn() -> void:
 	if _arvores == null:
 		return
 	_update_ctx_btn()
+	_work_btn.visible = _apoios != null and _carry.is_empty() and _crouch_job == "" and not _chopping and not _walking \
+		and _work.is_empty() and _work_menu == null and _apoios.nearest_rested(_player.position, 1.6) >= 0
 	_vine_btn.visible = _cipos != null and _carry.is_empty() and _crouch_job == "" and not _chopping and not _cipos.harvest_target(_player.position, 1.6).is_empty()
 	if _crouch_job != "" or _chopping or _air:
 		_log_btn.visible = false
@@ -1664,7 +1722,15 @@ func _update_crouch(delta: float) -> void:
 			_chop_pose.log_node = null
 			_show_toast("Tora apoiada nas forquilhas")
 		elif _crouch_job == "tora_apoiada":
+			_work = {}
 			_hold_log(_apoios.take_rested(int(_crouch_target.apoiada)))
+		elif _crouch_job == "mover_forquilha":
+			if not _work.is_empty() and _work.has("fix") and int(_work.i) < _apoios.rested.size():
+				var fx: Dictionary = _work.fix
+				_apoios.move_fork(int(_work.i), int(fx.fork), fx.to)
+				Sons.play_at(self, "baque", fx.to + Vector3(0, height_at(fx.to.x, fx.to.z), 0), -8.0)
+		elif _crouch_job == "chao":
+			_pick_ground_now(int(_crouch_target.chao))
 		elif _crouch_job == "fincar":
 			_buracos.plant(int(_crouch_target.buraco), _carry, _face)
 			Sons.play_at(self, "baque", _player.position)
@@ -1689,9 +1755,17 @@ func _update_crouch(delta: float) -> void:
 			_carry_node = null
 			_chop_pose.log_node = null
 	if _crouch_t >= T:
+		var job := _crouch_job
 		_crouch_job = ""
 		_chop_pose.crouch = 0.0
 		_act_check = 0.0
+		if job == "mover_forquilha" and not _work.is_empty():
+			# forquilha no lugar: agora vai para a ponta da tora cortar a rodela
+			var e: int = _apoios.slice_side(int(_work.i), _player.position)
+			if e == 0:
+				_work = {}
+			else:
+				_rodela_go(e)
 
 
 ## Um passo: som no chão ou na água; na água abre uma onda em volta do pé.
@@ -1795,6 +1869,167 @@ func _branch_target() -> Dictionary:
 	return {}
 
 
+# ================== TRABALHAR NA TORA APOIADA ==================
+
+func _open_work_menu() -> void:
+	if _work_menu != null or _apoios == null or _apoios.nearest_rested(_player.position, 1.8) < 0:
+		return
+	_joy_id = -1
+	_joy_vec = Vector2.ZERO
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0, 0, 0, 0.45)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_hud.add_child(dim)
+	_work_menu = dim
+	var panel := PanelContainer.new()
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	panel.add_theme_stylebox_override("panel", Mochila._box(Color(0.06, 0.06, 0.05, 0.94), Color(0.85, 0.7, 0.45, 0.6), 2, 10))
+	dim.add_child(panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	panel.add_child(v)
+	var title := Label.new()
+	title.text = "TRABALHAR NA TORA"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", Color(0.96, 0.9, 0.78))
+	v.add_child(title)
+	var sub := Label.new()
+	sub.text = "Escolha o que fazer"
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.add_theme_font_size_override("font_size", 18)
+	sub.add_theme_color_override("font_color", Color(0.75, 0.72, 0.65))
+	v.add_child(sub)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 18)
+	v.add_child(row)
+	for opt in [["Cortar rodela", "rodela", "Uma fatia fina da ponta da tora.\nÉ o fundo do balde."]]:
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 6)
+		row.add_child(col)
+		var b := Icones.IconButton.new()
+		b.text = opt[0]
+		b.custom_minimum_size = Vector2(190, 190)
+		b.add_theme_font_size_override("font_size", 22)
+		var modo: String = opt[1]
+		b.pressed.connect(func(): _work_choose(modo))
+		col.add_child(b)
+		var d := Label.new()
+		d.text = opt[2]
+		d.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		d.add_theme_font_size_override("font_size", 16)
+		d.add_theme_color_override("font_color", Color(0.8, 0.77, 0.7))
+		col.add_child(d)
+	var close := Button.new()
+	close.text = "FECHAR"
+	close.custom_minimum_size = Vector2(0, 56)
+	close.add_theme_font_size_override("font_size", 20)
+	close.pressed.connect(_close_work_menu)
+	v.add_child(close)
+
+
+func _close_work_menu() -> void:
+	if _work_menu != null:
+		_work_menu.queue_free()
+	_work_menu = null
+	_act_check = 0.0
+
+
+## Escolheu o trabalho: pega o machado na mão e vai para a ponta da tora.
+## Se nenhuma ponta passa o bastante da forquilha, primeiro muda a forquilha de lugar.
+func _work_choose(modo: String) -> void:
+	_close_work_menu()
+	var i: int = _apoios.nearest_rested(_player.position, 1.8)
+	if i < 0:
+		return
+	if item_qtd("machado") <= 0:
+		_show_toast("Precisa de um machado para cortar a rodela.")
+		return
+	if _mao != "machado":
+		equip("machado")
+	_work = {"i": i, "modo": modo, "stage": "indo"}
+	var e: int = _apoios.slice_side(i, _player.position)
+	if e != 0:
+		_rodela_go(e)
+		return
+	var fx: Dictionary = _apoios.fix_plan(i, _player.position)
+	if fx.is_empty():
+		_work = {}
+		_show_toast("Essa tora ficou curta demais para tirar rodela.")
+		return
+	_work.fix = fx
+	var f: Dictionary = _apoios.forks[int(fx.fork)]
+	var fpos := Vector3(float(f.x), 0, float(f.z))
+	var to: Vector3 = fx.to
+	var mid := (fpos + to) * 0.5
+	_work.look = mid
+	_walk_to(_side_spot(i, mid, 0.8), "forquilha")
+
+
+func _rodela_go(e: int) -> void:
+	var i := int(_work.i)
+	_work.e = e
+	_work.erase("fix")
+	var sp: Vector3 = _apoios.slice_point(i, e)
+	_work.look = sp
+	_walk_to(_side_spot(i, sp, float(_apoios.info(i).rad) + 0.5), "rodela")
+
+
+## Lugar do lado da tora (do lado em que o jogador está), na altura do ponto "at".
+func _side_spot(i: int, at: Vector3, dist: float) -> Vector3:
+	var dir: Vector3 = _apoios.info(i).dir
+	var n := Vector3(-dir.z, 0, dir.x).normalized()
+	if Vector3(_player.position.x - at.x, 0, _player.position.z - at.z).dot(n) < 0.0:
+		n = -n
+	return Vector3(at.x, 0, at.z) + n * dist
+
+
+func _walk_to(target: Vector3, next: String) -> void:
+	_walk_target = target
+	_walk_next = next
+	_walk_t = 0.0
+	_walking = true
+
+
+func _walk_arrived() -> void:
+	if _work.is_empty():
+		return
+	var look: Vector3 = _work.get("look", _player.position)
+	_face_to(look)
+	match _walk_next:
+		"forquilha":
+			_crouch_target = {}
+			_crouch_job = "mover_forquilha"
+			_crouch_t = 0.0
+		"rodela":
+			_work.stage = "pronto"
+			_act_check = 0.0
+	_walk_next = ""
+
+
+## A rodela solta da ponta e cai no chão (gira de em pé para deitada).
+func _drop_rodela(at: Vector3, out: Vector3, r: float) -> void:
+	var land := at + Vector3(out.x, 0, out.z).normalized() * 0.3
+	_add_ground("rodela", 1, land.x, land.z, r)
+	var g: Dictionary = _chao[_chao.size() - 1]
+	var node: Node3D = g.node
+	var end_pos := node.position
+	var q0 := Quaternion(Vector3.UP, out.normalized())
+	var q1 := Quaternion(Vector3.UP, randf() * TAU)
+	var tw := node.create_tween()
+	tw.tween_method(func(t: float) -> void:
+		var arc := Vector3(0, sin(t * PI) * 0.12, 0)
+		node.position = at.lerp(end_pos, t) + arc
+		node.basis = Basis(q0.slerp(q1, smoothstep(0.0, 1.0, t))), 0.0, 1.0, 0.45).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.tween_callback(func(): Sons.play_at(self, "baque", end_pos, -10.0, 1.4))
+	node.position = at
+	node.basis = Basis(q0)
+
+
 ## Pulo: sobe uns 60 cm (dá para passar por cima de uma tora ou subir nela).
 func _jump() -> void:
 	if _air or _chopping or _digging or not _carry.is_empty() or _crouch_job != "":
@@ -1825,6 +2060,26 @@ func _start_chop() -> void:
 		if _chop_pose:
 			_chop_pose.digging = true
 			_chop_pose.vertical = false
+			_chop_pose.ready_pose = true
+		_begin_swing()
+		return
+	if not _work.is_empty() and str(_work.get("stage", "")) == "pronto" and _mao == "machado":
+		var wi := int(_work.i)
+		var we := int(_work.e)
+		var inf: Dictionary = _apoios.info(wi)
+		var sp: Vector3 = _apoios.slice_point(wi, we)
+		if _digging:
+			_cancel_dig()
+		_chop_tree = null
+		_chop_branch = {}
+		_chop_log = {"rodela": true, "axis": sp, "along": inf.dir, "r": inf.rad, "dist": float(inf.rad) + 0.5,
+			"point": sp + Vector3.UP * float(inf.rad) * 0.9}
+		_chopping = true
+		_swing_queued = false
+		_play("Idle", 0.5)
+		if _chop_pose:
+			_chop_pose.vertical = true
+			_chop_pose.down_hit = 8.0       # tora na altura da cintura
 			_chop_pose.ready_pose = true
 		_begin_swing()
 		return
@@ -1893,6 +2148,24 @@ func _chop_hit() -> void:
 		_dirt(at)
 		Sons.play_at(self, "cavar", at)
 		_show_toast("Buraco com %d cm de fundura" % int(round(d * 100.0)) if d < Buracos.MAX_DEPTH else "O buraco já está bem fundo (80 cm)")
+		return
+	if _chop_log.has("rodela"):
+		var wi := int(_work.get("i", -1))
+		var we := int(_work.get("e", 0))
+		var at: Vector3 = _chop_log.point
+		_chips(at)
+		Sons.play_at(self, "machado", at, -1.0, 1.05)
+		if wi < 0 or wi >= _apoios.rested.size() or we == 0:
+			_cancel_chop()
+			return
+		var end_before: Vector3 = _apoios.end_point(wi, we)
+		var dir: Vector3 = _apoios.info(wi).dir
+		var rad: float = _apoios.slice_hit(wi, we)
+		if rad > 0.0:
+			_drop_rodela(end_before - dir * float(we) * Apoios.SLICE * 0.5, dir * float(we), rad)
+			_cancel_chop()
+			_work = {}
+			_show_toast("A rodela caiu no chão. Pegue ela!")
 		return
 	if not _chop_log.is_empty():
 		var lp: Array = _chop_log.p
@@ -1976,6 +2249,7 @@ func _cancel_chop() -> void:
 	if _chop_pose:
 		_chop_pose.digging = false
 		_chop_pose.vertical = false
+		_chop_pose.down_hit = -42.0
 		_chop_pose.swinging = false
 		_chop_pose.ready_pose = false
 	_act_check = 0.0
@@ -2062,8 +2336,11 @@ func _move_player(delta: float) -> void:
 			amount = 0.0
 	if _crouch_job != "":
 		amount = 0.0           # abaixado pegando ou largando a tora
+	if _walking and amount > 0.12:
+		_walking = false       # o jogador mexeu no controle: para de ir sozinho
+		_work = {}
 	if _chop_pose:
-		_chop_pose.moving = amount > 0.12
+		_chop_pose.moving = amount > 0.12 or _walking
 	var p := _player.position
 	var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
 	var depth := 0.0
@@ -2084,6 +2361,20 @@ func _move_player(delta: float) -> void:
 		p.z = clampf(p.z, 1.0, MundoSim.H * CELL - 1.0)
 		_face = lerp_angle(_face, atan2(-move.x, -move.z), minf(1.0, delta * 10.0))
 		_play("Run" if running else "Walk", water_slow)
+	elif _walking and not _chopping and _crouch_job == "":
+		# indo sozinho até o lugar do trabalho (a forquilha ou a ponta da tora)
+		var to := Vector2(_walk_target.x - p.x, _walk_target.z - p.z)
+		_walk_t += delta
+		if to.length() < 0.08 or _walk_t > 6.0:
+			_walking = false
+			_play("Idle")
+			_walk_arrived()
+		else:
+			var stp := minf(to.length(), WALK_SPEED * 0.8 * delta)
+			p.x += to.x / to.length() * stp
+			p.z += to.y / to.length() * stp
+			_face = lerp_angle(_face, atan2(-to.x, -to.y), minf(1.0, delta * 10.0))
+			_play("Walk", 0.8)
 	elif not _digging:
 		_play("Idle")
 	if _chopping and not _chop_branch.is_empty():
@@ -2102,7 +2393,7 @@ func _move_player(delta: float) -> void:
 		var side := rel - Vector3(al.x, 0, al.z).normalized() * rel.dot(Vector3(al.x, 0, al.z).normalized())
 		if side.length() < 0.05:
 			side = Vector3(al.z, 0, -al.x)
-		var want_pos := axp + side.normalized() * (float(_chop_log.r) + 0.42)
+		var want_pos := axp + side.normalized() * float(_chop_log.get("dist", float(_chop_log.r) + 0.42))
 		var mv := Vector2(want_pos.x - p.x, want_pos.z - p.z)
 		if mv.length() > 0.04:
 			var stp := minf(mv.length(), delta * 1.5)
@@ -2211,13 +2502,13 @@ func _open_calendar() -> void:
 
 
 func _input(e: InputEvent) -> void:
-	if _cal != null or _bag_ui != null or _craft_ui != null:
+	if _cal != null or _bag_ui != null or _craft_ui != null or _work_menu != null:
 		return   # com o calendário, a mochila ou o craft aberto, o toque não anda nem gira a câmera
 	var half := get_viewport().get_visible_rect().size.x * 0.5
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn]:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn]:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:

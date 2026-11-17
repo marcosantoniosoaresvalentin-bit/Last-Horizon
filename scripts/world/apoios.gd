@@ -6,9 +6,14 @@ extends Node3D
 ## deitada na altura da cintura: é ali que a madeira vai ser trabalhada.
 
 const TOP := 0.62                # altura do cruzamento do X (onde a tora encosta)
+const SLICE := 0.05              # grossura da rodela cortada da ponta (m)
+const MIN_OVER := 0.4            # quanto a ponta precisa passar da forquilha para dar de cortar
+const FIX_OVER := 0.55           # onde a forquilha fica depois de mudada de lugar
+const GAP_MIN := 0.6             # forquilhas nem perto demais...
+const GAP_SPARE := 0.5           # ...nem longe demais: sobra pelo menos isso da tora fora delas
 
 var forks: Array = []            # {x, z, yaw}
-var rested: Array = []           # {log (dados da tora), a, b (índices das forquilhas)}
+var rested: Array = []           # {log (dados da tora), a, b (índices das forquilhas), off (centro da tora a partir do meio delas)}
 var _jogo: Node
 var _arv: Node
 var _nodes: Array = []
@@ -81,7 +86,7 @@ func pair_for(pos: Vector3, length: float) -> Array:
 			var A: Dictionary = forks[i]
 			var B: Dictionary = forks[j]
 			var gap := Vector2(float(A.x) - float(B.x), float(A.z) - float(B.z)).length()
-			if gap < 0.5 or gap > length - 0.15:
+			if gap < GAP_MIN or gap > length - GAP_SPARE:
 				continue
 			var mid := Vector2((float(A.x) + float(B.x)) * 0.5, (float(A.z) + float(B.z)) * 0.5)
 			var d := Vector2(pos.x, pos.z).distance_to(mid)
@@ -98,7 +103,7 @@ func rest(fl: Dictionary, a: int, b: int) -> void:
 	var yaw := atan2(float(B.z) - float(A.z), float(B.x) - float(A.x))
 	A.yaw = yaw
 	B.yaw = yaw
-	rested.append({"log": fl, "a": a, "b": b})
+	rested.append({"log": fl, "a": a, "b": b, "off": 0.0})
 	_rebuild()
 
 
@@ -107,8 +112,12 @@ func nearest_rested(pos: Vector3, reach: float) -> int:
 	var best := -1
 	var bd := reach
 	for i in rested.size():
-		var c := _rest_center(rested[i])
-		var d := Vector2(c.x - pos.x, c.z - pos.z).length()
+		var A := end_point(i, -1)
+		var B := end_point(i, 1)
+		var ab := Vector2(B.x - A.x, B.z - A.z)
+		var t := clampf(Vector2(pos.x - A.x, pos.z - A.z).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
+		var c := Vector2(A.x, A.z) + ab * t
+		var d := Vector2(c.x - pos.x, c.y - pos.z).length()
 		if d < bd:
 			bd = d
 			best = i
@@ -127,7 +136,109 @@ func _fork_top(f: Dictionary) -> Vector3:
 
 
 func _rest_center(r: Dictionary) -> Vector3:
-	return (_fork_top(forks[int(r.a)]) + _fork_top(forks[int(r.b)])) * 0.5
+	var A := _fork_top(forks[int(r.a)])
+	var B := _fork_top(forks[int(r.b)])
+	return (A + B) * 0.5 + (B - A).normalized() * float(r.get("off", 0.0))
+
+
+## Tudo sobre a tora apoiada i: centro (no eixo), direção (da forquilha a para a b),
+## comprimento, raio e quanto cada ponta passa da forquilha ("over" [-1] = lado a, [1] = lado b).
+func info(i: int) -> Dictionary:
+	var r: Dictionary = rested[i]
+	var A := _fork_top(forks[int(r.a)])
+	var B := _fork_top(forks[int(r.b)])
+	var dir := (B - A).normalized()
+	var gap := Vector2(B.x - A.x, B.z - A.z).length()
+	var off := float(r.get("off", 0.0))
+	var L: float = _arv.free_log_length(r.log)
+	var rad: float = _arv.free_log_radius(r.log)
+	var c := (A + B) * 0.5 + dir * off + Vector3.UP * rad * 0.75
+	return {"center": c, "dir": dir, "L": L, "rad": rad, "gap": gap,
+		"over": {-1: L * 0.5 - off - gap * 0.5, 1: L * 0.5 + off - gap * 0.5}}
+
+
+## Lado da tora apoiada onde dá para cortar a rodela (a ponta passa bem da forquilha):
+## o mais perto do jogador. 0 se nenhum.
+func slice_side(i: int, pos: Vector3) -> int:
+	var inf := info(i)
+	var best := 0
+	var bd := 1e9
+	for e in [-1, 1]:
+		if float(inf.over[e]) < MIN_OVER:
+			continue
+		var d := pos.distance_to(end_point(i, e))
+		if d < bd:
+			bd = d
+			best = e
+	return best
+
+
+## Ponta da tora (no eixo) do lado e.
+func end_point(i: int, e: int) -> Vector3:
+	var inf := info(i)
+	return inf.center + inf.dir * float(e) * float(inf.L) * 0.5
+
+
+## Onde a lâmina corta a rodela (no eixo, a SLICE da ponta).
+func slice_point(i: int, e: int) -> Vector3:
+	var inf := info(i)
+	return inf.center + inf.dir * float(e) * (float(inf.L) * 0.5 - SLICE)
+
+
+## Plano para mudar a forquilha de lugar quando nenhuma ponta passa o suficiente:
+## {fork: índice, to: posição nova} ou {} se a tora está curta demais.
+func fix_plan(i: int, pos: Vector3) -> Dictionary:
+	var r: Dictionary = rested[i]
+	var inf := info(i)
+	var best := {}
+	var bd := 1e9
+	for e in [-1, 1]:
+		var fi := int(r.b) if e > 0 else int(r.a)
+		var other := int(r.a) if e > 0 else int(r.b)
+		var to: Vector3 = inf.center + inf.dir * float(e) * (float(inf.L) * 0.5 - FIX_OVER)
+		var o: Dictionary = forks[other]
+		if Vector2(to.x - float(o.x), to.z - float(o.z)).length() < 0.5:
+			continue
+		var f: Dictionary = forks[fi]
+		var d := pos.distance_to(Vector3(float(f.x), pos.y, float(f.z)))
+		if d < bd:
+			bd = d
+			best = {"fork": fi, "to": Vector3(to.x, 0, to.z), "e": e}
+	return best
+
+
+## Muda a forquilha de lugar (a tora em cima continua onde está).
+func move_fork(i: int, fi: int, to: Vector3) -> void:
+	var r: Dictionary = rested[i]
+	var keep := _rest_center(r)
+	forks[fi].x = to.x
+	forks[fi].z = to.z
+	var A := _fork_top(forks[int(r.a)])
+	var B := _fork_top(forks[int(r.b)])
+	r.off = (keep - (A + B) * 0.5).dot((B - A).normalized())
+	_rebuild()
+
+
+## Uma machadada na ponta da tora apoiada (lado e). Quando solta a rodela, a tora
+## fica 5 cm mais curta e devolve o raio da rodela; senão devolve 0.
+func slice_hit(i: int, e: int) -> float:
+	var r: Dictionary = rested[i]
+	var fl: Dictionary = r.log
+	var rad: float = _arv.free_log_end_radius(fl, e)
+	var need := clampi(int(round(2.0 + rad * 12.0)), 3, 7)
+	var en: Dictionary = fl.get("entalhe", {})
+	if en.is_empty() or int(en.e) != e:
+		en = {"e": e, "hits": 0, "need": need}
+	en.hits = int(en.hits) + 1
+	if int(en.hits) < need:
+		fl["entalhe"] = en
+		_rebuild()
+		return 0.0
+	fl.erase("entalhe")
+	_arv.shorten_free_log(fl, e, SLICE)
+	r.off = float(r.get("off", 0.0)) - float(e) * SLICE * 0.5
+	_rebuild()
+	return rad
 
 
 # ================== COLISÃO ==================
@@ -140,11 +251,12 @@ func push_out(p: Vector3) -> Vector3:
 			var n := d / l if l > 0.001 else Vector2(1, 0)
 			p.x = float(f.x) + n.x * 0.45
 			p.z = float(f.z) + n.y * 0.45
-	for r in rested:
-		var A := _fork_top(forks[int(r.a)])
-		var B := _fork_top(forks[int(r.b)])
+	for i in rested.size():
+		var r: Dictionary = rested[i]
+		var A := end_point(i, -1)
+		var B := end_point(i, 1)
 		var ab := Vector2(B.x - A.x, B.z - A.z)
-		var t := clampf(Vector2(p.x - A.x, p.z - A.z).dot(ab) / maxf(ab.length_squared(), 0.0001), -0.3, 1.3)
+		var t := clampf(Vector2(p.x - A.x, p.z - A.z).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
 		var c := Vector2(A.x, A.z) + ab * t
 		var d := Vector2(p.x, p.z) - c
 		var lim: float = _arv.free_log_radius(r.log) + 0.3
@@ -173,16 +285,14 @@ func _rebuild() -> void:
 		mi.material_override = _mat
 		add_child(mi)
 		_nodes.append(mi)
-	for r in rested:
+	for i in rested.size():
+		var r: Dictionary = rested[i]
 		var n: Node3D = _arv.free_log_node(r.log)
 		add_child(n)
 		_nodes.append(n)
-		var A := _fork_top(forks[int(r.a)])
-		var B := _fork_top(forks[int(r.b)])
-		var rad: float = _arv.free_log_radius(r.log)
-		var dir := (B - A).normalized()
+		var inf := info(i)
 		# a tora encaixa no V de cima do X
-		n.transform = Transform3D(Basis(Quaternion(Vector3.RIGHT, dir)), (A + B) * 0.5 + Vector3.UP * rad * 0.75)
+		n.transform = Transform3D(Basis(Quaternion(Vector3.RIGHT, inf.dir)), inf.center)
 
 
 ## Forquilha em X: dois galhos cruzados e amarrados com cipó no cruzamento.

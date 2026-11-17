@@ -524,7 +524,9 @@ func _refresh() -> void:
 		_peso.text = txt + "\nNão cabe na mochila: o que sobrar vai cair no chão"
 		_peso.add_theme_color_override("font_color", C_ORANGE)
 	_craft_btn.disabled = not ok
-	if not ok:
+	if ok:
+		_msg.text = ""
+	else:
 		_msg.text = "Faltam ingredientes."
 		_msg.add_theme_color_override("font_color", C_DIM)
 

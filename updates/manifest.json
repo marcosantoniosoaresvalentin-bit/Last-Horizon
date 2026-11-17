@@ -1,9 +1,9 @@
 {
-  "version": 49,
-  "file": "update_49.zip",
-  "size": 3338660,
-  "sha256": "8e4da9afb74c663dde049c71f9040cea440e4c18952497200d9c9a1f00bb5bb0",
+  "version": 50,
+  "file": "update_50.zip",
+  "size": 3347885,
+  "sha256": "b0a8f78d6794dc5a1e043f12d0500a5d48b097a49e50404332acbc0cc322a0e9",
   "min_build": 1,
-  "notes": "Galhos caídos perto das árvores secando (corta em 2 com o machado e pega); cortar os galhos da árvore derrubada; forquilha (2 galhos + 2 cipós) que se põe no chão em X; apoiar a tora em duas forquilhas",
+  "notes": "Trabalhar na tora apoiada: cortar rodela (a forquilha muda de lugar sozinha), cipó trançado, ripa e balde de madeira",
   "date": "2026-11-17"
 }

@@ -307,6 +307,7 @@ class ChopPose extends SkeletonModifier3D:
 	var ready_pose := false            # duas mãos no cabo, esperando o próximo toque
 	var phase := 0.0
 	var vertical := false         # golpe de cima para baixo (cortar tora deitada)
+	var down_hit := -42.0         # onde o golpe de cima para baixo para (graus): -42 chão, -16 cintura
 	var digging := false          # cavando com a cavadeira
 	var crouch := 0.0             # 0 em pé, 1 agachado (pegar ou largar a tora)
 	var moving := false           # andando/correndo (o jogo avisa)
@@ -364,7 +365,7 @@ class ChopPose extends SkeletonModifier3D:
 			if digging:
 				_two_hands_dig(sk, up, fwd, right, phase if swinging else 0.0)
 			elif vertical:
-				_two_hands_down(sk, up, fwd, right, down_angle(phase) if swinging else -30.0)
+				_two_hands_down(sk, up, fwd, right, down_angle(phase, down_hit) if swinging else -30.0)
 			else:
 				_two_hands(sk, up, fwd, right, swing_angle(phase) if swinging else -25.0)
 		else:
@@ -372,15 +373,16 @@ class ChopPose extends SkeletonModifier3D:
 
 	## Ângulo do golpe de cima para baixo (graus de elevação do cabo):
 	## 115 = machado lá em cima, atrás da cabeça; -42 = batendo na tora no chão.
-	static func down_angle(p: float) -> float:
+	static func down_angle(p: float, hit := -42.0) -> float:
+		var rest := maxf(-30.0, hit + 4.0)
 		if p < 0.4:
-			return lerpf(-30.0, 115.0, smoothstep(0.0, 1.0, p / 0.4))
+			return lerpf(rest, 115.0, smoothstep(0.0, 1.0, p / 0.4))
 		if p < HIT_AT:
 			var t := (p - 0.4) / (HIT_AT - 0.4)
-			return lerpf(115.0, -42.0, t * t)
+			return lerpf(115.0, hit, t * t)
 		if p < 0.65:
-			return lerpf(-42.0, -34.0, (p - HIT_AT) / (0.65 - HIT_AT))
-		return lerpf(-34.0, -30.0, smoothstep(0.0, 1.0, (p - 0.65) / 0.35))
+			return lerpf(hit, hit + 8.0, (p - HIT_AT) / (0.65 - HIT_AT))
+		return lerpf(hit + 8.0, rest, smoothstep(0.0, 1.0, (p - 0.65) / 0.35))
 
 	# ---------- cavar: levanta a cavadeira e crava no chão, depois alavanca ----------
 	func _two_hands_dig(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3, p: float) -> void:

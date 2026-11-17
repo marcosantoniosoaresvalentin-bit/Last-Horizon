@@ -1525,8 +1525,45 @@ func free_log_node(fl: Dictionary) -> Node3D:
 	var age := float(last_day - int(fl.get("dia", last_day)))
 	var bot: Dictionary = fl.get("bot", {})
 	var top: Dictionary = fl.get("top", {})
-	_trunk_node(holder, _trunk_build(m, h0, h1, [], s, top, bot), _bark if age < 200 else _bark_dead)
+	# entalhe da rodela sendo cortada na ponta (o machado bate de cima)
+	var notches := []
+	var en: Dictionary = fl.get("entalhe", {})
+	if not en.is_empty():
+		var e := int(en.e)
+		var prog := clampf(float(en.hits) / maxf(float(en.need), 1.0), 0.0, 1.0)
+		var hc := h1 - SLICE_M / s if e > 0 else h0 + SLICE_M / s
+		var upm: Vector3 = Basis(Quaternion((b - a).normalized(), Vector3.RIGHT)).inverse() * Vector3.UP
+		var flat := 0.012 / s                       # lado da rodela: face reta
+		var bevel := (0.03 + 0.05 * prog) / s       # lado da tora: inclinado
+		notches.append({"h": hc, "ac": atan2(upm.z, upm.x), "depth": 0.18 + 0.7 * prog,
+			"up": flat if e > 0 else bevel, "down": bevel if e > 0 else flat,
+			"open": 0.9 + 0.9 * prog, "seed": int(en.hits) * 31 + 7, "s": s})
+	_trunk_node(holder, _trunk_build(m, h0, h1, notches, s, top, bot), _bark if age < 200 else _bark_dead)
 	return root
+
+
+const SLICE_M := 0.05   # grossura da rodela (igual a Apoios.SLICE)
+
+
+## Raio da tora solta numa das pontas (e = 1: ponta h1; -1: ponta h0).
+func free_log_end_radius(fl: Dictionary, e: int) -> float:
+	var m: Dictionary = _models[int(fl.v) % VARIANTS]
+	var h := float(fl.h1) if e > 0 else float(fl.h0)
+	return _radius_of(m, h, 0.0) * float(fl.s)
+
+
+## Tira um pedaço da ponta da tora (a rodela): fica mais curta, com a ponta
+## nova cortada a machado.
+func shorten_free_log(fl: Dictionary, e: int, length: float) -> void:
+	var dh := length / float(fl.s)
+	var cap := {"ac": PI, "seed": absi(hash(Vector3(float(fl.h0), float(fl.h1), float(e)))) % 100000,
+		"rough": 0.25, "sign": -1.0 if e > 0 else 1.0}
+	if e > 0:
+		fl.h1 = float(fl.h1) - dh
+		fl.top = cap
+	else:
+		fl.h0 = float(fl.h0) + dh
+		fl.bot = cap
 
 
 func free_log_length(fl: Dictionary) -> float:
