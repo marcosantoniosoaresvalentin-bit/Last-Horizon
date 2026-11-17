@@ -1,9 +1,9 @@
 {
-  "version": 53,
-  "file": "update_53.zip",
-  "size": 3463534,
-  "sha256": "2ca97ea0b4f7269237749bbf5a4e72a14e6b893982e5d2314319c4006fe81ed3",
+  "version": 54,
+  "file": "update_54.zip",
+  "size": 3464172,
+  "sha256": "38083beca6c231d77f4fe61cd609aaf32976ed55d050481de4d691d7dce56ab0",
   "min_build": 1,
-  "notes": "Pedras no chão para pegar e modelagem de pedra no chão (pedra de machado, lâmina de cavadeira e lâmina de serra)",
+  "notes": "Colocar com câmera de cima e prévia visível, forquilha alinhada, mãos no cabo da serra, lâmina de pedra, galhos da árvore caída para cima e mochila fixa",
   "date": "2026-11-17"
 }

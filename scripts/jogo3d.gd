@@ -351,7 +351,7 @@ var _walk_target := Vector3.ZERO
 var _walk_t := 0.0
 var _walk_next := ""
 # colocar item no chão escolhendo o lugar (prévia branca transparente)
-const PLACE_MAX := 2.5            # até onde dá para colocar, longe do personagem (m)
+const PLACE_DIST := 1.7           # a prévia fica a essa distância na frente do personagem (m)
 var _placing := ""                # item sendo colocado ("" = fora do modo)
 var _ghost: MeshInstance3D = null
 var _place_rot := 0.0             # giro escolhido no botão "Girar"
@@ -2300,9 +2300,10 @@ func _fall_branch_bits(tp: Array, res: Dictionary) -> void:
 		var lm: MeshInstance3D = _galhos.leaves_node(v, int(ci))
 		lm.set_instance_shader_parameter("tint", tint)
 		add_child(lm)
-		lm.transform = xf
+		var cxf: Transform3D = res.get("lxf", {}).get(ci, xf)
+		lm.transform = cxf
 		var aabb: AABB = lm.mesh.get_aabb()
-		var wc: Vector3 = xf * aabb.get_center()
+		var wc: Vector3 = cxf * aabb.get_center()
 		var gy := surface_at(wc.x, wc.z)
 		var yaw := randf() * TAU
 		var b := Basis(Vector3.UP, yaw).scaled(Vector3(sc * 0.62, sc * 0.4, sc * 0.62))
@@ -2310,7 +2311,7 @@ func _fall_branch_bits(tp: Array, res: Dictionary) -> void:
 		var dur := clampf(sqrt(maxf(wc.y - gy, 0.1) / 4.9) * 1.6, 0.4, 1.2)   # folha cai mais devagar
 		var tw := lm.create_tween()
 		tw.tween_method(func(t: float) -> void:
-			lm.transform = xf.interpolate_with(end_xf, smoothstep(0.0, 1.0, t)), 0.0, 1.0, dur)
+			lm.transform = cxf.interpolate_with(end_xf, smoothstep(0.0, 1.0, t)), 0.0, 1.0, dur)
 		var cii := int(ci)
 		tw.tween_callback(func():
 			lm.queue_free()
@@ -2347,9 +2348,8 @@ func start_placing(id: String) -> bool:
 	var gm := StandardMaterial3D.new()
 	gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	gm.albedo_color = Color(1, 1, 1, 0.45)
+	gm.albedo_color = Color(1, 1, 1, 0.55)
 	gm.cull_mode = BaseMaterial3D.CULL_DISABLED
-	gm.no_depth_test = true          # aparece por cima do capim alto
 	gm.render_priority = 10
 	_ghost.material_override = gm
 	_ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -2386,33 +2386,28 @@ func _update_placing() -> void:
 	_store_btn.visible = not busy
 	if busy:
 		return
-	# onde a câmera aponta no chão, limitado a PLACE_MAX do personagem
-	var o := _cam.global_position
-	var d := -_cam.global_transform.basis.z
-	var hit := Vector3.INF
-	var t := 0.5
-	while t < 30.0:
-		var q := o + d * t
-		if q.y <= height_at(q.x, q.z):
-			hit = q
-			break
-		t += 0.2
+	# na frente do personagem, para onde a câmera está virada
 	var pp := _player.position
 	var fwd := Vector3(-sin(_yaw), 0, -cos(_yaw))
-	var flat := fwd * 1.5 if hit == Vector3.INF else Vector3(hit.x - pp.x, 0, hit.z - pp.z)
-	var dist := clampf(flat.length(), 0.8, PLACE_MAX)
-	flat = (flat.normalized() if flat.length() > 0.01 else fwd) * dist
-	var pos := pp + flat
+	var pos := pp + fwd * PLACE_DIST
 	pos.y = surface_at(pos.x, pos.z)
 	_place_pos = pos
-	_place_yaw = -_yaw + _place_rot
+	_place_yaw = atan2(fwd.z, fwd.x) + _place_rot      # o X fica de frente para a câmera
+	# a segunda forquilha já fica alinhada com a que está no chão (a tora deita reta nas duas)
+	if _placing == "forquilha" and _apoios:
+		var best := 3.2
+		for f in _apoios.forks:
+			var d := Vector2(pos.x - float(f.x), pos.z - float(f.z))
+			if d.length() > 0.4 and d.length() < best:
+				best = d.length()
+				_place_yaw = atan2(d.y, d.x) + _place_rot
 	# não dá para colocar dentro da água funda
 	var depth := 0.0
 	var cell := Vector2i(int(pos.x / CELL), int(pos.z / CELL))
 	if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
 		depth = maxf(0.0, _water_level[cell.y * MundoSim.W + cell.x] - height_at(pos.x, pos.z))
 	_place_ok = depth < 0.25
-	(_ghost.material_override as StandardMaterial3D).albedo_color = Color(1, 1, 1, 0.45) if _place_ok else Color(1, 0.35, 0.3, 0.45)
+	(_ghost.material_override as StandardMaterial3D).albedo_color = Color(1, 1, 1, 0.55) if _place_ok else Color(1, 0.35, 0.3, 0.55)
 	_ghost.global_position = pos
 	_ghost.rotation = Vector3(0, -_place_yaw, 0)
 	_place_btn.disabled = not _place_ok
@@ -3301,8 +3296,16 @@ func _move_player(delta: float) -> void:
 		return
 	# câmera em terceira pessoa, atrás do personagem
 	var target := p + Vector3(0, 1.55, 0)
-	var back := Vector3(sin(_yaw) * cos(_pitch), sin(_pitch), cos(_yaw) * cos(_pitch))
-	var cam_pos := target + back * CAM_DIST
+	var pitch := _pitch
+	var dist := CAM_DIST
+	if _placing != "":
+		# colocando item: a câmera sobe e olha para baixo, mostrando o lugar na frente
+		# (mira na prévia, de cima: a linha da câmera passa por cima da cabeça do personagem)
+		target = _place_pos + Vector3(0, 0.15, 0)
+		pitch = maxf(_pitch, 1.0)
+		dist = CAM_DIST + 1.2
+	var back := Vector3(sin(_yaw) * cos(pitch), sin(pitch), cos(_yaw) * cos(pitch))
+	var cam_pos := target + back * dist
 	cam_pos.y = maxf(cam_pos.y, height_at(cam_pos.x, cam_pos.z) + 0.4)
 	_cam.position = _cam.position.lerp(cam_pos, minf(1.0, delta * 12.0)) if _cam.position.distance_to(cam_pos) < 8.0 else cam_pos
 	_cam.look_at(target + Vector3(0, 0.15, 0))

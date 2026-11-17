@@ -723,25 +723,30 @@ func _build_log(p: Array, v: int, s: float, day: int) -> void:
 		if absf(h1 - float(m.H)) > 0.0001:
 			continue
 		# a copa fica com o último pedaço: galhos inteiros, cortados (com o entalhe) ou só o toco
-		var up_model := (node.transform.basis.inverse() * Vector3.UP).normalized()
-		var bd := GalhoGeo.Builder.new()
-		var dyn := false
+		# cada galho no seu nó: o que ficaria enterrado é levantado (gira em volta da base)
+		var holders := {}
 		for bi in m.branches.size():
+			var lift := branch_lift(p, bi, node.transform)
+			var hold := Node3D.new()
+			hold.transform = node.transform.affine_inverse() * lift * node.transform
+			node.add_child(hold)
+			holders[bi] = hold
 			var st := branch_state(p, bi)
 			if int(st[0]) == 0 and int(st[1]) == 0:
-				_piece(node, m.branches[bi], bark_m)
+				_piece(hold, m.branches[bi], bark_m)
 			else:
-				dyn = true
+				var up_model := ((node.transform.basis * hold.transform.basis).inverse() * Vector3.UP).normalized()
+				var bd := GalhoGeo.Builder.new()
 				_branch_partial(bd, m, bi, st, up_model, h0)
-		if dyn:
-			_trunk_node(node, bd.commit(), bark_m)
+				_trunk_node(hold, bd.commit(), bark_m)
 		if green and age < GREEN_FALLEN_DAYS:
 			var color := fallen_leaf_tint(p)
 			for i in m.clusters.size():
-				if _cluster_gone(p, m, int(m.cluster_owner[i])):
+				var owner := int(m.cluster_owner[i])
+				if _cluster_gone(p, m, owner):
 					continue
 				if _cluster_shown(p, i):
-					var mi := _piece(node, m.clusters[i], _leaves)
+					var mi := _piece(holders.get(owner, node), m.clusters[i], _leaves)
 					mi.set_instance_shader_parameter("tint", color)
 
 
@@ -808,6 +813,28 @@ func _crown_xf(p: Array) -> Variant:
 	return null
 
 
+## Galho da árvore caída que ficaria enterrado no chão: gira em volta da base dele
+## até ficar um pouco para cima (todos os galhos ficam à vista e dá para cortar).
+## Devolve a transformação no mundo (identidade se o galho já está para fora).
+func branch_lift(p: Array, i: int, xf: Transform3D) -> Transform3D:
+	var m: Dictionary = _models[int(p[4]) % VARIANTS]
+	if i >= m.binfo.size():
+		return Transform3D.IDENTITY
+	var bi: Dictionary = m.binfo[i]
+	var a: Vector3 = xf * (bi.a as Vector3)
+	var b: Vector3 = xf * (bi.b as Vector3)
+	var mid: Vector3 = xf * _br_center(bi, 0.5)
+	if b.y - _jogo.surface_at(b.x, b.z) > 0.5 and mid.y - _jogo.surface_at(mid.x, mid.z) > 0.3:
+		return Transform3D.IDENTITY
+	var v := b - a
+	var h := Vector3(v.x, 0, v.z)
+	if h.length() < 0.05:
+		h = Vector3(1, 0, 0)
+	var want := (h.normalized() * cos(0.45) + Vector3.UP * sin(0.45)).normalized()
+	var r := Basis(Quaternion(v.normalized(), want))
+	return Transform3D(r, a - r * a)
+
+
 static func _br_center(bi: Dictionary, t: float) -> Vector3:
 	return GalhoGeo.branch_center(bi.a, bi.b, t)
 
@@ -834,9 +861,10 @@ func felled_branch_target(pos: Vector3, reach: float) -> Dictionary:
 			var stage := int(st[0])
 			if stage >= 3:
 				continue
+			var lift := branch_lift(p, i, xf)
 			for k in range(stage, 3):
 				var t: float = BR_CUTS[k]
-				var c: Vector3 = xf * _br_center(m.binfo[i], t)
+				var c: Vector3 = lift * (xf * _br_center(m.binfo[i], t))
 				var above: float = c.y - _jogo.surface_at(c.x, c.z)
 				if above > 2.0 or above < -0.12:
 					continue          # alto demais (ou enterrado no chão): tenta mais perto do tronco
@@ -869,7 +897,8 @@ func branch_hit(p: Array, i: int, t: float, to: int) -> Dictionary:
 		_set_branch_state(p, i, st)
 		_rebuild_logs()
 		return {}
-	var xf: Transform3D = cx
+	var xf0: Transform3D = cx
+	var xf: Transform3D = branch_lift(p, i, xf0) * xf0     # o galho (levantado, se ia ficar enterrado)
 	var m: Dictionary = _models[int(p[4]) % VARIANTS]
 	var bi: Dictionary = m.binfo[i]
 	var from := int(st[0])
@@ -877,7 +906,7 @@ func branch_hit(p: Array, i: int, t: float, to: int) -> Dictionary:
 	for ci in m.clusters.size():
 		if not _cluster_gone(p, m, int(m.cluster_owner[ci])) and _cluster_shown(p, ci):
 			leaves_before.append(ci)
-	var out := {"wood": [], "leaves": [], "xf": xf}
+	var out := {"wood": [], "leaves": [], "xf": xf, "lxf": {}}
 	var s: float = height_of(p, last_day) / float(m.height)
 	# o pedaço do galho de t até onde ele ia
 	var t_end: float = BR_END[from]
@@ -899,8 +928,10 @@ func branch_hit(p: Array, i: int, t: float, to: int) -> Dictionary:
 		out.wood.append([sp, sr])
 	_set_branch_state(p, i, [to, 0, 0.0])
 	for ci in leaves_before:
-		if _cluster_gone(p, m, int(m.cluster_owner[ci])):
+		var owner := int(m.cluster_owner[ci])
+		if _cluster_gone(p, m, owner):
 			out.leaves.append(ci)
+			out.lxf[ci] = branch_lift(p, owner, xf0) * xf0
 	_rebuild_logs()
 	return out
 

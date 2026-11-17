@@ -286,7 +286,8 @@ static func digger_mesh() -> ArrayMesh:
 ## Cabo de y = 0 até y = 1,3; os dentes apontam para +Z (para baixo, serrando) e os
 ## pegadores para -Z (para cima).
 const SAW_LEN := 1.3
-const SAW_TEETH := 0.088          # dos dentes até o meio do cabo
+const SAW_TEETH := 0.097          # dos dentes até o meio do cabo
+const Lascar := preload("res://scripts/world/lascar.gd")
 
 static func saw_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
@@ -307,40 +308,17 @@ static func saw_mesh() -> ArrayMesh:
 	for y in [0.07, SAW_LEN - 0.07]:
 		_tube_r(st, [Vector3(0, y, 0.01), Vector3(0.004, y + 0.004, -0.07), Vector3(0, y, -0.15)], 0.017, 0.015, bark.darkened(0.08), 7, rng)
 		_helix(st, y - 0.03, y + 0.03, 0.024, 2.5, 0.0038, Color(0.17, 0.19, 0.08), rng)
-	# lâmina de pedra lascada com dentes, embaixo do cabo
-	var y0 := 0.36
-	var y1 := 0.94
-	var stone := Color(0.55, 0.42, 0.22)
-	var th := 0.007
-	var top := 0.012
-	var n := 26
-	for i in n:
-		var ya := lerpf(y0, y1, float(i) / n)
-		var yb := lerpf(y0, y1, float(i + 1) / n)
-		# a ponta da lâmina afina nas duas pontas
-		var ea := 1.0 - pow(absf(float(i) / n * 2.0 - 1.0), 3.0) * 0.5
-		var eb := 1.0 - pow(absf(float(i + 1) / n * 2.0 - 1.0), 3.0) * 0.5
-		var za := top + 0.062 * ea
-		var zb := top + 0.062 * eb
-		var c := stone * rng.randf_range(0.85, 1.12)
-		c.a = 1.0
-		for sx in [th, -th]:
-			_quad(st, Vector3(sx, ya, top), Vector3(sx, yb, top), Vector3(sx * 0.6, yb, zb), Vector3(sx * 0.6, ya, za), c)
-		# dente: ponta para fora da lâmina (lascado, de tamanhos diferentes)
-		var ym := (ya + yb) * 0.5
-		var tip := maxf(za, zb) + rng.randf_range(0.01, 0.017) * minf(ea, eb)
-		var tc := c.lightened(0.08)
-		for sx in [th * 0.6, -th * 0.6]:
-			st.set_color(tc)
-			st.add_vertex(Vector3(sx, ya, za))
-			st.add_vertex(Vector3(sx, yb, zb))
-			st.add_vertex(Vector3(0, ym, tip))
+	# lâmina de pedra lascada com dentes (a mesma lâmina que sai da modelagem de pedra),
+	# encaixada embaixo do cabo: comprimento ao longo do cabo, dentes para +Z
+	var blade: ArrayMesh = Lascar.mesh(Lascar.target("lamina_serra"), Lascar.rock(31), 31)
+	var bx := Transform3D(Basis(Vector3(0, 0.6, 0), Vector3(-0.22, 0, 0), Vector3(0, 0, 0.3)), Vector3(0, 0.65, 0.052))
+	st.append_from(blade, 0, bx)
 	# amarração de cipó prendendo a lâmina no cabo
 	for y in [0.4, 0.52, 0.65, 0.78, 0.9]:
 		var ring := []
 		for k in 13:
 			var a := TAU * k / 12.0
-			ring.append(Vector3(cos(a) * 0.026, y + k * 0.0015, -0.01 + sin(a) * 0.04 + 0.01))
+			ring.append(Vector3(cos(a) * 0.028, y + k * 0.0015, 0.012 + sin(a) * 0.042))
 		_tube(st, ring, 0.004, Color(0.17, 0.19, 0.08), rng)
 	st.generate_normals()
 	return st.commit()
@@ -516,15 +494,17 @@ class ChopPose extends SkeletonModifier3D:
 	# ---------- serrar: vai e vem, a mão direita no pegador e a esquerda no cabo ----------
 	func _saw(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
 		var pt: Vector3 = sk.global_transform.affine_inverse() * saw_point
-		var dir := fwd
+		# a serra vai do personagem até o corte (deitada, na horizontal)
+		var flat := pt - up * pt.dot(up)
+		var dir := flat.normalized() if flat.length() > 0.05 else fwd
 		var stroke := sin(saw_phase * TAU) * 0.14     # + empurra (a serra vai para longe)
 		var bar_mid := pt + up * (SAW_TEETH - saw_depth)
 		var base := bar_mid - dir * (SAW_LEN * 0.5) + dir * stroke
 		# o corpo vai junto: inclina para a frente quando empurra
 		_rot_global(sk, "Spine1", right, -0.22 - stroke * 0.9)
-		var peg := base + dir * 0.07
-		_hand_on(sk, "Right", peg + up * 0.09, up, _orth(fwd, up), up, right)
-		_hand_on(sk, "Left", base + dir * 0.24, dir, _orth(-up * 0.6 - right * 0.4, dir), up, -right)
+		# as duas mãos fechadas no cabo, perto da ponta (do lado de dentro do pegador)
+		_hand_on(sk, "Right", base + dir * 0.13, dir, _orth(-up * 0.4 + right * 0.5, dir), up, right)
+		_hand_on(sk, "Left", base + dir * 0.31, dir, _orth(-up * 0.4 - right * 0.5, dir), up, -right)
 		_set_tool(sk, _tool_xf(base, dir, -up))
 
 	# ---------- cavar: levanta a cavadeira e crava no chão, depois alavanca ----------

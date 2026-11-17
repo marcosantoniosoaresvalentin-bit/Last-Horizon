@@ -237,6 +237,7 @@ func _build() -> void:
 	right.add_child(grid)
 	for i in COLS * ROWS:
 		var s := Button.new()
+		s.clip_contents = true
 		s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		s.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		s.toggle_mode = true
@@ -251,7 +252,8 @@ func _build() -> void:
 		s.add_child(ic)
 		var q := _label("", 18)
 		q.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-		q.offset_left = -90
+		q.offset_left = -140
+		q.clip_text = true
 		q.offset_top = -30
 		q.offset_right = -8
 		q.offset_bottom = -4
@@ -263,9 +265,15 @@ func _build() -> void:
 		s.pressed.connect(_select.bind(i))
 		grid.add_child(s)
 		_slots.append([s, ic, q])
-	_info = _label("", 20, C_DIM, false)
+	_info = _label("", 18, C_DIM, false)
 	_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_info.custom_minimum_size = Vector2(0, 28)
+	# tamanho fixo: o texto quebra em até 2 linhas e nunca estica a mochila
+	_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_info.max_lines_visible = 2
+	_info.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_info.clip_text = true
+	_info.custom_minimum_size = Vector2(10, 52)
+	_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.add_child(_info)
 
 	# ---------- botões ----------
