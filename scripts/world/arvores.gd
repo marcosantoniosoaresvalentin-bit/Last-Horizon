@@ -82,7 +82,9 @@ var cuts := {}                     # Vector2(x, z) da árvore -> [machadadas, la
 var _cut_nodes := {}
 var _cut_mat: Material
 var _chips_mat: Material
-var _falling: Array = []          # árvores tombando agora (a animação desenha elas)
+var _falling: Array = []
+var _log_nodes := {}               # tora derrubada pelo jogador -> nó desenhado
+var _log_segs: Array = []          # [ponta A, ponta B, raio] de cada tora (para colidir e subir)          # árvores tombando agora (a animação desenha elas)
 var _drown := {}                   # Vector2(x, z) -> dias seguidos debaixo d'água
 
 
@@ -500,6 +502,11 @@ func _rebuild() -> void:
 		if is_instance_valid(_cut_nodes[k]):
 			_cut_nodes[k].free()
 	_cut_nodes.clear()
+	for k in _log_nodes:
+		if is_instance_valid(_log_nodes[k]):
+			_log_nodes[k].free()
+	_log_nodes.clear()
+	_log_segs.clear()
 	_instances.clear()
 	_grid.clear()
 	var day := last_day
@@ -534,7 +541,10 @@ func _rebuild() -> void:
 			var rest := _rest_pose(p, h)
 			if not logs.has(key):
 				logs[key] = []
-			logs[key].append(Transform3D(Basis(rest[1], rest[2]) * Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), rest[0]))
+			var lxf := Transform3D(Basis(rest[1], rest[2]) * Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), rest[0])
+			logs[key].append(lxf)
+			var mm: Dictionary = _models[v]
+			_log_segs.append([lxf * _axis_of(mm, 1.0), lxf * _axis_of(mm, float(mm.H) * 0.6), float(mm.r0) * s])
 			continue
 		var gk := Vector2i(floori(x / 8.0), floori(z / 8.0))
 		if not _grid.has(gk):
@@ -575,7 +585,7 @@ func _rebuild() -> void:
 func _build_cut_tree(p: Array, v: int, xf: Transform3D, s: float, day: int) -> void:
 	var m: Dictionary = _models[v]
 	var cut := _cut_info(p)
-	var mesh := _trunk_build(m, 0.0, float(m.H), cut, s)
+	var mesh := _trunk_build(m, 0.0, float(m.H), [cut], s)
 	var root: Node3D
 	if _alive_now(p, day):
 		root = Node3D.new()
@@ -628,7 +638,7 @@ func _build_stump(st_: Array, day: int) -> void:
 	var t := clampf(float(day - int(st_[2])) / _stump_life(st_), 0.0, 1.0)
 	var top := float(cut.h) * lerpf(1.0, 0.4, smoothstep(0.45, 1.0, t))
 	var tint := Color(1, 1, 1).lerp(Color(0.62, 0.58, 0.55), smoothstep(0.0, 0.3, t)).lerp(Color(0.32, 0.27, 0.22), smoothstep(0.3, 0.85, t))
-	var mesh := _trunk_build(m, 0.0, top, cut, s, true, false, tint)
+	var mesh := _trunk_build(m, 0.0, top, [cut], s, cut, {}, tint)
 	var rot := fmod(x * 12.9898 + z * 78.233, TAU)
 	var root := Node3D.new()
 	root.transform = Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), Vector3(x, _jogo.height_at(x, z) - 0.15, z))
@@ -658,29 +668,173 @@ func _log_xf(p: Array, h: float, s: float, cut: Dictionary) -> Transform3D:
 ## Tora derrubada pelo jogador: do corte para cima, com a ponta lascada, os galhos
 ## e (se caiu verde) a copa secando aos poucos.
 func _build_log(p: Array, v: int, s: float, day: int) -> void:
+	var k := _cut_key(p)
+	if _log_nodes.has(k) and is_instance_valid(_log_nodes[k]):
+		_log_nodes[k].free()
 	var m: Dictionary = _models[v]
 	var h := height_of(p, day)
 	var c: Array = p[9]
 	var cut := _cut_from(p, c, s)
+	var xf := _log_xf(p, h, s, cut)
 	var root := Node3D.new()
-	root.transform = _log_xf(p, h, s, cut)
 	add_child(root)
-	_instances.append(root)
+	_log_nodes[k] = root
 	var green := p.size() > 8 and int(p[8]) == 1
 	var age := float(day - int(p[6]))
-	_trunk_node(root, _trunk_build(m, float(cut.h), float(m.H), cut, s, false, true), _bark if age < 200 else _bark_dead)
-	for b in m.branches:
-		_piece(root, b, _bark if age < 200 else _bark_dead)
-	if green and age < GREEN_FALLEN_DAYS:
-		var f := age / GREEN_FALLEN_DAYS
-		var yellow := Color(0.62, 0.5, 0.12)
-		var brown := Color(0.48, 0.3, 0.13)
-		var color := yellow.lerp(brown, clampf((f - 0.35) / 0.4, 0.0, 1.0))
-		color.a = clampf(f / 0.35, 0.0, 1.0)
-		for i in m.clusters.size():
-			if f < _hash_range(p, 0.45, 1.0, 140 + i):
-				var mi := _piece(root, m.clusters[i], _leaves)
-				mi.set_instance_shader_parameter("tint", color)
+	var bark_m: Material = _bark if age < 200 else _bark_dead
+	var along := (xf * _axis_of(m, float(m.H)) - xf * _axis_of(m, float(cut.h))).normalized()
+	var a_up := _log_up_angle(xf)
+	var buck = p[11] if p.size() > 11 else null
+	for pc in log_pieces(p):
+		var h0 := float(pc[0])
+		var h1 := float(pc[1])
+		var node := Node3D.new()
+		node.transform = Transform3D(xf.basis, xf.origin + along * float(pc[2]))
+		root.add_child(node)
+		# pontas: a de baixo da primeira é a quebra do tombo; as outras são cortes de machado
+		var bottom: Dictionary = cut if absf(h0 - float(cut.h)) < 0.0001 else _buck_end(p, a_up, h0, 1.0)
+		var top := {} if absf(h1 - float(m.H)) < 0.0001 else _buck_end(p, a_up, h1, -1.0)
+		var notches := []
+		if buck is Array and float(buck[0]) > h0 and float(buck[0]) < h1:
+			notches.append(_buck_notch(p, a_up, float(buck[0]), int(buck[1]), s))
+		_trunk_node(node, _trunk_build(m, h0, h1, notches, s, top, bottom), bark_m)
+		# colisão: o jogador não atravessa a tora (pode pular por cima ou subir nela)
+		var A: Vector3 = node.transform * _axis_of(m, h0)
+		var B: Vector3 = node.transform * _axis_of(m, minf(h1, float(m.H) * 0.62))
+		_log_segs.append([A, B, _radius_of(m, (h0 + minf(h1, float(m.H) * 0.62)) * 0.5, 0.0) * s])
+		if absf(h1 - float(m.H)) > 0.0001:
+			continue
+		# a copa fica com o último pedaço
+		for b in m.branches:
+			_piece(node, b, bark_m)
+		if green and age < GREEN_FALLEN_DAYS:
+			var f := age / GREEN_FALLEN_DAYS
+			var yellow := Color(0.62, 0.5, 0.12)
+			var brown := Color(0.48, 0.3, 0.13)
+			var color := yellow.lerp(brown, clampf((f - 0.35) / 0.4, 0.0, 1.0))
+			color.a = clampf(f / 0.35, 0.0, 1.0)
+			for i in m.clusters.size():
+				if f < _hash_range(p, 0.45, 1.0, 140 + i):
+					var mi := _piece(node, m.clusters[i], _leaves)
+					mi.set_instance_shader_parameter("tint", color)
+
+
+## Pedaços da tora: [[de, até (altura no modelo), deslocamento (m) ao longo da tora], ...]
+func log_pieces(p: Array) -> Array:
+	if p.size() > 10 and p[10] is Array and not p[10].is_empty():
+		return p[10]
+	var s: float = height_of(p, last_day) / float(_models[int(p[4]) % VARIANTS].height)
+	var cut := _cut_from(p, p[9], s)
+	return [[float(cut.h), float(_models[int(p[4]) % VARIANTS].H), 0.0]]
+
+
+## Ângulo (no anel do tronco) que aponta para cima com a tora deitada.
+static func _log_up_angle(xf: Transform3D) -> float:
+	return atan2(xf.basis.z.y, xf.basis.x.y)
+
+
+func _buck_notch(p: Array, a_up: float, h_at: float, hits: int, s: float) -> Dictionary:
+	var prog := clampf(float(hits) / buck_hits_needed(p, h_at), 0.0, 1.0)
+	return {"h": h_at, "ac": a_up, "depth": 0.12 + 0.78 * prog, "up": (0.06 + 0.1 * prog) / s,
+		"down": (0.06 + 0.1 * prog) / s, "open": 1.0 + 0.6 * prog,
+		"seed": absi(hash(Vector3(float(p[0]), float(p[1]), h_at))) % 100000}
+
+
+func _buck_end(p: Array, a_up: float, h_at: float, sign: float) -> Dictionary:
+	return {"ac": a_up + PI, "seed": absi(hash(Vector3(float(p[0]), float(p[1]), h_at))) % 100000,
+		"rough": 0.45, "sign": sign}
+
+
+## Machadadas para cortar a tora num ponto (tora grossa pede mais).
+func buck_hits_needed(p: Array, h_at: float) -> int:
+	var m: Dictionary = _models[int(p[4]) % VARIANTS]
+	var s: float = height_of(p, last_day) / float(m.height)
+	var r := _radius_of(m, h_at, 0.0) * s
+	return clampi(int(round(2.0 + r * 14.0)), 3, 10)
+
+
+## Lugar da tora mais perto do jogador onde dá para cortar: de meio em meio metro,
+## deixando pedaços de pelo menos 1 m. Devolve {} se não tem tora perto.
+func log_target(pos: Vector3, reach: float) -> Dictionary:
+	var best := {}
+	var bd := reach
+	for p in plants:
+		if int(p[5]) != FALLEN or p.size() < 10 or not p[9] is Array or _falling.has(p):
+			continue
+		var v := int(p[4]) % VARIANTS
+		var m: Dictionary = _models[v]
+		var h := height_of(p, last_day)
+		var s: float = h / float(m.height)
+		var cut := _cut_from(p, p[9], s)
+		var xf := _log_xf(p, h, s, cut)
+		var along := (xf * _axis_of(m, float(m.H)) - xf * _axis_of(m, float(cut.h))).normalized()
+		var buck = p[11] if p.size() > 11 else null
+		for pc in log_pieces(p):
+			var h0 := float(pc[0])
+			var h1 := minf(float(pc[1]), float(m.H) * 0.62)
+			if (h1 - h0) * s < 2.0:
+				continue          # pedaço curto demais para cortar de novo
+			var off: Vector3 = along * float(pc[2])
+			var A: Vector3 = xf * _axis_of(m, h0) + off
+			var B: Vector3 = xf * _axis_of(m, h1) + off
+			var ab := Vector2(B.x - A.x, B.z - A.z)
+			var t := clampf(Vector2(pos.x - A.x, pos.z - A.z).dot(ab) / ab.length_squared(), 0.0, 1.0)
+			# meio em meio metro a partir da ponta do pedaço; pelo menos 1 m de cada lado
+			var meters := snappedf(t * (h1 - h0) * s, 0.5)
+			meters = clampf(meters, 1.0, (float(pc[1]) - h0) * s - 1.0)
+			var h_at := h0 + meters / s
+			if h_at > h1:
+				continue
+			if buck is Array and absf(float(buck[0]) - h_at) * s < 0.6 and float(buck[0]) > h0 and float(buck[0]) < float(pc[1]):
+				h_at = float(buck[0])          # continua o corte que já começou
+			var P: Vector3 = xf * _axis_of(m, h_at) + off
+			var d := Vector2(pos.x - P.x, pos.z - P.z).length()
+			if d < bd:
+				bd = d
+				var r := _radius_of(m, h_at, 0.0) * s
+				best = {"p": p, "h": h_at, "point": P + Vector3.UP * r, "axis": P, "along": along, "r": r}
+	return best
+
+
+## Uma machadada na tora. Quando termina, a tora se parte em dois pedaços.
+func buck_hit(p: Array, h_at: float) -> bool:
+	if p.size() < 12:
+		p.resize(12)
+	var buck = p[11]
+	if not buck is Array or absf(float(buck[0]) - h_at) > 0.0001:
+		buck = [h_at, 0]
+	buck[1] = int(buck[1]) + 1
+	p[11] = buck
+	var done := int(buck[1]) >= buck_hits_needed(p, h_at)
+	if done:
+		var pieces: Array = log_pieces(p).duplicate(true)
+		for i in pieces.size():
+			var pc: Array = pieces[i]
+			if h_at > float(pc[0]) and h_at < float(pc[1]):
+				var upper := [h_at, float(pc[1]), float(pc[2]) + 0.14]
+				pc[1] = h_at
+				pieces.insert(i + 1, upper)
+				# os pedaços de cima se afastam um pouquinho
+				for j in range(i + 2, pieces.size()):
+					pieces[j][2] = float(pieces[j][2]) + 0.14
+				break
+		p[10] = pieces
+		p[11] = null
+	_rebuild_logs()
+	return done
+
+
+func _rebuild_logs() -> void:
+	_log_segs.clear()
+	for k in _log_nodes:
+		if is_instance_valid(_log_nodes[k]):
+			_log_nodes[k].free()
+	_log_nodes.clear()
+	for p in plants:
+		if int(p[5]) == FALLEN and p.size() > 9 and p[9] is Array and not _falling.has(p):
+			var v := int(p[4]) % VARIANTS
+			var s: float = height_of(p, last_day) / float(_models[v].height)
+			_build_log(p, v, s, last_day)
 
 
 ## Dados do corte guardados na árvore derrubada ([machadadas, lado]).
@@ -984,7 +1138,7 @@ func fell_by_player(p: Array, away: Vector3) -> void:
 		tree.basis = bt
 		tree.position = -(bt * cut_pt)
 		hinge0 = Vector3(x, y, z) + bt * cut_pt
-		_trunk_node(tree, _trunk_build(m, float(cut.h), float(m.H), cut, s, false, true), _bark if alive else _bark_dead)
+		_trunk_node(tree, _trunk_build(m, float(cut.h), float(m.H), [cut], s, {}, cut), _bark if alive else _bark_dead)
 		for b in m.branches:
 			_piece(tree, b, _bark if alive else _bark_dead)
 		if alive:
@@ -1063,13 +1217,16 @@ static func _break_at(cut: Dictionary, a: float, s: float) -> float:
 	var hinge := smoothstep(0.6, PI, da)          # 0 na boca, 1 do lado oposto
 	var hsh := absi(hash(Vector2i(int(cut.seed), int(round(a * 40.0)))))
 	var spike := (hsh % 1000) / 1000.0
-	return (hinge * 0.07 + spike * spike * 0.08 * (0.3 + hinge)) / s
+	var amount := float(cut.get("rough", 1.0))
+	return (hinge * 0.07 + spike * spike * 0.08 * (0.3 + hinge)) * amount * float(cut.get("sign", 1.0)) / s
 
 
 ## Monta um pedaço do tronco do modelo, de h0 até h1 (alturas do modelo), com a boca
 ## do corte escavada e, se pedir, a ponta de cima/de baixo quebrada no corte.
 ## Duas superfícies: 0 = casca (usa a textura), 1 = madeira (cor nos vértices).
-func _trunk_build(m: Dictionary, h0: float, h1: float, cut: Dictionary, s: float, broken_top := false, broken_bottom := false, wood_tint := Color(1, 1, 1)) -> ArrayMesh:
+func _trunk_build(m: Dictionary, h0: float, h1: float, notches: Array, s: float, top_break := {}, bottom_break := {}, wood_tint := Color(1, 1, 1)) -> ArrayMesh:
+	var broken_top := not top_break.is_empty()
+	var broken_bottom := not bottom_break.is_empty()
 	var SEG := 26
 	var hs: Array = []
 	var RINGS := 22
@@ -1078,7 +1235,7 @@ func _trunk_build(m: Dictionary, h0: float, h1: float, cut: Dictionary, s: float
 		var hh := H * pow(float(ri) / RINGS, 1.35)
 		if hh > h0 + 0.001 and hh < h1 - 0.001:
 			hs.append(hh)
-	if not cut.is_empty():
+	for cut in notches:
 		var lo := float(cut.h) - float(cut.down) * 1.3
 		var hi := float(cut.h) + float(cut.up) * 1.2
 		for k in 13:
@@ -1095,11 +1252,13 @@ func _trunk_build(m: Dictionary, h0: float, h1: float, cut: Dictionary, s: float
 			var a := TAU * si / SEG
 			var y: float = hh
 			if broken_top and absf(hh - h1) < 0.0001:
-				y = h1 + _break_at(cut, a, s)
+				y = h1 + _break_at(top_break, a, s)
 			elif broken_bottom and absf(hh - h0) < 0.0001:
-				y = h0 + _break_at(cut, a, s)
+				y = h0 + _break_at(bottom_break, a, s)
 			var c := _axis_of(m, y)
-			var cut_frac := _notch_at(cut, y, a)
+			var cut_frac := 0.0
+			for cut in notches:
+				cut_frac = maxf(cut_frac, _notch_at(cut, y, a))
 			var r := _radius_of(m, y, a) * (1.0 - cut_frac)
 			ring.append([c + Vector3(cos(a) * r, 0, sin(a) * r), Vector2(float(si) / SEG * 2.0, y / 3.0), cut_frac, c])
 		rings.append(ring)
@@ -1112,7 +1271,7 @@ func _trunk_build(m: Dictionary, h0: float, h1: float, cut: Dictionary, s: float
 	var any_wood := false
 	for ri in rings.size() - 1:
 		for si in SEG:
-			var q := [rings[ri][si], rings[ri + 1][si], rings[ri][si + 1], rings[ri][si + 1], rings[ri + 1][si], rings[ri + 1][si + 1]]
+			var q := [rings[ri][si], rings[ri][si + 1], rings[ri + 1][si], rings[ri][si + 1], rings[ri + 1][si + 1], rings[ri + 1][si]]
 			var deep := maxf(maxf(q[0][2], q[1][2]), maxf(q[2][2], q[5][2]))
 			if deep > 0.06:
 				any_wood = true
@@ -1198,8 +1357,45 @@ func _cut_info(p: Array) -> Dictionary:
 		"seed": absi(hash(Vector2(float(p[0]), float(p[1])))) % 100000, "s": s}
 
 
+## Altura do topo de uma tora embaixo do jogador (para ficar em pé em cima dela), ou -1e9.
+func support_y(x: float, z: float) -> float:
+	var best := -1e9
+	for sg in _log_segs:
+		var A: Vector3 = sg[0]
+		var B: Vector3 = sg[1]
+		var r: float = sg[2]
+		var ab := Vector2(B.x - A.x, B.z - A.z)
+		var L2 := ab.length_squared()
+		if L2 < 0.0001:
+			continue
+		var t := clampf(Vector2(x - A.x, z - A.z).dot(ab) / L2, 0.0, 1.0)
+		var c := A.lerp(B, t)
+		var l := Vector2(x - c.x, z - c.z).length()
+		if l < r * 0.95:
+			best = maxf(best, c.y + sqrt(maxf(0.0, r * r - l * l)))
+	return best
+
+
 ## O jogador não atravessa os troncos: empurra a posição para fora.
-func push_out(p: Vector3) -> Vector3:
+func push_out(p: Vector3, feet_y := -1e9) -> Vector3:
+	# toras deitadas: só passa por cima pulando (ou andando em cima delas)
+	for sg in _log_segs:
+		var A: Vector3 = sg[0]
+		var B: Vector3 = sg[1]
+		var r: float = sg[2]
+		var ab := Vector2(B.x - A.x, B.z - A.z)
+		var L2 := ab.length_squared()
+		if L2 < 0.0001:
+			continue
+		var t := clampf(Vector2(p.x - A.x, p.z - A.z).dot(ab) / L2, 0.0, 1.0)
+		var c := A.lerp(B, t)
+		var d := Vector2(p.x - c.x, p.z - c.z)
+		var l := d.length()
+		var lim := r + 0.28
+		if l < lim and feet_y < c.y + r - 0.2:
+			var n := d / l if l > 0.001 else Vector2(-ab.y, ab.x).normalized()
+			p.x = c.x + n.x * lim
+			p.z = c.z + n.y * lim
 	var k := Vector2i(floori(p.x / 8.0), floori(p.z / 8.0))
 	for dz in range(-1, 2):
 		for dx in range(-1, 2):
@@ -1539,7 +1735,7 @@ func _make_tree(seed_: int) -> Dictionary:
 		for si in SEG:
 			var a := ri * (SEG + 1) + si
 			var b := a + SEG + 1
-			core.idx.append_array(PackedInt32Array([a, b, a + 1, a + 1, b, b + 1]))
+			core.idx.append_array(PackedInt32Array([a, a + 1, b, a + 1, b + 1, b]))
 
 	# galhos (cada galho grosso junto com o galhinho que sai dele)
 	var branches: Array = []
@@ -1637,11 +1833,19 @@ static func _cyl(pc: Piece, a: Vector3, b: Vector3, ra: float, rb: float) -> voi
 			var ang := TAU * si / SEG
 			var nn := (side * cos(ang) + up * sin(ang)).normalized()
 			pc.vert(c + nn * r, nn, Vector2(float(si) / SEG, t * 2.0))
+	# a face da frente tem que ficar para fora (senão a câmera vê o lado de dentro do galho)
+	var j0 := base
+	var j1 := base + SEG + 1
+	var tri_n := (pc.v[j1] - pc.v[j0]).cross(pc.v[j0 + 1] - pc.v[j0])
+	var outward := tri_n.dot(pc.n[j0]) > 0.0
 	for ri in RINGS:
 		for si in SEG:
 			var i0 := base + ri * (SEG + 1) + si
 			var i1 := i0 + SEG + 1
-			pc.idx.append_array(PackedInt32Array([i0, i1, i0 + 1, i0 + 1, i1, i1 + 1]))
+			if outward:
+				pc.idx.append_array(PackedInt32Array([i0, i0 + 1, i1, i0 + 1, i1 + 1, i1]))
+			else:
+				pc.idx.append_array(PackedInt32Array([i0, i1, i0 + 1, i0 + 1, i1, i1 + 1]))
 
 
 ## Muda (1 m de altura; a instância é esticada para a altura de verdade).

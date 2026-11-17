@@ -1,9 +1,9 @@
 {
-  "version": 37,
-  "file": "update_37.zip",
-  "size": 3090110,
-  "sha256": "9717d48640aaf28bf4236c40cc431da8a378e37c6cf7990cc03788f14adeb510",
+  "version": 38,
+  "file": "update_38.zip",
+  "size": 3093587,
+  "sha256": "636ad90de408d3eaaf667928abfd4dbd619d03be89f3f45d4c011f321e7208d7",
   "min_build": 1,
-  "notes": "Corte de árvore refeito: mãos fechadas no cabo (dedos e polegar), a machadada escava o tronco, cai só a parte de cima e fica o toco com raiz e ponta lascada; tronco caído sem buraco; sem barrinha na tela",
+  "notes": "Árvores sem buraco/transparência; pulo; tora bloqueia a passagem e dá para subir nela; cortar a tora em pedaços com golpe de cima para baixo; pulso reto segurando o machado",
   "date": "2026-11-17"
 }

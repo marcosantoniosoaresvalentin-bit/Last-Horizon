@@ -222,6 +222,7 @@ class ChopPose extends SkeletonModifier3D:
 	var swinging := false         # dando uma machadada agora
 	var ready_pose := false            # duas mãos no cabo, esperando o próximo toque
 	var phase := 0.0
+	var vertical := false         # golpe de cima para baixo (cortar tora deitada)
 	var _b := {}
 	var thumb_axis := Vector3.BACK
 	var thumb_angs := [1.0, 0.9, 0.7]
@@ -259,17 +260,52 @@ class ChopPose extends SkeletonModifier3D:
 		_close_fingers(sk, "Right")
 		if swinging or ready_pose:
 			_close_fingers(sk, "Left")
-			_two_hands(sk, up, fwd, right, swing_angle(phase) if swinging else -25.0)
+			if vertical:
+				_two_hands_down(sk, up, fwd, right, down_angle(phase) if swinging else -30.0)
+			else:
+				_two_hands(sk, up, fwd, right, swing_angle(phase) if swinging else -25.0)
 		else:
 			_carry(sk, up, fwd, right)
+
+	## Ângulo do golpe de cima para baixo (graus de elevação do cabo):
+	## 115 = machado lá em cima, atrás da cabeça; -42 = batendo na tora no chão.
+	static func down_angle(p: float) -> float:
+		if p < 0.4:
+			return lerpf(-30.0, 115.0, smoothstep(0.0, 1.0, p / 0.4))
+		if p < HIT_AT:
+			var t := (p - 0.4) / (HIT_AT - 0.4)
+			return lerpf(115.0, -42.0, t * t)
+		if p < 0.65:
+			return lerpf(-42.0, -34.0, (p - HIT_AT) / (0.65 - HIT_AT))
+		return lerpf(-34.0, -30.0, smoothstep(0.0, 1.0, (p - 0.65) / 0.35))
+
+	# ---------- golpe de cima para baixo (tora no chão) ----------
+	func _two_hands_down(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3, e_deg: float) -> void:
+		var e := deg_to_rad(e_deg)
+		var dir := (fwd * cos(e) + up * sin(e)).normalized()
+		var edge := _orth(fwd * sin(e) - up * cos(e), dir)
+		var low := clampf(-e_deg / 42.0, 0.0, 1.0)
+		var chest := up * (1.12 - low * 0.12) + fwd * 0.06
+		var e2 := e * 0.8
+		var base := chest + (fwd * cos(e2) + up * sin(e2)).normalized() * 0.24 - right * 0.03
+		# o corpo dobra para a frente na batida e estica ao levantar
+		_rot_global(sk, "Spine1", right, lerpf(-0.12, 0.38, low) if e_deg < 60.0 else -0.12)
+		var out := Vector3(base.x - chest.x, 0, base.z - chest.z)
+		var fingers := _orth(-up * 0.4 + out.normalized() * 0.5 - fwd * 0.3, dir)
+		_hand_on(sk, "Right", base + dir * GRIP_HIGH, dir, fingers, up, right)
+		_hand_on(sk, "Left", base + dir * GRIP_LOW, dir, fingers, up, -right)
+		_place_axe(sk, base, dir, edge)
 
 	# ---------- carregando com uma mão ----------
 	func _carry(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
 		# antebraço um pouco dobrado, como quem segura peso
 		_rot_global(sk, "RightForeArm", right, deg_to_rad(20.0))
-		# cabo saindo da mão para a frente e para baixo; o fio virado para baixo
-		var handle := (fwd * 0.72 - up * 0.69).normalized()
-		var fingers := _orth(-up * 0.8 - fwd * 0.2, handle)
+		# pulso reto: os dedos seguem a linha do antebraço; o cabo sai da mão para a frente
+		var fa := _bone("RightForeArm")
+		var hb0 := _bone("RightHand")
+		var arm_dir := (sk.get_bone_global_pose(hb0).origin - sk.get_bone_global_pose(fa).origin).normalized()
+		var handle := _orth(fwd * 0.9 - up * 0.3, arm_dir)
+		var fingers := arm_dir
 		var g := _grip_rotate("Right", sk, handle, fingers)
 		if g.is_empty():
 			return
@@ -358,6 +394,14 @@ class ChopPose extends SkeletonModifier3D:
 		var sh := sk.get_bone_global_pose(_bone(side + "Arm")).origin
 		var pole := sh - up * 0.8 + out * 0.5
 		_ik(sk, side + "Arm", side + "ForeArm", side + "Hand", wrist, pole)
+		# pulso reto: os dedos seguem a linha do antebraço (refaz o braço com essa mão)
+		var fa := sk.get_bone_global_pose(_bone(side + "ForeArm")).origin
+		var arm_dir := (sk.get_bone_global_pose(hb).origin - fa).normalized()
+		var f2 := (_orth(arm_dir, along) * 0.75 + _orth(fingers, along) * 0.25).normalized()
+		var g2 := _grip_rotate(side, sk, along, f2)
+		if not g2.is_empty():
+			g = g2
+			_ik(sk, side + "Arm", side + "ForeArm", side + "Hand", grip - g.offset, pole)
 		var hp := sk.get_bone_global_pose(hb)
 		hp.basis = g.basis
 		sk.set_bone_global_pose(hb, hp)

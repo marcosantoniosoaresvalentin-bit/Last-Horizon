@@ -277,6 +277,10 @@ var _chopping := false
 var _chop_tree = null
 var _chop_t := 0.0
 var _swing_on := false
+var _chop_log := {}               # cortando uma tora deitada (em vez de árvore em pé)
+var _jump_btn: Button
+var _vy := 0.0                    # velocidade vertical (pulo)
+var _air := false
 var _swing_queued := false
 var _chop_idle := 0.0
 const DEEP := 0.05        # água parada funda o bastante para virar poça ou lagoa na tela; a rasa só molha o chão
@@ -397,6 +401,17 @@ func _build_hud() -> void:
 	_chop_btn.visible = false
 	_chop_btn.pressed.connect(_start_chop)
 	_hud.add_child(_chop_btn)
+
+	_jump_btn = Button.new()
+	_jump_btn.text = "Pular"
+	_jump_btn.add_theme_font_size_override("font_size", 22)
+	_jump_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_jump_btn.offset_left = -200
+	_jump_btn.offset_top = -90
+	_jump_btn.offset_right = -30
+	_jump_btn.offset_bottom = -16
+	_jump_btn.pressed.connect(_jump)
+	_hud.add_child(_jump_btn)
 
 	_pick_btn = Button.new()
 	_pick_btn.add_theme_font_size_override("font_size", 22)
@@ -1292,7 +1307,22 @@ func _update_chop(delta: float) -> void:
 	_pick_btn.visible = gi >= 0
 	if gi >= 0:
 		_pick_btn.text = "Pegar %s" % Itens.nome(str(_chao[gi].id)).to_lower()
-	_chop_btn.visible = _mao == "machado" and _arvores != null and _arvores.nearest_standing(_player.position, 1.3) != null and not _digging
+	_chop_btn.visible = false
+	if _mao == "machado" and _arvores != null and not _digging and not _air:
+		if _arvores.nearest_standing(_player.position, 1.3) != null:
+			_chop_btn.visible = true
+			_chop_btn.text = "Cortar"
+		elif not _arvores.log_target(_player.position, 1.6).is_empty():
+			_chop_btn.visible = true
+			_chop_btn.text = "Cortar tora"
+
+
+## Pulo: sobe uns 60 cm (dá para passar por cima de uma tora ou subir nela).
+func _jump() -> void:
+	if _air or _chopping or _digging:
+		return
+	_air = true
+	_vy = 4.2
 
 
 ## Toque no botão "Cortar": uma machadada (se já está no meio de uma, guarda a próxima).
@@ -1306,12 +1336,18 @@ func _start_chop() -> void:
 			_begin_swing()
 		return
 	var t = _arvores.nearest_standing(_player.position, 1.3)
+	_chop_log = {}
 	if t == null:
-		return
+		var lg: Dictionary = _arvores.log_target(_player.position, 1.6)
+		if lg.is_empty():
+			return
+		_chop_log = lg
 	if _digging:
 		_cancel_dig()
 	_chop_tree = t
 	_chopping = true
+	if _chop_pose:
+		_chop_pose.vertical = not _chop_log.is_empty()
 	_swing_queued = false
 	_play("Idle", 0.5)
 	if _chop_pose:
@@ -1330,6 +1366,14 @@ func _begin_swing() -> void:
 
 ## A lâmina bateu no tronco: conta a machadada, marca o corte e solta lascas.
 func _chop_hit() -> void:
+	if not _chop_log.is_empty():
+		var lp: Array = _chop_log.p
+		var done: bool = _arvores.buck_hit(lp, float(_chop_log.h))
+		_chips(_chop_log.point)
+		if done:
+			_show_toast("Tora cortada!")
+			_cancel_chop()
+		return
 	var t = _chop_tree
 	if t == null:
 		return
@@ -1372,7 +1416,9 @@ func _cancel_chop() -> void:
 	_swing_on = false
 	_swing_queued = false
 	_chop_tree = null
+	_chop_log = {}
 	if _chop_pose:
+		_chop_pose.vertical = false
 		_chop_pose.swinging = false
 		_chop_pose.ready_pose = false
 	_act_check = 0.0
@@ -1477,7 +1523,23 @@ func _move_player(delta: float) -> void:
 		_play("Run" if running else "Walk", water_slow)
 	elif not _digging:
 		_play("Idle")
-	if _chopping and _chop_tree != null:
+	if _chopping and not _chop_log.is_empty():
+		# de lado para a tora, de frente para o ponto do corte
+		var axp: Vector3 = _chop_log.axis
+		var al: Vector3 = _chop_log.along
+		var rel := Vector3(p.x - axp.x, 0, p.z - axp.z)
+		var side := rel - Vector3(al.x, 0, al.z).normalized() * rel.dot(Vector3(al.x, 0, al.z).normalized())
+		if side.length() < 0.05:
+			side = Vector3(al.z, 0, -al.x)
+		var want_pos := axp + side.normalized() * (float(_chop_log.r) + 0.42)
+		var mv := Vector2(want_pos.x - p.x, want_pos.z - p.z)
+		if mv.length() > 0.04:
+			var stp := minf(mv.length(), delta * 1.5)
+			p.x += mv.x / mv.length() * stp
+			p.z += mv.y / mv.length() * stp
+		var tl := Vector2(axp.x - p.x, axp.z - p.z)
+		_face = lerp_angle(_face, atan2(-tl.x, -tl.y), minf(1.0, delta * 10.0))
+	elif _chopping and _chop_tree != null:
 		# fica de frente para o tronco
 		var to := Vector2(float(_chop_tree[0]) - p.x, float(_chop_tree[1]) - p.z)
 		_face = lerp_angle(_face, atan2(-to.x, -to.y), minf(1.0, delta * 10.0))
@@ -1488,9 +1550,29 @@ func _move_player(delta: float) -> void:
 			var step := clampf(dist - want, -delta * 1.5, delta * 1.5)
 			p.x += to.x / dist * step
 			p.z += to.y / dist * step
+	var feet := _player.position.y
 	if _arvores:
-		p = _arvores.push_out(p)   # não atravessa os troncos
-	p.y = height_at(p.x, p.z) - minf(depth, 0.9) * 0.5
+		p = _arvores.push_out(p, feet)   # não atravessa troncos e toras (pulando passa por cima)
+	# chão: o terreno ou o topo de uma tora (dá para subir pulando e andar em cima)
+	var ground := height_at(p.x, p.z) - minf(depth, 0.9) * 0.5
+	if _arvores:
+		var sup: float = _arvores.support_y(p.x, p.z)
+		if sup > ground and feet >= sup - 0.2:
+			ground = sup
+	if _air:
+		_vy -= 13.0 * delta
+		p.y = feet + _vy * delta
+		if p.y <= ground:
+			p.y = ground
+			_air = false
+			_vy = 0.0
+	elif feet > ground + 0.12:
+		# saiu de cima da tora: cai
+		_air = true
+		_vy = 0.0
+		p.y = feet
+	else:
+		p.y = ground
 	_player.position = p
 	_player.rotation.y = _face
 
@@ -1549,7 +1631,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn]:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn]:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
