@@ -436,6 +436,8 @@ class ChopPose extends SkeletonModifier3D:
 	var phase := 0.0
 	var vertical := false         # golpe de cima para baixo (cortar tora deitada)
 	var down_hit := -42.0         # onde o golpe de cima para baixo para (graus): -42 chão, -16 cintura
+	var ground_fn: Callable       # altura do chão (x, z) -> y, para os pés pisarem no morro
+	var in_air := false
 	var sawing := false           # serrando (vai e vem com a serra de pedra)
 	var saw_phase := 0.0          # 0 a 1: uma ida e volta
 	var saw_pos := -1.0           # -1 puxada (perto do corpo) a 1 empurrada (o jogador controla)
@@ -486,6 +488,8 @@ class ChopPose extends SkeletonModifier3D:
 		var right: Vector3 = (tb * player.global_transform.basis.x).normalized()
 		if crouch > 0.001:
 			_crouch(sk, up, fwd, right)
+		elif not moving and not in_air and ground_fn.is_valid():
+			_plant_feet(sk, tb, up, fwd)
 		if log_node:
 			if axe:
 				axe.visible = false
@@ -620,6 +624,60 @@ class ChopPose extends SkeletonModifier3D:
 		_hand_on(sk, "Right", base + dir * grip_high, dir, fingers, up, right)
 		_hand_on(sk, "Left", base + dir * grip_low, dir, fingers, up, -right)
 		_place_axe(sk, base, dir, edge)
+
+	# ---------- parado no morro: cada pé pisa no chão ----------
+	# O personagem fica com o centro na altura do chão; no morro um pé afunda e o outro
+	# fica no ar. O quadril desce até o pé mais baixo e cada perna dobra para o pé
+	# encostar no chão embaixo dele.
+	func _plant_feet(sk: Skeleton3D, tb: Basis, up: Vector3, fwd: Vector3) -> void:
+		var hb := _bone("Hips")
+		if hb < 0:
+			return
+		var gx := sk.global_transform
+		var base_y := player.global_position.y
+		var pp := player.global_position
+		if absf(float(ground_fn.call(pp.x, pp.z)) - base_y) > 0.15:
+			return          # em cima de tora ou dentro d'água: não mexe nos pés
+		var feet := {}
+		var ds := {}
+		for side in ["Left", "Right"]:
+			var fb := _bone(side + "Foot")
+			if fb < 0:
+				return
+			var fp := sk.get_bone_global_pose(fb)
+			feet[side] = fp
+			var w := gx * fp.origin
+			ds[side] = clampf(float(ground_fn.call(w.x, w.z)) - base_y, -0.4, 0.4)
+		var lo := minf(minf(float(ds.Left), float(ds.Right)), 0.0)
+		if absf(float(ds.Left)) < 0.01 and absf(float(ds.Right)) < 0.01:
+			return
+		var upm := tb * Vector3.UP          # 1 m para cima, no espaço do esqueleto
+		var hp := sk.get_bone_global_pose(hb)
+		hp.origin += upm * lo
+		sk.set_bone_global_pose(hb, hp)
+		for side in feet:
+			var foot: Transform3D = feet[side]
+			var target := foot.origin + upm * float(ds[side])
+			var toe_b := _bone(side + "ToeBase")
+			var toe_dir := fwd
+			if toe_b >= 0:
+				toe_dir = sk.get_bone_global_pose(toe_b).origin - sk.get_bone_global_pose(_bone(side + "Foot")).origin
+				toe_dir -= up * toe_dir.dot(up)
+				toe_dir = toe_dir.normalized() if toe_dir.length() > 0.001 else fwd
+			_ik(sk, side + "UpLeg", side + "Leg", side + "Foot", target, target + toe_dir * 1.2 + up * 0.5)
+			# o pé deita no morro (a sola acompanha a inclinação do chão)
+			var w := gx * foot.origin
+			var e := 0.15
+			var nx := (float(ground_fn.call(w.x + e, w.z)) - float(ground_fn.call(w.x - e, w.z))) / (2.0 * e)
+			var nz := (float(ground_fn.call(w.x, w.z + e)) - float(ground_fn.call(w.x, w.z - e))) / (2.0 * e)
+			var nw := Vector3(-nx, 1.0, -nz).normalized()
+			var ns := (tb * nw).normalized()
+			var tilt := Quaternion(up, ns)
+			if tilt.get_angle() > 0.6:
+				tilt = Quaternion(tilt.get_axis(), 0.6)
+			var fp2 := sk.get_bone_global_pose(_bone(side + "Foot"))
+			fp2.basis = Basis(tilt) * foot.basis
+			sk.set_bone_global_pose(_bone(side + "Foot"), fp2)
 
 	# ---------- agachar: o quadril desce e os joelhos dobram com os pés no chão ----------
 	func _crouch(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:

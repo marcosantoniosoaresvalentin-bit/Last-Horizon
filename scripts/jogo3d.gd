@@ -1111,6 +1111,7 @@ func _build_player() -> void:
 		var pose = Corte.ChopPose.new()
 		pose.player = _player
 		pose.axe = axe
+		pose.ground_fn = surface_at
 		sks[0].add_child(pose)
 		_chop_pose = pose
 
@@ -3437,6 +3438,7 @@ func _move_player(delta: float) -> void:
 			_walk_next = ""
 	if _chop_pose:
 		_chop_pose.moving = amount > 0.12 or _walking
+		_chop_pose.in_air = _air
 	var p := _player.position
 	var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
 	var depth := 0.0

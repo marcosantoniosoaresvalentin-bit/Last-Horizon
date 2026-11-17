@@ -1,9 +1,9 @@
 {
-  "version": 59,
-  "file": "update_59.zip",
-  "size": 3475007,
-  "sha256": "bbae642bb974f0b53f04e0f6685b3ef73491088b2a0c68d278bcb95b1e8273c9",
+  "version": 60,
+  "file": "update_60.zip",
+  "size": 3475658,
+  "sha256": "4e797654cbfdaae48aa786ab9f7eea5d3115a2fc28538ce090ad140c91138ccd",
   "min_build": 1,
-  "notes": "Serrar: o personagem agacha conforme o corte desce e as mãos ficam no cabo",
+  "notes": "Parado no morro: cada pé pisa no chão (o quadril desce, a perna dobra e a sola acompanha a inclinação)",
   "date": "2026-11-17"
 }
