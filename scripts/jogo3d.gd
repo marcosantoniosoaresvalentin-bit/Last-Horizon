@@ -14,6 +14,7 @@ const Itens := preload("res://scripts/itens.gd")
 const Corte := preload("res://scripts/world/corte.gd")
 const Craft := preload("res://scripts/ui/craft.gd")
 const Icones := preload("res://scripts/ui/icones.gd")
+const Cipos := preload("res://scripts/world/cipos.gd")
 const SAVE_EVERY := 60.0     # salva o mundo a cada minuto
 
 const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
@@ -281,6 +282,8 @@ var _swing_on := false
 var _chop_log := {}               # cortando uma tora deitada (em vez de árvore em pé)
 var _jump_btn: Button
 var _log_btn: Button
+var _vine_btn: Button
+var _cipos: Node3D = null
 var _carry := {}                  # tora no ombro (dados da tora)
 var _carry_node: Node3D = null
 var _carry_kg := 0.0
@@ -421,6 +424,17 @@ func _build_hud() -> void:
 	_jump_btn.offset_bottom = -16
 	_jump_btn.pressed.connect(_jump)
 	_hud.add_child(_jump_btn)
+
+	_vine_btn = Icones.IconButton.new()
+	_vine_btn.text = "Coletar cipó"
+	_vine_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_vine_btn.offset_left = -430
+	_vine_btn.offset_top = -426
+	_vine_btn.offset_right = -300
+	_vine_btn.offset_bottom = -296
+	_vine_btn.visible = false
+	_vine_btn.pressed.connect(_collect_vine)
+	_hud.add_child(_vine_btn)
 
 	_log_btn = Icones.IconButton.new()
 	_log_btn.add_theme_font_size_override("font_size", 22)
@@ -648,6 +662,9 @@ func _on_world_ready() -> void:
 	add_child(_arvores)
 	_arvores.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/arvores.json" if _world_id != "" else "")
 	print("árvores: %d plantas em %d ms" % [_arvores.plants.size(), Time.get_ticks_msec() - t0])
+	_cipos = Cipos.new()
+	add_child(_cipos)
+	_cipos.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/cipos.json" if _world_id != "" else "")
 	if not _pending_carry.is_empty():
 		_hold_log(_pending_carry)
 		_pending_carry = {}
@@ -941,6 +958,8 @@ func _process(delta: float) -> void:
 	_update_grass()
 	if _arvores:
 		_arvores.tick()   # quando vira o dia: sementes, brotos, crescimento
+		if _cipos:
+			_cipos.tick()
 	_save_timer -= delta
 	if _save_timer <= 0.0:
 		_save_world()
@@ -991,6 +1010,8 @@ func _save_world() -> void:
 	_save_player()
 	if _arvores:
 		_arvores.save(Mundos.dir(_world_id) + "/arvores.json")
+	if _cipos:
+		_cipos.save(Mundos.dir(_world_id) + "/cipos.json")
 	Mundos.touch(_world_id, _game_date())
 
 
@@ -1353,6 +1374,7 @@ func _update_chop(delta: float) -> void:
 func _update_log_btn() -> void:
 	if _arvores == null:
 		return
+	_vine_btn.visible = _cipos != null and _carry.is_empty() and _crouch_job == "" and not _chopping and not _cipos.harvest_target(_player.position, 1.6).is_empty()
 	if _crouch_job != "" or _chopping or _air:
 		_log_btn.visible = false
 		return
@@ -1390,6 +1412,24 @@ func _log_action() -> void:
 	_face = atan2(-(c.x - _player.position.x), -(c.z - _player.position.z))
 
 
+## Arranca uma raiz aérea madura de cipó-titica (coleta limitada: a planta não morre).
+func _collect_vine() -> void:
+	if _cipos == null or _crouch_job != "" or not _carry.is_empty():
+		return
+	var pl: Dictionary = _cipos.harvest_target(_player.position, 1.6)
+	if pl.is_empty():
+		return
+	var why: String = _cipos.harvest(pl)
+	if why != "":
+		_show_toast(why)
+		return
+	var dropped := add_item("cipo", 1)
+	_show_toast("+1 cipó-titica" + (" (mochila cheia: caiu no chão)" if dropped > 0 else ""))
+	_face = atan2(-(float(pl.x) - _player.position.x), -(float(pl.z) - _player.position.z))
+	_crouch_job = "puxar"
+	_crouch_t = 0.0
+
+
 ## Agacha, pega (ou larga) a tora embaixo e levanta: 1,1 s no total.
 func _update_crouch(delta: float) -> void:
 	if _crouch_job == "" or _chop_pose == null:
@@ -1400,7 +1440,9 @@ func _update_crouch(delta: float) -> void:
 	var mid := 0.5
 	_chop_pose.crouch = smoothstep(0.0, mid, _crouch_t) if _crouch_t < mid else 1.0 - smoothstep(mid, T, _crouch_t)
 	if before < mid and _crouch_t >= mid:
-		if _crouch_job == "pegar":
+		if _crouch_job == "puxar":
+			pass
+		elif _crouch_job == "pegar":
 			var fl: Dictionary = _arvores.take_log(_crouch_target)
 			_hold_log(fl)
 		else:
@@ -1747,7 +1789,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn]:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn]:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:

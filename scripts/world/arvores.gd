@@ -1074,6 +1074,34 @@ func nearest_standing(pos: Vector3, reach: float) -> Variant:
 	return best
 
 
+## Ponto (no mundo) na casca de uma árvore em pé, a y metros do chão e no ângulo ang
+## (usado pelos cipós que sobem no tronco). "out" afasta da casca.
+func trunk_point(p: Array, y: float, ang: float, out := 0.0) -> Vector3:
+	var v := int(p[4]) % VARIANTS
+	var m: Dictionary = _models[v]
+	var h := height_of(p, last_day)
+	var s: float = h / float(m.height)
+	var x := float(p[0])
+	var z := float(p[1])
+	var rot := fmod(x * 12.9898 + z * 78.233, TAU)
+	var hm := y / maxf(s, 0.01)
+	var r := _radius_of(m, hm, ang)
+	var local := _axis_of(m, hm) + Vector3(cos(ang), 0, sin(ang)) * r
+	var w := Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), Vector3(x, _jogo.height_at(x, z) - 0.15, z)) * local
+	var c := Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), Vector3(x, _jogo.height_at(x, z) - 0.15, z)) * _axis_of(m, hm)
+	var d := (w - c)
+	d.y = 0.0
+	return w + (d.normalized() * out if d.length() > 0.0001 else Vector3.ZERO)
+
+
+## Árvore em pé (viva ou secando) por posição, para o cipó saber onde está apoiado.
+func standing_at(x: float, z: float) -> Variant:
+	for p in plants:
+		if absf(float(p[0]) - x) < 0.01 and absf(float(p[1]) - z) < 0.01:
+			return p if int(p[5]) != FALLEN else null
+	return null
+
+
 ## Raio (m) do tronco na altura do corte (1 m do chão), do jeito que ele é desenhado.
 func trunk_radius(p: Array) -> float:
 	var h := height_of(p, last_day)

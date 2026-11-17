@@ -1,9 +1,9 @@
 {
-  "version": 40,
-  "file": "update_40.zip",
-  "size": 3100230,
-  "sha256": "15cab345bb9e3b7b5556570610eed79f36879e7bd7184c250ab7f0c1ed59c011",
+  "version": 41,
+  "file": "update_41.zip",
+  "size": 3107650,
+  "sha256": "0b6fec30ae048d2a90e3f96cf3ad82eb6a84727cf93d7dbf42b291cd170eceef",
   "min_build": 1,
-  "notes": "Toras só no tamanho pequeno de cada árvore (no máximo 50 kg); pé não torce ao agachar; ícones novos em todos os botões; botão de pegar sem o peso",
+  "notes": "Cipó-titica: nasce de semente, sobe nas árvores, solta raízes aéreas até o chão, dá flores e frutos, aves e pequenos animais espalham as sementes; coleta limitada das raízes",
   "date": "2026-11-17"
 }

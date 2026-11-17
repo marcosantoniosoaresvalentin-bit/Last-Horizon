@@ -65,6 +65,8 @@ static func kind_for(text: String) -> String:
 		return "pegar_tora"
 	if t.begins_with("largar"):
 		return "largar_tora"
+	if t.contains("cipó") or t.contains("cipo"):
+		return "cipo"
 	if t.contains("argila"):
 		return "argila"
 	if t.contains("semente"):
@@ -178,6 +180,15 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 					else P.call([[-10, y0 - 8], [-10, y0 + 6], [-20, y0 + 6], [0, y0 + 24], [20, y0 + 6], [10, y0 + 6], [10, y0 - 8]])
 				ci.draw_colored_polygon(arr, col.call(Color(0.98, 0.62, 0.25) if up else Color(0.55, 0.8, 0.45)))
 				ci.draw_polyline(arr + PackedVector2Array([arr[0]]), ink, 2 * u, true)
+		"cipo":
+			# rolo de raiz de titica com uma folha
+			for ring in 3:
+				var rr := 30.0 - ring * 7.0
+				ci.draw_arc(c + Vector2(0, 6) * u, rr * u, 0, TAU, 28, col.call(Color(0.5, 0.4, 0.26).darkened(ring * 0.12)), 6 * u, true)
+			ci.draw_line(c + Vector2(28, 8) * u, c + Vector2(44, 38) * u, col.call(Color(0.5, 0.4, 0.26)), 6 * u, true)
+			var lf: PackedVector2Array = P.call([[-10, -26], [-30, -46], [-6, -44], [4, -30]])
+			ci.draw_colored_polygon(lf, col.call(Color(0.22, 0.45, 0.16)))
+			ci.draw_polyline(lf + PackedVector2Array([lf[0]]), ink, 2 * u, true)
 		"argila":
 			var pts := PackedVector2Array()
 			for i in 18:

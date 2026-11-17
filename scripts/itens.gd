@@ -11,7 +11,7 @@ const ITENS := {
 	"semente": {"nome": "Semente de Cedrinho", "kg": 0.002, "cat": "Recursos", "desc": "Plante em terra boa: brota em uns 100 dias."},
 	"pedra": {"nome": "Pedra", "kg": 0.8, "cat": "Recursos", "desc": "Pedra lascada, boa para ferramentas."},
 	"galho": {"nome": "Galho", "kg": 0.5, "cat": "Recursos", "desc": "Galho reto e firme."},
-	"cipo": {"nome": "Cipó", "kg": 0.1, "cat": "Recursos", "desc": "Serve de corda para amarrar."},
+	"cipo": {"nome": "Cipó-titica", "kg": 0.15, "cat": "Recursos", "desc": "Raiz aérea da titica: forte e flexível. Serve para amarrar, cestos e cordas."},
 }
 
 const CATEGORIAS := ["Tudo", "Armas", "Munição", "Equipamentos", "Ferramentas", "Construção", "Recursos", "Itens Médicos", "Diversos"]

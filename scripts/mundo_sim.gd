@@ -346,6 +346,18 @@ func soil_data(cell: Vector2i) -> Dictionary:
 	return d
 
 
+## Água no solo de uma célula (0 seco a 1 encharcado), para as plantas.
+func ground_water(cell: Vector2i) -> float:
+	if cell.x < 0 or cell.y < 0 or cell.x >= W or cell.y >= H:
+		return 0.0
+	_mx.lock()
+	var v := 0.5
+	if _out_soil.size() == N * 4:
+		v = _out_soil[(cell.y * W + cell.x) * 4 + 2] / 255.0
+	_mx.unlock()
+	return v
+
+
 ## Tira argila da beira numa célula (o jogador cavou ali). Aplicado pela simulação.
 func dig(cell: Vector2i, amount: float) -> void:
 	_mx.lock()
