@@ -57,6 +57,20 @@ class IconButton extends Button:
 
 static func kind_for(text: String) -> String:
 	var t := text.to_lower()
+	if t.begins_with("modelar"):
+		return "modelar"
+	if t.begins_with("pegar pedra"):
+		return "it_pedra"
+	if t.begins_with("bater"):
+		return "bater"
+	if t.begins_with("sair"):
+		return "sair"
+	if t.begins_with("pedra de machado"):
+		return "it_pedra_machado"
+	if t.begins_with("lâmina de cavadeira"):
+		return "it_pedra_cavadeira"
+	if t.begins_with("lâmina de serra"):
+		return "it_lamina_serra"
 	if t.begins_with("serrar"):
 		return "serrar"
 	if t.begins_with("parar"):
@@ -230,6 +244,20 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 				ci.draw_colored_polygon(lg, col.call(BARK.lightened(0.1)))
 				ci.draw_polyline(lg + PackedVector2Array([lg[0]]), ink, 2 * u, true)
 				ci.draw_circle(c + Vector2(36, -18) * u, 12 * u, col.call(WOOD_LIGHT))
+		"modelar", "bater":
+			# pedra no chão e a pedra de bater em cima, com risquinhos da batida
+			if shadow:
+				ci.draw_circle(c + Vector2(0, 22) * u, 26 * u, sh)
+			else:
+				Desenhos.item(ci, "pedra", c + Vector2(0, 22) * u, s * 0.62)
+				Desenhos.item(ci, "pedra", c + Vector2(-8, -24) * u, s * 0.42)
+				for k2 in 3:
+					var a2 := -0.9 + k2 * 0.9
+					var o := c + Vector2(14, -2) * u
+					ci.draw_line(o + Vector2(cos(a2), sin(a2) * 0.6) * 10 * u, o + Vector2(cos(a2), sin(a2) * 0.6) * 22 * u, col.call(Color(1.0, 0.8, 0.3)), 3 * u, true)
+		"sair":
+			ci.draw_line(c + Vector2(-24, -24) * u, c + Vector2(24, 24) * u, col.call(BONE), 9 * u, true)
+			ci.draw_line(c + Vector2(24, -24) * u, c + Vector2(-24, 24) * u, col.call(BONE), 9 * u, true)
 		"serrar":
 			# rodela com a serra em cima
 			if shadow:
@@ -334,6 +362,11 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 				var body: PackedVector2Array = P.call([[20, 0], [6, -12], [-8, 0], [6, 12]])
 				ci.draw_colored_polygon(body, Color(0.42, 0.26, 0.14))
 				ci.draw_polyline(body + PackedVector2Array([body[0]]), INK, 2 * u, true)
+		_ when k.begins_with("it_"):
+			if shadow:
+				ci.draw_circle(c, 30 * u, sh)
+			else:
+				Desenhos.item(ci, k.substr(3), c, s * 0.85)
 		_:
 			# mão aberta (pegar)
 			var palm: PackedVector2Array = P.call([[-24, -2], [22, -2], [24, 30], [-20, 34]])

@@ -425,6 +425,15 @@ func _use() -> void:
 	if it.id in ["machado", "cavadeira", "serra"]:
 		_equip()
 		return
+	if it.id == "pedra" and _game:
+		if str(_game._mao) == "pedra":
+			_game.equip("")
+			_refresh()
+			_say("Pedra guardada na mochila.")
+		else:
+			_game.equip("pedra")
+			fechar()
+		return
 	if Itens.colocavel(str(it.id)) and _game:
 		if _game.start_placing(str(it.id)):
 			fechar()

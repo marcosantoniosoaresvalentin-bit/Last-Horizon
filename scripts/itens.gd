@@ -22,7 +22,7 @@ const ITENS := {
 		"desc": "Cavalete em X de galhos amarrados com cipó. COLOCAR põe no chão onde você escolher; duas forquilhas seguram uma tora para trabalhar.", "colocar": true},
 	"argila": {"nome": "Argila", "kg": 1.0, "cat": "Recursos", "desc": "Barro da beira das lagoas."},
 	"semente": {"nome": "Semente de Cedrinho", "kg": 0.002, "cat": "Recursos", "desc": "Plante em terra boa: brota em uns 100 dias."},
-	"pedra": {"nome": "Pedra", "kg": 0.8, "cat": "Recursos", "desc": "Pedra lascada, boa para ferramentas."},
+	"pedra": {"nome": "Pedra", "kg": 0.8, "cat": "Recursos", "desc": "Pedra solta do chão. USAR põe ela na mão: perto de outra pedra no chão dá para bater e modelar as pedras das ferramentas."},
 	"galho": {"nome": "Galho", "kg": 0.5, "cat": "Recursos", "desc": "Galho reto e firme."},
 	"cipo": {"nome": "Cipó-titica", "kg": 0.15, "cat": "Recursos", "desc": "Raiz aérea da titica: forte e flexível. Serve para amarrar, cestos e cordas."},
 	"cipo_trancado": {"nome": "Cipó Trançado", "kg": 0.4, "cat": "Recursos",

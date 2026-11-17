@@ -409,6 +409,9 @@ class ChopPose extends SkeletonModifier3D:
 	var saw_phase := 0.0          # 0 a 1: uma ida e volta
 	var saw_point := Vector3.ZERO # onde a serra corta (no mundo, em cima da tora)
 	var saw_depth := 0.0          # quanto o corte já desceu (m)
+	var knapping := false         # agachado batendo uma pedra na outra (modelando)
+	var knap_point := Vector3.ZERO  # onde bate (no mundo)
+	var knap_lift := 0.35         # 0 = encostou na pedra do chão, 1 = levantada
 	var digging := false          # cavando com a cavadeira
 	var crouch := 0.0             # 0 em pé, 1 agachado (pegar ou largar a tora)
 	var moving := false           # andando/correndo (o jogo avisa)
@@ -456,6 +459,13 @@ class ChopPose extends SkeletonModifier3D:
 				axe.visible = false
 			_carry_log(sk, up, fwd, right)
 			return
+		if knapping and holding:
+			if axe:
+				axe.visible = true
+			_close_fingers(sk, "Right")
+			_close_fingers(sk, "Left")
+			_knap(sk, up, fwd, right)
+			return
 		if axe:
 			axe.visible = holding
 		if not holding:
@@ -488,6 +498,20 @@ class ChopPose extends SkeletonModifier3D:
 		if p < 0.65:
 			return lerpf(hit, hit + 8.0, (p - HIT_AT) / (0.65 - HIT_AT))
 		return lerpf(hit + 8.0, rest, smoothstep(0.0, 1.0, (p - 0.65) / 0.35))
+
+	# ---------- modelar pedra: as duas mãos seguram a pedra de bater e descem no ponto ----------
+	func _knap(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
+		var pt: Vector3 = sk.global_transform.affine_inverse() * knap_point
+		var hammer := pt + up * (0.06 + 0.28 * knap_lift) - fwd * 0.03
+		for side in ["Right", "Left"]:
+			var out := right if side == "Right" else -right
+			var sb := _bone(side + "Arm")
+			if sb < 0:
+				continue
+			var sh := sk.get_bone_global_pose(sb).origin
+			var wrist := hammer + out * 0.06 + up * 0.05 - fwd * 0.07
+			_ik(sk, side + "Arm", side + "ForeArm", side + "Hand", wrist, sh - up * 0.3 + out * 0.7 + fwd * 0.2)
+		_set_tool(sk, Transform3D(Basis(), hammer))
 
 	# ---------- serrar: vai e vem, a mão direita no pegador e a esquerda no cabo ----------
 	func _saw(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:

@@ -1,9 +1,9 @@
 {
-  "version": 52,
-  "file": "update_52.zip",
-  "size": 3407729,
-  "sha256": "63860e4ab7a74c1755b45446efac16464e724b9490a761f13cf201f1cf4937dc",
+  "version": 53,
+  "file": "update_53.zip",
+  "size": 3463534,
+  "sha256": "2ca97ea0b4f7269237749bbf5a4e72a14e6b893982e5d2314319c4006fe81ed3",
   "min_build": 1,
-  "notes": "Serra de pedra (rodela só com serra, corte lento com som real), pedras trabalhadas nas receitas e durabilidade das ferramentas",
+  "notes": "Pedras no chão para pegar e modelagem de pedra no chão (pedra de machado, lâmina de cavadeira e lâmina de serra)",
   "date": "2026-11-17"
 }
