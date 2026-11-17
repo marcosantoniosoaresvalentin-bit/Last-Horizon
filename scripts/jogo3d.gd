@@ -279,6 +279,14 @@ var _chop_t := 0.0
 var _swing_on := false
 var _chop_log := {}               # cortando uma tora deitada (em vez de árvore em pé)
 var _jump_btn: Button
+var _log_btn: Button
+var _carry := {}                  # tora no ombro (dados da tora)
+var _carry_node: Node3D = null
+var _carry_kg := 0.0
+var _crouch_job := ""             # "pegar" ou "largar" enquanto agacha
+var _crouch_t := 0.0
+var _crouch_target := {}
+var _pending_carry := {}
 var _vy := 0.0                    # velocidade vertical (pulo)
 var _air := false
 var _swing_queued := false
@@ -412,6 +420,17 @@ func _build_hud() -> void:
 	_jump_btn.offset_bottom = -16
 	_jump_btn.pressed.connect(_jump)
 	_hud.add_child(_jump_btn)
+
+	_log_btn = Button.new()
+	_log_btn.add_theme_font_size_override("font_size", 22)
+	_log_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_log_btn.offset_left = -300
+	_log_btn.offset_top = -490
+	_log_btn.offset_right = -30
+	_log_btn.offset_bottom = -416
+	_log_btn.visible = false
+	_log_btn.pressed.connect(_log_action)
+	_hud.add_child(_log_btn)
 
 	_pick_btn = Button.new()
 	_pick_btn.add_theme_font_size_override("font_size", 22)
@@ -625,6 +644,9 @@ func _on_world_ready() -> void:
 	add_child(_arvores)
 	_arvores.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/arvores.json" if _world_id != "" else "")
 	print("árvores: %d plantas em %d ms" % [_arvores.plants.size(), Time.get_ticks_msec() - t0])
+	if not _pending_carry.is_empty():
+		_hold_log(_pending_carry)
+		_pending_carry = {}
 	_loading.visible = false
 	_loading_bg.visible = false
 	# hora e dia não aparecem na tela (o calendário vai mostrar a data)
@@ -936,6 +958,7 @@ func _process(delta: float) -> void:
 		_seed_check = 0.25
 		_seed_btn.visible = _arvores.nearest_seed(_player.position, 1.6) >= 0
 	_update_chop(delta)
+	_update_crouch(delta)
 	# a grama vai sendo refeita aos poucos, acompanhando as estações
 	_refresh_timer -= delta
 	if _refresh_timer <= 0.0 and _grass_queue.is_empty() and not _grass_chunks.is_empty():
@@ -975,7 +998,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1003,6 +1026,9 @@ func _load_player() -> void:
 			if g is Dictionary and Itens.ITENS.has(str(g.get("id", ""))):
 				_add_ground(str(g.id), int(g.get("qtd", 1)), float(g.get("x", 0.0)), float(g.get("z", 0.0)))
 	equip(str(d.get("mao", "")))
+	var tora = d.get("tora", {})
+	if tora is Dictionary and tora.has("v"):
+		_pending_carry = tora      # volta com a tora no ombro (depois que as árvores carregam)
 	var x := clampf(float(d.get("x", _player.position.x)), 1.0, MundoSim.W * CELL - 1.0)
 	var z := clampf(float(d.get("z", _player.position.z)), 1.0, MundoSim.H * CELL - 1.0)
 	_player.position = _ground_pos(Vector2(x, z))
@@ -1308,7 +1334,8 @@ func _update_chop(delta: float) -> void:
 	if gi >= 0:
 		_pick_btn.text = "Pegar %s" % Itens.nome(str(_chao[gi].id)).to_lower()
 	_chop_btn.visible = false
-	if _mao == "machado" and _arvores != null and not _digging and not _air:
+	_update_log_btn()
+	if _mao == "machado" and _arvores != null and not _digging and not _air and _carry.is_empty() and _crouch_job == "":
 		if _arvores.nearest_standing(_player.position, 1.3) != null:
 			_chop_btn.visible = true
 			_chop_btn.text = "Cortar"
@@ -1317,9 +1344,91 @@ func _update_chop(delta: float) -> void:
 			_chop_btn.text = "Cortar tora"
 
 
+# ================== PEGAR, CARREGAR E LARGAR TORA ==================
+
+func _update_log_btn() -> void:
+	if _arvores == null:
+		return
+	if _crouch_job != "" or _chopping or _air:
+		_log_btn.visible = false
+		return
+	if not _carry.is_empty():
+		_log_btn.visible = true
+		_log_btn.text = "Largar tora"
+		return
+	var t: Dictionary = _arvores.pick_target(_player.position, 1.3)
+	_log_btn.visible = not t.is_empty()
+	if not t.is_empty():
+		var kg: float = _arvores.free_log_kg(t.log)
+		_log_btn.text = "Pegar tora (%d kg)" % int(round(kg))
+
+
+func _log_action() -> void:
+	if _crouch_job != "" or _chopping or _air or _arvores == null:
+		return
+	if not _carry.is_empty():
+		_crouch_job = "largar"
+		_crouch_t = 0.0
+		return
+	var t: Dictionary = _arvores.pick_target(_player.position, 1.3)
+	if t.is_empty():
+		return
+	var kg: float = _arvores.free_log_kg(t.log)
+	if kg > Arvores.CARRY_MAX_KG:
+		_show_toast("Pesada demais (%d kg). Corte um pedaço menor." % int(round(kg)))
+		return
+	if _digging:
+		_cancel_dig()
+	_crouch_target = t
+	_crouch_job = "pegar"
+	_crouch_t = 0.0
+	# vira para a tora
+	var c: Vector3 = t.center
+	_face = atan2(-(c.x - _player.position.x), -(c.z - _player.position.z))
+
+
+## Agacha, pega (ou larga) a tora embaixo e levanta: 1,1 s no total.
+func _update_crouch(delta: float) -> void:
+	if _crouch_job == "" or _chop_pose == null:
+		return
+	var before := _crouch_t
+	_crouch_t += delta
+	var T := 1.1
+	var mid := 0.5
+	_chop_pose.crouch = smoothstep(0.0, mid, _crouch_t) if _crouch_t < mid else 1.0 - smoothstep(mid, T, _crouch_t)
+	if before < mid and _crouch_t >= mid:
+		if _crouch_job == "pegar":
+			var fl: Dictionary = _arvores.take_log(_crouch_target)
+			_hold_log(fl)
+		else:
+			var fwd := Vector3(-sin(_face), 0, -cos(_face))
+			var r: float = _arvores.free_log_radius(_carry)
+			var c := _player.position + fwd * (r + 0.55)
+			_arvores.drop_log(_carry, c, _face)
+			_carry = {}
+			if _carry_node:
+				_carry_node.queue_free()
+			_carry_node = null
+			_chop_pose.log_node = null
+	if _crouch_t >= T:
+		_crouch_job = ""
+		_chop_pose.crouch = 0.0
+		_act_check = 0.0
+
+
+func _hold_log(fl: Dictionary) -> void:
+	_carry = fl
+	_carry_kg = _arvores.free_log_kg(fl)
+	_carry_node = _arvores.free_log_node(fl)
+	add_child(_carry_node)
+	if _chop_pose:
+		_chop_pose.log_node = _carry_node
+		_chop_pose.log_r = _arvores.free_log_radius(fl)
+
+
 ## Pulo: sobe uns 60 cm (dá para passar por cima de uma tora ou subir nela).
 func _jump() -> void:
-	if _air or _chopping or _digging:
+	if _air or _chopping or _digging or not _carry.is_empty() or _crouch_job != "":
 		return
 	_air = true
 	_vy = 4.2
@@ -1503,6 +1612,8 @@ func _move_player(delta: float) -> void:
 			_cancel_chop()
 		else:
 			amount = 0.0
+	if _crouch_job != "":
+		amount = 0.0           # abaixado pegando ou largando a tora
 	var p := _player.position
 	var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
 	var depth := 0.0
@@ -1514,8 +1625,10 @@ func _move_player(delta: float) -> void:
 		var fwd := Vector3(-sin(_yaw), 0, -cos(_yaw))
 		var right := Vector3(cos(_yaw), 0, -sin(_yaw))
 		var move := (right * dir.x - fwd * dir.y).normalized()
-		var running := amount > 0.85
+		var running := amount > 0.85 and _carry.is_empty()
 		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow
+		if not _carry.is_empty():
+			sp *= lerpf(0.9, 0.45, clampf(_carry_kg / Arvores.CARRY_MAX_KG, 0.0, 1.0))   # tora pesada: anda devagar
 		p += move * sp * delta
 		p.x = clampf(p.x, 1.0, MundoSim.W * CELL - 1.0)
 		p.z = clampf(p.z, 1.0, MundoSim.H * CELL - 1.0)
@@ -1631,7 +1744,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn]:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn]:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:

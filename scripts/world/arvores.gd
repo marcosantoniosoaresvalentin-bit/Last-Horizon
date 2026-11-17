@@ -84,6 +84,9 @@ var _cut_mat: Material
 var _chips_mat: Material
 var _falling: Array = []
 var _log_nodes := {}               # tora derrubada pelo jogador -> nó desenhado
+var free_logs: Array = []          # pedaços de tora soltos (levados pelo jogador): ver _free_log
+var _free_nodes: Array = []
+var _nat_segs: Array = []          # troncos que caíram sozinhos (colisão)
 var _log_segs: Array = []          # [ponta A, ponta B, raio] de cada tora (para colidir e subir)          # árvores tombando agora (a animação desenha elas)
 var _drown := {}                   # Vector2(x, z) -> dias seguidos debaixo d'água
 
@@ -453,7 +456,7 @@ func save(path: String) -> void:
 		var cl := []
 		for k in cuts:
 			cl.append([k.x, k.y, cuts[k][0], cuts[k][1]])
-		f.store_string(JSON.stringify({"versao": 3, "dia": last_day, "plantas": plants, "sementes": seeds, "cortes": cl, "tocos": stumps}))
+		f.store_string(JSON.stringify({"versao": 3, "dia": last_day, "plantas": plants, "sementes": seeds, "cortes": cl, "tocos": stumps, "toras": free_logs}))
 		f.close()
 
 
@@ -482,6 +485,10 @@ func _load(path: String) -> bool:
 	else:
 		return false
 	stumps = d.get("tocos", [])
+	free_logs = []
+	for fl in d.get("toras", []):
+		if fl is Dictionary and fl.has("pos"):
+			free_logs.append(fl)
 	cuts = {}
 	for c in d.get("cortes", []):
 		cuts[Vector2(float(c[0]), float(c[1]))] = [int(c[2]), float(c[3])]
@@ -507,6 +514,13 @@ func _rebuild() -> void:
 			_log_nodes[k].free()
 	_log_nodes.clear()
 	_log_segs.clear()
+	_nat_segs.clear()
+	for n in _free_nodes:
+		if is_instance_valid(n):
+			n.free()
+	_free_nodes.clear()
+	for fl in free_logs:
+		_place_free_node(fl)
 	_instances.clear()
 	_grid.clear()
 	var day := last_day
@@ -544,7 +558,7 @@ func _rebuild() -> void:
 			var lxf := Transform3D(Basis(rest[1], rest[2]) * Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), rest[0])
 			logs[key].append(lxf)
 			var mm: Dictionary = _models[v]
-			_log_segs.append([lxf * _axis_of(mm, 1.0), lxf * _axis_of(mm, float(mm.H) * 0.6), float(mm.r0) * s])
+			_nat_segs.append([lxf * _axis_of(mm, 1.0), lxf * _axis_of(mm, float(mm.H) * 0.6), float(mm.r0) * s])
 			continue
 		var gk := Vector2i(floori(x / 8.0), floori(z / 8.0))
 		if not _grid.has(gk):
@@ -826,6 +840,12 @@ func buck_hit(p: Array, h_at: float) -> bool:
 
 func _rebuild_logs() -> void:
 	_log_segs.clear()
+	for n in _free_nodes:
+		if is_instance_valid(n):
+			n.free()
+	_free_nodes.clear()
+	for fl in free_logs:
+		_place_free_node(fl)
 	for k in _log_nodes:
 		if is_instance_valid(_log_nodes[k]):
 			_log_nodes[k].free()
@@ -1357,10 +1377,156 @@ func _cut_info(p: Array) -> Dictionary:
 		"seed": absi(hash(Vector2(float(p[0]), float(p[1])))) % 100000, "s": s}
 
 
+# ================== TORAS SOLTAS (pegar, carregar e largar) ==================
+
+const WOOD_DENSITY := 520.0     # kg por m³ (madeira de Cedrinho ainda verde, mais leve)
+const CARRY_MAX_KG := 150.0
+
+## Tora solta: {v, s, h0, h1, bot, top (pontas), pos [x, y, z] (centro), yaw, dia}.
+## O desenho usa o tronco do modelo de h0 a h1 (no tamanho s), deitado ao longo de +X.
+func free_log_node(fl: Dictionary) -> Node3D:
+	var v := int(fl.v) % VARIANTS
+	var m: Dictionary = _models[v]
+	var s := float(fl.s)
+	var h0 := float(fl.h0)
+	var h1 := float(fl.h1)
+	var a := _axis_of(m, h0)
+	var b := _axis_of(m, h1)
+	var mid := (a + b) * 0.5
+	var bas := Basis(Quaternion((b - a).normalized(), Vector3.RIGHT)).scaled(Vector3(s, s, s))
+	var root := Node3D.new()
+	var holder := Node3D.new()
+	holder.transform = Transform3D(bas, -(bas * mid))
+	root.add_child(holder)
+	var age := float(last_day - int(fl.get("dia", last_day)))
+	var bot: Dictionary = fl.get("bot", {})
+	var top: Dictionary = fl.get("top", {})
+	_trunk_node(holder, _trunk_build(m, h0, h1, [], s, top, bot), _bark if age < 200 else _bark_dead)
+	return root
+
+
+func free_log_length(fl: Dictionary) -> float:
+	var m: Dictionary = _models[int(fl.v) % VARIANTS]
+	return (_axis_of(m, float(fl.h1)) - _axis_of(m, float(fl.h0))).length() * float(fl.s)
+
+
+func free_log_radius(fl: Dictionary) -> float:
+	var m: Dictionary = _models[int(fl.v) % VARIANTS]
+	return _radius_of(m, (float(fl.h0) + float(fl.h1)) * 0.5, 0.0) * float(fl.s)
+
+
+func free_log_kg(fl: Dictionary) -> float:
+	var r := free_log_radius(fl)
+	return PI * r * r * free_log_length(fl) * WOOD_DENSITY
+
+
+## Põe a tora deitada no chão: centro em pos, virada para yaw, acompanhando o morro.
+func _place_free_node(fl: Dictionary) -> void:
+	var n := free_log_node(fl)
+	add_child(n)
+	_free_nodes.append(n)
+	var x := float(fl.pos[0])
+	var z := float(fl.pos[2])
+	var L := free_log_length(fl)
+	var r := free_log_radius(fl)
+	var dir := Vector3(cos(float(fl.yaw)), 0, -sin(float(fl.yaw)))
+	var e1 := Vector3(x, 0, z) - dir * L * 0.5
+	var e2 := Vector3(x, 0, z) + dir * L * 0.5
+	e1.y = _jogo.height_at(e1.x, e1.z) + r * 0.9
+	e2.y = _jogo.height_at(e2.x, e2.z) + r * 0.9
+	var d := (e2 - e1).normalized()
+	n.transform = Transform3D(Basis(Quaternion(Vector3.RIGHT, d)), (e1 + e2) * 0.5)
+	_log_segs.append([e1, e2, r])
+
+
+## Pedaço de tora mais perto que dá para pegar (não pega a parte da copa).
+## Devolve {kind: "arvore" ou "solta", ...} ou {}.
+func pick_target(pos: Vector3, reach: float) -> Dictionary:
+	var best := {}
+	var bd := reach
+	for i in free_logs.size():
+		var fl: Dictionary = free_logs[i]
+		var d := _seg_dist(pos, _free_ends(fl))
+		if d < bd:
+			bd = d
+			best = {"kind": "solta", "i": i, "log": fl}
+	for p in plants:
+		if int(p[5]) != FALLEN or p.size() < 10 or not p[9] is Array or _falling.has(p):
+			continue
+		var v := int(p[4]) % VARIANTS
+		var m: Dictionary = _models[v]
+		var h := height_of(p, last_day)
+		var s: float = h / float(m.height)
+		var cut := _cut_from(p, p[9], s)
+		var xf := _log_xf(p, h, s, cut)
+		var along := (xf * _axis_of(m, float(m.H)) - xf * _axis_of(m, float(cut.h))).normalized()
+		var a_up := _log_up_angle(xf)
+		var pieces := log_pieces(p)
+		for idx in pieces.size():
+			var pc: Array = pieces[idx]
+			if absf(float(pc[1]) - float(m.H)) < 0.0001:
+				continue      # a copa fica
+			var off: Vector3 = along * float(pc[2])
+			var A: Vector3 = xf * _axis_of(m, float(pc[0])) + off
+			var B: Vector3 = xf * _axis_of(m, float(pc[1])) + off
+			var d := _seg_dist(pos, [A, B])
+			if d < bd:
+				bd = d
+				var bot: Dictionary = cut if absf(float(pc[0]) - float(cut.h)) < 0.0001 else _buck_end(p, a_up, float(pc[0]), 1.0)
+				var fl := {"v": v, "s": s, "h0": float(pc[0]), "h1": float(pc[1]), "bot": bot,
+					"top": _buck_end(p, a_up, float(pc[1]), -1.0), "pos": [0, 0, 0], "yaw": 0.0, "dia": int(p[6])}
+				best = {"kind": "arvore", "p": p, "idx": idx, "log": fl, "center": (A + B) * 0.5}
+	if not best.is_empty() and best.kind == "solta":
+		var fl: Dictionary = best.log
+		best["center"] = Vector3(float(fl.pos[0]), float(fl.pos[1]), float(fl.pos[2]))
+	return best
+
+
+func _free_ends(fl: Dictionary) -> Array:
+	var dir := Vector3(cos(float(fl.yaw)), 0, -sin(float(fl.yaw)))
+	var c := Vector3(float(fl.pos[0]), float(fl.pos[1]), float(fl.pos[2]))
+	var L := free_log_length(fl)
+	return [c - dir * L * 0.5, c + dir * L * 0.5]
+
+
+static func _seg_dist(pos: Vector3, seg: Array) -> float:
+	var A: Vector3 = seg[0]
+	var B: Vector3 = seg[1]
+	var ab := Vector2(B.x - A.x, B.z - A.z)
+	var L2 := maxf(ab.length_squared(), 0.0001)
+	var t := clampf(Vector2(pos.x - A.x, pos.z - A.z).dot(ab) / L2, 0.0, 1.0)
+	var c := A.lerp(B, t)
+	return Vector2(pos.x - c.x, pos.z - c.z).length()
+
+
+## Tira o pedaço do mundo (o jogador pegou). Devolve a tora para ser carregada.
+func take_log(target: Dictionary) -> Dictionary:
+	var fl: Dictionary = target.log
+	if target.kind == "solta":
+		free_logs.remove_at(int(target.i))
+	else:
+		var p: Array = target.p
+		var pieces: Array = log_pieces(p).duplicate(true)
+		pieces.remove_at(int(target.idx))
+		if p.size() < 11:
+			p.resize(11)
+		p[10] = pieces
+	_rebuild_logs()
+	return fl
+
+
+## Larga a tora no chão.
+func drop_log(fl: Dictionary, center: Vector3, yaw: float) -> void:
+	fl.pos = [center.x, center.y, center.z]
+	fl.yaw = yaw
+	free_logs.append(fl)
+	_rebuild_logs()
+
+
 ## Altura do topo de uma tora embaixo do jogador (para ficar em pé em cima dela), ou -1e9.
 func support_y(x: float, z: float) -> float:
 	var best := -1e9
-	for sg in _log_segs:
+	for sg in _log_segs + _nat_segs:
 		var A: Vector3 = sg[0]
 		var B: Vector3 = sg[1]
 		var r: float = sg[2]
@@ -1379,7 +1545,7 @@ func support_y(x: float, z: float) -> float:
 ## O jogador não atravessa os troncos: empurra a posição para fora.
 func push_out(p: Vector3, feet_y := -1e9) -> Vector3:
 	# toras deitadas: só passa por cima pulando (ou andando em cima delas)
-	for sg in _log_segs:
+	for sg in _log_segs + _nat_segs:
 		var A: Vector3 = sg[0]
 		var B: Vector3 = sg[1]
 		var r: float = sg[2]

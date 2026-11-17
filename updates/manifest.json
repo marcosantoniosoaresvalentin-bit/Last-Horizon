@@ -1,9 +1,9 @@
 {
-  "version": 38,
-  "file": "update_38.zip",
-  "size": 3093587,
-  "sha256": "636ad90de408d3eaaf667928abfd4dbd619d03be89f3f45d4c011f321e7208d7",
+  "version": 39,
+  "file": "update_39.zip",
+  "size": 3096605,
+  "sha256": "c093303649da4b4c29c59d4da9040bb87f5c85cbcb5ec84c0b9ef969ec1889cf",
   "min_build": 1,
-  "notes": "Árvores sem buraco/transparência; pulo; tora bloqueia a passagem e dá para subir nela; cortar a tora em pedaços com golpe de cima para baixo; pulso reto segurando o machado",
+  "notes": "Pegar tora: o personagem agacha, põe a tora no ombro, carrega (mais devagar se pesada, até 150 kg) e larga no chão onde quiser",
   "date": "2026-11-17"
 }

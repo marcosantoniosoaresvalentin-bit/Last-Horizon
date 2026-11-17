@@ -223,6 +223,9 @@ class ChopPose extends SkeletonModifier3D:
 	var ready_pose := false            # duas mãos no cabo, esperando o próximo toque
 	var phase := 0.0
 	var vertical := false         # golpe de cima para baixo (cortar tora deitada)
+	var crouch := 0.0             # 0 em pé, 1 agachado (pegar ou largar a tora)
+	var log_node: Node3D = null   # tora no ombro
+	var log_r := 0.2
 	var _b := {}
 	var thumb_axis := Vector3.BACK
 	var thumb_angs := [1.0, 0.9, 0.7]
@@ -248,15 +251,22 @@ class ChopPose extends SkeletonModifier3D:
 		var sk := get_skeleton()
 		if sk == null or player == null:
 			return
-		if axe:
-			axe.visible = holding
-		if not holding:
-			return
 		var to_skel := sk.global_transform.affine_inverse()
 		var tb := to_skel.basis
 		var up: Vector3 = (tb * Vector3.UP).normalized()
 		var fwd: Vector3 = (tb * -player.global_transform.basis.z).normalized()
 		var right: Vector3 = (tb * player.global_transform.basis.x).normalized()
+		if crouch > 0.001:
+			_crouch(sk, up, fwd, right)
+		if log_node:
+			if axe:
+				axe.visible = false
+			_carry_log(sk, up, fwd, right)
+			return
+		if axe:
+			axe.visible = holding
+		if not holding:
+			return
 		_close_fingers(sk, "Right")
 		if swinging or ready_pose:
 			_close_fingers(sk, "Left")
@@ -289,12 +299,57 @@ class ChopPose extends SkeletonModifier3D:
 		var e2 := e * 0.8
 		var base := chest + (fwd * cos(e2) + up * sin(e2)).normalized() * 0.24 - right * 0.03
 		# o corpo dobra para a frente na batida e estica ao levantar
-		_rot_global(sk, "Spine1", right, lerpf(-0.12, 0.38, low) if e_deg < 60.0 else -0.12)
+		_rot_global(sk, "Spine1", right, lerpf(0.1, -0.38, low) if e_deg < 60.0 else 0.1)
 		var out := Vector3(base.x - chest.x, 0, base.z - chest.z)
 		var fingers := _orth(-up * 0.4 + out.normalized() * 0.5 - fwd * 0.3, dir)
 		_hand_on(sk, "Right", base + dir * GRIP_HIGH, dir, fingers, up, right)
 		_hand_on(sk, "Left", base + dir * GRIP_LOW, dir, fingers, up, -right)
 		_place_axe(sk, base, dir, edge)
+
+	# ---------- agachar: o quadril desce e os joelhos dobram com os pés no chão ----------
+	func _crouch(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
+		var hb := _bone("Hips")
+		if hb < 0:
+			return
+		var feet := {}
+		for side in ["Left", "Right"]:
+			var fb := _bone(side + "Foot")
+			if fb >= 0:
+				feet[side] = sk.get_bone_global_pose(fb)
+		var hp := sk.get_bone_global_pose(hb)
+		hp.origin += -up * 0.42 * crouch - fwd * 0.08 * crouch
+		sk.set_bone_global_pose(hb, hp)
+		_rot_global(sk, "Spine", right, -0.6 * crouch)
+		_rot_global(sk, "Spine1", right, -0.25 * crouch)
+		for side in feet:
+			var foot: Transform3D = feet[side]
+			var hip := sk.get_bone_global_pose(_bone(side + "UpLeg")).origin
+			_ik(sk, side + "UpLeg", side + "Leg", side + "Foot", foot.origin, hip + fwd * 1.0 - up * 0.3)
+			var fp := sk.get_bone_global_pose(_bone(side + "Foot"))
+			fp.basis = foot.basis
+			sk.set_bone_global_pose(_bone(side + "Foot"), fp)
+
+	# ---------- tora no ombro ----------
+	func _carry_log(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
+		var sb := _bone("RightArm")
+		if sb < 0:
+			return
+		var sh := sk.get_bone_global_pose(sb).origin
+		# a tora deitada em cima do ombro direito, ao longo do caminho (um pouco inclinada)
+		var center := sh + up * (log_r + 0.02) + right * 0.05
+		var axis := (fwd + up * 0.08).normalized()
+		# mão direita segura a tora por baixo, um pouco à frente do ombro
+		var grip := center + axis * 0.32 - up * log_r * 0.75 + right * 0.04
+		_close_fingers(sk, "Right")
+		var g := _grip_rotate("Right", sk, -right, up)
+		if not g.is_empty():
+			_ik(sk, "RightArm", "RightForeArm", "RightHand", grip - g.offset, sh - up * 0.6 + right * 0.6)
+			var hp := sk.get_bone_global_pose(_bone("RightHand"))
+			hp.basis = g.basis
+			sk.set_bone_global_pose(_bone("RightHand"), hp)
+		var gx := sk.global_transform * Transform3D(Basis(Quaternion(Vector3.RIGHT, axis)), center)
+		gx.basis = gx.basis.orthonormalized()
+		log_node.global_transform = gx
 
 	# ---------- carregando com uma mão ----------
 	func _carry(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
