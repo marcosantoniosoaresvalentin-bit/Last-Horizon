@@ -1,17 +1,41 @@
 extends RefCounted
-## Sons do jogo, gerados em código (sem arquivos de áudio): machadada, árvore
-## quebrando e caindo, cavadeira na terra, passos no chão e na água.
-## Cada som tem algumas variações para não soar repetido.
+## Sons do jogo: gravações reais (domínio público, CC0) na pasta sons/:
+##  - machadada, árvore caindo e baque: "Tree chop fall thud" (OpenGameArt, CC0)
+##  - madeira rachando: Independent nu ljudbank, wood crack (OpenGameArt, CC0)
+##  - cavadeira: "Shovel sound" (OpenGameArt, CC0)
+##  - passos: Fantozzi's footsteps, terra/areia (OpenGameArt, CC0)
+##  - água: qubodup, 6 short water splashes (OpenGameArt, CC0)
+## Se algum arquivo faltar, usa um som gerado em código no lugar.
 
 const RATE := 22050
+const FILES := {
+	"machado": ["machado1"],
+	"estalo": ["estalo1", "estalo2"],
+	"queda": ["queda1"],
+	"cavar": ["cavar1"],
+	"passo": ["passo1", "passo2", "passo3", "passo4", "passo5", "passo6"],
+	"agua": ["agua1", "agua2", "agua4", "agua5"],
+	"baque": ["baque1"],
+}
+## Volume de cada som (dB): passos baixos e a água bem baixinha.
+const VOLUME := {"machado": 0.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0}
 
 static var _cache := {}
 
 
 ## Um som pelo nome (variação sorteada): "machado", "estalo", "queda", "cavar", "passo", "agua", "baque".
-static func pick(name: String) -> AudioStreamWAV:
+static func pick(name: String) -> AudioStream:
 	if not _cache.has(name):
-		_cache[name] = _make_set(name)
+		var arr := []
+		for f in FILES.get(name, []):
+			var bytes := FileAccess.get_file_as_bytes("res://sons/%s.somog" % f)
+			if not bytes.is_empty():
+				var st := AudioStreamOggVorbis.load_from_buffer(bytes)
+				if st:
+					arr.append(st)
+		if arr.is_empty():
+			arr = _make_set(name)
+		_cache[name] = arr
 	var arr: Array = _cache[name]
 	return arr[randi() % arr.size()]
 
@@ -20,7 +44,7 @@ static func pick(name: String) -> AudioStreamWAV:
 static func play_at(parent: Node, name: String, pos: Vector3, volume_db := 0.0, pitch := 1.0) -> void:
 	var p := AudioStreamPlayer3D.new()
 	p.stream = pick(name)
-	p.volume_db = volume_db
+	p.volume_db = volume_db + float(VOLUME.get(name, 0.0))
 	p.pitch_scale = pitch * randf_range(0.94, 1.06)
 	p.unit_size = 6.0
 	p.max_distance = 90.0

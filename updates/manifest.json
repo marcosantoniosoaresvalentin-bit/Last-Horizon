@@ -1,9 +1,9 @@
 {
-  "version": 46,
-  "file": "update_46.zip",
-  "size": 3120831,
-  "sha256": "7cde3ce15faec1c4eb1704c8e92e6dee0a414c7be135dd26c1f3d6165424207b",
+  "version": 47,
+  "file": "update_47.zip",
+  "size": 3282461,
+  "sha256": "9e05448d3ca7a8694d7fb632191e8270278b3c63bc91130de9254c0c9e0806df",
   "min_build": 1,
-  "notes": "Sons: machadada, árvore estalando e caindo, cavadeira na terra, passos no chão e na água; ondas na água quando o personagem anda nela",
+  "notes": "Sons reais (gravações CC0): machadada, madeira rachando, árvore batendo no chão, cavadeira, passos e água bem baixinha; ondas na água mais discretas e naturais",
   "date": "2026-11-17"
 }

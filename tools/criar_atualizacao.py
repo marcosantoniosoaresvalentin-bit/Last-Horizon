@@ -26,8 +26,8 @@ ROOT = Path(__file__).resolve().parent.parent
 UPDATES = ROOT / "updates"
 MANIFEST = UPDATES / "manifest.json"
 PROJECT = ROOT / "project.godot"
-INCLUDE_DIRS = ["scripts", "scenes", "personagem", "fontes"]
-TEXT_EXT = {".gd", ".tscn", ".tres", ".gdshader", ".json", ".cfg", ".txt", ".glbin", ".fonte"}
+INCLUDE_DIRS = ["scripts", "scenes", "personagem", "fontes", "sons"]
+TEXT_EXT = {".gd", ".tscn", ".tres", ".gdshader", ".json", ".cfg", ".txt", ".glbin", ".fonte", ".somog"}
 REMAP_EXT = {".gd", ".tscn", ".tres"}
 
 

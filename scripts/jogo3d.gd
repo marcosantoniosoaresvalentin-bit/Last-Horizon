@@ -22,13 +22,17 @@ const RIPPLE_SHADER := """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled;
 uniform float age = 0.0;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 void fragment(){
 	vec2 p = UV * 2.0 - 1.0;
-	float r = length(p);
-	float ring = smoothstep(0.62, 0.8, r) * (1.0 - smoothstep(0.8, 0.98, r));
-	float inner = smoothstep(0.25, 0.45, r) * (1.0 - smoothstep(0.45, 0.6, r)) * 0.4;
-	ALBEDO = vec3(0.85, 0.9, 0.92);
-	ALPHA = (ring + inner) * (1.0 - age) * 0.55;
+	float a = atan(p.y, p.x);
+	// borda levemente ondulada, não um círculo perfeito
+	float r = length(p) * (1.0 + 0.04 * sin(a * 5.0 + age * 6.0) + 0.03 * sin(a * 9.0));
+	float w = mix(0.05, 0.1, age);
+	float ring = smoothstep(0.82 - w, 0.82, r) * (1.0 - smoothstep(0.82, 0.82 + w * 0.6, r));
+	float ring2 = (smoothstep(0.5 - w, 0.5, r) * (1.0 - smoothstep(0.5, 0.5 + w * 0.6, r))) * 0.5;
+	ALBEDO = vec3(0.78, 0.84, 0.86);
+	ALPHA = (ring + ring2) * pow(1.0 - age, 1.5) * 0.28;
 }
 """
 const SAVE_EVERY := 60.0     # salva o mundo a cada minuto
@@ -1565,17 +1569,15 @@ func _update_crouch(delta: float) -> void:
 ## Um passo: som no chão ou na água; na água abre uma onda em volta do pé.
 func _footstep(p: Vector3, depth: float, hard := false) -> void:
 	if depth > 0.04:
-		Sons.play_at(self, "agua", p, -4.0 if not hard else 0.0)
+		Sons.play_at(self, "agua", p, 0.0 if not hard else 4.0)
 		var level := p.y + depth * 2.0
 		var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
 		if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
 			level = _water_level[cell.y * MundoSim.W + cell.x]
 		var fwd := Vector3(-sin(_face), 0, -cos(_face))
-		_ripple(Vector3(p.x, level + 0.02, p.z) + fwd * 0.15, 1.1 + depth)
-		if depth > 0.15:
-			_ripple(Vector3(p.x, level + 0.02, p.z) - fwd * 0.2, 0.8)
+		_ripple(Vector3(p.x, level + 0.015, p.z) + fwd * 0.12, 0.9 + depth * 0.8)
 	else:
-		Sons.play_at(self, "passo", p, -9.0 if not hard else -3.0)
+		Sons.play_at(self, "passo", p, 0.0 if not hard else 4.0)
 
 
 func _ripple(pos: Vector3, size: float) -> void:
@@ -1594,8 +1596,8 @@ func _ripple(pos: Vector3, size: float) -> void:
 	mi.global_position = pos
 	mi.scale = Vector3(0.25, 1, 0.25)
 	var tw := mi.create_tween().set_parallel(true)
-	tw.tween_property(mi, "scale", Vector3(size, 1, size), 1.3).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	tw.tween_method(func(a: float): mat.set_shader_parameter("age", a), 0.0, 1.0, 1.3)
+	tw.tween_property(mi, "scale", Vector3(size, 1, size), 1.6).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	tw.tween_method(func(a: float): mat.set_shader_parameter("age", a), 0.0, 1.0, 1.6)
 	tw.chain().tween_callback(mi.queue_free)
 
 
