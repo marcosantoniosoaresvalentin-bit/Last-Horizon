@@ -323,8 +323,14 @@ class ChopPose extends SkeletonModifier3D:
 		_rot_global(sk, "Spine1", right, -0.25 * crouch)
 		for side in feet:
 			var foot: Transform3D = feet[side]
-			var hip := sk.get_bone_global_pose(_bone(side + "UpLeg")).origin
-			_ik(sk, side + "UpLeg", side + "Leg", side + "Foot", foot.origin, hip + fwd * 1.0 - up * 0.3)
+			# o joelho dobra para onde o pé aponta (senão o tornozelo torce)
+			var toe_b := _bone(side + "ToeBase")
+			var toe_dir := fwd
+			if toe_b >= 0:
+				toe_dir = sk.get_bone_global_pose(toe_b).origin - foot.origin
+				toe_dir -= up * toe_dir.dot(up)
+				toe_dir = toe_dir.normalized() if toe_dir.length() > 0.001 else fwd
+			_ik(sk, side + "UpLeg", side + "Leg", side + "Foot", foot.origin, foot.origin + toe_dir * 1.2 + up * 0.5)
 			var fp := sk.get_bone_global_pose(_bone(side + "Foot"))
 			fp.basis = foot.basis
 			sk.set_bone_global_pose(_bone(side + "Foot"), fp)

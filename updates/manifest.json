@@ -1,9 +1,9 @@
 {
-  "version": 39,
-  "file": "update_39.zip",
-  "size": 3096605,
-  "sha256": "c093303649da4b4c29c59d4da9040bb87f5c85cbcb5ec84c0b9ef969ec1889cf",
+  "version": 40,
+  "file": "update_40.zip",
+  "size": 3100230,
+  "sha256": "15cab345bb9e3b7b5556570610eed79f36879e7bd7184c250ab7f0c1ed59c011",
   "min_build": 1,
-  "notes": "Pegar tora: o personagem agacha, põe a tora no ombro, carrega (mais devagar se pesada, até 150 kg) e larga no chão onde quiser",
+  "notes": "Toras só no tamanho pequeno de cada árvore (no máximo 50 kg); pé não torce ao agachar; ícones novos em todos os botões; botão de pegar sem o peso",
   "date": "2026-11-17"
 }

@@ -13,6 +13,7 @@ const Arvores := preload("res://scripts/world/arvores.gd")
 const Itens := preload("res://scripts/itens.gd")
 const Corte := preload("res://scripts/world/corte.gd")
 const Craft := preload("res://scripts/ui/craft.gd")
+const Icones := preload("res://scripts/ui/icones.gd")
 const SAVE_EVERY := 60.0     # salva o mundo a cada minuto
 
 const CELL := 5.0            # metros por célula da simulação (mapa de 640 x 480 m)
@@ -374,71 +375,71 @@ func _build_hud() -> void:
 	_toast.offset_right = 400
 	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
-	_dig_btn = Button.new()
+	_dig_btn = Icones.IconButton.new()
 	_dig_btn.text = "Pegar argila"
 	_dig_btn.add_theme_font_size_override("font_size", 22)
 	_dig_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_dig_btn.offset_left = -300
-	_dig_btn.offset_top = -170
-	_dig_btn.offset_right = -30
-	_dig_btn.offset_bottom = -96
+	_dig_btn.offset_left = -430
+	_dig_btn.offset_top = -146
+	_dig_btn.offset_right = -300
+	_dig_btn.offset_bottom = -16
 	_dig_btn.visible = false
 	_dig_btn.pressed.connect(_start_dig)
 	_hud.add_child(_dig_btn)
 
-	_seed_btn = Button.new()
+	_seed_btn = Icones.IconButton.new()
 	_seed_btn.text = "Pegar semente"
 	_seed_btn.add_theme_font_size_override("font_size", 22)
 	_seed_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_seed_btn.offset_left = -300
-	_seed_btn.offset_top = -250
-	_seed_btn.offset_right = -30
-	_seed_btn.offset_bottom = -176
+	_seed_btn.offset_left = -430
+	_seed_btn.offset_top = -286
+	_seed_btn.offset_right = -300
+	_seed_btn.offset_bottom = -156
 	_seed_btn.visible = false
 	_seed_btn.pressed.connect(_pick_seed)
 	_hud.add_child(_seed_btn)
 
-	_chop_btn = Button.new()
+	_chop_btn = Icones.IconButton.new()
 	_chop_btn.text = "Cortar"
 	_chop_btn.add_theme_font_size_override("font_size", 22)
 	_chop_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_chop_btn.offset_left = -300
-	_chop_btn.offset_top = -330
-	_chop_btn.offset_right = -30
-	_chop_btn.offset_bottom = -256
+	_chop_btn.offset_left = -290
+	_chop_btn.offset_top = -146
+	_chop_btn.offset_right = -160
+	_chop_btn.offset_bottom = -16
 	_chop_btn.visible = false
 	_chop_btn.pressed.connect(_start_chop)
 	_hud.add_child(_chop_btn)
 
-	_jump_btn = Button.new()
+	_jump_btn = Icones.IconButton.new()
 	_jump_btn.text = "Pular"
 	_jump_btn.add_theme_font_size_override("font_size", 22)
 	_jump_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_jump_btn.offset_left = -200
-	_jump_btn.offset_top = -90
+	_jump_btn.offset_left = -150
+	_jump_btn.offset_top = -146
 	_jump_btn.offset_right = -30
 	_jump_btn.offset_bottom = -16
 	_jump_btn.pressed.connect(_jump)
 	_hud.add_child(_jump_btn)
 
-	_log_btn = Button.new()
+	_log_btn = Icones.IconButton.new()
 	_log_btn.add_theme_font_size_override("font_size", 22)
 	_log_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_log_btn.offset_left = -300
-	_log_btn.offset_top = -490
-	_log_btn.offset_right = -30
-	_log_btn.offset_bottom = -416
+	_log_btn.offset_left = -290
+	_log_btn.offset_top = -286
+	_log_btn.offset_right = -160
+	_log_btn.offset_bottom = -156
 	_log_btn.visible = false
 	_log_btn.pressed.connect(_log_action)
 	_hud.add_child(_log_btn)
 
-	_pick_btn = Button.new()
+	_pick_btn = Icones.IconButton.new()
 	_pick_btn.add_theme_font_size_override("font_size", 22)
 	_pick_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_pick_btn.offset_left = -300
-	_pick_btn.offset_top = -410
+	_pick_btn.offset_left = -150
+	_pick_btn.offset_top = -286
 	_pick_btn.offset_right = -30
-	_pick_btn.offset_bottom = -336
+	_pick_btn.offset_bottom = -156
 	_pick_btn.visible = false
 	_pick_btn.pressed.connect(_pick_ground)
 	_hud.add_child(_pick_btn)
@@ -453,50 +454,53 @@ func _build_hud() -> void:
 	_dig_bar.visible = false
 	_hud.add_child(_dig_bar)
 
-	var menu := Button.new()
+	var menu := Icones.IconButton.new()
+	menu.show_caption = false
 	menu.text = "Menu"
 	menu.add_theme_font_size_override("font_size", 20)
 	menu.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	menu.offset_left = -124
-	menu.offset_top = 16
+	menu.offset_left = -96
+	menu.offset_top = 6
 	menu.offset_right = -20
-	menu.offset_bottom = 60
+	menu.offset_bottom = 72
 	menu.pressed.connect(func():
 		_save_world()
 		get_tree().change_scene_to_file("res://scenes/main_menu.tscn"))
 	_hud.add_child(menu)
 
 	# por enquanto o calendário abre por este botão; depois vai ser um item da mochila
-	var cal_btn := Button.new()
+	var cal_btn := Icones.IconButton.new()
+	cal_btn.show_caption = false
 	cal_btn.text = "Calendário"
 	cal_btn.add_theme_font_size_override("font_size", 20)
 	cal_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	cal_btn.offset_left = -290
-	cal_btn.offset_top = 16
-	cal_btn.offset_right = -136
-	cal_btn.offset_bottom = 60
+	cal_btn.offset_left = -190
+	cal_btn.offset_top = 6
+	cal_btn.offset_right = -110
+	cal_btn.offset_bottom = 72
 	cal_btn.pressed.connect(_open_calendar)
 	_hud.add_child(cal_btn)
 
 	# botão da mochila: só o desenho da mochila, sem bola em volta
 	var bag_btn: Button = Mochila.BackpackButton.new()
 	bag_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	bag_btn.offset_left = -380
+	bag_btn.offset_left = -280
 	bag_btn.offset_top = 8
-	bag_btn.offset_right = -304
-	bag_btn.offset_bottom = 76
+	bag_btn.offset_right = -200
+	bag_btn.offset_bottom = 70
 	bag_btn.pressed.connect(_open_backpack)
 	_hud.add_child(bag_btn)
 
 	# craft de mão (poucas receitas; o craft de verdade vai ser nas bancadas)
-	var craft_btn := Button.new()
+	var craft_btn := Icones.IconButton.new()
+	craft_btn.show_caption = false
 	craft_btn.text = "Craft"
 	craft_btn.add_theme_font_size_override("font_size", 20)
 	craft_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	craft_btn.offset_left = -496
-	craft_btn.offset_top = 16
-	craft_btn.offset_right = -392
-	craft_btn.offset_bottom = 60
+	craft_btn.offset_left = -370
+	craft_btn.offset_top = 6
+	craft_btn.offset_right = -290
+	craft_btn.offset_bottom = 72
 	craft_btn.pressed.connect(_open_craft)
 	_hud.add_child(craft_btn)
 	_inv_label.visible = false   # o que tem na mochila aparece na tela da mochila
@@ -1359,8 +1363,7 @@ func _update_log_btn() -> void:
 	var t: Dictionary = _arvores.pick_target(_player.position, 1.3)
 	_log_btn.visible = not t.is_empty()
 	if not t.is_empty():
-		var kg: float = _arvores.free_log_kg(t.log)
-		_log_btn.text = "Pegar tora (%d kg)" % int(round(kg))
+		_log_btn.text = "Pegar tora"
 
 
 func _log_action() -> void:
@@ -1375,7 +1378,7 @@ func _log_action() -> void:
 		return
 	var kg: float = _arvores.free_log_kg(t.log)
 	if kg > Arvores.CARRY_MAX_KG:
-		_show_toast("Pesada demais (%d kg). Corte um pedaço menor." % int(round(kg)))
+		_show_toast("Pesada demais. Corte em toras menores com o machado.")
 		return
 	if _digging:
 		_cancel_dig()

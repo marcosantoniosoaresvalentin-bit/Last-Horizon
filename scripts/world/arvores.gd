@@ -759,6 +759,22 @@ func _buck_end(p: Array, a_up: float, h_at: float, sign: float) -> Dictionary:
 		"rough": 0.45, "sign": sign}
 
 
+## Tamanho das toras de cada árvore (m): o comprimento que dá no máximo 50 kg na
+## parte mais grossa. Árvore fina dá toras mais compridas; grossa, mais curtas.
+func piece_len(p: Array) -> float:
+	var m: Dictionary = _models[int(p[4]) % VARIANTS]
+	var s: float = height_of(p, last_day) / float(m.height)
+	var cut := _cut_from(p, p[9], s)
+	# mede com a mesma conta de peso usada para pegar: encurta até dar no máximo ~49 kg
+	var L := 1.2
+	while L > 0.15:
+		var fl := {"v": int(p[4]), "s": s, "h0": float(cut.h), "h1": float(cut.h) + L / s}
+		if free_log_kg(fl) <= CARRY_MAX_KG * 0.98:
+			break
+		L -= 0.02
+	return L
+
+
 ## Machadadas para cortar a tora num ponto (tora grossa pede mais).
 func buck_hits_needed(p: Array, h_at: float) -> int:
 	var m: Dictionary = _models[int(p[4]) % VARIANTS]
@@ -786,19 +802,23 @@ func log_target(pos: Vector3, reach: float) -> Dictionary:
 		for pc in log_pieces(p):
 			var h0 := float(pc[0])
 			var h1 := minf(float(pc[1]), float(m.H) * 0.62)
-			if (h1 - h0) * s < 2.0:
-				continue          # pedaço curto demais para cortar de novo
+			# só corta no tamanho certo das toras desta árvore (contado da base do tronco)
+			var L := piece_len(p)
+			if (h1 - h0) * s < L * 1.5:
+				continue          # já está do tamanho de uma tora
 			var off: Vector3 = along * float(pc[2])
 			var A: Vector3 = xf * _axis_of(m, h0) + off
 			var B: Vector3 = xf * _axis_of(m, h1) + off
 			var ab := Vector2(B.x - A.x, B.z - A.z)
 			var t := clampf(Vector2(pos.x - A.x, pos.z - A.z).dot(ab) / ab.length_squared(), 0.0, 1.0)
-			# meio em meio metro a partir da ponta do pedaço; pelo menos 1 m de cada lado
-			var meters := snappedf(t * (h1 - h0) * s, 0.5)
-			meters = clampf(meters, 1.0, (float(pc[1]) - h0) * s - 1.0)
-			var h_at := h0 + meters / s
-			if h_at > h1:
+			# posição do corte: sempre num múltiplo do tamanho da tora, contado da base do tronco
+			var start := (h0 - float(cut.h)) * s
+			var end := (h1 - float(cut.h)) * s
+			# corta uma tora por vez, do tamanho certo, a partir da ponta de baixo do pedaço
+			var at_m := start + L
+			if at_m > end + 0.001:
 				continue
+			var h_at := float(cut.h) + at_m / s
 			if buck is Array and absf(float(buck[0]) - h_at) * s < 0.6 and float(buck[0]) > h0 and float(buck[0]) < float(pc[1]):
 				h_at = float(buck[0])          # continua o corte que já começou
 			var P: Vector3 = xf * _axis_of(m, h_at) + off
@@ -1380,7 +1400,7 @@ func _cut_info(p: Array) -> Dictionary:
 # ================== TORAS SOLTAS (pegar, carregar e largar) ==================
 
 const WOOD_DENSITY := 520.0     # kg por m³ (madeira de Cedrinho ainda verde, mais leve)
-const CARRY_MAX_KG := 150.0
+const CARRY_MAX_KG := 50.0
 
 ## Tora solta: {v, s, h0, h1, bot, top (pontas), pos [x, y, z] (centro), yaw, dia}.
 ## O desenho usa o tronco do modelo de h0 a h1 (no tamanho s), deitado ao longo de +X.
