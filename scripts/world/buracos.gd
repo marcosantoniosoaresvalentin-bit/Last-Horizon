@@ -8,7 +8,7 @@ extends Node3D
 ## - Com uma tora no ombro perto de um buraco, dá para fincar a tora em pé: a parte
 ##   de baixo fica enterrada no buraco e o resto fica para fora da terra.
 
-const MAX_DEPTH := 0.8
+const MAX_DEPTH := 1.2
 const STEP := 0.1               # cada golpe aprofunda 10 cm
 const MAX_HOLES := 400
 
@@ -90,7 +90,7 @@ func open_holes_near(pos: Vector3, n: int) -> Array:
 ## Um golpe da cavadeira no ponto pos. Devolve a fundura do buraco (m).
 func dig_at(pos: Vector3) -> float:
 	var best := -1
-	var bd := 0.22
+	var bd := 0.3
 	for i in holes.size():
 		var h: Dictionary = holes[i]
 		if int(h.get("tora", -1)) >= 0:
@@ -102,12 +102,12 @@ func dig_at(pos: Vector3) -> float:
 	if best < 0:
 		if holes.size() >= MAX_HOLES:
 			return 0.0
-		holes.append({"x": pos.x, "z": pos.z, "d": STEP, "r": 0.17, "tora": -1})
+		holes.append({"x": pos.x, "z": pos.z, "d": STEP, "r": 0.3, "tora": -1})
 		best = holes.size() - 1
 	else:
 		var h: Dictionary = holes[best]
 		h.d = minf(float(h.d) + STEP, MAX_DEPTH)
-		h.r = minf(float(h.r) + 0.012, 0.26)
+		h.r = minf(float(h.r) + 0.015, 0.45)
 	_rebuild()
 	return float(holes[best].d)
 
@@ -175,7 +175,7 @@ func _rebuild() -> void:
 		add_child(n)
 		_nodes.append(n)
 		var L: float = _arv.free_log_length(po.log)
-		var gy: float = _jogo.height_at(float(po.x), float(po.z))
+		var gy: float = _jogo.surface_at(float(po.x), float(po.z))
 		# em pé: o eixo da tora (que é +X) vira para cima; a ponta de baixo no fundo do buraco
 		n.transform = Transform3D(Basis(Vector3.UP, float(po.yaw)) * Basis(Quaternion(Vector3.RIGHT, Vector3.UP)),
 			Vector3(float(po.x), gy - float(po.d) + L * 0.5, float(po.z)))
@@ -206,13 +206,13 @@ func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 	var filled := int(h.get("tora", -1)) >= 0
 	var seg := 18
 	var hsh := absi(hash(Vector2(x, z)))
-	var gy: float = _jogo.height_at(x, z)
+	var gy: float = _jogo.surface_at(x, z)
 	var rims := []
 	for k in seg + 1:
 		var a := TAU * k / seg
 		var rr := r * (0.92 + 0.16 * float((hsh >> (k % 18)) % 10) / 10.0)
 		var p := Vector2(x + cos(a) * rr, z + sin(a) * rr)
-		rims.append([a, rr, _jogo.height_at(p.x, p.y), p])
+		rims.append([a, rr, _jogo.surface_at(p.x, p.y), p])
 	if filled:
 		# terra socada em volta da tora
 		var c := Vector3(x, gy + 0.03, z)
@@ -223,8 +223,9 @@ func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 			var pb := Vector3(B[3].x, float(B[2]) + 0.02, B[3].y)
 			_tri(st, c, pa, pb, Color(0.3, 0.22, 0.14), Color(0.34, 0.25, 0.16), Color(0.34, 0.25, 0.16))
 		return
-	# paredes: de cima (na altura do chão) até o fundo, afinando um pouco; anéis no meio
-	var levels := 5
+	# paredes: de cima (na borda levantada) até o fundo, afinando um pouco; anéis no meio
+	var lip := 0.03 + minf(d, 0.6) * 0.06
+	var levels := 6
 	for k in seg:
 		var A: Array = rims[k]
 		var B: Array = rims[k + 1]
@@ -239,7 +240,7 @@ func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 				var rad: float = float(rim[1]) * lerpf(1.0, 0.82, t)
 				var top: float = rim[2]
 				var bottom := gy - d
-				var y := lerpf(top + 0.01, bottom, t)
+				var y := lerpf(top + lip, bottom, t)
 				var wob := 0.012 * sin(a * 5.0 + t * 9.0 + float(hsh % 7))
 				pts.append([Vector3(x + cos(a) * (rad + wob), y, z + sin(a) * (rad + wob)), top - y])
 			var c0 := _soil_color(pts[0][1], d, k)
@@ -262,12 +263,13 @@ func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 	for k in seg:
 		var A: Array = rims[k]
 		var B: Array = rims[k + 1]
-		var ia := Vector3(A[3].x, float(A[2]) + 0.012, A[3].y)
-		var ib := Vector3(B[3].x, float(B[2]) + 0.012, B[3].y)
+		# borda de terra solta um pouco levantada: o buraco aparece mesmo olhando de lado
+		var ia := Vector3(A[3].x, float(A[2]) + lip, A[3].y)
+		var ib := Vector3(B[3].x, float(B[2]) + lip, B[3].y)
 		var oa2 := Vector2(x + cos(float(A[0])) * float(A[1]) * 1.5, z + sin(float(A[0])) * float(A[1]) * 1.5)
 		var ob2 := Vector2(x + cos(float(B[0])) * float(B[1]) * 1.5, z + sin(float(B[0])) * float(B[1]) * 1.5)
-		var oa := Vector3(oa2.x, _jogo.height_at(oa2.x, oa2.y) + 0.02, oa2.y)
-		var ob := Vector3(ob2.x, _jogo.height_at(ob2.x, ob2.y) + 0.02, ob2.y)
+		var oa := Vector3(oa2.x, _jogo.surface_at(oa2.x, oa2.y) + 0.015, oa2.y)
+		var ob := Vector3(ob2.x, _jogo.surface_at(ob2.x, ob2.y) + 0.015, ob2.y)
 		_tri(st, ia, oa, ob, loose.darkened(0.15), loose, loose)
 		_tri(st, ia, ob, ib, loose.darkened(0.15), loose, loose.darkened(0.15))
 	# monte da terra tirada, do lado: redondo, com torrões
@@ -288,7 +290,7 @@ func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 			var rad := mr * (1.0 - t) * bump
 			var p := Vector2(mc.x + cos(a) * rad, mc.y + sin(a) * rad)
 			var hgt := mh * sqrt(maxf(0.0, 1.0 - (1.0 - t) * (1.0 - t))) * (0.9 + 0.2 * float((hsh >> ((i * 3 + k) % 20)) % 5) / 5.0)
-			row.append(Vector3(p.x, _jogo.height_at(p.x, p.y) + 0.01 + hgt, p.y))
+			row.append(Vector3(p.x, _jogo.surface_at(p.x, p.y) + 0.01 + hgt, p.y))
 		grid.append(row)
 	var soil := Color(0.31, 0.23, 0.15)
 	for i in rings:

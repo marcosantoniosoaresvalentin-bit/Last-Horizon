@@ -1,9 +1,9 @@
 {
-  "version": 43,
-  "file": "update_43.zip",
-  "size": 3116509,
-  "sha256": "4b661b68fd8199f1984caa31b7ef1a52bc98807bcdfc5d89cad867af39c43a70",
+  "version": 44,
+  "file": "update_44.zip",
+  "size": 3116790,
+  "sha256": "00f110108f5342b3d5892e1bc87d4419cdc0acd2115c7fbbd3a193829cd6186c",
   "min_build": 1,
-  "notes": "Buraco de verdade (chão aberto, paredes de terra até o fundo, sem capim dentro) e terra realista; toras de 2 m para os esteios ficarem altos",
+  "notes": "Buracos mais largos e fundos (até 1,2 m), com borda levantada para ver de lado; terra e tora fincada encostadas no chão de verdade (sem flutuar)",
   "date": "2026-11-17"
 }

@@ -722,6 +722,23 @@ func height_at(x: float, z: float) -> float:
 	return lerpf(lerpf(a, b, fu), lerpf(c, d, fu), fv) * HS
 
 
+## Altura exata do chão do jeito que ele está desenhado (triângulos a cada 2,5 m),
+## para objetos no chão (buracos, toras fincadas) ficarem encostados, sem flutuar.
+func surface_at(x: float, z: float) -> float:
+	var step := CELL / SUB
+	var gx := floori(x / step)
+	var gz := floori(z / step)
+	var fx := x / step - gx
+	var fz := z / step - gz
+	var h00 := height_at(gx * step, gz * step)
+	var h10 := height_at((gx + 1) * step, gz * step)
+	var h01 := height_at(gx * step, (gz + 1) * step)
+	var h11 := height_at((gx + 1) * step, (gz + 1) * step)
+	if fx + fz <= 1.0:
+		return h00 + (h10 - h00) * fx + (h01 - h00) * fz
+	return h11 + (h01 - h11) * (1.0 - fx) + (h10 - h11) * (1.0 - fz)
+
+
 func _field_at(arr: PackedFloat32Array, x: float, z: float) -> float:
 	var u := clampf(x / CELL - 0.5, 0.0, MundoSim.W - 1.001)
 	var v := clampf(z / CELL - 0.5, 0.0, MundoSim.H - 1.001)
