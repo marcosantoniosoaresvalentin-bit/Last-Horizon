@@ -554,6 +554,18 @@ class ChopPose extends SkeletonModifier3D:
 		var stroke := saw_pos * 0.16                  # + empurra (a serra vai para longe)
 		var bar_mid := pt + up * (SAW_TEETH - saw_depth)
 		var base := bar_mid - dir * (SAW_LEN * 0.5) + dir * stroke
+		# a serra desce com o corte: o corpo agacha junto para as mãos continuarem no cabo
+		var sb := _bone("RightArm")
+		if sb >= 0:
+			var sh := sk.get_bone_global_pose(sb).origin
+			var grip := base + dir * 0.13
+			var drop := (sh - grip).dot(up)
+			var need := clampf((drop - 0.34) / 0.4, 0.0, 1.0)
+			if need > crouch:
+				var old := crouch
+				crouch = need
+				_crouch(sk, up, fwd, right)
+				crouch = old
 		# o corpo vai junto: inclina para a frente quando empurra
 		_rot_global(sk, "Spine1", right, -0.22 - stroke * 0.9)
 		# as duas mãos fechadas no cabo, perto da ponta (do lado de dentro do pegador)

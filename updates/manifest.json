@@ -1,9 +1,9 @@
 {
-  "version": 58,
-  "file": "update_58.zip",
-  "size": 3474898,
-  "sha256": "9b15445603c8ad80fc6d18efdac211a7732f2125d82666b6e0e036c0c44d027e",
+  "version": 59,
+  "file": "update_59.zip",
+  "size": 3475007,
+  "sha256": "bbae642bb974f0b53f04e0f6685b3ef73491088b2a0c68d278bcb95b1e8273c9",
   "min_build": 1,
-  "notes": "Cabo da serra de volta, trilho da serra sem setas, rodela com formato próprio, pedras mais realistas, pedra toma forma aos poucos, cipó sem limite, tora cai e rola, galhos visíveis",
+  "notes": "Serrar: o personagem agacha conforme o corte desce e as mãos ficam no cabo",
   "date": "2026-11-17"
 }
