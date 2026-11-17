@@ -328,6 +328,11 @@ var _ctx_action := ""
 var _work_btn: Button             # "Trabalhar" na tora apoiada nas forquilhas
 var _work_menu: Control = null
 var _work := {}                   # trabalho escolhido: {i (tora apoiada), modo, e (ponta), stage, fix}
+var _sawing := false              # serrando a rodela (vai e vem sozinho até terminar ou parar)
+var _saw_t := 0.0
+var _saw_half := 0
+const SAW_CYCLE := 1.5            # segundos por ida e volta da serra (devagar)
+var _dur := {}                    # durabilidade: id da ferramenta -> [usos que faltam de cada uma]
 var _walking := false             # o personagem indo sozinho até um lugar
 var _walk_target := Vector3.ZERO
 var _walk_t := 0.0
@@ -1182,9 +1187,9 @@ func _save_player() -> void:
 	var p := _player.position
 	var chao := []
 	for g in _chao:
-		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0)})
+		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "dur": _dur}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1193,7 +1198,7 @@ func _save_player() -> void:
 
 func _load_player() -> void:
 	# todo mapa novo começa com um machado de pedra na mochila
-	_itens = {"machado": 1, "cavadeira": 1}
+	_itens = {"machado": 1, "cavadeira": 1, "serra": 1}
 	if _world_id == "" or not sim.loaded_from_save:
 		return
 	var path := Mundos.dir(_world_id) + "/jogador.json"
@@ -1210,10 +1215,17 @@ func _load_player() -> void:
 		# a cavadeira chegou numa atualização: quem já jogava ganha uma para testar
 		if not bool(d.get("ganhou_cavadeira", false)) and not _itens.has("cavadeira"):
 			_itens["cavadeira"] = 1
+		# a serra de pedra também chegou numa atualização: uma para testar
+		if not bool(d.get("ganhou_serra", false)) and not _itens.has("serra"):
+			_itens["serra"] = 1
+	if d.has("dur") and d.dur is Dictionary:
+		for k in d.dur:
+			if d.dur[k] is Array:
+				_dur[k] = (d.dur[k] as Array).map(func(v): return int(v))
 	if d.has("chao") and d.chao is Array:
 		for g in d.chao:
 			if g is Dictionary and Itens.ITENS.has(str(g.get("id", ""))):
-				_add_ground(str(g.id), int(g.get("qtd", 1)), float(g.get("x", 0.0)), float(g.get("z", 0.0)), float(g.get("r", 0.0)))
+				_add_ground(str(g.id), int(g.get("qtd", 1)), float(g.get("x", 0.0)), float(g.get("z", 0.0)), float(g.get("r", 0.0)), g.get("dur", []))
 	equip(str(d.get("mao", "")))
 	var tora = d.get("tora", {})
 	if tora is Dictionary and tora.has("v"):
@@ -1280,18 +1292,22 @@ func add_item(id: String, qtd: int) -> int:
 
 ## Solta itens no chão na frente do jogador (from_bag: tira da mochila).
 func drop_item(id: String, qtd: int, from_bag := true) -> void:
+	var dv := []
 	if from_bag:
 		qtd = mini(qtd, item_qtd(id))
 		if qtd <= 0:
 			return
+		var l := _dur_fix(id)
+		if not l.is_empty():
+			dv = l.slice(l.size() - qtd)       # a ferramenta largada leva o desgaste junto
 		remove_item(id, qtd)
 	var fwd := Vector3(-sin(_face), 0, -cos(_face))
 	var side := Vector3(cos(_face), 0, -sin(_face)) * randf_range(-0.3, 0.3)
 	var pos := _player.position + fwd * 0.7 + side
-	_add_ground(id, qtd, pos.x, pos.z)
+	_add_ground(id, qtd, pos.x, pos.z, 0.0, dv)
 
 
-func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0) -> void:
+func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) -> void:
 	var node := Node3D.new()
 	add_child(node)
 	if id == "rodela":
@@ -1307,9 +1323,9 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0) -> void:
 		mi.mesh = Balde.mesh()
 		mi.material_override = Balde.material()
 		node.add_child(mi)
-	elif id == "machado":
+	elif id in ["machado", "cavadeira", "serra"]:
 		var mi := MeshInstance3D.new()
-		mi.mesh = Corte.axe_mesh()
+		mi.mesh = Corte.axe_mesh() if id == "machado" else (Corte.digger_mesh() if id == "cavadeira" else Corte.saw_mesh())
 		mi.material_override = Corte.axe_material()
 		node.add_child(mi)
 		mi.rotation = Vector3(PI * 0.5, randf() * TAU, 0)
@@ -1325,7 +1341,7 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0) -> void:
 		mi.position.y = 0.06
 		node.add_child(mi)
 	node.position = Vector3(x, height_at(x, z), z)
-	_chao.append({"id": id, "qtd": qtd, "x": x, "z": z, "node": node, "r": r})
+	_chao.append({"id": id, "qtd": qtd, "x": x, "z": z, "node": node, "r": r, "dur": dur})
 
 
 func _nearest_ground(r: float) -> int:
@@ -1369,6 +1385,14 @@ func _pick_ground_now(i: int) -> void:
 	if str(g.id) == "semente":
 		_seeds += fit
 	else:
+		var mx := Itens.dur_max(str(g.id))
+		if mx > 0:
+			var l := _dur_fix(str(g.id)).duplicate()
+			var dl: Array = g.get("dur", [])
+			for k in fit:
+				l.append(int(dl[k]) if k < dl.size() else mx)
+			_dur[str(g.id)] = l
+			g.dur = dl.slice(mini(fit, dl.size()))
 		_itens[g.id] = int(_itens.get(g.id, 0)) + fit
 	g.qtd = int(g.qtd) - fit
 	if int(g.qtd) <= 0:
@@ -1378,25 +1402,86 @@ func _pick_ground_now(i: int) -> void:
 	_act_check = 0.0
 
 
+# ================== DURABILIDADE DAS FERRAMENTAS ==================
+
+## Lista de usos que faltam de cada unidade da ferramenta (a primeira é a da mão).
+func _dur_fix(id: String) -> Array:
+	var mx := Itens.dur_max(id)
+	if mx <= 0:
+		return []
+	var l: Array = _dur.get(id, [])
+	var q := item_qtd(id)
+	while l.size() < q:
+		l.append(mx)
+	while l.size() > q:
+		l.pop_back()
+	_dur[id] = l
+	return l
+
+
+## Quanto ainda aguenta (0 a 1) a ferramenta da mão.
+func tool_dur(id: String) -> float:
+	var l := _dur_fix(id)
+	if l.is_empty():
+		return 1.0
+	return clampf(float(l[0]) / Itens.dur_max(id), 0.0, 1.0)
+
+
+## Gasta a ferramenta (n usos). Quando chega a zero ela quebra (some da mochila).
+func wear(id: String, n := 1) -> bool:
+	var l := _dur_fix(id)
+	if l.is_empty():
+		return false
+	var mx := Itens.dur_max(id)
+	var before := int(l[0])
+	l[0] = before - n
+	if before > int(mx * 0.15) and int(l[0]) <= int(mx * 0.15) and int(l[0]) > 0:
+		_show_toast("%s está gasto: logo vai quebrar." % Itens.nome(id))
+	if int(l[0]) > 0:
+		return false
+	l.pop_front()
+	_dur[id] = l
+	var left := item_qtd(id) - 1
+	if left > 0:
+		_itens[id] = left
+	else:
+		_itens.erase(id)
+	Sons.play_at(self, "estalo", _player.position + Vector3(0, 1, 0), -10.0, 1.6)
+	_show_toast("%s quebrou!" % Itens.nome(id))
+	if _mao == id and left <= 0:
+		equip("")
+	return true
+
+
 ## Equipa uma ferramenta da mochila na mão ("" guarda).
 ## Só uma ferramenta na mão de cada vez (equipar outra guarda a anterior).
 func equip(id: String) -> void:
 	_mao = id if id != "" and item_qtd(id) > 0 else ""
 	if _chopping:
 		_cancel_chop()
+	if _sawing:
+		_stop_saw()
 	if _chop_pose:
-		_chop_pose.holding = _mao in ["machado", "cavadeira"]
+		_chop_pose.holding = _mao in ["machado", "cavadeira", "serra"]
 		_chop_pose.tool = _mao if _mao != "" else "machado"
 		if _mao == "cavadeira":
 			_chop_pose.grip_low = 0.04
 			_chop_pose.grip_high = 0.4
 			_chop_pose.carry_grip = 0.22
+		elif _mao == "serra":
+			_chop_pose.carry_grip = Corte.SAW_LEN * 0.5
 		else:
 			_chop_pose.grip_low = Corte.ChopPose.GRIP_LOW
 			_chop_pose.grip_high = Corte.ChopPose.GRIP_HIGH
 			_chop_pose.carry_grip = Corte.ChopPose.GRIP_HIGH
 	if _axe_node is MeshInstance3D:
-		(_axe_node as MeshInstance3D).mesh = Corte.digger_mesh() if _mao == "cavadeira" else Corte.axe_mesh()
+		var mi := _axe_node as MeshInstance3D
+		if _mao == "cavadeira":
+			mi.mesh = Corte.digger_mesh()
+		elif _mao == "serra":
+			mi.mesh = Corte.saw_mesh()
+		else:
+			mi.mesh = Corte.axe_mesh()
 	_act_check = 0.0
 
 
@@ -1529,6 +1614,9 @@ func _finish_dig() -> void:
 ## Mostra os botões "Cortar" e "Pegar ...". Cada toque em "Cortar" é uma machadada:
 ## o personagem segura o machado com as duas mãos e bate de lado no tronco.
 func _update_chop(delta: float) -> void:
+	if _sawing:
+		_saw_update(delta)
+		return
 	var pose = _chop_pose
 	if _chopping:
 		if _swing_on:
@@ -1570,9 +1658,9 @@ func _update_chop(delta: float) -> void:
 		var sp: Vector3 = _apoios.slice_point(int(_work.i), int(_work.e)) if int(_work.i) < _apoios.rested.size() else Vector3(1e9, 0, 1e9)
 		if Vector2(sp.x - _player.position.x, sp.z - _player.position.z).length() > 3.0:
 			_work = {}      # foi embora: sai do modo de cortar rodela
-		elif _mao == "machado" and _crouch_job == "" and not _air:
+		elif _mao == "serra" and _crouch_job == "" and not _air:
 			_chop_btn.visible = true
-			_chop_btn.text = "Cortar rodela"
+			_chop_btn.text = "Serrar rodela"
 			return
 	if _mao == "machado" and _arvores != null and not _digging and not _air and _carry.is_empty() and _crouch_job == "":
 		if _arvores.nearest_standing(_player.position, 1.3) != null:
@@ -1981,11 +2069,12 @@ func _work_choose(modo: String) -> void:
 	var i: int = _apoios.nearest_rested(_player.position, 1.8)
 	if i < 0:
 		return
-	if item_qtd("machado") <= 0:
-		_show_toast("Precisa de um machado para cortar a rodela.")
+	# a rodela é fina: só a serra de pedra corta (o machado racha a madeira)
+	if item_qtd("serra") <= 0:
+		_show_toast("Precisa de uma serra de pedra para cortar a rodela.")
 		return
-	if _mao != "machado":
-		equip("machado")
+	if _mao != "serra":
+		equip("serra")
 	_work = {"i": i, "modo": modo, "stage": "indo"}
 	var e: int = _apoios.slice_side(i, _player.position)
 	if e != 0:
@@ -2011,7 +2100,7 @@ func _rodela_go(e: int) -> void:
 	_work.erase("fix")
 	var sp: Vector3 = _apoios.slice_point(i, e)
 	_work.look = sp
-	_walk_to(_side_spot(i, sp, float(_apoios.info(i).rad) + 0.5), "rodela")
+	_walk_to(_side_spot(i, sp, 0.95), "rodela")       # a serra é comprida: fica mais afastado
 
 
 ## Lugar do lado da tora (do lado em que o jogador está), na altura do ponto "at".
@@ -2275,6 +2364,105 @@ func _place_now(t: Dictionary) -> void:
 	_update_inventory()
 
 
+# ================== SERRAR A RODELA ==================
+
+func _begin_saw() -> void:
+	var wi := int(_work.get("i", -1))
+	var we := int(_work.get("e", 0))
+	if wi < 0 or wi >= _apoios.rested.size() or we == 0:
+		return
+	var inf: Dictionary = _apoios.info(wi)
+	var sp: Vector3 = _apoios.slice_point(wi, we)
+	var rend: float = _arvores.free_log_end_radius(_apoios.rested[wi].log, we)
+	_chop_log = {"rodela": true, "axis": sp, "along": inf.dir, "r": rend, "dist": 0.95, "point": sp + Vector3.UP * rend}
+	_sawing = true
+	_saw_t = 0.0
+	_saw_half = 0
+	_play("Idle", 0.5)
+	if _chop_pose:
+		_chop_pose.sawing = true
+		_chop_pose.saw_point = sp + Vector3.UP * rend
+		_chop_pose.saw_depth = _saw_depth(wi, rend)
+	_chop_btn.visible = true
+	_chop_btn.text = "Parar"
+
+
+func _stop_saw() -> void:
+	_sawing = false
+	_chop_log = {}
+	if _chop_pose:
+		_chop_pose.sawing = false
+	_act_check = 0.0
+
+
+## Quanto o corte já desceu na tora (m), para a serra ir afundando.
+func _saw_depth(wi: int, rend: float) -> float:
+	var en: Dictionary = _apoios.rested[wi].log.get("entalhe", {})
+	if en.is_empty():
+		return 0.0
+	return clampf(float(en.hits) / maxf(float(en.need), 1.0), 0.0, 1.0) * rend * 1.7
+
+
+func _saw_update(delta: float) -> void:
+	var wi := int(_work.get("i", -1))
+	var we := int(_work.get("e", 0))
+	if wi < 0 or wi >= _apoios.rested.size() or we == 0 or _mao != "serra":
+		_stop_saw()
+		return
+	_saw_t += delta
+	var phase := fmod(_saw_t / SAW_CYCLE, 1.0)
+	if _chop_pose:
+		_chop_pose.saw_phase = phase
+	var at: Vector3 = _chop_log.point
+	# um som a cada passada (empurrando e puxando)
+	var half := int(_saw_t / (SAW_CYCLE * 0.5))
+	if half > _saw_half:
+		_saw_half = half
+		Sons.play_at(self, "serra", at, 0.0, 0.92 if half % 2 == 0 else 1.0)
+		_sawdust(at)
+		if half % 2 == 0:
+			# uma ida e volta inteira: o corte desce um pouco e a serra gasta
+			var end_before: Vector3 = _apoios.end_point(wi, we)
+			var dir: Vector3 = _apoios.info(wi).dir
+			var rad: float = _apoios.slice_stroke(wi, we)
+			var broke := wear("serra")
+			if rad > 0.0:
+				_drop_rodela(end_before - dir * float(we) * Apoios.SLICE * 0.5, dir * float(we), rad)
+				_stop_saw()
+				_work = {}
+				_show_toast("A rodela soltou. Pegue ela!")
+				return
+			if broke and item_qtd("serra") <= 0:
+				_stop_saw()
+				return
+			if _chop_pose:
+				_chop_pose.saw_depth = _saw_depth(wi, float(_chop_log.r))
+
+
+## Pó de serra caindo do corte.
+func _sawdust(at: Vector3) -> void:
+	var c := CPUParticles3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.012, 0.006, 0.012)
+	c.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.78, 0.64, 0.42)
+	c.material_override = mat
+	c.amount = 18
+	c.one_shot = true
+	c.explosiveness = 0.6
+	c.lifetime = 0.9
+	c.direction = Vector3(0, -1, 0)
+	c.spread = 35.0
+	c.initial_velocity_min = 0.2
+	c.initial_velocity_max = 0.6
+	c.gravity = Vector3(0, -6.0, 0)
+	add_child(c)
+	c.global_position = at
+	c.emitting = true
+	get_tree().create_timer(1.2).timeout.connect(c.queue_free)
+
+
 ## Pulo: sobe uns 60 cm (dá para passar por cima de uma tora ou subir nela).
 func _jump() -> void:
 	if _air or _chopping or _digging or not _carry.is_empty() or _crouch_job != "":
@@ -2285,6 +2473,13 @@ func _jump() -> void:
 
 ## Toque no botão "Cortar": uma machadada (se já está no meio de uma, guarda a próxima).
 func _start_chop() -> void:
+	if _mao == "serra":
+		# serra: um toque começa a serrar (vai e vem sozinho), outro toque para
+		if _sawing:
+			_stop_saw()
+		elif not _work.is_empty() and str(_work.get("stage", "")) == "pronto":
+			_begin_saw()
+		return
 	if (_mao != "machado" and _mao != "cavadeira") or _arvores == null:
 		return
 	if _chopping:
@@ -2305,29 +2500,6 @@ func _start_chop() -> void:
 		if _chop_pose:
 			_chop_pose.digging = true
 			_chop_pose.vertical = false
-			_chop_pose.ready_pose = true
-		_begin_swing()
-		return
-	if not _work.is_empty() and str(_work.get("stage", "")) == "pronto" and _mao == "machado":
-		var wi := int(_work.i)
-		var we := int(_work.e)
-		var inf: Dictionary = _apoios.info(wi)
-		var sp: Vector3 = _apoios.slice_point(wi, we)
-		if _digging:
-			_cancel_dig()
-		_chop_tree = null
-		_chop_branch = {}
-		var rend: float = _arvores.free_log_end_radius(_apoios.rested[wi].log, we)
-		_chop_log = {"rodela": true, "axis": sp, "along": inf.dir, "r": rend, "dist": rend + 0.5,
-			"point": sp + Vector3.UP * rend * 0.9}
-		_chopping = true
-		_swing_queued = false
-		_play("Idle", 0.5)
-		if _chop_pose:
-			_chop_pose.vertical = true
-			# o golpe para na altura da tora (o chão pode estar mais alto ou mais baixo que as forquilhas)
-			var hy: float = float(_chop_log.point.y) - _player.position.y
-			_chop_pose.down_hit = clampf((hy - 0.96) / 0.0132, -42.0, 45.0)   # medido: 0° = lâmina a 0,96 m do pé
 			_chop_pose.ready_pose = true
 		_begin_swing()
 		return
@@ -2368,6 +2540,12 @@ func _begin_swing() -> void:
 
 ## A lâmina bateu no tronco: conta a machadada, marca o corte e solta lascas.
 func _chop_hit() -> void:
+	var tool := _mao
+	_chop_hit_now()
+	wear(tool)               # cada machadada ou cavada gasta a ferramenta
+
+
+func _chop_hit_now() -> void:
 	if not _chop_branch.is_empty():
 		var at: Vector3 = _chop_branch.point
 		_chips(at)
@@ -2390,24 +2568,6 @@ func _chop_hit() -> void:
 		_dirt(at)
 		Sons.play_at(self, "cavar", at)
 		_show_toast("Buraco com %d cm de fundura" % int(round(d * 100.0)) if d < Buracos.MAX_DEPTH else "O buraco já está bem fundo (80 cm)")
-		return
-	if _chop_log.has("rodela"):
-		var wi := int(_work.get("i", -1))
-		var we := int(_work.get("e", 0))
-		var at: Vector3 = _chop_log.point
-		_chips(at)
-		Sons.play_at(self, "machado", at, -1.0, 1.05)
-		if wi < 0 or wi >= _apoios.rested.size() or we == 0:
-			_cancel_chop()
-			return
-		var end_before: Vector3 = _apoios.end_point(wi, we)
-		var dir: Vector3 = _apoios.info(wi).dir
-		var rad: float = _apoios.slice_hit(wi, we)
-		if rad > 0.0:
-			_drop_rodela(end_before - dir * float(we) * Apoios.SLICE * 0.5, dir * float(we), rad)
-			_cancel_chop()
-			_work = {}
-			_show_toast("A rodela caiu no chão. Pegue ela!")
 		return
 	if not _chop_log.is_empty():
 		var lp: Array = _chop_log.p
@@ -2576,6 +2736,11 @@ func _move_player(delta: float) -> void:
 			_cancel_chop()
 		else:
 			amount = 0.0
+	if _sawing:
+		if amount > 0.12:
+			_stop_saw()
+		else:
+			amount = 0.0
 	if _crouch_job != "":
 		amount = 0.0           # abaixado pegando ou largando a tora
 	if _walking and amount > 0.12:
@@ -2629,7 +2794,7 @@ func _move_player(delta: float) -> void:
 			var stp := minf(tl.length() - 0.65, delta * 1.5)
 			p.x += tl.x / tl.length() * stp
 			p.z += tl.y / tl.length() * stp
-	elif _chopping and not _chop_log.is_empty():
+	elif (_chopping or _sawing) and not _chop_log.is_empty():
 		# de lado para a tora, de frente para o ponto do corte
 		var axp: Vector3 = _chop_log.axis
 		var al: Vector3 = _chop_log.along

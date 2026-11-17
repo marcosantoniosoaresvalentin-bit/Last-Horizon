@@ -1,9 +1,9 @@
 {
-  "version": 51,
-  "file": "update_51.zip",
-  "size": 3356954,
-  "sha256": "34d0c0374a5e6b58ae684dd4f98c519792b82c113e48a7def34a0da56d923dbc",
+  "version": 52,
+  "file": "update_52.zip",
+  "size": 3407729,
+  "sha256": "63860e4ab7a74c1755b45446efac16464e724b9490a761f13cf201f1cf4937dc",
   "min_build": 1,
-  "notes": "Forquilha baixa de galho grosso, tora sem atravessar, árvore inteira vira tora, galho com 3 cortes, folhas paradas e colocar itens escolhendo o lugar",
+  "notes": "Serra de pedra (rodela só com serra, corte lento com som real), pedras trabalhadas nas receitas e durabilidade das ferramentas",
   "date": "2026-11-17"
 }

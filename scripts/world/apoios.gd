@@ -239,23 +239,24 @@ func move_fork(i: int, fi: int, to: Vector3) -> void:
 	_rebuild()
 
 
-## Uma machadada na ponta da tora apoiada (lado e). Quando solta a rodela, a tora
-## fica 5 cm mais curta e devolve o raio da rodela; senão devolve 0.
-func slice_hit(i: int, e: int) -> float:
+## Uma ida e volta da serra na ponta da tora apoiada (lado e). Corte lento: tora grossa
+## pede muitas passadas. Quando solta a rodela, a tora fica 5 cm mais curta e devolve
+## o raio da rodela; senão devolve 0.
+func slice_stroke(i: int, e: int) -> float:
 	var r: Dictionary = rested[i]
 	var fl: Dictionary = r.log
 	var rad: float = _arv.free_log_end_radius(fl, e)
-	var need := clampi(int(round(2.0 + rad * 12.0)), 3, 7)
+	var need := clampi(int(round(8.0 + rad * 40.0)), 10, 26)
 	var en: Dictionary = fl.get("entalhe", {})
 	if en.is_empty() or int(en.e) != e:
-		en = {"e": e, "hits": 0, "need": need}
+		en = {"e": e, "hits": 0, "need": need, "serra": true}
 	en.hits = int(en.hits) + 1
 	if int(en.hits) < need:
 		fl["entalhe"] = en
 		_rebuild()
 		return 0.0
 	fl.erase("entalhe")
-	_arv.shorten_free_log(fl, e, SLICE)
+	_arv.shorten_free_log(fl, e, SLICE, 0.5)     # serra de pedra: acabamento irregular
 	r.off = float(r.get("off", 0.0)) - float(e) * SLICE * 0.5
 	_rebuild()
 	return rad

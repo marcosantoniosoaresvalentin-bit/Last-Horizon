@@ -57,6 +57,10 @@ class IconButton extends Button:
 
 static func kind_for(text: String) -> String:
 	var t := text.to_lower()
+	if t.begins_with("serrar"):
+		return "serrar"
+	if t.begins_with("parar"):
+		return "parar"
 	if t.begins_with("colocar"):
 		return "colocar"
 	if t.begins_with("girar"):
@@ -226,6 +230,17 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 				ci.draw_colored_polygon(lg, col.call(BARK.lightened(0.1)))
 				ci.draw_polyline(lg + PackedVector2Array([lg[0]]), ink, 2 * u, true)
 				ci.draw_circle(c + Vector2(36, -18) * u, 12 * u, col.call(WOOD_LIGHT))
+		"serrar":
+			# rodela com a serra em cima
+			if shadow:
+				ci.draw_circle(c + Vector2(-4, 16) * u, 30 * u, sh)
+			else:
+				Desenhos.item(ci, "rodela", c + Vector2(-4, 16) * u, s * 0.66)
+				Desenhos.item(ci, "serra", c + Vector2(4, -18) * u, s * 0.8)
+		"parar":
+			var sq: PackedVector2Array = P.call([[-26, -26], [26, -26], [26, 26], [-26, 26]])
+			ci.draw_colored_polygon(sq, col.call(RED))
+			ci.draw_polyline(sq + PackedVector2Array([sq[0]]), ink, 2.5 * u, true)
 		"colocar":
 			# chão com a marca tracejada de onde vai ficar e a seta descendo
 			ci.draw_line(c + Vector2(-46, 34) * u, c + Vector2(46, 34) * u, col.call(Color(0.3, 0.45, 0.16)), 5 * u, true)

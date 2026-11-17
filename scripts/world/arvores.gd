@@ -1735,11 +1735,17 @@ func free_log_node(fl: Dictionary) -> Node3D:
 		var prog := clampf(float(en.hits) / maxf(float(en.need), 1.0), 0.0, 1.0)
 		var hc := h1 - SLICE_M / s if e > 0 else h0 + SLICE_M / s
 		var upm: Vector3 = Basis(Quaternion((b - a).normalized(), Vector3.RIGHT)).inverse() * Vector3.UP
-		var flat := 0.012 / s                       # lado da rodela: face reta
-		var bevel := (0.03 + 0.05 * prog) / s       # lado da tora: inclinado
-		notches.append({"h": hc, "ac": atan2(upm.z, upm.x), "depth": 0.18 + 0.7 * prog,
-			"up": flat if e > 0 else bevel, "down": bevel if e > 0 else flat,
-			"open": 0.9 + 0.9 * prog, "seed": int(en.hits) * 31 + 7, "s": s})
+		if bool(en.get("serra", false)):
+			# serra: um rasgo fino descendo de cima (os dentes de pedra deixam ele irregular)
+			var k := 0.006 / s
+			notches.append({"h": hc, "ac": atan2(upm.z, upm.x), "depth": 0.08 + 0.85 * prog,
+				"up": k, "down": k, "open": 1.4 + 0.8 * prog, "seed": int(en.hits) * 31 + 7, "s": s})
+		else:
+			var flat := 0.012 / s                       # lado da rodela: face reta
+			var bevel := (0.03 + 0.05 * prog) / s       # lado da tora: inclinado
+			notches.append({"h": hc, "ac": atan2(upm.z, upm.x), "depth": 0.18 + 0.7 * prog,
+				"up": flat if e > 0 else bevel, "down": bevel if e > 0 else flat,
+				"open": 0.9 + 0.9 * prog, "seed": int(en.hits) * 31 + 7, "s": s})
 	_trunk_node(holder, _trunk_build(m, h0, h1, notches, s, top, bot), _bark if age < 200 else _bark_dead)
 	return root
 
@@ -1775,10 +1781,10 @@ func free_log_end_radius(fl: Dictionary, e: int) -> float:
 
 ## Tira um pedaço da ponta da tora (a rodela): fica mais curta, com a ponta
 ## nova cortada a machado.
-func shorten_free_log(fl: Dictionary, e: int, length: float) -> void:
+func shorten_free_log(fl: Dictionary, e: int, length: float, rough := 0.25) -> void:
 	var dh := length / float(fl.s)
 	var cap := {"ac": PI, "seed": absi(hash(Vector3(float(fl.h0), float(fl.h1), float(e)))) % 100000,
-		"rough": 0.25, "sign": -1.0 if e > 0 else 1.0}
+		"rough": rough, "sign": -1.0 if e > 0 else 1.0}
 	if e > 0:
 		fl.h1 = float(fl.h1) - dh
 		fl.top = cap

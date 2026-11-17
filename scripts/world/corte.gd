@@ -280,6 +280,103 @@ static func digger_mesh() -> ArrayMesh:
 	return st.commit()
 
 
+## Serra de pedra (dos antigos, para dois): um cabo comprido de galho (1,3 m) com um
+## pegador em pé em cada ponta, e no meio uma lâmina de pedra lascada com dentes
+## (como a da foto), encaixada embaixo do cabo e amarrada com cipó.
+## Cabo de y = 0 até y = 1,3; os dentes apontam para +Z (para baixo, serrando) e os
+## pegadores para -Z (para cima).
+const SAW_LEN := 1.3
+const SAW_TEETH := 0.088          # dos dentes até o meio do cabo
+
+static func saw_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9393
+	var bark := Color(0.3, 0.22, 0.14)
+	# cabo: galho meio torto, com casca
+	var path := []
+	for i in 15:
+		var t := i / 14.0
+		path.append(Vector3(sin(t * 3.1) * 0.006, t * SAW_LEN, cos(t * 2.3) * 0.005))
+	_tube_r(st, path, 0.021, 0.018, bark, 9, rng)
+	# pontas cortadas (madeira clara)
+	for y in [0.0, SAW_LEN]:
+		_disc(st, Vector3(0, y, 0), 0.019, Color(0.6, 0.46, 0.28))
+	# pegadores em pé, um em cada ponta (um jogador de cada lado da tora)
+	for y in [0.07, SAW_LEN - 0.07]:
+		_tube_r(st, [Vector3(0, y, 0.01), Vector3(0.004, y + 0.004, -0.07), Vector3(0, y, -0.15)], 0.017, 0.015, bark.darkened(0.08), 7, rng)
+		_helix(st, y - 0.03, y + 0.03, 0.024, 2.5, 0.0038, Color(0.17, 0.19, 0.08), rng)
+	# lâmina de pedra lascada com dentes, embaixo do cabo
+	var y0 := 0.36
+	var y1 := 0.94
+	var stone := Color(0.55, 0.42, 0.22)
+	var th := 0.007
+	var top := 0.012
+	var n := 26
+	for i in n:
+		var ya := lerpf(y0, y1, float(i) / n)
+		var yb := lerpf(y0, y1, float(i + 1) / n)
+		# a ponta da lâmina afina nas duas pontas
+		var ea := 1.0 - pow(absf(float(i) / n * 2.0 - 1.0), 3.0) * 0.5
+		var eb := 1.0 - pow(absf(float(i + 1) / n * 2.0 - 1.0), 3.0) * 0.5
+		var za := top + 0.062 * ea
+		var zb := top + 0.062 * eb
+		var c := stone * rng.randf_range(0.85, 1.12)
+		c.a = 1.0
+		for sx in [th, -th]:
+			_quad(st, Vector3(sx, ya, top), Vector3(sx, yb, top), Vector3(sx * 0.6, yb, zb), Vector3(sx * 0.6, ya, za), c)
+		# dente: ponta para fora da lâmina (lascado, de tamanhos diferentes)
+		var ym := (ya + yb) * 0.5
+		var tip := maxf(za, zb) + rng.randf_range(0.01, 0.017) * minf(ea, eb)
+		var tc := c.lightened(0.08)
+		for sx in [th * 0.6, -th * 0.6]:
+			st.set_color(tc)
+			st.add_vertex(Vector3(sx, ya, za))
+			st.add_vertex(Vector3(sx, yb, zb))
+			st.add_vertex(Vector3(0, ym, tip))
+	# amarração de cipó prendendo a lâmina no cabo
+	for y in [0.4, 0.52, 0.65, 0.78, 0.9]:
+		var ring := []
+		for k in 13:
+			var a := TAU * k / 12.0
+			ring.append(Vector3(cos(a) * 0.026, y + k * 0.0015, -0.01 + sin(a) * 0.04 + 0.01))
+		_tube(st, ring, 0.004, Color(0.17, 0.19, 0.08), rng)
+	st.generate_normals()
+	return st.commit()
+
+
+static func _tube_r(st: SurfaceTool, path: Array, ra: float, rb: float, col: Color, sides: int, rng: RandomNumberGenerator) -> void:
+	var rings := []
+	for i in path.size():
+		var p: Vector3 = path[i]
+		var d: Vector3 = (path[mini(i + 1, path.size() - 1)] - path[maxi(i - 1, 0)]).normalized()
+		var a := d.cross(Vector3.FORWARD if absf(d.z) < 0.9 else Vector3.RIGHT).normalized()
+		var b := d.cross(a).normalized()
+		var r := lerpf(ra, rb, float(i) / maxf(path.size() - 1, 1))
+		var ring := []
+		for k in sides:
+			var ang := TAU * k / sides
+			ring.append(p + (a * cos(ang) + b * sin(ang)) * r)
+		rings.append(ring)
+	for i in rings.size() - 1:
+		var c := col * rng.randf_range(0.88, 1.1)
+		c.a = 1.0
+		for k in sides:
+			var k2 := (k + 1) % sides
+			_quad(st, rings[i][k], rings[i + 1][k], rings[i + 1][k2], rings[i][k2], c)
+
+
+static func _disc(st: SurfaceTool, c: Vector3, r: float, col: Color) -> void:
+	for k in 8:
+		var a0 := TAU * k / 8.0
+		var a1 := TAU * (k + 1) / 8.0
+		st.set_color(col)
+		st.add_vertex(c)
+		st.add_vertex(c + Vector3(cos(a0) * r, 0, sin(a0) * r))
+		st.add_vertex(c + Vector3(cos(a1) * r, 0, sin(a1) * r))
+
+
 static func axe_material() -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
@@ -308,6 +405,10 @@ class ChopPose extends SkeletonModifier3D:
 	var phase := 0.0
 	var vertical := false         # golpe de cima para baixo (cortar tora deitada)
 	var down_hit := -42.0         # onde o golpe de cima para baixo para (graus): -42 chão, -16 cintura
+	var sawing := false           # serrando (vai e vem com a serra de pedra)
+	var saw_phase := 0.0          # 0 a 1: uma ida e volta
+	var saw_point := Vector3.ZERO # onde a serra corta (no mundo, em cima da tora)
+	var saw_depth := 0.0          # quanto o corte já desceu (m)
 	var digging := false          # cavando com a cavadeira
 	var crouch := 0.0             # 0 em pé, 1 agachado (pegar ou largar a tora)
 	var moving := false           # andando/correndo (o jogo avisa)
@@ -360,6 +461,10 @@ class ChopPose extends SkeletonModifier3D:
 		if not holding:
 			return
 		_close_fingers(sk, "Right")
+		if sawing:
+			_close_fingers(sk, "Left")
+			_saw(sk, up, fwd, right)
+			return
 		if swinging or ready_pose:
 			_close_fingers(sk, "Left")
 			if digging:
@@ -383,6 +488,20 @@ class ChopPose extends SkeletonModifier3D:
 		if p < 0.65:
 			return lerpf(hit, hit + 8.0, (p - HIT_AT) / (0.65 - HIT_AT))
 		return lerpf(hit + 8.0, rest, smoothstep(0.0, 1.0, (p - 0.65) / 0.35))
+
+	# ---------- serrar: vai e vem, a mão direita no pegador e a esquerda no cabo ----------
+	func _saw(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
+		var pt: Vector3 = sk.global_transform.affine_inverse() * saw_point
+		var dir := fwd
+		var stroke := sin(saw_phase * TAU) * 0.14     # + empurra (a serra vai para longe)
+		var bar_mid := pt + up * (SAW_TEETH - saw_depth)
+		var base := bar_mid - dir * (SAW_LEN * 0.5) + dir * stroke
+		# o corpo vai junto: inclina para a frente quando empurra
+		_rot_global(sk, "Spine1", right, -0.22 - stroke * 0.9)
+		var peg := base + dir * 0.07
+		_hand_on(sk, "Right", peg + up * 0.09, up, _orth(fwd, up), up, right)
+		_hand_on(sk, "Left", base + dir * 0.24, dir, _orth(-up * 0.6 - right * 0.4, dir), up, -right)
+		_set_tool(sk, _tool_xf(base, dir, -up))
 
 	# ---------- cavar: levanta a cavadeira e crava no chão, depois alavanca ----------
 	func _two_hands_dig(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3, p: float) -> void:
@@ -506,6 +625,8 @@ class ChopPose extends SkeletonModifier3D:
 		# pulso reto: os dedos seguem a linha do antebraço; o cabo sai da mão para a frente
 		var arm_dir := (sk.get_bone_global_pose(hb).origin - fa_g.origin).normalized()
 		var want := fwd * 0.9 - up * 0.3 if tool == "machado" else fwd * 0.75 - up * 0.45 + right * 0.45
+		if tool == "serra":
+			want = fwd * 1.0 - up * 0.12 + right * 0.15   # serra deitada, segura pelo meio do cabo
 		var handle := _orth(want, arm_dir)
 		var g := _grip_rotate("Right", sk, handle, arm_dir)
 		if g.is_empty():
@@ -514,7 +635,7 @@ class ChopPose extends SkeletonModifier3D:
 		hp.basis = g.basis
 		sk.set_bone_global_pose(hb, hp)
 		var center: Vector3 = hp.origin + g.offset
-		var edge := _orth(-up if tool == "machado" else fwd, handle)
+		var edge := _orth(-up if tool in ["machado", "serra"] else fwd, handle)
 		var txf := _tool_xf(center - handle * carry_grip, handle, edge)
 		_set_tool(sk, _avoid_body(sk, txf, center))
 		if not moving:

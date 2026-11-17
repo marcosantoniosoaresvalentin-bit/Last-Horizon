@@ -6,6 +6,7 @@ extends RefCounted
 ##  - cavadeira: "Shovel sound" (OpenGameArt, CC0)
 ##  - passos: Fantozzi's footsteps, terra/areia (OpenGameArt, CC0)
 ##  - água: qubodup, 6 short water splashes (OpenGameArt, CC0)
+##  - serra: "Saw wood" (Joseph Sardin, BigSoundBank.com, CC0), cada passada separada
 ## Se algum arquivo faltar, usa um som gerado em código no lugar.
 
 const RATE := 22050
@@ -18,9 +19,10 @@ const FILES := {
 	"passo": ["passo1", "passo2", "passo3", "passo4", "passo5", "passo6"],
 	"agua": ["agua1", "agua2", "agua4", "agua5"],
 	"baque": ["baque1"],
+	"serra": ["serra1", "serra2", "serra3", "serra4", "serra5", "serra6"],
 }
 ## Volume de cada som (dB): passos baixos e a água bem baixinha.
-const VOLUME := {"machado": 0.0, "corrida": -12.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0}
+const VOLUME := {"machado": 0.0, "corrida": -12.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0, "serra": -9.0}
 
 static var _cache := {}
 

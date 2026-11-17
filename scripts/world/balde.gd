@@ -148,7 +148,7 @@ static func _handle(st: SurfaceTool) -> void:
 static func rodela_mesh(r: float, th: float) -> Mesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_disc(st, Vector3.ZERO, r, th, Color(0.46, 0.35, 0.22), Color(0.24, 0.17, 0.11), true)
+	_disc(st, Vector3.ZERO, r, th, Color(0.38, 0.28, 0.17), Color(0.22, 0.16, 0.1), true)
 	st.generate_normals()
 	return st.commit()
 
@@ -171,7 +171,12 @@ static func _disc(st: SurfaceTool, c: Vector3, r: float, th: float, wood: Color,
 			var col := wood.darkened(0.045 * (k % 2)) if rings else wood
 			for sgn in [1.0, -1.0]:
 				var y: Vector3 = top * sgn
-				_quad(st, c + y + p0 * f0, c + y + p1 * f0, c + y + p1 * f1, c + y + p0 * f1, col if k < nr - 1 or not rings else col.lerp(bark, 0.25))
+				# serra de pedra: a face fica ondulada, com marcas do vai e vem
+				var j := func(a: float, f: float) -> Vector3:
+					if not rings:
+						return Vector3.ZERO
+					return Vector3(0, (sin(a * 5.0 + f * 9.0 + sgn) * 0.5 + sin(f * 23.0 + a * 2.0) * 0.5) * th * 0.22 * f, 0)
+				_quad(st, c + y + p0 * f0 + j.call(a0, f0), c + y + p1 * f0 + j.call(a1, f0), c + y + p1 * f1 + j.call(a1, f1), c + y + p0 * f1 + j.call(a0, f1), col if k < nr - 1 or not rings else col.lerp(bark, 0.25))
 		# casca em volta
 		_quad(st, c - top + p0, c - top + p1, c + top + p1, c + top + p0, bark.darkened(0.08 * (i % 2)))
 

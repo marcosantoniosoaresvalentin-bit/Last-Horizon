@@ -361,6 +361,13 @@ func _refresh() -> void:
 			q.text = ("x%d" % int(_items[i].qtd)) if _items[i].has("qtd") else ("%.1f kg" % float(_items[i].kg)).replace(".", ",")
 			if _game and str(_items[i].id) == str(_game._mao):
 				q.text = "NA MÃO"
+			# durabilidade da ferramenta (a que vai para a mão)
+			if _game and Itens.dur_max(str(_items[i].id)) > 0:
+				var pct := int(round(float(_game.tool_dur(str(_items[i].id))) * 100.0))
+				q.text = ("MÃO " if q.text == "NA MÃO" else q.text + " · ") + "%d%%" % pct
+				q.add_theme_color_override("font_color", Color(0.95, 0.93, 0.86) if pct > 30 else (Color(0.95, 0.7, 0.15) if pct > 15 else Color(0.9, 0.25, 0.2)))
+			else:
+				q.remove_theme_color_override("font_color")
 		else:
 			ic.kind = ""
 			q.text = ""
@@ -390,7 +397,10 @@ func _select(i: int) -> void:
 	if it.id == "semente":
 		_say("%s · %d · USAR planta aqui, SOLTAR larga uma no chão" % [it.nome, int(it.qtd)])
 	elif Itens.ITENS.has(str(it.id)) and it.id != "argila":
-		_say("%s · %s kg · %s" % [it.nome, Itens.kg_txt(Itens.kg(str(it.id))), Itens.ITENS[it.id].desc])
+		var dur := ""
+		if _game and Itens.dur_max(str(it.id)) > 0:
+			dur = " · Durabilidade %d%%" % int(round(float(_game.tool_dur(str(it.id))) * 100.0))
+		_say("%s · %s kg%s · %s" % [it.nome, Itens.kg_txt(Itens.kg(str(it.id))), dur, Itens.ITENS[it.id].desc])
 	else:
 		_say("%s · %s kg" % [it.nome, ("%.1f" % float(it.kg)).replace(".", ",")])
 
@@ -412,7 +422,7 @@ func _use() -> void:
 	if _selected < 0 or _selected >= _items.size():
 		return
 	var it: Dictionary = _items[_selected]
-	if it.id in ["machado", "cavadeira"]:
+	if it.id in ["machado", "cavadeira", "serra"]:
 		_equip()
 		return
 	if Itens.colocavel(str(it.id)) and _game:

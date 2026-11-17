@@ -129,6 +129,46 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_polyline(rp + PackedVector2Array([rp[0]]), ink, 2.0 * u, true)
 		"balde":
 			balde(ci, c, s)
+		"serra", "lamina_serra":
+			# lâmina de pedra com dentes (e, na serra, o cabo comprido com os dois pegadores)
+			var blade: PackedVector2Array = P.call([[-30, -4], [30, -6], [34, 0], [30, 6], [-30, 8], [-35, 2]])
+			if id == "lamina_serra":
+				blade = P.call([[-42, -10], [42, -12], [46, 0], [42, 12], [-42, 14], [-47, 2]])
+			var stone := Color(0.62, 0.48, 0.26)
+			ci.draw_colored_polygon(blade, stone)
+			var y0 := 8.0 if id == "serra" else 14.0
+			var x0 := -30.0 if id == "serra" else -42.0
+			var x1 := 30.0 if id == "serra" else 42.0
+			var k := 0
+			var x := x0
+			while x < x1:
+				ci.draw_colored_polygon(P.call([[x, y0 - 1], [x + 5, y0 - 1], [x + 2.5, y0 + 6]]), stone.darkened(0.1))
+				x += 5.0
+				k += 1
+			ci.draw_polyline(blade + PackedVector2Array([blade[0]]), ink, 1.6 * u, true)
+			for f in 4:
+				ci.draw_line(c + Vector2(x0 + 8 + f * (x1 - x0 - 16) / 3.0, -4) * u, c + Vector2(x0 + 14 + f * (x1 - x0 - 16) / 3.0, 4) * u, stone.lightened(0.15), 1.5 * u, true)
+			if id == "serra":
+				ci.draw_line(c + Vector2(-46, -12) * u, c + Vector2(46, -12) * u, Color(0.4, 0.27, 0.15), 7 * u, true)
+				for e in [-42.0, 42.0]:
+					ci.draw_line(c + Vector2(e, -12) * u, c + Vector2(e, -38) * u, Color(0.36, 0.24, 0.13), 7 * u, true)
+				for e in [-18.0, 0.0, 18.0]:
+					ci.draw_line(c + Vector2(e - 3, -16) * u, c + Vector2(e + 3, 4) * u, Color(0.3, 0.36, 0.14), 3 * u, true)
+		"pedra_machado":
+			var head: PackedVector2Array = P.call([[-34, -10], [-10, -30], [24, -26], [42, -4], [30, 22], [-6, 28], [-30, 14]])
+			ci.draw_colored_polygon(head, Color(0.5, 0.5, 0.47))
+			ci.draw_colored_polygon(P.call([[30, 22], [42, -4], [46, 0], [34, 24]]), Color(0.72, 0.72, 0.68))
+			for f in 5:
+				var a := TAU * f / 5.0
+				ci.draw_arc(c + Vector2(cos(a) * 14, sin(a) * 10) * u, 9 * u, a, a + 2.2, 6, Color(0.4, 0.4, 0.38), 1.5 * u, true)
+			ci.draw_polyline(head + PackedVector2Array([head[0]]), ink, 2.0 * u, true)
+		"pedra_cavadeira":
+			var bl: PackedVector2Array = P.call([[-14, -40], [14, -40], [26, 10], [16, 40], [-16, 40], [-26, 10]])
+			ci.draw_colored_polygon(bl, Color(0.58, 0.52, 0.42))
+			ci.draw_colored_polygon(P.call([[-16, 40], [16, 40], [14, 34], [-14, 34]]), Color(0.74, 0.7, 0.6))
+			for f in 4:
+				ci.draw_arc(c + Vector2(-8 + (f % 2) * 16, -18 + f * 12) * u, 8 * u, 0.3, 2.6, 6, Color(0.46, 0.42, 0.34), 1.5 * u, true)
+			ci.draw_polyline(bl + PackedVector2Array([bl[0]]), ink, 2.0 * u, true)
 		_:
 			return false
 	return true
