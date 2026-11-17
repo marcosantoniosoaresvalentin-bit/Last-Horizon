@@ -7,17 +7,22 @@ extends Node3D
 ## - Galho grande não dá para pegar: primeiro corta com o machado em 2 pedaços.
 ##   Depois cada pedaço pode ser pego (vira 1 "galho" na mochila).
 
+const GalhoGeo := preload("res://scripts/world/galho_geo.gd")
 const MAX := 160
+const LEAF_DAYS := 45            # dias até o monte de folhas cortadas sumir
 const PER_TREE := 3
 const CUT_HITS := 2
 
 ## Cada galho: {x, z, yaw, len (m), r (grossura), inteiro (precisa cortar), seco}
 var items: Array = []
+## Montes de folhas que caíram dos galhos cortados: {x, z, y (chão), yaw, v, ci, s, dia, tint}
+var folhas: Array = []
 var last_day := 0
 var _jogo: Node
 var _arv: Node
 var _nodes: Array = []
 var _mat: StandardMaterial3D
+var _wood: StandardMaterial3D
 var _rng := RandomNumberGenerator.new()
 var _cuts := {}                 # índice -> machadadas já dadas
 
@@ -31,6 +36,7 @@ func build(jogo: Node, arvores: Node, seed_: int, save_path := "") -> void:
 	_mat.vertex_color_is_srgb = true
 	_mat.roughness = 0.95
 	_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_wood = GalhoGeo.wood_material()
 	last_day = int(jogo.sim.elapsed_days())
 	if save_path == "" or not _load(save_path):
 		_generate()
@@ -44,6 +50,7 @@ func tick() -> void:
 	while last_day < day:
 		last_day += 1
 		_drop_from_dying()
+	folhas = folhas.filter(func(f): return last_day - int(f.dia) < LEAF_DAYS)
 	_rebuild()
 
 
@@ -140,6 +147,21 @@ func take(i: int) -> void:
 	_rebuild()
 
 
+## Folhas do galho cortado no chão (cacho de folhas do modelo da árvore, amassado no chão).
+func add_leaves(x: float, z: float, y: float, yaw: float, v: int, ci: int, s: float, tint: Color) -> void:
+	folhas.append({"x": x, "z": z, "y": y, "yaw": yaw, "v": v, "ci": ci, "s": s, "dia": last_day,
+		"tint": [tint.r, tint.g, tint.b, tint.a]})
+
+
+## Nó de um cacho de folhas no lugar dele (para a animação de queda e para o monte no chão).
+func leaves_node(v: int, ci: int) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = _arv.cluster_mesh(v, ci)
+	mi.material_override = _arv.leaf_material()
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return mi
+
+
 # ================== DESENHO ==================
 
 func _rebuild() -> void:
@@ -147,24 +169,40 @@ func _rebuild() -> void:
 		if is_instance_valid(n):
 			n.free()
 	_nodes.clear()
+	for f in folhas:
+		var mi := leaves_node(int(f.v), int(f.ci))
+		var aabb: AABB = mi.mesh.get_aabb()
+		var sc := float(f.s)
+		var b := Basis(Vector3.UP, float(f.yaw)).scaled(Vector3(sc * 0.62, sc * 0.4, sc * 0.62))
+		var c := aabb.get_center()
+		mi.transform = Transform3D(b, Vector3(float(f.x), float(f.y) + aabb.size.y * sc * 0.12, float(f.z)) - b * c)
+		# secam no chão: do verde/amarelo da hora do corte para marrom
+		var t0: Array = f.tint
+		var age := clampf(float(last_day - int(f.dia)) / 12.0, 0.0, 1.0)
+		var col := Color(float(t0[0]), float(t0[1]), float(t0[2])).lerp(Color(0.42, 0.27, 0.12), age)
+		col.a = maxf(float(t0[3]), age)
+		mi.set_instance_shader_parameter("tint", col)
+		mi.visibility_range_end = 90.0
+		add_child(mi)
+		_nodes.append(mi)
 	if items.is_empty():
 		return
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var bd := GalhoGeo.Builder.new()
 	for g in items:
-		_branch_geo(st, g)
-	st.generate_normals()
+		_branch_geo(bd, g)
 	var mi := MeshInstance3D.new()
-	mi.mesh = st.commit()
-	mi.material_override = _mat
+	mi.mesh = bd.commit()
+	mi.set_surface_override_material(0, _arv.bark_material())
+	if mi.mesh.get_surface_count() > 1:
+		mi.set_surface_override_material(1, _wood)
 	mi.visibility_range_end = 90.0
 	add_child(mi)
 	_nodes.append(mi)
 
 
 ## Galho deitado no chão: torto, afinando, com um ou dois galhinhos; pedaço cortado
-## tem a ponta clara do corte.
-func _branch_geo(st: SurfaceTool, g: Dictionary) -> void:
+## tem a madeira clara do corte nas pontas.
+func _branch_geo(bd, g: Dictionary) -> void:
 	var x := float(g.x)
 	var z := float(g.z)
 	var yaw := float(g.yaw)
@@ -173,57 +211,28 @@ func _branch_geo(st: SurfaceTool, g: Dictionary) -> void:
 	var dir := Vector3(cos(yaw), 0, sin(yaw))
 	var side := Vector3(-dir.z, 0, dir.x)
 	var hsh := absi(hash(Vector2(x, z)))
-	var bark := Color(0.3, 0.24, 0.17) if bool(g.seco) else Color(0.28, 0.2, 0.12)
 	var pts := []
-	var segs := 6
+	var radii := []
+	var segs := 8
 	for k in segs + 1:
 		var t := float(k) / segs
 		var p := Vector3(x, 0, z) + dir * (t - 0.5) * length + side * sin(t * 3.0 + float(hsh % 7)) * 0.06
-		var rr := r * lerpf(1.0, 0.55, t)
+		var rr := r * lerpf(1.0, 0.6, t)
 		p.y = _jogo.surface_at(p.x, p.z) + rr * 0.9
-		pts.append([p, rr])
-	for k in segs:
-		_tube(st, pts[k][0], pts[k + 1][0], float(pts[k][1]), float(pts[k + 1][1]), bark.darkened(0.06 * (k % 2)))
+		pts.append(p)
+		radii.append(rr)
+	var piece := not bool(g.inteiro)
+	bd.tube(pts, radii, [true, piece], {}, 8)
 	# galhinhos saindo do galho
 	var twigs := 2 if bool(g.inteiro) else 1
 	for k in twigs:
 		var t := 0.35 + 0.3 * k
-		var base: Vector3 = (pts[int(t * segs)][0] as Vector3)
+		var base: Vector3 = pts[int(t * segs)]
 		var sgn := 1.0 if (hsh >> k) % 2 == 0 else -1.0
 		var tip := base + (dir * 0.25 + side * sgn * 0.45).normalized() * length * 0.28
 		tip.y = _jogo.surface_at(tip.x, tip.z) + 0.03
-		_tube(st, base, tip, r * 0.4, r * 0.15, bark)
-	# pontas cortadas (madeira clara) nos pedaços
-	if not bool(g.inteiro):
-		var wood := Color(0.62, 0.5, 0.33)
-		for e in [[pts[0][0], -dir, pts[0][1]], [pts[segs][0], dir, pts[segs][1]]]:
-			var c: Vector3 = e[0]
-			var n: Vector3 = e[1]
-			var rr: float = e[2]
-			var a := n.cross(Vector3.UP).normalized()
-			var b := n.cross(a).normalized()
-			for k in 8:
-				var a0 := TAU * k / 8.0
-				var a1 := TAU * (k + 1) / 8.0
-				st.set_color(wood)
-				st.add_vertex(c)
-				st.add_vertex(c + (a * cos(a0) + b * sin(a0)) * rr)
-				st.add_vertex(c + (a * cos(a1) + b * sin(a1)) * rr)
-
-
-static func _tube(st: SurfaceTool, a: Vector3, b: Vector3, ra: float, rb: float, col: Color) -> void:
-	var d := (b - a).normalized()
-	var s1 := d.cross(Vector3.UP if absf(d.y) < 0.9 else Vector3.RIGHT).normalized()
-	var s2 := d.cross(s1).normalized()
-	st.set_color(col)
-	var n := 6
-	for k in n:
-		var a0 := TAU * k / n
-		var a1 := TAU * (k + 1) / n
-		var o0 := s1 * cos(a0) + s2 * sin(a0)
-		var o1 := s1 * cos(a1) + s2 * sin(a1)
-		for v in [a + o0 * ra, b + o0 * rb, b + o1 * rb, a + o0 * ra, b + o1 * rb, a + o1 * ra]:
-			st.add_vertex(v)
+		var bp: Array = GalhoGeo.bent_points(base, tip, r * 0.4, r * 0.15, 3, 0.02, hsh + k)
+		bd.tube(bp[0], bp[1], [false, false], {}, 5)
 
 
 # ================== SALVAR ==================
@@ -231,7 +240,7 @@ static func _tube(st: SurfaceTool, a: Vector3, b: Vector3, ra: float, rb: float,
 func save(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "galhos": items}))
+		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "galhos": items, "folhas": folhas}))
 		f.close()
 
 
@@ -242,5 +251,6 @@ func _load(path: String) -> bool:
 	if not d is Dictionary:
 		return false
 	items = d.get("galhos", [])
+	folhas = d.get("folhas", [])
 	last_day = mini(int(d.get("dia", last_day)), last_day)
 	return true

@@ -1,9 +1,9 @@
 {
-  "version": 50,
-  "file": "update_50.zip",
-  "size": 3347885,
-  "sha256": "b0a8f78d6794dc5a1e043f12d0500a5d48b097a49e50404332acbc0cc322a0e9",
+  "version": 51,
+  "file": "update_51.zip",
+  "size": 3356954,
+  "sha256": "34d0c0374a5e6b58ae684dd4f98c519792b82c113e48a7def34a0da56d923dbc",
   "min_build": 1,
-  "notes": "Trabalhar na tora apoiada: cortar rodela (a forquilha muda de lugar sozinha), cipó trançado, ripa e balde de madeira",
+  "notes": "Forquilha baixa de galho grosso, tora sem atravessar, árvore inteira vira tora, galho com 3 cortes, folhas paradas e colocar itens escolhendo o lugar",
   "date": "2026-11-17"
 }

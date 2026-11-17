@@ -20,6 +20,7 @@ const Sons := preload("res://scripts/sons.gd")
 const Galhos := preload("res://scripts/world/galhos.gd")
 const Apoios := preload("res://scripts/world/apoios.gd")
 const Balde := preload("res://scripts/world/balde.gd")
+const GalhoGeo := preload("res://scripts/world/galho_geo.gd")
 ## Onda na água: um anel que abre e some (passos dentro d'água).
 const RIPPLE_SHADER := """
 shader_type spatial;
@@ -331,6 +332,17 @@ var _walking := false             # o personagem indo sozinho até um lugar
 var _walk_target := Vector3.ZERO
 var _walk_t := 0.0
 var _walk_next := ""
+# colocar item no chão escolhendo o lugar (prévia branca transparente)
+const PLACE_MAX := 2.5            # até onde dá para colocar, longe do personagem (m)
+var _placing := ""                # item sendo colocado ("" = fora do modo)
+var _ghost: MeshInstance3D = null
+var _place_rot := 0.0             # giro escolhido no botão "Girar"
+var _place_pos := Vector3.ZERO
+var _place_yaw := 0.0
+var _place_ok := true
+var _place_btn: Button
+var _rot_btn: Button
+var _store_btn: Button
 var _chop_branch := {}           # cortando um galho (da árvore caída ou do chão)
 var _branch_hits := 0
 var _plant_btn: Button
@@ -502,6 +514,24 @@ func _build_hud() -> void:
 	_work_btn.visible = false
 	_work_btn.pressed.connect(_open_work_menu)
 	_hud.add_child(_work_btn)
+
+	# modo de colocar: Colocar, Girar e Guardar
+	var mk := func(txt: String, l: int, t: int, cb: Callable) -> Button:
+		var b := Icones.IconButton.new()
+		b.text = txt
+		b.add_theme_font_size_override("font_size", 22)
+		b.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+		b.offset_left = l
+		b.offset_top = t
+		b.offset_right = l + 130
+		b.offset_bottom = t + 130
+		b.visible = false
+		b.pressed.connect(cb)
+		_hud.add_child(b)
+		return b
+	_place_btn = mk.call("Colocar", -290, -146, _place_press)
+	_rot_btn = mk.call("Girar", -150, -286, func(): _place_rot += PI * 0.25)
+	_store_btn = mk.call("Guardar", -290, -286, stop_placing)
 
 	_plant_btn = Icones.IconButton.new()
 	_plant_btn.text = "Fincar tora"
@@ -1102,6 +1132,7 @@ func _process(delta: float) -> void:
 		_seed_btn.visible = _arvores.nearest_seed(_player.position, 1.6) >= 0
 	_update_chop(delta)
 	_update_crouch(delta)
+	_update_placing()
 	_holes_t -= delta
 	if _holes_t <= 0.0:
 		_holes_t = 1.0
@@ -1707,6 +1738,8 @@ func _update_crouch(delta: float) -> void:
 			_apoios.take_fork(int(_crouch_target.forquilha))
 			add_item("forquilha", 1)
 			_show_toast("Forquilha de volta na mochila")
+		elif _crouch_job == "colocar":
+			_place_now(_crouch_target)
 		elif _crouch_job == "forquilha_por":
 			remove_item("forquilha", 1)
 			_apoios.place(_front(0.9), _face + PI * 0.5)
@@ -1759,6 +1792,8 @@ func _update_crouch(delta: float) -> void:
 		_crouch_job = ""
 		_chop_pose.crouch = 0.0
 		_act_check = 0.0
+		if job == "colocar" and _placing != "" and item_qtd(_placing) <= 0:
+			stop_placing()       # acabou: sai do modo de colocar
 		if job == "mover_forquilha" and not _work.is_empty():
 			# forquilha no lugar: agora vai para a ponta da tora cortar a rodela
 			var e: int = _apoios.slice_side(int(_work.i), _player.position)
@@ -1862,7 +1897,7 @@ func _branch_target() -> Dictionary:
 		return {}
 	var fb: Dictionary = _arvores.felled_branch_target(_player.position, 1.6)
 	if not fb.is_empty():
-		return {"kind": "arvore", "p": fb.p, "i": fb.i, "a": fb.a, "b": fb.b, "point": fb.point}
+		return {"kind": "arvore", "p": fb.p, "i": fb.i, "t": fb.t, "to": fb.to, "point": fb.point}
 	var gi: int = _galhos.nearest(_player.position, 1.5, true)
 	if gi >= 0:
 		return {"kind": "chao", "i": gi, "point": _galhos.point_of(gi)}
@@ -1996,6 +2031,13 @@ func _walk_to(target: Vector3, next: String) -> void:
 
 
 func _walk_arrived() -> void:
+	if _walk_next == "colocar":
+		_walk_next = ""
+		_face_to(_place_pos)
+		_crouch_target = {"id": _placing, "pos": _place_pos, "yaw": _place_yaw}
+		_crouch_job = "colocar"
+		_crouch_t = 0.0
+		return
 	if _work.is_empty():
 		return
 	var look: Vector3 = _work.get("look", _player.position)
@@ -2028,6 +2070,209 @@ func _drop_rodela(at: Vector3, out: Vector3, r: float) -> void:
 	tw.tween_callback(func(): Sons.play_at(self, "baque", end_pos, -10.0, 1.4))
 	node.position = at
 	node.basis = Basis(q0)
+
+
+## O que soltou do galho cortado cai no chão e fica lá: as folhas (amassadas num
+## monte) e os pedaços de galho (viram galhos do chão: os grandes cortam em 2).
+func _fall_branch_bits(tp: Array, res: Dictionary) -> void:
+	var xf: Transform3D = res.xf
+	var sc := xf.basis.x.length()
+	var v := int(tp[4])
+	var tint: Color = _arvores.fallen_leaf_tint(tp)
+	for piece in res.wood:
+		var pts: Array = piece[0]
+		var radii: Array = piece[1]
+		var c := Vector3.ZERO
+		for q in pts:
+			c += q as Vector3
+		c /= pts.size()
+		var d3: Vector3 = ((pts[pts.size() - 1] as Vector3) - (pts[0] as Vector3))
+		var length := 0.0
+		for k in pts.size() - 1:
+			length += ((pts[k + 1] as Vector3) - (pts[k] as Vector3)).length()
+		var dh := Vector3(d3.x, 0, d3.z)
+		if dh.length() < 0.05:
+			dh = Vector3(cos(randf() * TAU), 0, sin(randf() * TAU))
+		dh = dh.normalized()
+		var rel := []
+		for q in pts:
+			rel.append((q as Vector3) - c)
+		var bd := GalhoGeo.Builder.new()
+		bd.tube(rel, radii, [true, false], {}, 7)
+		var mi := MeshInstance3D.new()
+		mi.mesh = bd.commit()
+		mi.set_surface_override_material(0, _arvores.bark_material())
+		if mi.mesh.get_surface_count() > 1:
+			mi.set_surface_override_material(1, GalhoGeo.wood_material())
+		add_child(mi)
+		mi.position = c
+		var r0 := float(radii[0])
+		var ground := Vector3(c.x, surface_at(c.x, c.z) + r0 * 0.8, c.z)
+		var q0 := Quaternion.IDENTITY
+		var q1 := Quaternion(d3.normalized(), dh)
+		var dur := clampf(sqrt(maxf(c.y - ground.y, 0.1) / 4.9), 0.25, 0.8)
+		var tw := mi.create_tween()
+		tw.tween_method(func(t: float) -> void:
+			mi.position = c.lerp(ground, t * t)
+			mi.basis = Basis(q0.slerp(q1, t)), 0.0, 1.0, dur)
+		var gx := c.x
+		var gz := c.z
+		var yaw := atan2(dh.z, dh.x)
+		var big := length > 1.4
+		tw.tween_callback(func():
+			mi.queue_free()
+			_galhos.add(gx, gz, yaw, length, r0, false, big)
+			_galhos._rebuild()
+			# galho caindo de pouca altura: barulho baixo, abafado
+			Sons.play_at(self, "baque", Vector3(gx, surface_at(gx, gz), gz), -17.0, 1.45))
+	for ci in res.leaves:
+		var lm: MeshInstance3D = _galhos.leaves_node(v, int(ci))
+		lm.set_instance_shader_parameter("tint", tint)
+		add_child(lm)
+		lm.transform = xf
+		var aabb: AABB = lm.mesh.get_aabb()
+		var wc: Vector3 = xf * aabb.get_center()
+		var gy := surface_at(wc.x, wc.z)
+		var yaw := randf() * TAU
+		var b := Basis(Vector3.UP, yaw).scaled(Vector3(sc * 0.62, sc * 0.4, sc * 0.62))
+		var end_xf := Transform3D(b, Vector3(wc.x, gy + aabb.size.y * sc * 0.12, wc.z) - b * aabb.get_center())
+		var dur := clampf(sqrt(maxf(wc.y - gy, 0.1) / 4.9) * 1.6, 0.4, 1.2)   # folha cai mais devagar
+		var tw := lm.create_tween()
+		tw.tween_method(func(t: float) -> void:
+			lm.transform = xf.interpolate_with(end_xf, smoothstep(0.0, 1.0, t)), 0.0, 1.0, dur)
+		var cii := int(ci)
+		tw.tween_callback(func():
+			lm.queue_free()
+			_galhos.add_leaves(wc.x, wc.z, gy, yaw, v, cii, sc, tint)
+			_galhos._rebuild()
+			Sons.play_at(self, "passo", Vector3(wc.x, gy, wc.z), -8.0, 0.7))
+	if not res.wood.is_empty():
+		_show_toast("O galho caiu." if res.leaves.is_empty() else "Caíram as folhas e o galho.")
+	elif not res.leaves.is_empty():
+		_show_toast("Caíram as folhas do galho.")
+
+
+# ================== COLOCAR ITEM NO CHÃO ==================
+
+## Mochila: COLOCAR. Aparece a prévia do item, branca e transparente, onde a câmera
+## aponta (perto do personagem). Dá para andar, girar a câmera e o botão "Girar".
+func start_placing(id: String) -> bool:
+	if item_qtd(id) <= 0 or not _carry.is_empty() or _crouch_job != "":
+		return false
+	if _chopping:
+		_cancel_chop()
+	stop_placing()
+	_placing = id
+	_place_rot = 0.0
+	_ghost = MeshInstance3D.new()
+	if id == "forquilha":
+		_ghost.mesh = _apoios.preview_mesh()
+	elif id == "balde":
+		_ghost.mesh = Balde.mesh()
+	else:
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.22, 0.12, 0.18)
+		_ghost.mesh = bm
+	var gm := StandardMaterial3D.new()
+	gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gm.albedo_color = Color(1, 1, 1, 0.45)
+	gm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	gm.no_depth_test = true          # aparece por cima do capim alto
+	gm.render_priority = 10
+	_ghost.material_override = gm
+	_ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_ghost)
+	_act_check = 0.0
+	_update_placing()
+	return true
+
+
+func stop_placing() -> void:
+	_placing = ""
+	if _ghost:
+		_ghost.queue_free()
+	_ghost = null
+	if _walk_next == "colocar":
+		_walking = false
+		_walk_next = ""
+	for b in [_place_btn, _rot_btn, _store_btn]:
+		if b:
+			b.visible = false
+	_act_check = 0.0
+
+
+func _update_placing() -> void:
+	if _placing == "" or _ghost == null:
+		return
+	# os outros botões de ação somem enquanto escolhe o lugar
+	for b in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn]:
+		if b:
+			b.visible = false
+	var busy := _crouch_job != "" or _walk_next == "colocar"
+	_place_btn.visible = not busy
+	_rot_btn.visible = not busy
+	_store_btn.visible = not busy
+	if busy:
+		return
+	# onde a câmera aponta no chão, limitado a PLACE_MAX do personagem
+	var o := _cam.global_position
+	var d := -_cam.global_transform.basis.z
+	var hit := Vector3.INF
+	var t := 0.5
+	while t < 30.0:
+		var q := o + d * t
+		if q.y <= height_at(q.x, q.z):
+			hit = q
+			break
+		t += 0.2
+	var pp := _player.position
+	var fwd := Vector3(-sin(_yaw), 0, -cos(_yaw))
+	var flat := fwd * 1.5 if hit == Vector3.INF else Vector3(hit.x - pp.x, 0, hit.z - pp.z)
+	var dist := clampf(flat.length(), 0.8, PLACE_MAX)
+	flat = (flat.normalized() if flat.length() > 0.01 else fwd) * dist
+	var pos := pp + flat
+	pos.y = surface_at(pos.x, pos.z)
+	_place_pos = pos
+	_place_yaw = -_yaw + _place_rot
+	# não dá para colocar dentro da água funda
+	var depth := 0.0
+	var cell := Vector2i(int(pos.x / CELL), int(pos.z / CELL))
+	if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
+		depth = maxf(0.0, _water_level[cell.y * MundoSim.W + cell.x] - height_at(pos.x, pos.z))
+	_place_ok = depth < 0.25
+	(_ghost.material_override as StandardMaterial3D).albedo_color = Color(1, 1, 1, 0.45) if _place_ok else Color(1, 0.35, 0.3, 0.45)
+	_ghost.global_position = pos
+	_ghost.rotation = Vector3(0, -_place_yaw, 0)
+	_place_btn.disabled = not _place_ok
+
+
+## Botão "Colocar": o personagem vai até perto do lugar, se abaixa e põe o item lá.
+func _place_press() -> void:
+	if _placing == "" or not _place_ok or _crouch_job != "" or item_qtd(_placing) <= 0:
+		return
+	var to := Vector3(_place_pos.x - _player.position.x, 0, _place_pos.z - _player.position.z)
+	if to.length() > 1.1:
+		_walk_to(_place_pos - to.normalized() * 0.85, "colocar")
+		return
+	_walk_next = "colocar"
+	_walk_arrived()
+
+
+func _place_now(t: Dictionary) -> void:
+	var id := str(t.get("id", ""))
+	if id == "" or item_qtd(id) <= 0:
+		return
+	var pos: Vector3 = t.pos
+	remove_item(id, 1)
+	if id == "forquilha":
+		_apoios.place(pos, float(t.yaw))
+	else:
+		_add_ground(id, 1, pos.x, pos.z)
+		var g: Dictionary = _chao[_chao.size() - 1]
+		(g.node as Node3D).rotation.y = -float(t.yaw)
+	Sons.play_at(self, "baque", pos, -12.0, 1.3)
+	_update_inventory()
 
 
 ## Pulo: sobe uns 60 cm (dá para passar por cima de uma tora ou subir nela).
@@ -2072,14 +2317,17 @@ func _start_chop() -> void:
 			_cancel_dig()
 		_chop_tree = null
 		_chop_branch = {}
-		_chop_log = {"rodela": true, "axis": sp, "along": inf.dir, "r": inf.rad, "dist": float(inf.rad) + 0.5,
-			"point": sp + Vector3.UP * float(inf.rad) * 0.9}
+		var rend: float = _arvores.free_log_end_radius(_apoios.rested[wi].log, we)
+		_chop_log = {"rodela": true, "axis": sp, "along": inf.dir, "r": rend, "dist": rend + 0.5,
+			"point": sp + Vector3.UP * rend * 0.9}
 		_chopping = true
 		_swing_queued = false
 		_play("Idle", 0.5)
 		if _chop_pose:
 			_chop_pose.vertical = true
-			_chop_pose.down_hit = 8.0       # tora na altura da cintura
+			# o golpe para na altura da tora (o chão pode estar mais alto ou mais baixo que as forquilhas)
+			var hy: float = float(_chop_log.point.y) - _player.position.y
+			_chop_pose.down_hit = clampf((hy - 0.96) / 0.0132, -42.0, 45.0)   # medido: 0° = lâmina a 0,96 m do pé
 			_chop_pose.ready_pose = true
 		_begin_swing()
 		return
@@ -2125,17 +2373,11 @@ func _chop_hit() -> void:
 		_chips(at)
 		Sons.play_at(self, "machado", at, -2.0, 1.12)
 		if _chop_branch.kind == "arvore":
-			_branch_hits += 1
-			if _branch_hits >= 3:
-				# o galho sai da árvore e cai no chão inteiro (depois corta em 2 e pega)
-				var a: Vector3 = _chop_branch.a
-				var b: Vector3 = _chop_branch.b
-				_arvores.cut_branch(_chop_branch.p, int(_chop_branch.i))
-				var c := (a + b) * 0.5
-				_galhos.add(c.x, c.z, atan2(b.z - a.z, b.x - a.x), minf((b - a).length(), 4.0), 0.07, false, true)
-				_galhos._rebuild()
-				Sons.play_at(self, "baque", c, -4.0)
-				_show_toast("O galho caiu. Corte em 2 para pegar.")
+			# 3 cortes em cada galho: nas folhas, no meio e no toco
+			var tp: Array = _chop_branch.p
+			var res: Dictionary = _arvores.branch_hit(tp, int(_chop_branch.i), float(_chop_branch.t), int(_chop_branch.to))
+			if not res.is_empty():
+				_fall_branch_bits(tp, res)
 				_cancel_chop()
 		else:
 			if _galhos.chop(int(_chop_branch.i)):
@@ -2339,6 +2581,8 @@ func _move_player(delta: float) -> void:
 	if _walking and amount > 0.12:
 		_walking = false       # o jogador mexeu no controle: para de ir sozinho
 		_work = {}
+		if _walk_next == "colocar":
+			_walk_next = ""
 	if _chop_pose:
 		_chop_pose.moving = amount > 0.12 or _walking
 	var p := _player.position
@@ -2508,7 +2752,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn]:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn]:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:

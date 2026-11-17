@@ -57,6 +57,12 @@ class IconButton extends Button:
 
 static func kind_for(text: String) -> String:
 	var t := text.to_lower()
+	if t.begins_with("colocar"):
+		return "colocar"
+	if t.begins_with("girar"):
+		return "girar"
+	if t.begins_with("guardar"):
+		return "guardar"
 	if t.begins_with("trabalhar"):
 		return "trabalhar"
 	if t.contains("rodela"):
@@ -220,6 +226,25 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 				ci.draw_colored_polygon(lg, col.call(BARK.lightened(0.1)))
 				ci.draw_polyline(lg + PackedVector2Array([lg[0]]), ink, 2 * u, true)
 				ci.draw_circle(c + Vector2(36, -18) * u, 12 * u, col.call(WOOD_LIGHT))
+		"colocar":
+			# chão com a marca tracejada de onde vai ficar e a seta descendo
+			ci.draw_line(c + Vector2(-46, 34) * u, c + Vector2(46, 34) * u, col.call(Color(0.3, 0.45, 0.16)), 5 * u, true)
+			for j in 6:
+				var x0 := -36.0 + j * 13.0
+				ci.draw_line(c + Vector2(x0, 24) * u, c + Vector2(x0 + 7, 24) * u, col.call(BONE), 3 * u, true)
+			var arr: PackedVector2Array = P.call([[-9, -44], [9, -44], [9, -8], [20, -8], [0, 16], [-20, -8], [-9, -8]])
+			ci.draw_colored_polygon(arr, col.call(Color(0.55, 0.8, 0.45)))
+			ci.draw_polyline(arr + PackedVector2Array([arr[0]]), ink, 2 * u, true)
+		"girar":
+			ci.draw_arc(c, 32 * u, -PI * 0.35, PI * 1.25, 28, col.call(BONE), 8 * u, true)
+			var tip := c + Vector2(cos(-PI * 0.35), sin(-PI * 0.35)) * 32 * u
+			var arr: PackedVector2Array = PackedVector2Array([tip + Vector2(-14, -10) * u, tip + Vector2(12, -6) * u, tip + Vector2(2, 18) * u])
+			ci.draw_colored_polygon(arr, col.call(BONE))
+		"guardar":
+			if shadow:
+				ci.draw_circle(c, 34 * u, sh)
+			else:
+				Desenhos.backpack(ci, c + Vector2(0, 4) * u, s * 0.8, Color(0.42, 0.45, 0.27), Color(0, 0, 0, 0.2))
 		"trabalhar":
 			# tora deitada nas forquilhas com o machado em cima (bancada de trabalho)
 			for sx in [-26.0, 24.0]:

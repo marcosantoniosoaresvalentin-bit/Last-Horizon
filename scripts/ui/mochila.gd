@@ -373,6 +373,7 @@ func _refresh() -> void:
 	_btn.EQUIPAR.disabled = not tool
 	_btn.EQUIPAR.text = "GUARDAR" if tool and _game and str(_game._mao) == str(_items[_selected].id) else "EQUIPAR"
 	_btn.USAR.disabled = not has
+	_btn.USAR.text = "COLOCAR" if has and Itens.colocavel(str(_items[_selected].id)) else "USAR"
 	_btn.SOLTAR.disabled = not has
 	if _info.text == "" or not has:
 		_info.text = "Toque num item para ver o que fazer com ele." if not _items.is_empty() else "A mochila está vazia."
@@ -414,11 +415,11 @@ func _use() -> void:
 	if it.id in ["machado", "cavadeira"]:
 		_equip()
 		return
-	if it.id == "forquilha" and _game:
-		if _game.use_fork():
+	if Itens.colocavel(str(it.id)) and _game:
+		if _game.start_placing(str(it.id)):
 			fechar()
 		else:
-			_say("Largue a tora antes de pôr a forquilha.")
+			_say("Largue a tora antes de colocar %s." % Itens.nome(str(it.id)).to_lower())
 		return
 	if it.id == "semente" and _game:
 		if _game.put_seed_from_bag(true):

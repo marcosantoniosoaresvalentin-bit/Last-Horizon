@@ -5,7 +5,11 @@ extends Node3D
 ## Com duas forquilhas no chão, a tora do ombro pode ser apoiada em cima delas,
 ## deitada na altura da cintura: é ali que a madeira vai ser trabalhada.
 
-const TOP := 0.62                # altura do cruzamento do X (onde a tora encosta)
+const GalhoGeo := preload("res://scripts/world/galho_geo.gd")
+const TOP := 0.3                 # altura do cruzamento do X
+const ALPHA := 1.0               # abertura das pernas (rad, a partir da vertical): V largo em cima
+const LEG_R := 0.06              # grossura do galho da forquilha (raio)
+const HEAD := 0.36               # quanto cada galho passa do cruzamento (as pontas do V)
 const SLICE := 0.05              # grossura da rodela cortada da ponta (m)
 const MIN_OVER := 0.4            # quanto a ponta precisa passar da forquilha para dar de cortar
 const FIX_OVER := 0.55           # onde a forquilha fica depois de mudada de lugar
@@ -18,6 +22,7 @@ var _jogo: Node
 var _arv: Node
 var _nodes: Array = []
 var _mat: StandardMaterial3D
+var _wood: StandardMaterial3D
 
 
 func build(jogo: Node, arvores: Node, save_path := "") -> void:
@@ -28,6 +33,7 @@ func build(jogo: Node, arvores: Node, save_path := "") -> void:
 	_mat.vertex_color_is_srgb = true
 	_mat.roughness = 0.95
 	_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_wood = GalhoGeo.wood_material()
 	if save_path != "":
 		_load(save_path)
 	_rebuild()
@@ -100,7 +106,7 @@ func pair_for(pos: Vector3, length: float) -> Array:
 func rest(fl: Dictionary, a: int, b: int) -> void:
 	var A: Dictionary = forks[a]
 	var B: Dictionary = forks[b]
-	var yaw := atan2(float(B.z) - float(A.z), float(B.x) - float(A.x))
+	var yaw := atan2(float(B.z) - float(A.z), float(B.x) - float(A.x))   # o X fica de lado para a tora
 	A.yaw = yaw
 	B.yaw = yaw
 	rested.append({"log": fl, "a": a, "b": b, "off": 0.0})
@@ -131,30 +137,43 @@ func take_rested(i: int) -> Dictionary:
 	return fl
 
 
-func _fork_top(f: Dictionary) -> Vector3:
-	return Vector3(float(f.x), _jogo.surface_at(float(f.x), float(f.z)) + TOP, float(f.z))
+func _fork_pos(f: Dictionary) -> Vector3:
+	return Vector3(float(f.x), _jogo.surface_at(float(f.x), float(f.z)), float(f.z))
 
 
+## Centro da tora no chão (só x e z), a partir do meio das forquilhas.
 func _rest_center(r: Dictionary) -> Vector3:
-	var A := _fork_top(forks[int(r.a)])
-	var B := _fork_top(forks[int(r.b)])
-	return (A + B) * 0.5 + (B - A).normalized() * float(r.get("off", 0.0))
+	var A := _fork_pos(forks[int(r.a)])
+	var B := _fork_pos(forks[int(r.b)])
+	var d := Vector3(B.x - A.x, 0, B.z - A.z).normalized()
+	var c := (A + B) * 0.5 + d * float(r.get("off", 0.0))
+	return Vector3(c.x, 0, c.z)
+
+
+## Altura do eixo da tora em cima de uma forquilha: a tora de raio r encaixa no V
+## de cima do X, encostando nos dois galhos (sem entrar na madeira).
+func _rest_height(fork_ground: float, r: float) -> float:
+	return fork_ground + TOP + (r + LEG_R) / sin(ALPHA) + 0.01
 
 
 ## Tudo sobre a tora apoiada i: centro (no eixo), direção (da forquilha a para a b),
 ## comprimento, raio e quanto cada ponta passa da forquilha ("over" [-1] = lado a, [1] = lado b).
 func info(i: int) -> Dictionary:
 	var r: Dictionary = rested[i]
-	var A := _fork_top(forks[int(r.a)])
-	var B := _fork_top(forks[int(r.b)])
-	var dir := (B - A).normalized()
+	var A := _fork_pos(forks[int(r.a)])
+	var B := _fork_pos(forks[int(r.b)])
 	var gap := Vector2(B.x - A.x, B.z - A.z).length()
 	var off := float(r.get("off", 0.0))
 	var L: float = _arv.free_log_length(r.log)
-	var rad: float = _arv.free_log_radius(r.log)
-	var c := (A + B) * 0.5 + dir * off + Vector3.UP * rad * 0.75
-	return {"center": c, "dir": dir, "L": L, "rad": rad, "gap": gap,
-		"over": {-1: L * 0.5 - off - gap * 0.5, 1: L * 0.5 + off - gap * 0.5}}
+	# raio da tora bem em cima de cada forquilha (a ponta do pé da árvore é mais grossa)
+	var ra: float = _arv.free_log_radius_at(r.log, 0.5 + (-gap * 0.5 - off) / L)
+	var rb: float = _arv.free_log_radius_at(r.log, 0.5 + (gap * 0.5 - off) / L)
+	var A3 := Vector3(A.x, _rest_height(A.y, ra), A.z)
+	var B3 := Vector3(B.x, _rest_height(B.y, rb), B.z)
+	var dir := (B3 - A3).normalized()
+	var c := A3.lerp(B3, (gap * 0.5 + off) / maxf(gap, 0.01))
+	return {"center": c, "dir": dir, "L": L, "rad": _arv.free_log_radius(r.log), "rmax": _arv.free_log_max_radius(r.log),
+		"gap": gap, "over": {-1: L * 0.5 - off - gap * 0.5, 1: L * 0.5 + off - gap * 0.5}}
 
 
 ## Lado da tora apoiada onde dá para cortar a rodela (a ponta passa bem da forquilha):
@@ -213,9 +232,10 @@ func move_fork(i: int, fi: int, to: Vector3) -> void:
 	var keep := _rest_center(r)
 	forks[fi].x = to.x
 	forks[fi].z = to.z
-	var A := _fork_top(forks[int(r.a)])
-	var B := _fork_top(forks[int(r.b)])
-	r.off = (keep - (A + B) * 0.5).dot((B - A).normalized())
+	var A := _fork_pos(forks[int(r.a)])
+	var B := _fork_pos(forks[int(r.b)])
+	var mid := (A + B) * 0.5
+	r.off = Vector3(keep.x - mid.x, 0, keep.z - mid.z).dot(Vector3(B.x - A.x, 0, B.z - A.z).normalized())
 	_rebuild()
 
 
@@ -244,26 +264,31 @@ func slice_hit(i: int, e: int) -> float:
 # ================== COLISÃO ==================
 
 func push_out(p: Vector3) -> Vector3:
-	for f in forks:
-		var d := Vector2(p.x - float(f.x), p.z - float(f.z))
-		var l := d.length()
-		if l < 0.45:
-			var n := d / l if l > 0.001 else Vector2(1, 0)
-			p.x = float(f.x) + n.x * 0.45
-			p.z = float(f.z) + n.y * 0.45
-	for i in rested.size():
-		var r: Dictionary = rested[i]
-		var A := end_point(i, -1)
-		var B := end_point(i, 1)
-		var ab := Vector2(B.x - A.x, B.z - A.z)
-		var t := clampf(Vector2(p.x - A.x, p.z - A.z).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
-		var c := Vector2(A.x, A.z) + ab * t
-		var d := Vector2(p.x, p.z) - c
-		var lim: float = _arv.free_log_radius(r.log) + 0.3
-		if d.length() < lim:
-			var n := d.normalized() if d.length() > 0.001 else Vector2(-ab.y, ab.x).normalized()
-			p.x = c.x + n.x * lim
-			p.z = c.y + n.y * lim
+	# duas passadas: empurrar para fora de uma coisa não pode jogar para dentro da outra
+	for _k in 2:
+		for f in forks:
+			# o X no chão: uma linha de pé a pé (de lado para a tora)
+			var yaw := float(f.yaw)
+			var across := Vector2(-sin(yaw), cos(yaw))
+			var half := TOP * tan(ALPHA) + 0.05
+			p = _push_seg(p, Vector2(float(f.x), float(f.z)) - across * half, Vector2(float(f.x), float(f.z)) + across * half, 0.32)
+		for i in rested.size():
+			var inf := info(i)
+			var A := end_point(i, -1)
+			var B := end_point(i, 1)
+			p = _push_seg(p, Vector2(A.x, A.z), Vector2(B.x, B.z), float(inf.rmax) + 0.3)
+	return p
+
+
+static func _push_seg(p: Vector3, A: Vector2, B: Vector2, lim: float) -> Vector3:
+	var ab := B - A
+	var t := clampf(Vector2(p.x - A.x, p.z - A.y).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
+	var c := A + ab * t
+	var d := Vector2(p.x, p.z) - c
+	if d.length() < lim:
+		var n := d.normalized() if d.length() > 0.001 else Vector2(-ab.y, ab.x).normalized()
+		p.x = c.x + n.x * lim
+		p.z = c.y + n.y * lim
 	return p
 
 
@@ -275,14 +300,14 @@ func _rebuild() -> void:
 			n.free()
 	_nodes.clear()
 	if not forks.is_empty():
-		var st := SurfaceTool.new()
-		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var bd := GalhoGeo.Builder.new()
 		for f in forks:
-			_fork_geo(st, f)
-		st.generate_normals()
+			_fork_geo(bd, f)
 		var mi := MeshInstance3D.new()
-		mi.mesh = st.commit()
-		mi.material_override = _mat
+		mi.mesh = bd.commit()
+		mi.set_surface_override_material(0, _arv.bark_material())
+		if mi.mesh.get_surface_count() > 1:
+			mi.set_surface_override_material(1, _wood)
 		add_child(mi)
 		_nodes.append(mi)
 	for i in rested.size():
@@ -295,41 +320,47 @@ func _rebuild() -> void:
 		n.transform = Transform3D(Basis(Quaternion(Vector3.RIGHT, inf.dir)), inf.center)
 
 
-## Forquilha em X: dois galhos cruzados e amarrados com cipó no cruzamento.
-func _fork_geo(st: SurfaceTool, f: Dictionary) -> void:
-	var c := Vector3(float(f.x), _jogo.surface_at(float(f.x), float(f.z)), float(f.z))
-	var yaw := float(f.yaw)
-	# o X fica de lado em relação à tora (que vai na direção yaw)
+## Forquilha em X: dois galhos grossos com casca, cruzados e amarrados com cipó.
+## O X fica de lado para a tora; as pontas de cima formam o V onde a tora deita.
+func _fork_geo(bd, f: Dictionary) -> void:
+	_fork_geo_at(bd, _fork_pos(f), float(f.yaw), absi(hash(Vector2(float(f.x), float(f.z)))))
+
+
+## Forquilha sem a tora, em volta da origem (para a prévia de onde ela vai ficar).
+func preview_mesh() -> ArrayMesh:
+	var bd := GalhoGeo.Builder.new()
+	_fork_geo_at(bd, Vector3.ZERO, 0.0, 7)
+	return bd.commit()
+
+
+func _fork_geo_at(bd, c: Vector3, yaw: float, hs: int) -> void:
 	var across := Vector3(-sin(yaw), 0, cos(yaw))
 	var along := Vector3(cos(yaw), 0, sin(yaw))
-	var bark := Color(0.32, 0.24, 0.16)
-	for sgn in [1.0, -1.0]:
-		var foot: Vector3 = c + across * 0.36 * sgn + along * 0.03 * sgn
-		var head: Vector3 = c + Vector3.UP * (TOP + 0.38) - across * 0.25 * sgn - along * 0.03 * sgn
-		foot.y = _jogo.surface_at(foot.x, foot.z) - 0.04
-		_tube(st, foot, head, 0.03, 0.022, bark.darkened(0.08 if sgn > 0 else 0.0))
-		# ponta cortada clara em cima
-		_tube(st, head, head + (head - foot).normalized() * 0.01, 0.022, 0.02, Color(0.62, 0.5, 0.33))
-	# amarração de cipó no cruzamento
 	var x := c + Vector3.UP * TOP
-	for k in 4:
-		var a := Vector3.UP * (0.02 * (k - 1.5))
-		_tube(st, x + a - along * 0.045, x + a + along * 0.045, 0.035, 0.035, Color(0.2, 0.22, 0.1).darkened(0.1 * (k % 2)))
-
-
-static func _tube(st: SurfaceTool, a: Vector3, b: Vector3, ra: float, rb: float, col: Color) -> void:
-	var d := (b - a).normalized()
-	var s1 := d.cross(Vector3.UP if absf(d.y) < 0.9 else Vector3.RIGHT).normalized()
-	var s2 := d.cross(s1).normalized()
-	st.set_color(col)
-	var n := 7
-	for k in n:
-		var a0 := TAU * k / n
-		var a1 := TAU * (k + 1) / n
-		var o0 := s1 * cos(a0) + s2 * sin(a0)
-		var o1 := s1 * cos(a1) + s2 * sin(a1)
-		for v in [a + o0 * ra, b + o0 * rb, b + o1 * rb, a + o0 * ra, b + o1 * rb, a + o1 * ra]:
-			st.add_vertex(v)
+	for k in 2:
+		var sgn := 1.0 if k == 0 else -1.0
+		var dir := (-across * sgn * sin(ALPHA) + Vector3.UP * cos(ALPHA)).normalized()
+		var off := along * 0.055 * sgn             # um galho na frente do outro
+		var foot := x + off - dir * (TOP / cos(ALPHA) + 0.06)
+		var head := x + off + dir * HEAD
+		var bp: Array = GalhoGeo.bent_points(foot, head, LEG_R * 1.1, LEG_R * 0.8, 8, 0.025, hs + k * 7)
+		bd.tube(bp[0], bp[1], [false, true])
+		# um toquinho de galho cortado saindo de um dos galhos
+		var t := 0.35 + 0.2 * k
+		var base: Vector3 = (bp[0] as Array)[int(t * 8)]
+		var stub_dir := (dir + along * sgn * 0.9 + Vector3.UP * 0.3).normalized()
+		bd.tube([base, base + stub_dir * 0.09], [LEG_R * 0.45, LEG_R * 0.4], [false, true], {}, 6)
+	# amarração de cipó no cruzamento: voltas em X
+	for k in 5:
+		var ang := (k - 2) * 0.35
+		var ring := []
+		var rr := []
+		for j in 13:
+			var a := TAU * j / 12.0
+			var axis := (along * cos(a) * (LEG_R + 0.062) + (Vector3.UP.rotated(along, ang)) * sin(a) * (LEG_R + 0.018))
+			ring.append(x + axis)
+			rr.append(0.011)
+		bd.color_tube(ring, rr, Color(0.3, 0.25, 0.13).darkened(0.12 * (k % 2)))
 
 
 # ================== SALVAR ==================
