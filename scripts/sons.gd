@@ -1,6 +1,7 @@
 extends RefCounted
 ## Sons do jogo: gravações reais (domínio público, CC0) na pasta sons/:
-##  - machadada, árvore caindo e baque: "Tree chop fall thud" (OpenGameArt, CC0)
+##  - machadada: "Ax on log" (Joseph Sardin, BigSoundBank.com, CC0)
+##  - árvore caindo e baque: "Tree chop fall thud" (OpenGameArt, CC0)
 ##  - madeira rachando: Independent nu ljudbank, wood crack (OpenGameArt, CC0)
 ##  - cavadeira: "Shovel sound" (OpenGameArt, CC0)
 ##  - passos: Fantozzi's footsteps, terra/areia (OpenGameArt, CC0)
@@ -9,7 +10,8 @@ extends RefCounted
 
 const RATE := 22050
 const FILES := {
-	"machado": ["machado1"],
+	"machado": ["machado1", "machado2", "machado3", "machado4"],
+	"corrida": ["corrida1", "corrida2", "corrida3", "corrida4", "corrida5", "corrida6"],
 	"estalo": ["estalo1", "estalo2"],
 	"queda": ["queda1"],
 	"cavar": ["cavar1"],
@@ -18,7 +20,7 @@ const FILES := {
 	"baque": ["baque1"],
 }
 ## Volume de cada som (dB): passos baixos e a água bem baixinha.
-const VOLUME := {"machado": 0.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0}
+const VOLUME := {"machado": 0.0, "corrida": -12.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0}
 
 static var _cache := {}
 
@@ -66,7 +68,7 @@ static func _make_set(name: String) -> Array:
 			"estalo": s = _crack(rng)
 			"queda": s = _fall(rng)
 			"cavar": s = _dig(rng)
-			"passo": s = _step(rng)
+			"passo", "corrida": s = _step(rng)
 			"agua": s = _splash(rng)
 			_: s = _thud(rng)
 		out.append(_wav(s))

@@ -321,6 +321,7 @@ var _plant_btn: Button
 var _chop_hole := false           # cavando com a cavadeira
 var _holes_t := 0.0
 var _step_dist := 0.0
+var _step_player: AudioStreamPlayer3D = null
 var _ripple_mat: Shader
 var _carry := {}                  # tora no ombro (dados da tora)
 var _carry_node: Node3D = null
@@ -1567,7 +1568,7 @@ func _update_crouch(delta: float) -> void:
 
 
 ## Um passo: som no chão ou na água; na água abre uma onda em volta do pé.
-func _footstep(p: Vector3, depth: float, hard := false) -> void:
+func _footstep(p: Vector3, depth: float, hard := false, running := false) -> void:
 	if depth > 0.04:
 		Sons.play_at(self, "agua", p, 0.0 if not hard else 4.0)
 		var level := p.y + depth * 2.0
@@ -1577,7 +1578,17 @@ func _footstep(p: Vector3, depth: float, hard := false) -> void:
 		var fwd := Vector3(-sin(_face), 0, -cos(_face))
 		_ripple(Vector3(p.x, level + 0.015, p.z) + fwd * 0.12, 0.9 + depth * 0.8)
 	else:
-		Sons.play_at(self, "passo", p, 0.0 if not hard else 4.0)
+		# um tocador só para os passos: o passo novo corta o anterior (não embola na corrida)
+		if _step_player == null:
+			_step_player = AudioStreamPlayer3D.new()
+			_step_player.unit_size = 6.0
+			_step_player.max_distance = 60.0
+			_player.add_child(_step_player)
+		var kind := "corrida" if running and not hard else "passo"
+		_step_player.stream = Sons.pick(kind)
+		_step_player.volume_db = float(Sons.VOLUME.get(kind, 0.0)) + (4.0 if hard else 0.0)
+		_step_player.pitch_scale = randf_range(0.95, 1.05)
+		_step_player.play()
 
 
 func _ripple(pos: Vector3, size: float) -> void:
@@ -1963,10 +1974,12 @@ func _move_player(delta: float) -> void:
 	var landed := _air == false and _player.position.y > p.y + 0.15
 	if not _air:
 		_step_dist += moved
-		var stride := 0.62 if moved / maxf(delta, 0.001) < 3.0 else 0.95
+		# andando ~1,9 passos por segundo; correndo ~3 (passada mais longa)
+		var running := moved / maxf(delta, 0.001) > 3.0
+		var stride := 0.66 if not running else 1.7
 		if _step_dist >= stride or landed:
 			_step_dist = 0.0
-			_footstep(p, depth, landed)
+			_footstep(p, depth, landed, running)
 	_player.position = p
 	_player.rotation.y = _face
 

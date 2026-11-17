@@ -4,10 +4,11 @@ Todos os sons são gravações em domínio público (CC0), baixadas do OpenGameA
 
 | Arquivos | Origem | Licença |
 |---|---|---|
-| machado1, queda1, baque1 | "Tree chop fall thud" — opengameart.org/content/tree-chop-fall-thud | CC0 |
+| machado1–4 | "Ax on log" — Joseph Sardin, bigsoundbank.com/ax-on-log-s0705.html | CC0 |
+| queda1, baque1 | "Tree chop fall thud" — opengameart.org/content/tree-chop-fall-thud | CC0 |
 | estalo1, estalo2 | "35 wooden cracks/hits/destructions" (Independent nu ljudbank) — opengameart.org/content/35-wooden-crackshitsdestructions | CC0 |
 | cavar1 | "Shovel sound" — opengameart.org/content/shovel-sound | CC0 |
-| passo1–6 | "Fantozzi's footsteps (grass/sand & stone)" — opengameart.org/content/fantozzis-footsteps-grasssand-stone | CC0 |
+| passo1–6, corrida1–6 | "Fantozzi's footsteps (grass/sand & stone)" — opengameart.org/content/fantozzis-footsteps-grasssand-stone | CC0 |
 | agua1, agua2, agua4, agua5 | "6 short water splashes" (qubodup) — opengameart.org/content/6-short-water-splashes | CC0 |
 
 Os arquivos `.somog` são OGG Vorbis (só a extensão é outra, para a Godot não tentar
