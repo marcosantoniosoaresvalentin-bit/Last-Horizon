@@ -23,6 +23,7 @@ const Balde := preload("res://scripts/world/balde.gd")
 const GalhoGeo := preload("res://scripts/world/galho_geo.gd")
 const Pedras := preload("res://scripts/world/pedras.gd")
 const Lascar := preload("res://scripts/world/lascar.gd")
+const Macacos := preload("res://scripts/world/macacos.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
 const SAW_SPEED := 2.6            # quão rápido a serra acompanha o dedo (curso inteiro ≈ 0,8 s)
@@ -338,6 +339,7 @@ var _ctx_btn: Button
 var _ctx_action := ""
 var _work_btn: Button             # "Trabalhar" na tora apoiada nas forquilhas (ou "Modelar pedra")
 var _pedras: Node3D = null
+var _macacos: Node3D = null
 var _knap := {}                   # modelando pedra no chão: ver _knap_start
 var _knap_ui: Control = null
 var _knap_mi: MeshInstance3D = null
@@ -817,6 +819,10 @@ func _on_world_ready() -> void:
 	_cipos = Cipos.new()
 	add_child(_cipos)
 	_cipos.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/cipos.json" if _world_id != "" else "")
+	_macacos = Macacos.new()
+	add_child(_macacos)
+	_macacos.build(self, _arvores, _cipos, int(sim.world_seed), Mundos.dir(_world_id) + "/macacos.json" if _world_id != "" else "")
+	print("macacos: %d em %d bandos" % [_macacos.count(), _macacos.troops.size()])
 	_arvores.fell_hook = _cipos.attach_falling
 	_arvores.fall_done_hook = _cipos._rebuild
 	_buracos = Buracos.new()
@@ -1145,6 +1151,9 @@ func _process(delta: float) -> void:
 		_arvores.tick()   # quando vira o dia: sementes, brotos, crescimento
 		if _cipos:
 			_cipos.tick()
+		if _macacos:
+			_macacos.tick()
+			_macacos.update(delta)
 		if _galhos:
 			_galhos.tick()
 	_save_timer -= delta
@@ -1206,6 +1215,8 @@ func _save_world() -> void:
 		_arvores.save(Mundos.dir(_world_id) + "/arvores.json")
 	if _cipos:
 		_cipos.save(Mundos.dir(_world_id) + "/cipos.json")
+	if _macacos:
+		_macacos.save(Mundos.dir(_world_id) + "/macacos.json")
 	if _buracos:
 		_buracos.save(Mundos.dir(_world_id) + "/buracos.json")
 	if _galhos:

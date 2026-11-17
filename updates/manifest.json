@@ -1,9 +1,9 @@
 {
-  "version": 66,
-  "file": "update_66.zip",
-  "size": 3481964,
-  "sha256": "0ba53f5c233e498ac5f8a6a2bba79819af0c5c6fa4139143513abdd01b769071",
+  "version": 67,
+  "file": "update_67.zip",
+  "size": 3488534,
+  "sha256": "19bf97621d98fe90367ead4130159505bee6dc2965223cc3b41df0168c2c24af",
   "min_build": 1,
-  "notes": "Coletar cipó com a mão de verdade do personagem (câmera nos olhos)",
+  "notes": "Macacos-prego: comem os frutos do cipó-titica e espalham as sementes; um depende do outro para viver",
   "date": "2026-11-17"
 }

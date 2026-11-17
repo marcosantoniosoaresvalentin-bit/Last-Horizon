@@ -10,9 +10,8 @@ extends Node3D
 ##  - Adulta (passou de ~4 m de altura): solta raízes aéreas, as "titicas", que
 ##    descem do alto até o chão. Raiz que chegou no chão está madura e pode ser colhida.
 ##  - Flores (setembro a novembro): insetos polinizam. Frutos laranja (dezembro a
-##    fevereiro): aves comem e levam sementes longe (10 a 60 m); pequenos mamíferos
-##    espalham perto (5 a 15 m). Animais ainda não aparecem no jogo: é uma simulação
-##    do papel deles (possibilidades até haver registros confirmados para a espécie).
+##    fevereiro): os macacos-prego comem e soltam as sementes onde passam. Sem
+##    macaco, o cipó não nasce em lugar novo (e sem cipó o macaco passa fome).
 ##  - Se a árvore de apoio morre ou é derrubada, a titica morre junto. Seca forte
 ##    mata mudas.
 ## Coleta: o jogador puxa as raízes que quiser e pode até arrancar o pé inteiro
@@ -148,9 +147,7 @@ func _process_day(day: int) -> void:
 						rt[2] = 0.0
 					continue
 				rt[2] = minf(float(rt[2]) + 0.02 * clampf(water * 1.6, 0.2, 1.0), float(rt[1]))
-			# flores (insetos) e frutos (aves e mamíferos espalham as sementes)
-			if month == 1 and _day_of_month(day) == 15:
-				_disperse(pl, day)
+			# os frutos são comidos pelos macacos-prego, que espalham as sementes (macacos.gd)
 		keep.append(pl)
 	plants = keep
 	# sementes que caíram: brotam se o solo está úmido e tem árvore perto
@@ -168,6 +165,22 @@ func _process_day(day: int) -> void:
 			var pos := _beside(host)
 			plants.append(_new_plant(pos.x, pos.y, host, day))
 	seeds = still
+
+
+## Cipós adultos vivos (dão fruto e alimentam os macacos).
+func adult_plants() -> Array:
+	var out := []
+	for pl in plants:
+		if int(pl.dead) < 0 and float(pl.climb) >= ADULT_H and _host_of(pl) != null:
+			out.append(pl)
+	return out
+
+
+## Um macaco soltou uma semente aqui (brota em 2 a 3 meses se tiver árvore perto).
+func drop_seed(x: float, z: float, day: int) -> void:
+	if seeds.size() > 400:
+		return
+	seeds.append([clampf(x, 2.0, 638.0), clampf(z, 2.0, 478.0), day, day + _rng.randi_range(GERM_MIN, GERM_MAX)])
 
 
 static func _day_of_month(day: int) -> int:
