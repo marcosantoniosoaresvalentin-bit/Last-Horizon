@@ -448,6 +448,10 @@ class ChopPose extends SkeletonModifier3D:
 	var saw_pos := -1.0           # -1 puxada (perto do corpo) a 1 empurrada (o jogador controla)
 	var saw_point := Vector3.ZERO # onde a serra corta (no mundo, em cima da tora)
 	var saw_depth := 0.0          # quanto o corte já desceu (m)
+	var reach_on := false         # braço direito esticado até um ponto (pegar cipó)
+	var reach_target := Vector3.ZERO   # no mundo
+	var reach_grip := false       # mão fechada (segurando)
+	var hide_head := false        # câmera nos olhos: a cabeça some para não tapar a visão
 	var knapping := false         # agachado batendo uma pedra na outra (modelando)
 	var knap_point := Vector3.ZERO  # onde bate (no mundo)
 	var knap_lift := 0.35         # 0 = encostou na pedra do chão, 1 = levantada
@@ -491,6 +495,15 @@ class ChopPose extends SkeletonModifier3D:
 		var up: Vector3 = (tb * Vector3.UP).normalized()
 		var fwd: Vector3 = (tb * -player.global_transform.basis.z).normalized()
 		var right: Vector3 = (tb * player.global_transform.basis.x).normalized()
+		if reach_on:
+			if axe:
+				axe.visible = false
+			if not moving and not in_air and ground_fn.is_valid():
+				_plant_feet(sk, tb, up, fwd, right)
+			_reach(sk, up, fwd, right)
+			if hide_head:
+				_hide_head(sk)
+			return
 		if crouch > 0.001:
 			_crouch(sk, up, fwd, right)
 		elif not moving and not in_air and ground_fn.is_valid():
@@ -540,6 +553,38 @@ class ChopPose extends SkeletonModifier3D:
 		if p < 0.65:
 			return lerpf(hit, hit + 8.0, (p - HIT_AT) / (0.65 - HIT_AT))
 		return lerpf(hit + 8.0, rest, smoothstep(0.0, 1.0, (p - 0.65) / 0.35))
+
+	## Câmera nos olhos: o pescoço e a cabeça encolhem até sumir (não tapam a visão).
+	func _hide_head(sk: Skeleton3D) -> void:
+		for n in ["Neck1", "Head"]:
+			var b := _bone(n)
+			if b < 0:
+				continue
+			var hp := sk.get_bone_global_pose(b)
+			hp.basis = hp.basis.orthonormalized().scaled(Vector3(0.001, 0.001, 0.001))
+			sk.set_bone_global_pose(b, hp)
+
+	# ---------- esticar o braço direito até um ponto (pegar e puxar o cipó) ----------
+	func _reach(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
+		var sb := _bone("RightArm")
+		var fb := _bone("RightForeArm")
+		var hb := _bone("RightHand")
+		if sb < 0 or fb < 0 or hb < 0:
+			return
+		var t: Vector3 = sk.global_transform.affine_inverse() * reach_target
+		var sh := sk.get_bone_global_pose(sb).origin
+		var L := sh.distance_to(sk.get_bone_global_pose(fb).origin) + sk.get_bone_global_pose(fb).origin.distance_to(sk.get_bone_global_pose(hb).origin)
+		var _l := L
+		var wrist := t - (t - sh).normalized() * 0.07
+		_ik(sk, "RightArm", "RightForeArm", "RightHand", wrist, sh - up * 0.6 + right * 0.5)
+		# a mão segue a linha do antebraço, palma virada para o cipó
+		var hp := sk.get_bone_global_pose(hb)
+		var arm_dir := (hp.origin - sk.get_bone_global_pose(fb).origin).normalized()
+		var cur := hp.basis.orthonormalized()
+		hp.basis = Basis(Quaternion((cur * Vector3.UP).normalized(), arm_dir)) * cur
+		sk.set_bone_global_pose(hb, hp)
+		if reach_grip:
+			_close_fingers(sk, "Right")
 
 	# ---------- modelar pedra: as duas mãos seguram a pedra de bater e descem no ponto ----------
 	func _knap(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:

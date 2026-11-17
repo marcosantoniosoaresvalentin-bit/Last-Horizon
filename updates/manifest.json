@@ -1,9 +1,9 @@
 {
-  "version": 65,
-  "file": "update_65.zip",
-  "size": 3481503,
-  "sha256": "196fc981c51ea65c1676e222e1a6c8c98419485ec9b2e310a0a1513557aaf45b",
+  "version": 66,
+  "file": "update_66.zip",
+  "size": 3481964,
+  "sha256": "0ba53f5c233e498ac5f8a6a2bba79819af0c5c6fa4139143513abdd01b769071",
   "min_build": 1,
-  "notes": "Coletar cipó: puxa de baixo e o fio inteiro solta lá de cima e cai comprido no chão",
+  "notes": "Coletar cipó com a mão de verdade do personagem (câmera nos olhos)",
   "date": "2026-11-17"
 }

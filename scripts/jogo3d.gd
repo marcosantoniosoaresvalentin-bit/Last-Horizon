@@ -1981,9 +1981,11 @@ func _vine_start(pl: Dictionary) -> void:
 	var away := Vector3(_player.position.x - float(pl.x), 0, _player.position.z - float(pl.z))
 	_vine = {"pl": pl, "spots": _cipos.pull_spots(pl), "sel": -1, "anim": -1.0, "drag": -1.0, "tid": -2,
 		"orbit": atan2(away.z, away.x), "orbit_to": atan2(away.z, away.x), "dx": -1.0}
-	_player.visible = false
-	_vine_hand = Maos.right_hand(Color(0.4, 0.27, 0.2), Color(0.1, 0.14, 0.18), false)
-	add_child(_vine_hand)
+	# a mão é a do próprio personagem: câmera nos olhos dele (a cabeça some)
+	if _chop_pose:
+		_chop_pose.hide_head = true
+		_chop_pose.reach_on = true
+		_chop_pose.reach_grip = false
 	_play("Idle", 0.5)
 	_vine_camera()
 	_vine_ui = Control.new()
@@ -2029,22 +2031,32 @@ func _vine_end() -> void:
 		_vine_hand.queue_free()
 	_vine_hand = null
 	_vine = {}
-	_player.visible = true
+	if _chop_pose:
+		_chop_pose.hide_head = false
+		_chop_pose.reach_on = false
 	_act_check = 0.0
 
 
-## Câmera na altura dos olhos, olhando para o tronco onde estão os cipós (gira em volta).
+## O personagem fica de frente para o tronco (dá a volta nele) e a câmera fica nos
+## olhos dele, olhando para os cipós.
 func _vine_camera() -> void:
 	var pl: Dictionary = _vine.pl
 	var c := Vector3(float(pl.x), 0, float(pl.z))
 	var o := float(_vine.orbit)
 	var away := Vector3(cos(o), 0, sin(o))
 	var gy := height_at(c.x, c.z)
-	_cam.global_position = c + away * 1.35 + Vector3(0, gy + 1.45, 0)
-	_cam.look_at(c + Vector3(0, gy + 0.85, 0))
-	# o personagem (escondido) fica onde a câmera está, para a mão sair do lado certo
-	var pp := c + away * 1.0
-	_player.position = Vector3(pp.x, _player.position.y, pp.z)
+	# distância do tronco: um pouco mais que onde ficam os cipós (para o braço alcançar)
+	var rr := 0.25
+	for sp in _vine.spots:
+		var w: Vector3 = sp.pos
+		rr = maxf(rr, Vector2(w.x - c.x, w.z - c.z).length())
+	var pp := c + away * (rr + 0.36)
+	_player.position = Vector3(pp.x, height_at(pp.x, pp.z), pp.z)
+	_face = atan2(away.x, away.z)
+	_player.rotation.y = _face
+	var eye := _player.position + Vector3(0, 1.64, 0) - away * 0.1
+	_cam.global_position = eye
+	_cam.look_at(Vector3(c.x, gy + 1.0, c.z))
 
 
 ## O cipó está do lado da árvore que a câmera vê?
@@ -2154,25 +2166,28 @@ func _vine_input(e: InputEvent) -> void:
 			Sons.play_at(self, "passo", _vine.spots[int(_vine.sel)].pos, -4.0, 0.7)
 
 
-## A mão: parada embaixo, na batida vai até o cipó, fecha e puxa para baixo.
+## O braço do personagem: parado, a mão fica na frente da barriga; puxando, ela vai
+## até o cipó, fecha e puxa para baixo.
 func _place_vine_hand(a: float) -> void:
-	if _vine_hand == null:
+	if _chop_pose == null:
 		return
-	var cb := _cam.global_transform.basis
-	var cam := _cam.global_position
-	var idle := cam - cb.z * 0.75 + cb.x * 0.3 - cb.y * 0.36
+	var fwd := Vector3(-sin(_face), 0, -cos(_face))
+	var right := Vector3(cos(_face), 0, -sin(_face))
+	var idle := _player.position + Vector3.UP * 1.22 + fwd * 0.36 + right * 0.2
 	var p := idle
-	if a >= 0.0 and int(_vine.sel) >= 0:
+	var grip := false
+	if a >= 0.0 and int(_vine.sel) >= 0 and int(_vine.sel) < _vine.spots.size():
 		var sp: Vector3 = _vine.spots[int(_vine.sel)].pos
-		var reach := sp + cb.z * 0.05
+		var reach := sp - fwd * 0.04
 		if a < 0.35:
 			p = idle.lerp(reach, smoothstep(0.0, 1.0, a / 0.35))
 		elif a < 0.75:
-			p = reach + Vector3.DOWN * 0.55 * smoothstep(0.0, 1.0, (a - 0.35) / 0.4)
+			grip = true
+			p = reach + Vector3.DOWN * 0.45 * smoothstep(0.0, 1.0, (a - 0.35) / 0.4) - fwd * 0.1 * smoothstep(0.0, 1.0, (a - 0.35) / 0.4)
 		else:
-			p = (reach + Vector3.DOWN * 0.55).lerp(idle, smoothstep(0.0, 1.0, (a - 0.75) / 0.25))
-	var b := Basis(cb.x, cb.y, cb.z) * Basis(Vector3.RIGHT, -0.5)
-	_vine_hand.global_transform = Transform3D(b, p - b * Vector3(0, -0.02, -0.06))
+			p = (reach + Vector3.DOWN * 0.45 - fwd * 0.1).lerp(idle, smoothstep(0.0, 1.0, (a - 0.75) / 0.25))
+	_chop_pose.reach_target = p
+	_chop_pose.reach_grip = grip
 
 
 func _update_vine(delta: float) -> void:
