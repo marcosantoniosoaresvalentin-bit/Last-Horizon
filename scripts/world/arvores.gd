@@ -931,6 +931,8 @@ func felled_branch_target(pos: Vector3, reach: float) -> Dictionary:
 
 ## Machadadas para cortar o galho no ponto t (galho grosso pede mais).
 func branch_hits_needed(p: Array, i: int, t: float) -> int:
+	if bool(_jogo.teste):
+		return 1
 	var m: Dictionary = _models[int(p[4]) % VARIANTS]
 	var s: float = height_of(p, last_day) / float(m.height)
 	var r := _br_radius(m.binfo[i], t) * s
@@ -1082,6 +1084,8 @@ func piece_len(_p: Array) -> float:
 
 ## Machadadas para cortar a tora num ponto (tora grossa pede mais).
 func buck_hits_needed(p: Array, h_at: float) -> int:
+	if bool(_jogo.teste):
+		return 1
 	var m: Dictionary = _models[int(p[4]) % VARIANTS]
 	var s: float = height_of(p, last_day) / float(m.height)
 	var r := _radius_of(m, h_at, 0.0) * s
@@ -1596,6 +1600,8 @@ func cut_point(p: Array) -> Vector3:
 
 ## Quantas machadadas para derrubar: muda sai com 2, árvore grande pede umas 14.
 func hits_to_fell(p: Array) -> int:
+	if bool(_jogo.teste):
+		return 1
 	return clampi(int(round(2.0 + height_of(p, last_day) * 0.55)), 2, 16)
 
 

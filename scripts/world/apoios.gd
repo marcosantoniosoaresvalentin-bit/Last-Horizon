@@ -254,7 +254,7 @@ func slice_stroke(i: int, e: int) -> float:
 	var r: Dictionary = rested[i]
 	var fl: Dictionary = r.log
 	var rad: float = _arv.free_log_end_radius(fl, e)
-	var need := clampi(int(round(8.0 + rad * 40.0)), 10, 26)
+	var need := 1 if bool(_jogo.teste) else clampi(int(round(8.0 + rad * 40.0)), 10, 26)
 	var en: Dictionary = fl.get("entalhe", {})
 	if en.is_empty() or int(en.e) != e:
 		en = {"e": e, "hits": 0, "need": need, "serra": true}

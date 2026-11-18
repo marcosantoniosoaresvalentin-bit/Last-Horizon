@@ -384,6 +384,7 @@ var _araras: Node3D = null
 var _minerios: Node = null
 var _cupins: Node3D = null
 var _tamanduas: Node3D = null
+var teste := false                 # modo de teste (Configurações): tudo de graça e rápido
 var _constr: Node3D = null
 var _bld := {}                     # modo construção: {yaw, tilt, roll, ghost, ok, c, b}
 var _bld_btn: Button
@@ -497,6 +498,7 @@ func _ready() -> void:
 	_build_hud()
 	_build_environment()
 	sim = MundoSim.new()
+	teste = Perfil.teste()
 	_world_id = str(Engine.get_meta("mundo", ""))
 	var meta := Mundos.read_meta(_world_id) if _world_id != "" else {}
 	if not meta.is_empty():
@@ -1840,6 +1842,8 @@ func tool_dur(id: String) -> float:
 
 ## Gasta a ferramenta (n usos). Quando chega a zero ela quebra (some da mochila).
 func wear(id: String, n := 1) -> bool:
+	if teste:
+		return false             # modo de teste: ferramenta não gasta
 	var l := _dur_fix(id)
 	if l.is_empty():
 		return false
@@ -3508,6 +3512,8 @@ func _knap_start(i: int, kind: String) -> void:
 	_play("Idle", 0.5)
 	_build_knap_ui()
 	_grass_mat.set_shader_parameter("flat_spot", Vector4(_knap_mi.global_position.x, 0, _knap_mi.global_position.z, 2.2))
+	if teste:
+		_knap_finish()           # modo de teste: fica pronta na hora
 
 
 func _knap_refresh_mesh() -> void:
@@ -5176,10 +5182,10 @@ func _split_begin() -> void:
 	var i: int = _apoios.nearest_rested(_player.position, 1.8)
 	if i < 0:
 		return
-	if item_qtd("cunha") < 3:
+	if item_qtd("cunha") < 3 and not teste:
 		_show_toast("Precisa de 3 cunhas de pedra (tem %d). Faça modelando pedra." % item_qtd("cunha"))
 		return
-	if item_qtd("marreta") < 1:
+	if item_qtd("marreta") < 1 and not teste:
 		_show_toast("Precisa de uma marreta (pedra de marreta + galho + 2 cipós).")
 		return
 	var fl0: Dictionary = _apoios.rested[i].log
@@ -5196,6 +5202,9 @@ func _split_begin() -> void:
 	_split_rng.randomize()
 	_split_new_timing()
 	_build_split_ui()
+	if teste:
+		_split_finish()          # modo de teste: racha na hora
+		return
 	_show_toast("Toque nos 3 lugares marcados na tora para pôr as cunhas.")
 
 
@@ -6108,7 +6117,7 @@ func _board_hit() -> void:
 	var n_rip := _ripas_of(fl)
 	var hits := int(fl.get("racha", 0)) + 1
 	fl["racha"] = hits
-	var need := n_rip
+	var need := 1 if teste else n_rip
 	if hits < need:
 		_show_board_cracks(fl, hits, n_rip)
 		Sons.play_at(self, "estalo", at, -10.0, 1.3)
@@ -6298,7 +6307,7 @@ func _post_cut_tick(delta: float) -> void:
 		var cutp := Vector3(top.x, float(_post_cut.y) + 0.02, top.z)
 		Sons.play_at(self, "machado", cutp, -2.0, 1.0 + randf() * 0.1)
 		_chips(cutp)
-	if float(_post_cut.t) >= 3.0:
+	if float(_post_cut.t) >= (0.3 if teste else 3.0):
 		var cut: float = _buracos.cut_post(i, float(_post_cut.y))
 		_post_cut = {}
 		_medida = {}

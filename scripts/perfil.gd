@@ -45,6 +45,18 @@ static func skin() -> String:
 	return s if s in ["homem", "mulher"] else "homem"
 
 
+## Modo de teste: fabricar sem gastar, pedra fica pronta na hora, madeira corta
+## numa batida e as ferramentas não gastam. Só neste celular.
+static func teste() -> bool:
+	return bool(_read().get("teste", false))
+
+
+static func set_teste(on: bool) -> void:
+	var d := _read()
+	d["teste"] = on
+	_write(d)
+
+
 static func set_skin(s: String) -> void:
 	var d := _read()
 	d["skin"] = s

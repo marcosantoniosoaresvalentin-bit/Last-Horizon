@@ -753,6 +753,25 @@ func _page_settings() -> Control:
 	save.pressed.connect(do_save)
 	edit.text_submitted.connect(func(_t): do_save.call())
 
+	# modo de teste
+	var tc := PanelContainer.new()
+	tc.add_theme_stylebox_override("panel", _box(C_CARD, 10, C_LINE, 1))
+	v.add_child(tc)
+	var tm := MarginContainer.new()
+	for k in ["left", "right", "top", "bottom"]:
+		tm.add_theme_constant_override("margin_" + k, 22)
+	tc.add_child(tm)
+	var tb := VBoxContainer.new()
+	tb.add_theme_constant_override("separation", 10)
+	tm.add_child(tb)
+	var tchk := CheckButton.new()
+	tchk.text = "Modo de teste"
+	tchk.add_theme_font_size_override("font_size", 22)
+	tchk.button_pressed = Perfil.teste()
+	tchk.toggled.connect(func(on: bool): Perfil.set_teste(on))
+	tb.add_child(tchk)
+	tb.add_child(_note("Para testar o jogo: fabricar sem gastar nada, pedra fica pronta na hora de modelar, madeira corta numa batida (árvore, tora, galho, tábua, rachar com cunha, serrar) e as ferramentas não gastam. Vale só neste celular.", C_DIM))
+
 	var s := Conta.session()
 	if not s.is_empty():
 		var acc := PanelContainer.new()

@@ -474,6 +474,8 @@ func _have(id: String) -> int:
 
 
 func _max_craft(r: Dictionary) -> int:
+	if _game and bool(_game.teste):
+		return 99
 	var m := 99
 	for ing in r.ingredientes:
 		m = mini(m, _have(str(ing[0])) / int(ing[1]))
@@ -527,7 +529,7 @@ func _refresh() -> void:
 			ic.id = str(ing[0])
 			q.text = "%d / %d" % [have, need]
 			q.add_theme_color_override("font_color", C_GREEN if have >= need else C_RED)
-			if have < need:
+			if have < need and not (_game and bool(_game.teste)):
 				ok = false
 			used_kg += Itens.kg(str(ing[0])) * need
 		else:
@@ -559,8 +561,9 @@ func _do_craft() -> void:
 	var r: Dictionary = rs[_sel]
 	if _max_craft(r) < _qtd:
 		return
-	for ing in r.ingredientes:
-		_game.remove_item(str(ing[0]), int(ing[1]) * _qtd)
+	if not bool(_game.teste):
+		for ing in r.ingredientes:
+			_game.remove_item(str(ing[0]), int(ing[1]) * _qtd)
 	var made := int(r.qtd) * _qtd
 	var dropped: int = _game.add_item(str(r.id), made)
 	if dropped > 0:

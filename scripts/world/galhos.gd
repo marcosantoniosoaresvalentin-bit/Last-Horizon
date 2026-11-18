@@ -127,7 +127,7 @@ func point_of(i: int) -> Vector3:
 ## Uma machadada no galho grande. Na segunda ele se parte em 2 pedaços.
 func chop(i: int) -> bool:
 	_cuts[i] = int(_cuts.get(i, 0)) + 1
-	if int(_cuts[i]) < CUT_HITS:
+	if int(_cuts[i]) < CUT_HITS and not bool(_jogo.teste):
 		return false
 	_cuts.clear()
 	var g: Dictionary = items[i]
