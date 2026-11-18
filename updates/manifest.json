@@ -1,9 +1,9 @@
 {
-  "version": 106,
-  "file": "update_106.zip",
-  "size": 4579688,
-  "sha256": "1c0e236cc4872e1f1fdf590b27e595d0312b68c56b2515c9633c4f26b84833cf",
+  "version": 107,
+  "file": "update_107.zip",
+  "size": 4580287,
+  "sha256": "ec77f42beafb625e1165951df93da04380c8bd6e7656298e68a8a2555999b79d",
   "min_build": 1,
-  "notes": "Corrige: peça da construção não podia ser pega de volta (pesada demais)",
+  "notes": "Novo: Modo de teste nas Configurações (fabricar sem gastar, pedra pronta na hora, madeira corta numa batida)",
   "date": "2026-11-18"
 }
