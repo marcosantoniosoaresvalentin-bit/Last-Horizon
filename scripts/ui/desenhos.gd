@@ -184,6 +184,34 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			# lâmina de cavadeira: estreita em cima (onde encaixa no cabo), larga e chata embaixo
 			flint(ci, P.call([[-12, -42], [12, -42], [16, -24], [26, -2], [34, 20], [30, 36], [12, 42], [-12, 42], [-30, 36], [-34, 20], [-26, -2], [-16, -24]]),
 				Color(0.47, 0.43, 0.35), 5, u, [6, 7])
+		"cunha":
+			# cunha vista de lado: grossa atrás, fio fino na frente
+			flint(ci, P.call([[-40, -22], [-14, -26], [20, -14], [44, -2], [44, 4], [20, 16], [-14, 26], [-40, 22], [-44, 0]]),
+				Color(0.22, 0.22, 0.21), 41, u, [3, 4, 5])
+		"pedra_marreta":
+			flint(ci, P.call([[-44, -14], [-30, -26], [30, -26], [44, -14], [44, 14], [30, 26], [-30, 26], [-44, 14]]),
+				Color(0.26, 0.25, 0.23), 43, u, [])
+		"marreta":
+			# cabo na diagonal e a cabeça de pedra atravessada em cima, amarrada com cipó
+			ci.draw_line(c + Vector2(-34, 44) * u, c + Vector2(18, -20) * u, Color(0.45, 0.3, 0.17), 8.0 * u, true)
+			ci.draw_line(c + Vector2(-34, 44) * u, c + Vector2(18, -20) * u, ink, 1.2 * u, true)
+			var hd: PackedVector2Array = P.call([[-2, -40], [10, -50], [44, -22], [36, -8], [26, -4]])
+			flint(ci, P.call([[-6, -36], [8, -50], [48, -20], [36, -4], [22, 4]]), Color(0.26, 0.25, 0.23), 45, u, [])
+			for k in 3:
+				var y := -18 + k * 5
+				ci.draw_line(c + Vector2(8 + k * 3, y) * u, c + Vector2(22 + k * 3, y - 12) * u, Color(0.45, 0.4, 0.18), 3.0 * u, true)
+			var _h := hd
+		"banda":
+			var pts := PackedVector2Array()
+			for k in 13:
+				var a := PI * k / 12.0
+				pts.append(c + Vector2(cos(a) * 44.0, -sin(a) * 34.0 + 14.0) * u)
+			ci.draw_colored_polygon(pts, Color(0.36, 0.26, 0.17))
+			var inner := PackedVector2Array()
+			for q in pts:
+				inner.append(c + (q - c - Vector2(0, 14) * u) * 0.82 + Vector2(0, 14) * u)
+			ci.draw_colored_polygon(inner, Color(0.78, 0.62, 0.42))
+			ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 2.0 * u, true)
 		"hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita":
 			_mineral(ci, id, c, u)
 		"lasca_silex":

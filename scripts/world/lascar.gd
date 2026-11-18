@@ -14,6 +14,8 @@ const KINDS := {
 	"pedra_cavadeira": {"spots": 9, "nome": "Lâmina de Cavadeira"},
 	"lamina_serra": {"spots": 12, "nome": "Lâmina de Serra"},
 	"pedra_pa": {"spots": 10, "nome": "Lâmina de Pá"},
+	"cunha": {"spots": 9, "nome": "Cunha de Pedra"},
+	"pedra_marreta": {"spots": 7, "nome": "Pedra de Marreta"},
 }
 const N := 48                   # ângulos do contorno
 const R := 5                    # anéis do centro até a beira
@@ -112,6 +114,20 @@ static func _limits(kind: String, x: float, z: float) -> Vector3:
 				w *= 1.0 - 0.2 * absf(sin(x / a * PI * 7.0))     # dentes
 			var t := 0.05 * (1.0 - 0.7 * clampf(z / 0.15, 0.0, 1.0)) * (1.0 - 0.5 * pow(e, 3.0))
 			return Vector3(a, maxf(t, 0.008), maxf(w, 0.012))
+		"cunha":
+			# cunha: grossa atrás (-x, onde a marreta bate), afinando até o fio reto (+x)
+			var a := 0.42
+			var u := clampf((x + a) / (2.0 * a), 0.0, 1.0)
+			var w := 0.2 * (1.0 - 0.25 * pow(absf(x) / a, 6.0))
+			var t := lerpf(0.15, 0.012, pow(u, 0.9))
+			return Vector3(a, maxf(t, 0.01), w)
+		"pedra_marreta":
+			# cabeça de marreta: bloco grosso e comprido, pontas meio arredondadas (as faces de bater)
+			var a := 0.4
+			var e := clampf(absf(x) / a, 0.0, 1.0)
+			var w := 0.24 * (1.0 - 0.15 * pow(e, 4.0))
+			var t := 0.2 * (1.0 - 0.2 * pow(e, 4.0))
+			return Vector3(a, t, w)
 	return Vector3(0.5, 0.3, 0.4)
 
 

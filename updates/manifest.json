@@ -1,9 +1,9 @@
 {
-  "version": 84,
-  "file": "update_84.zip",
-  "size": 4292426,
-  "sha256": "019b8edaa75f88f0a7bde5c687ae08443fc3ba106e5011ae4f419e6d973ec21a",
+  "version": 85,
+  "file": "update_85.zip",
+  "size": 4300014,
+  "sha256": "d6322be081a9fb6840fe2d7b347d319a3ea3b19215c76882de7aa4aec0cbe9ca",
   "min_build": 1,
-  "notes": "Terra e argila dentro do balde mais realistas; botão Despejar: o balde vira e despeja no chão (monte de argila ou terra, que a pá pega de novo) ou em outro balde",
+  "notes": "Cunha e pedra de marreta (modelar pedra), marreta (craft); Trabalhar na tora: Rachar ao meio com 3 cunhas e a marreta, barra de acerto (vermelho quebra a cunha), vira 2 bandas; corrige o botão Pular por baixo do Bater",
   "date": "2026-11-18"
 }

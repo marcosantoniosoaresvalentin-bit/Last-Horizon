@@ -395,6 +395,9 @@ var _pa_tipo := "terra"           # o que está na pá: "terra" ou "argila"
 var _balde_carga := {}            # o que tem no balde da mochila/mão: {tipo, vol (m³)}
 var _balde_fill: MeshInstance3D = null
 var _pour_t := -1.0               # despejando o balde (segundos)
+var _split := {}                  # rachando a tora com cunhas (ver _split_begin)
+var _split_ui: Control = null
+var _split_rng := RandomNumberGenerator.new()
 const BALDE_VOL := 0.024          # cabe uns 24 litros
 const BALDE_KG := 25.0            # mais que isso não dá para carregar pela alça
 const PAZADA := 0.006             # uma pazada: uns 6 litros
@@ -1269,6 +1272,7 @@ func _process(delta: float) -> void:
 		# a informação do solo não aparece mais na tela
 	_update_dig(delta)
 	_update_pour(delta)
+	_update_split(delta)
 	_tick_hole_water(delta)
 	_seed_check -= delta
 	if _seed_check <= 0.0 and _arvores:
@@ -1342,7 +1346,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1373,6 +1377,9 @@ func _load_player() -> void:
 			_itens["pa"] = 1        # a pá chegou numa atualização: uma para testar
 		if not bool(d.get("ganhou_serra", false)) and not _itens.has("serra"):
 			_itens["serra"] = 1
+		if not bool(d.get("ganhou_cunhas", false)):
+			_itens["cunha"] = int(_itens.get("cunha", 0)) + 3     # para testar o rachar a tora
+			_itens["marreta"] = maxi(1, int(_itens.get("marreta", 0)))
 		if not bool(d.get("ganhou_balde", false)) and not _itens.has("balde"):
 			_itens["balde"] = 1     # um balde para testar (encher de terra ou argila com a pá)
 	if d.get("rodelas") is Array:
@@ -1612,9 +1619,15 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 			fm.name = "carga"
 			node.add_child(fm)
 			_update_balde_fill(fm, {"tipo": str(dur[0]), "vol": float(dur[1])})
-	elif id in ["machado", "cavadeira", "serra"]:
+	elif id == "banda":
 		var mi := MeshInstance3D.new()
-		mi.mesh = Corte.axe_mesh() if id == "machado" else (Corte.digger_mesh() if id == "cavadeira" else Corte.saw_mesh())
+		var L := float(dur[0]) if dur.size() >= 3 else 1.5
+		mi.mesh = _banda_mesh(L, float(dur[1]) if dur.size() >= 3 else 0.12, float(dur[2]) if dur.size() >= 3 else 0.1)
+		mi.rotation.y = float(dur[3]) if dur.size() >= 4 else 0.0
+		node.add_child(mi)
+	elif id in ["machado", "cavadeira", "serra", "marreta"]:
+		var mi := MeshInstance3D.new()
+		mi.mesh = Corte.axe_mesh() if id == "machado" else (Corte.digger_mesh() if id == "cavadeira" else (Corte.saw_mesh() if id == "serra" else Corte.marreta_mesh()))
 		mi.material_override = Corte.axe_material()
 		node.add_child(mi)
 		mi.rotation = Vector3(PI * 0.5, randf() * TAU, 0)
@@ -1640,6 +1653,8 @@ func _nearest_ground(r: float) -> int:
 	var bd := r
 	for i in _chao.size():
 		var g: Dictionary = _chao[i]
+		if str(g.id) == "banda":
+			continue          # metade de tora: pesada demais para a mochila
 		var d := Vector2(float(g.x) - _player.position.x, float(g.z) - _player.position.z).length()
 		if d < bd:
 			bd = d
@@ -1782,7 +1797,7 @@ func equip(id: String) -> void:
 	if _sawing:
 		_stop_saw()
 	if _chop_pose:
-		_chop_pose.holding = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde"]
+		_chop_pose.holding = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta"]
 		_chop_pose.tool = _mao if _mao != "" else "machado"
 		if _mao == "cavadeira" or _mao == "pa":
 			_chop_pose.grip_low = 0.04
@@ -1808,6 +1823,8 @@ func equip(id: String) -> void:
 			mi.mesh = Lascar.cobble_mesh(77, 0.1)      # pedra de bater, na palma da mão
 		elif _mao == "balde":
 			mi.mesh = Balde.mesh()                     # pendurado pela alça
+		elif _mao == "marreta":
+			mi.mesh = Corte.marreta_mesh()
 		else:
 			mi.mesh = Corte.axe_mesh()
 		mi.material_override = Balde.material() if _mao == "balde" else Corte.axe_material()
@@ -1984,6 +2001,8 @@ func _update_chop(delta: float) -> void:
 			if _chop_idle > 2.5:
 				_cancel_chop()
 		return
+	if not _split.is_empty():
+		return          # rachando a tora: os botões normais somem
 	_act_check -= delta
 	if _act_check > 0.0:
 		return
@@ -2683,7 +2702,8 @@ func _open_work_menu() -> void:
 	if _apoios == null or _apoios.nearest_rested(_player.position, 1.8) < 0:
 		return
 	_choice_menu("TRABALHAR NA TORA", "Escolha o que fazer",
-		[["Cortar rodela", "Uma fatia fina da ponta da tora.\nÉ o fundo do balde.", func(): _work_choose("rodela")]])
+		[["Cortar rodela", "Uma fatia fina da ponta da tora.\nÉ o fundo do balde.", func(): _work_choose("rodela")],
+		["Rachar ao meio", "Abre a tora no comprido com\n3 cunhas e a marreta: 2 bandas.", func(): _split_begin()]])
 
 
 ## Menu no meio da tela com opções em botões grandes (com ícone) e FECHAR.
@@ -2719,10 +2739,13 @@ func _choice_menu(title_txt: String, sub_txt: String, opts: Array) -> void:
 	sub.add_theme_font_size_override("font_size", 18)
 	sub.add_theme_color_override("font_color", Color(0.75, 0.72, 0.65))
 	v.add_child(sub)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 18)
-	v.add_child(row)
+	var row := GridContainer.new()
+	row.columns = 3 if opts.size() > 4 else opts.size()
+	row.add_theme_constant_override("h_separation", 18)
+	row.add_theme_constant_override("v_separation", 10)
+	var cc := CenterContainer.new()
+	cc.add_child(row)
+	v.add_child(cc)
 	for opt in opts:
 		var col := VBoxContainer.new()
 		col.add_theme_constant_override("separation", 6)
@@ -2730,7 +2753,7 @@ func _choice_menu(title_txt: String, sub_txt: String, opts: Array) -> void:
 		row.add_child(col)
 		var b := Icones.IconButton.new()
 		b.text = opt[0]
-		b.custom_minimum_size = Vector2(190, 170)
+		b.custom_minimum_size = Vector2(190, 170 if opts.size() <= 4 else 120)
 		b.add_theme_font_size_override("font_size", 20)
 		var cb: Callable = opt[2]
 		b.pressed.connect(func():
@@ -2817,6 +2840,10 @@ func _walk_to(target: Vector3, next: String) -> void:
 
 
 func _walk_arrived() -> void:
+	if _walk_next == "rachar":
+		_walk_next = ""
+		_split_arrived()
+		return
 	if _walk_next == "modelar":
 		_walk_next = ""
 		var pend: Dictionary = _crouch_target
@@ -3200,9 +3227,11 @@ func _open_knap_menu() -> void:
 	var descs := {"pedra_machado": "Pedra com fio, do formato da cabeça do machado.",
 		"pedra_cavadeira": "Pedra larga e chata, como uma pá.",
 		"lamina_serra": "Pedra comprida e fina, com dentes num lado.",
-		"pedra_pa": "Pedra larga e fina, arredondada na frente, para a pá."}
+		"pedra_pa": "Pedra larga e fina, arredondada na frente, para a pá.",
+		"cunha": "Grossa atrás e com fio reto: abre a tora.",
+		"pedra_marreta": "Bloco grosso e comprido: cabeça da marreta."}
 	var opts := []
-	for k in ["pedra_machado", "pedra_cavadeira", "lamina_serra", "pedra_pa"]:
+	for k in ["pedra_machado", "pedra_cavadeira", "lamina_serra", "pedra_pa", "cunha", "pedra_marreta"]:
 		var kk: String = k
 		opts.append([Lascar.KINDS[k].nome, descs[k], func(): _knap_go(_pedras.nearest(_player.position, 1.5, true), kk)])
 	_choice_menu("MODELAR PEDRA", "Que ferramenta essa pedra vai virar?", opts)
@@ -3635,6 +3664,7 @@ func _knap_end() -> void:
 		_knap_hand.queue_free()
 	_knap_hand = null
 	_player.visible = true
+	_jump_btn.visible = true
 	_grass_mat.set_shader_parameter("flat_spot", Vector4.ZERO)
 	if _pedras:
 		_pedras.hide_stone(-1)
@@ -4306,7 +4336,7 @@ func _move_player(delta: float) -> void:
 			_stop_saw()
 		else:
 			amount = 0.0
-	if not _knap.is_empty() or not _vine.is_empty() or not _climb.is_empty():
+	if not _knap.is_empty() or not _vine.is_empty() or not _climb.is_empty() or not _split.is_empty():
 		amount = 0.0
 	if _crouch_job != "":
 		amount = 0.0           # abaixado pegando ou largando a tora
@@ -4569,6 +4599,8 @@ func _open_calendar() -> void:
 
 
 func _input(e: InputEvent) -> void:
+	if not _split.is_empty() and _split_input(e):
+		return
 	if not _knap.is_empty():
 		_knap_input(e)
 		return
@@ -4804,3 +4836,625 @@ func _water_arrays(wat: PackedFloat32Array) -> void:
 	arr[Mesh.ARRAY_COLOR] = cols
 	arr[Mesh.ARRAY_NORMAL] = nrm
 	_w_arr = arr
+
+
+# ================== RACHAR A TORA COM CUNHAS ==================
+# Na tora apoiada nas forquilhas: o jogador põe 3 cunhas (uma perto de cada ponta e uma
+# no meio), com o fio virado para a madeira; depois bate nelas com a marreta, um pouco
+# em cada (nenhuma pode entrar muito mais que as outras), com a barrinha de acerto.
+# Vermelho: a marreta pega torto e a cunha quebra (tem que pôr outra). Quando as três
+# entram até o fim, a tora abre no comprido em duas bandas.
+
+const SPLIT_U := [0.15, 0.5, 0.85]
+const SPLIT_LEAD := 0.34          # o quanto uma cunha pode estar à frente das outras
+
+
+func _split_begin() -> void:
+	var i: int = _apoios.nearest_rested(_player.position, 1.8)
+	if i < 0:
+		return
+	if item_qtd("cunha") < 3:
+		_show_toast("Precisa de 3 cunhas de pedra (tem %d). Faça modelando pedra." % item_qtd("cunha"))
+		return
+	if item_qtd("marreta") < 1:
+		_show_toast("Precisa de uma marreta (pedra de marreta + galho + 2 cipós).")
+		return
+	equip("")                      # as mãos livres para pôr as cunhas
+	var spots := []
+	for u in SPLIT_U:
+		spots.append({"u": u, "placed": false, "depth": 0.0, "node": null})
+	_split = {"i": i, "stage": "cunhas", "spots": spots, "sel": -1, "go": -1, "anim": -1.0, "kind": "", "ok": false,
+		"crack": null, "t": 0.0, "speed": 0.4, "gw": 0.3, "gc": 0.5, "fired": false}
+	_split_rng.randomize()
+	_split_new_timing()
+	_build_split_ui()
+	_show_toast("Toque nos 3 lugares marcados na tora para pôr as cunhas.")
+
+
+func _split_geo(u: float) -> Dictionary:
+	var i := int(_split.i)
+	var inf: Dictionary = _apoios.info(i)
+	var fl: Dictionary = _apoios.rested[i].log
+	var rad: float = _arvores.free_log_radius_at(fl, clampf(u, 0.02, 0.98))
+	var axis: Vector3 = inf.center + inf.dir * (u - 0.5) * float(inf.L)
+	return {"top": axis + Vector3.UP * rad, "axis": axis, "rad": rad, "dir": inf.dir}
+
+
+func _split_new_timing() -> void:
+	_split.speed = _split_rng.randf_range(0.3, 0.55)
+	_split.gw = _split_rng.randf_range(0.2, 0.32)
+	_split.gc = _split_rng.randf_range(0.25, 0.75)
+	_split.t = _split_rng.randf() * 4.0
+
+
+func _split_marker() -> float:
+	var x := fmod(float(_split.t) * float(_split.speed), 2.0)
+	return x if x <= 1.0 else 2.0 - x
+
+
+func _split_busy() -> bool:
+	if _split.is_empty():
+		return false
+	return _walking or float(_split.anim) >= 0.0
+
+
+## Toque na tela: escolhe um dos lugares das cunhas. Devolve true se usou o toque.
+func _split_input(e: InputEvent) -> bool:
+	var pos := Vector2.INF
+	if e is InputEventScreenTouch and e.pressed:
+		pos = e.position
+	elif e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+	if pos == Vector2.INF:
+		return false
+	var spots: Array = _split.spots
+	for k in spots.size():
+		var w: Vector3 = _split_geo(float(spots[k].u)).top
+		if _cam.is_position_behind(w):
+			continue
+		if pos.distance_to(_cam.unproject_position(w)) < 80.0:
+			_split_pick(k)
+			return true
+	return false
+
+
+func _split_pick(k: int) -> void:
+	if _split_busy():
+		return
+	var sp: Dictionary = _split.spots[k]
+	if not bool(sp.placed):
+		if item_qtd("cunha") <= 0:
+			_show_toast("Acabaram as cunhas. Faça outra modelando pedra.")
+			return
+	elif str(_split.stage) == "cunhas":
+		_show_toast("Já tem cunha aqui.")
+		return
+	_split.go = k
+	var g := _split_geo(float(sp.u))
+	var spot := _side_spot(int(_split.i), g.top, 0.72)
+	if Vector2(spot.x - _player.position.x, spot.z - _player.position.z).length() < 0.15:
+		_split_arrived()
+	else:
+		_walk_to(spot, "rachar")
+
+
+## Olha para o ponto (vira o corpo e a câmera).
+func _split_aim(at: Vector3) -> void:
+	_face_to(at)
+	_yaw = _face
+	var eye := _player.global_position + Vector3.UP * 1.6
+	var hd := Vector2(at.x - eye.x, at.z - eye.z).length()
+	_pitch = clampf(atan2(eye.y - at.y, maxf(hd, 0.1)) - 0.08, -0.4, 1.2)
+
+
+func _split_arrived() -> void:
+	var k := int(_split.go)
+	if k < 0:
+		return
+	var sp: Dictionary = _split.spots[k]
+	var g := _split_geo(float(sp.u))
+	_split_aim(g.top)
+	if not bool(sp.placed):
+		# põe a cunha com a mão: estica o braço até o lugar, encaixa o fio na madeira
+		equip("")
+		_split.anim = 0.0
+		_split.kind = "pôr"
+		if _chop_pose:
+			_chop_pose.reach_on = true
+			_chop_pose.reach_grip = true
+			_chop_pose.reach_target = g.top + Vector3.UP * 0.08
+		return
+	_split.sel = k
+	_split_ready_hammer(g)
+
+
+func _split_ready_hammer(g: Dictionary) -> void:
+	if item_qtd("marreta") <= 0:
+		_show_toast("A marreta quebrou. Faça outra para continuar.")
+		return
+	if _mao != "marreta":
+		equip("marreta")
+	if _chop_pose:
+		var top_h: float = g.top.y - _player.global_position.y
+		_chop_pose.vertical = true
+		_chop_pose.down_hit = lerpf(-42.0, -14.0, clampf(top_h / 0.95, 0.0, 1.0))
+		_chop_pose.ready_pose = true
+		_chop_pose.swinging = false
+
+
+func _split_hit() -> void:
+	if _split.is_empty() or str(_split.stage) != "bater" or _split_busy():
+		return
+	var k := int(_split.sel)
+	if k < 0 or not bool(_split.spots[k].placed):
+		_show_toast("Toque primeiro numa cunha da tora.")
+		return
+	if _mao != "marreta":
+		_split_ready_hammer(_split_geo(float(_split.spots[k].u)))
+		if _mao != "marreta":
+			return
+	_split.t = float(_split.t) - 0.06       # o toque chega um pouquinho atrasado
+	var m := _split_marker()
+	_split.frozen = m
+	var d := absf(m - float(_split.gc)) - float(_split.gw) * 0.5
+	if d > 0.01 and d <= KNAP_EDGE:
+		_show_toast("Quase! Bata no verde.")
+		return
+	_split.ok = d <= 0.01
+	_split.anim = 0.0
+	_split.kind = "bater"
+	_split.fired = false
+	if _chop_pose:
+		_chop_pose.swinging = true
+		_chop_pose.phase = 0.0
+
+
+func _update_split(delta: float) -> void:
+	if _split.is_empty():
+		return
+	for b in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _jump_btn]:
+		if b:
+			b.visible = false
+	if int(_split.i) >= _apoios.rested.size():
+		_split_end()
+		return
+	var a := float(_split.anim)
+	if a >= 0.0:
+		a += delta
+		_split.anim = a
+		if str(_split.kind) == "pôr":
+			if a >= 0.9:
+				_split_place_done()
+		else:
+			var ph := a / 0.85
+			if _chop_pose:
+				_chop_pose.phase = minf(ph, 1.0)
+			if ph >= Corte.ChopPose.HIT_AT and not bool(_split.fired):
+				_split.fired = true
+				_split_impact()
+			if ph >= 1.0:
+				_split.anim = -1.0
+				if _chop_pose:
+					_chop_pose.swinging = false
+				if not _split.is_empty():
+					_split_new_timing()
+	elif str(_split.stage) == "bater":
+		_split.t = float(_split.t) + delta
+	if _split.is_empty():
+		return
+	_split_update_visuals()
+	if _split_ui:
+		for n in ["mk", "tb"]:
+			var c := _split_ui.find_child(n, true, false) as Control
+			if c:
+				c.queue_redraw()
+		var hit := _split_ui.find_child("hit", true, false) as Control
+		if hit:
+			hit.visible = str(_split.stage) == "bater"
+		var il := _split_ui.find_child("il", true, false) as Label
+		if il:
+			if str(_split.stage) == "cunhas":
+				il.text = "RACHAR A TORA\nToque nos 3 lugares marcados para pôr as cunhas (o fio vai virado para a madeira)."
+			else:
+				il.text = "RACHAR A TORA\nToque numa cunha e em BATER com o marcador no VERDE. Bata um pouco em cada. Vermelho: a cunha quebra!"
+		var pl := _split_ui.find_child("pl", true, false) as Label
+		var bar := _split_ui.find_child("bar", true, false) as ProgressBar
+		var pr := _split_progress()
+		if pl:
+			pl.text = "Rachadura   %d%%" % int(pr * 100.0)
+		if bar:
+			bar.value = pr * 100.0
+
+
+func _split_progress() -> float:
+	var t := 0.0
+	for sp in _split.spots:
+		t += float(sp.depth)
+	return t / 3.0
+
+
+func _split_place_done() -> void:
+	var k := int(_split.go)
+	var sp: Dictionary = _split.spots[k]
+	_split.anim = -1.0
+	if _chop_pose:
+		_chop_pose.reach_on = false
+		_chop_pose.reach_grip = false
+	if item_qtd("cunha") <= 0:
+		return
+	remove_item("cunha", 1)
+	sp.placed = true
+	var mi := MeshInstance3D.new()
+	mi.mesh = Corte2.worked_stone_mesh("cunha")
+	mi.material_override = Lascar.material()
+	add_child(mi)
+	sp.node = mi
+	Sons.play_at(self, "pedra_bate", _split_geo(float(sp.u)).top, -8.0, 1.2)
+	_update_inventory()
+	var all := true
+	for s2 in _split.spots:
+		all = all and bool(s2.placed)
+	if str(_split.stage) == "cunhas":
+		if all:
+			_split.stage = "bater"
+			_show_toast("As 3 cunhas estão no lugar. Pegue a marreta: toque numa cunha e bata.")
+			_split.go = -1
+	else:
+		_split.sel = k
+		_split_ready_hammer(_split_geo(float(sp.u)))
+
+
+## A marreta chegou na cunha.
+func _split_impact() -> void:
+	var k := int(_split.sel)
+	var sp: Dictionary = _split.spots[k]
+	var g := _split_geo(float(sp.u))
+	var at: Vector3 = g.top + Vector3.UP * 0.07
+	wear("marreta")
+	if not bool(_split.ok):
+		# pegou torto: a cunha estoura
+		sp.placed = false
+		if sp.node:
+			(sp.node as Node3D).queue_free()
+		sp.node = null
+		_split.sel = -1
+		Sons.play_at(self, "pedra_racha", at, 2.0)
+		_stone_chips(at, 22)
+		_show_toast("A marreta pegou torto: a cunha quebrou! Ponha outra cunha no lugar.")
+		if _chop_pose:
+			_chop_pose.ready_pose = false
+		return
+	Sons.play_at(self, "pedra_bate", at, 2.0, randf_range(0.8, 0.95))
+	_stone_chips(at, 5)
+	var low := 1e9
+	for j in _split.spots.size():
+		if j != k:
+			low = minf(low, float(_split.spots[j].depth))
+	if float(sp.depth) - low >= SPLIT_LEAD:
+		_show_toast("Essa cunha já entrou mais que as outras: bata um pouco nas outras.")
+		return
+	sp.depth = minf(1.0, float(sp.depth) + _split_rng.randf_range(0.15, 0.24))
+	if _split_rng.randf() < 0.5:
+		Sons.play_at(self, "estalo", g.axis, -6.0, randf_range(0.7, 0.9))     # a madeira estala abrindo
+	var done := true
+	for s2 in _split.spots:
+		done = done and float(s2.depth) >= 1.0
+	if done:
+		_split_finish()
+
+
+## Posição das cunhas (entrando na madeira) e a rachadura em cima da tora.
+func _split_update_visuals() -> void:
+	for sp in _split.spots:
+		var mi: Node3D = sp.node
+		if mi == null:
+			continue
+		var g := _split_geo(float(sp.u))
+		var dir: Vector3 = g.dir
+		var x := Vector3.DOWN
+		var z := Vector3(dir.x, 0, dir.z).normalized()
+		var y := z.cross(x)
+		var s := 0.28
+		mi.global_transform = Transform3D(Basis(x * s, y * s, z * s), g.top + Vector3.UP * (0.1 - float(sp.depth) * 0.075))
+	var pr := _split_progress()
+	if pr <= 0.0:
+		return
+	var crack: MeshInstance3D = _split.crack
+	if crack == null:
+		crack = MeshInstance3D.new()
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.08, 0.05, 0.03)
+		crack.material_override = m
+		add_child(crack)
+		_split.crack = crack
+	var inf: Dictionary = _apoios.info(int(_split.i))
+	var bm := BoxMesh.new()
+	var L := float(inf.L) * clampf(pr * 1.15, 0.0, 1.0)
+	bm.size = Vector3(0.006 + pr * 0.018, 0.05, L)
+	crack.mesh = bm
+	var g2 := _split_geo(0.5)
+	var dz: Vector3 = inf.dir
+	var bz := dz.normalized()
+	var bx := Vector3.UP.cross(bz).normalized()
+	var by := bz.cross(bx)
+	crack.global_transform = Transform3D(Basis(bx, by, bz), g2.top + Vector3.UP * 0.005)
+
+
+func _split_finish() -> void:
+	var i := int(_split.i)
+	var inf: Dictionary = _apoios.info(i)
+	var fl: Dictionary = _apoios.rested[i].log
+	var L := float(inf.L)
+	var ra: float = _arvores.free_log_radius_at(fl, 0.03)
+	var rb: float = _arvores.free_log_radius_at(fl, 0.97)
+	var c: Vector3 = inf.center
+	var dir: Vector3 = inf.dir
+	var flat := Vector3(dir.x, 0, dir.z).normalized()
+	var n := Vector3(-flat.z, 0, flat.x)
+	# as cunhas que sobraram voltam para a mochila
+	var back := 0
+	for sp in _split.spots:
+		if bool(sp.placed):
+			back += 1
+	_split_end(false)
+	if back > 0:
+		_itens["cunha"] = int(_itens.get("cunha", 0)) + back
+	_apoios.take_rested(i)
+	var yaw := atan2(-flat.z, flat.x)
+	var rmax := maxf(ra, rb)
+	for side in [-1.0, 1.0]:
+		var p: Vector3 = c + n * side * (rmax + 0.25)
+		_add_ground("banda", 1, p.x, p.z, rmax, [L, ra, rb, yaw])
+		var node: Node3D = _chao[_chao.size() - 1].node
+		var end_pos := node.position
+		node.position = c - Vector3.UP * rmax * 0.5
+		var tw := node.create_tween()
+		tw.tween_method(func(t: float) -> void:
+			node.position = (c - Vector3.UP * rmax * 0.5).lerp(end_pos, t) + Vector3.UP * sin(t * PI) * 0.15
+			node.basis = Basis(flat, side * (1.0 - t) * PI * 0.5), 0.0, 1.0, 0.5).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	Sons.play_at(self, "queda", c, -4.0, 1.3)
+	Sons.play_at(self, "estalo", c, 0.0, 0.8)
+	_update_inventory()
+	_show_toast("A tora rachou ao meio! Duas bandas no chão. As cunhas voltaram para a mochila.")
+
+
+func _split_end(give_back := true) -> void:
+	if _split.is_empty():
+		return
+	for sp in _split.spots:
+		if sp.node:
+			(sp.node as Node3D).queue_free()
+		if give_back and bool(sp.placed):
+			_itens["cunha"] = int(_itens.get("cunha", 0)) + 1
+	if _split.crack:
+		(_split.crack as Node3D).queue_free()
+	_split = {}
+	_jump_btn.visible = true
+	if _split_ui:
+		_split_ui.queue_free()
+	_split_ui = null
+	_walking = false
+	if _chop_pose:
+		_chop_pose.reach_on = false
+		_chop_pose.reach_grip = false
+		_chop_pose.swinging = false
+		_chop_pose.ready_pose = false
+		_chop_pose.vertical = false
+		_chop_pose.down_hit = -42.0
+	_update_inventory()
+	_act_check = 0.0
+
+
+func _build_split_ui() -> void:
+	_split_ui = Control.new()
+	_split_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_split_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(_split_ui)
+	var info := PanelContainer.new()
+	info.offset_left = 16
+	info.offset_top = 16
+	info.offset_right = 400
+	info.offset_bottom = 130
+	info.add_theme_stylebox_override("panel", Mochila._box(Color(0.05, 0.05, 0.04, 0.82), Color(1, 1, 1, 0.18), 2, 8))
+	info.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var il := Label.new()
+	il.name = "il"
+	il.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	il.add_theme_font_size_override("font_size", 15)
+	info.add_child(il)
+	_split_ui.add_child(info)
+	var prog := PanelContainer.new()
+	prog.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	prog.offset_left = -200
+	prog.offset_right = 200
+	prog.offset_top = 16
+	prog.offset_bottom = 84
+	prog.add_theme_stylebox_override("panel", Mochila._box(Color(0.05, 0.05, 0.04, 0.82), Color(1, 1, 1, 0.18), 2, 8))
+	prog.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var pv := VBoxContainer.new()
+	prog.add_child(pv)
+	var pl := Label.new()
+	pl.name = "pl"
+	pl.add_theme_font_size_override("font_size", 16)
+	pv.add_child(pl)
+	var bar := ProgressBar.new()
+	bar.name = "bar"
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(360, 14)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color(0.75, 0.55, 0.25)
+	bar.add_theme_stylebox_override("fill", fill)
+	pv.add_child(bar)
+	_split_ui.add_child(prog)
+	var mk := Control.new()
+	mk.name = "mk"
+	mk.set_anchors_preset(Control.PRESET_FULL_RECT)
+	mk.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mk.draw.connect(func(): _draw_split_marks(mk))
+	_split_ui.add_child(mk)
+	var tb := Control.new()
+	tb.name = "tb"
+	tb.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	tb.offset_left = -270
+	tb.offset_right = 270
+	tb.offset_top = -110
+	tb.offset_bottom = -30
+	tb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tb.draw.connect(func(): _draw_split_bar(tb))
+	_split_ui.add_child(tb)
+	var hit := Icones.IconButton.new()
+	hit.name = "hit"
+	hit.text = "Bater"
+	hit.add_theme_font_size_override("font_size", 22)
+	hit.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	hit.offset_left = -190
+	hit.offset_top = -190
+	hit.offset_right = -30
+	hit.offset_bottom = -30
+	hit.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+	hit.pressed.connect(_split_hit)
+	hit.visible = false
+	_split_ui.add_child(hit)
+	var out := Icones.IconButton.new()
+	out.text = "Sair"
+	out.add_theme_font_size_override("font_size", 20)
+	out.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	out.offset_left = 30
+	out.offset_top = -160
+	out.offset_right = 160
+	out.offset_bottom = -30
+	out.pressed.connect(func():
+		_show_toast("Você tirou as cunhas da tora.")
+		_split_end())
+	_split_ui.add_child(out)
+
+
+func _draw_split_marks(mk: Control) -> void:
+	if _split.is_empty():
+		return
+	var font := ThemeDB.fallback_font
+	var tsec := Time.get_ticks_msec() / 1000.0
+	var spots: Array = _split.spots
+	for k in spots.size():
+		var sp: Dictionary = spots[k]
+		var w: Vector3 = _split_geo(float(sp.u)).top + Vector3.UP * 0.1
+		if _cam.is_position_behind(w):
+			continue
+		var p := _cam.unproject_position(w)
+		var sel := k == int(_split.sel)
+		var txt: String
+		var col := Color(1, 1, 1, 0.95)
+		if not bool(sp.placed):
+			txt = "Pôr cunha"
+		else:
+			txt = "%d%%" % int(float(sp.depth) * 100.0)
+			col = Color(0.3, 0.85, 0.3) if sel else Color(1.0, 0.8, 0.3)
+		var r := 16.0 + (3.0 * sin(tsec * 6.0) if sel else 0.0)
+		var pts := PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0), p + Vector2(0, r), p + Vector2(-r, 0)])
+		if sel:
+			mk.draw_circle(p, r * 1.6, Color(0.3, 0.9, 0.3, 0.25))
+		mk.draw_polyline(pts + PackedVector2Array([pts[0]]), col, 3.0, true)
+		var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+		var lb := Rect2(p + Vector2(-tw * 0.5 - 8, -r - 44), Vector2(tw + 16, 28))
+		mk.draw_rect(lb, Color(0.05, 0.05, 0.04, 0.85))
+		mk.draw_rect(lb, col, false, 2.0)
+		mk.draw_string(font, lb.position + Vector2(8, 20), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.95, 0.8))
+
+
+func _draw_split_bar(tb: Control) -> void:
+	if _split.is_empty() or str(_split.stage) != "bater":
+		return
+	var w := tb.size.x
+	var r := Rect2(Vector2(0, 34), Vector2(w, 34))
+	var font := ThemeDB.fallback_font
+	var txt := "Bata quando o marcador estiver no verde" if int(_split.sel) >= 0 else "Toque numa cunha da tora"
+	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	tb.draw_rect(Rect2(Vector2(w * 0.5 - tw * 0.5 - 10, 0), Vector2(tw + 20, 28)), Color(0.05, 0.05, 0.04, 0.85))
+	tb.draw_string(font, Vector2(w * 0.5 - tw * 0.5, 21), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.95, 0.8))
+	tb.draw_rect(r.grow(4), Color(0.05, 0.05, 0.04, 0.9))
+	var n := 60
+	for k in n:
+		var u := (k + 0.5) / n
+		var d := absf(u - float(_split.gc)) - float(_split.gw) * 0.5
+		var col := Color(0.2, 0.75, 0.2) if d <= 0.0 else (Color(0.92, 0.55, 0.1) if d <= KNAP_EDGE else Color(0.8, 0.12, 0.1))
+		tb.draw_rect(Rect2(r.position + Vector2(w * k / n, 0), Vector2(w / n + 0.5, r.size.y)), col)
+	tb.draw_rect(r, Color(0, 0, 0, 0.8), false, 2.0)
+	var m: float = float(_split.get("frozen", 0.5)) if float(_split.anim) >= 0.0 else _split_marker()
+	var x := r.position.x + m * w
+	tb.draw_rect(Rect2(Vector2(x - 4, r.position.y - 7), Vector2(8, r.size.y + 14)), Color(1.0, 0.85, 0.15))
+	tb.draw_rect(Rect2(Vector2(x - 4, r.position.y - 7), Vector2(8, r.size.y + 14)), Color(0.2, 0.12, 0.0), false, 2.0)
+
+
+## Banda (metade da tora): deitada com a casca embaixo e a madeira aberta para cima.
+## Comprida no eixo X local, afinando de ra (x = -L/2) até rb (x = +L/2).
+func _banda_mesh(L: float, ra: float, rb: float) -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	var segs := 12
+	var arcs := 14
+	var bark := SurfaceTool.new()
+	bark.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rmax := maxf(ra, rb)
+	for i in segs:
+		for j in arcs:
+			var q := []
+			var uvs := []
+			for e in [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]]:
+				var t := float(e[0]) / segs
+				var a := PI * float(e[1]) / arcs
+				var r := lerpf(ra, rb, t)
+				var x := (t - 0.5) * L
+				q.append(Vector3(x, rmax - sin(a) * r, cos(a) * r))
+				uvs.append(Vector2(a * r / 0.5, x / 1.0))
+			for idx in [0, 2, 1, 0, 3, 2]:
+				var pv: Vector3 = q[idx]
+				var nrm := Vector3(0, pv.y - rmax, pv.z).normalized()
+				bark.set_normal(nrm)
+				bark.set_uv(uvs[idx])
+				bark.add_vertex(pv)
+	bark.commit(mesh)
+	mesh.surface_set_material(0, _arvores.bark_material())
+	var wood := SurfaceTool.new()
+	wood.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(L * 1000.0)
+	# face aberta (em cima): madeira clara, o miolo escuro no meio e veios compridos
+	for i in segs:
+		for j in 8:
+			var q := []
+			var cs := []
+			for e in [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]]:
+				var t := float(e[0]) / segs
+				var v := float(e[1]) / 8.0 * 2.0 - 1.0
+				var r := lerpf(ra, rb, t)
+				q.append(Vector3((t - 0.5) * L, rmax, v * r))
+				var core := 1.0 - smoothstep(0.0, 0.12, absf(v))
+				var grain := 0.06 * sin(v * 40.0 + t * 3.0)
+				cs.append(Color(0.5, 0.36, 0.23).darkened(core * 0.3 + grain + rng.randf() * 0.03))
+			for idx in [0, 1, 2, 0, 2, 3]:
+				wood.set_normal(Vector3.UP)
+				wood.set_color(cs[idx])
+				wood.add_vertex(q[idx])
+	# pontas (meia-lua de madeira com anéis)
+	for end in [0, 1]:
+		var r := ra if end == 0 else rb
+		var x := (float(end) - 0.5) * L
+		var nx := -1.0 if end == 0 else 1.0
+		for j in arcs:
+			var a0 := PI * float(j) / arcs
+			var a1 := PI * float(j + 1) / arcs
+			var c0 := Vector3(x, rmax, 0)
+			var p0 := Vector3(x, rmax - sin(a0) * r, cos(a0) * r)
+			var p1 := Vector3(x, rmax - sin(a1) * r, cos(a1) * r)
+			for v in ([c0, p0, p1] if end == 1 else [c0, p1, p0]):
+				var dd := Vector2(v.y - rmax, v.z).length() / maxf(r, 0.01)
+				wood.set_normal(Vector3(nx, 0, 0))
+				wood.set_color(Color(0.47, 0.34, 0.22).darkened(0.1 * absf(sin(dd * 14.0))))
+				wood.add_vertex(v)
+	wood.commit(mesh)
+	var wm := StandardMaterial3D.new()
+	wm.vertex_color_use_as_albedo = true
+	wm.vertex_color_is_srgb = true
+	wm.roughness = 0.85
+	wm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mesh.surface_set_material(1, wm)
+	return mesh

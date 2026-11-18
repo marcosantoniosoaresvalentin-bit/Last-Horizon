@@ -10,6 +10,39 @@ extends RefCounted
 ## lascada encaixada perto da ponta e amarrada com cipó (voltas em cima e embaixo
 ## da pedra e cruzando por cima dela). O cabo vai de y = 0 (ponta de baixo) até
 ## 0,64 m; a pedra fica perto de y = 0,52 e o fio aponta para +Z.
+## Marreta: cabo de galho (y = 0 a 0,62) e a cabeça de pedra atravessada em cima,
+## comprida no sentido Z (as faces de bater ficam em +Z e -Z), amarrada com cipó.
+static func marreta_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 909
+	var path := []
+	for k in 8:
+		var t := float(k) / 7.0
+		path.append(Vector3(sin(t * 3.0) * 0.006, t * 0.66, cos(t * 2.0) * 0.004))
+	_tube(st, path, 0.019, Color(0.42, 0.29, 0.17), rng)
+	# amarração de cipó em X em volta da cabeça
+	for k in 5:
+		var y := 0.6 + k * 0.012
+		var ring := []
+		for q in 9:
+			var a := TAU * q / 8.0
+			ring.append(Vector3(cos(a) * 0.05, y + sin(a * 2.0) * 0.006, sin(a) * 0.03))
+		_tube(st, ring, 0.0045, Color(0.4, 0.31, 0.16), rng)
+	st.generate_normals()
+	var m := st.commit()
+	var head: ArrayMesh = Lascar.mesh(Lascar.target("pedra_marreta"), Lascar.rock(57), 57)
+	var out := SurfaceTool.new()
+	out.begin(Mesh.PRIMITIVE_TRIANGLES)
+	out.append_from(m, 0, Transform3D.IDENTITY)
+	# pedra: X (comprimento) -> Z, Y (grossura) -> X, Z (largura) -> Y
+	var k := 0.24
+	out.append_from(head, 0, Transform3D(Basis(Vector3(0, 0, k), Vector3(k, 0, 0), Vector3(0, k, 0)), Vector3(0, 0.63, 0)))
+	out.generate_normals()
+	return out.commit()
+
+
 static func axe_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
