@@ -446,7 +446,7 @@ func _use() -> void:
 	if _selected < 0 or _selected >= _items.size():
 		return
 	var it: Dictionary = _items[_selected]
-	if it.id in ["machado", "cavadeira", "serra", "pa"]:
+	if it.id in ["machado", "cavadeira", "serra", "pa", "balde"]:
 		_equip()
 		return
 	if it.id == "pedra" and _game:

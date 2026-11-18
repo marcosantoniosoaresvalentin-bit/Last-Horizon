@@ -654,6 +654,9 @@ class ChopPose extends SkeletonModifier3D:
 			var tgt: Vector3
 			if with_tool and side == "Left":
 				tgt = eye + cf * 0.26 - cu * 0.66 - cr * 0.24          # a esquerda descansa embaixo
+			elif with_tool and tool == "balde":
+				# balde: braço quase solto, a mão segurando a alça na frente do quadril
+				tgt = eye + fwd * 0.58 - up * 0.22 + cr * 0.26 + bob * 0.5
 			elif with_tool:
 				tgt = eye + cf * 0.4 - cu * 0.16 + cr * 0.19 + bob
 			else:
@@ -688,6 +691,17 @@ class ChopPose extends SkeletonModifier3D:
 		var fa := _bone("RightForeArm")
 		var hp := sk.get_bone_global_pose(hb)
 		var arm_dir := (hp.origin - sk.get_bone_global_pose(fa).origin).normalized()
+		if tool == "balde":
+			# a alça passa por dentro da mão (de lado) e o balde fica pendurado, em pé
+			var gb := _grip_rotate("Right", sk, right, arm_dir)
+			if gb.is_empty():
+				return
+			hp.basis = gb.basis
+			sk.set_bone_global_pose(hb, hp)
+			var grip: Vector3 = hp.origin + gb.offset
+			var bb := Basis(right, up, -fwd)
+			_set_tool(sk, Transform3D(bb, grip - up * 0.595))
+			return
 		var want: Vector3
 		if tool in ["pa", "cavadeira"]:
 			want = cf * 0.55 - cu * 0.8 - cr * 0.1

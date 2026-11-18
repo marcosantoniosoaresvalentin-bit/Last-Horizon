@@ -1,9 +1,9 @@
 {
-  "version": 80,
-  "file": "update_80.zip",
-  "size": 4287364,
-  "sha256": "22e57da604ec27965144895e24e03b1fed6c077310c0dc1943cec9b5830d6a3b",
+  "version": 81,
+  "file": "update_81.zip",
+  "size": 4289647,
+  "sha256": "b319935d93457ed68280c25e171c648b1cd65fe38c991f60d5b80a7016a7ee63",
   "min_build": 1,
-  "notes": "Primeira pessoa: câmera presa nos olhos da cabeça (sem atraso); olhando para baixo andando não aparece mais a cabeça, cabelo ou barba",
+  "notes": "Argila só com a pá; balde na mão pela alça (Usar na mochila), Pôr no chão, encher com terra ou argila despejando a pá; o balde guarda o que tem dentro",
   "date": "2026-11-18"
 }

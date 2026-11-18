@@ -51,7 +51,7 @@ const ITENS := {
 	"calcopirita": {"nome": "Calcopirita", "kg": 1.6, "cat": "Recursos",
 		"desc": "Minério de cobre amarelo-latão, brilhante, das partes fundas dos veios (onde a água da chuva não chegou). Precisa ser torrado e fundido."},
 	"balde": {"nome": "Balde de Madeira", "kg": 2.8, "cat": "Equipamentos",
-		"desc": "Ripas em volta de um fundo redondo, apertadas com aros de cipó. Alça de cipó trançado.", "colocar": true},
+		"desc": "Ripas em volta de um fundo redondo, apertadas com aros de cipó. Alça de cipó trançado. USAR: segura pela alça. Com ele no chão, a pá despeja terra ou argila dentro (cabe uns 24 litros)."},
 }
 
 const CATEGORIAS := ["Tudo", "Armas", "Munição", "Equipamentos", "Ferramentas", "Construção", "Recursos", "Itens Médicos", "Diversos"]

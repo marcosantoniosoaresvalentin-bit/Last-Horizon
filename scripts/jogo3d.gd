@@ -391,6 +391,13 @@ var _work_menu: Control = null
 var _work := {}                   # trabalho escolhido: {i (tora apoiada), modo, e (ponta), stage, fix}
 var _pa_full := false            # a pá está cheia de terra (precisa jogar fora)
 var _pa_dirt: Node3D = null       # a terra em cima da pá
+var _pa_tipo := "terra"           # o que está na pá: "terra" ou "argila"
+var _balde_carga := {}            # o que tem no balde da mochila/mão: {tipo, vol (m³)}
+var _balde_fill: MeshInstance3D = null
+const BALDE_VOL := 0.024          # cabe uns 24 litros
+const BALDE_KG := 25.0            # mais que isso não dá para carregar pela alça
+const PAZADA := 0.006             # uma pazada: uns 6 litros
+const DENS := {"terra": 1500.0, "argila": 1800.0}
 var _climb := {}                  # saindo da cova funda: {t, dur, from, to}
 var _sawing := false              # serrando a rodela (vai e vem sozinho até terminar ou parar)
 var _saw_t := 0.0
@@ -1333,7 +1340,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "pa_cheia": _pa_full, "dur": _dur, "rodelas": _rodelas}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1375,6 +1382,9 @@ func _load_player() -> void:
 			if g is Dictionary and Itens.ITENS.has(str(g.get("id", ""))):
 				_add_ground(str(g.id), int(g.get("qtd", 1)), float(g.get("x", 0.0)), float(g.get("z", 0.0)), float(g.get("r", 0.0)), g.get("dur", []))
 	_pa_full = bool(d.get("pa_cheia", false))
+	_pa_tipo = str(d.get("pa_tipo", "terra"))
+	var bc = d.get("balde_carga", {})
+	_balde_carga = bc if bc is Dictionary and bc.has("vol") else {}
 	equip(str(d.get("mao", "")))
 	var tora = d.get("tora", {})
 	if tora is Dictionary and tora.has("v"):
@@ -1409,7 +1419,7 @@ func _bag_total() -> float:
 		t += Itens.kg(id) * int(_itens[id])
 	for pf in _rodelas_fix():
 		t += Balde.rodela_kg(pf, Apoios.SLICE)
-	return t
+	return t       # (o que vai dentro do balde é levado na mão, pela alça)
 
 
 ## Largura da rodela (o maior diâmetro, m).
@@ -1593,6 +1603,11 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 		mi.mesh = Balde.mesh()
 		mi.material_override = Balde.material()
 		node.add_child(mi)
+		if dur.size() == 2:
+			var fm := MeshInstance3D.new()
+			fm.name = "carga"
+			node.add_child(fm)
+			_update_balde_fill(fm, {"tipo": str(dur[0]), "vol": float(dur[1])})
 	elif id in ["machado", "cavadeira", "serra"]:
 		var mi := MeshInstance3D.new()
 		mi.mesh = Corte.axe_mesh() if id == "machado" else (Corte.digger_mesh() if id == "cavadeira" else Corte.saw_mesh())
@@ -1658,6 +1673,18 @@ func _pick_ground_now(i: int) -> void:
 		_show_toast("+1 rodela (Ø %d cm)" % int(round(_rodela_diam(pf) * 100.0)))
 		_act_check = 0.0
 		return
+	if str(g.id) == "balde":
+		var c := _carga_of(g)
+		var ckg := float(c.get("vol", 0.0)) * float(DENS.get(c.get("tipo", "terra"), 1500.0))
+		if not c.is_empty() and not _balde_carga.is_empty() and item_qtd("balde") > 0:
+			_show_toast("Você já está com um balde cheio. Esvazie ou largue ele antes.")
+			return
+		if _bag_total() + Itens.kg("balde") > BAG_MAX + 0.0001:
+			_show_toast("A mochila está cheia (%d kg)." % int(BAG_MAX))
+			return
+		if not c.is_empty():
+			_balde_carga = c
+			_show_toast("Balde com %s kg de %s" % [_kg(ckg), c.tipo])
 	var kg := Itens.kg(str(g.id))
 	var fit := int(g.qtd)
 	if kg > 0.0:
@@ -1745,7 +1772,7 @@ func equip(id: String) -> void:
 	if _sawing:
 		_stop_saw()
 	if _chop_pose:
-		_chop_pose.holding = _mao in ["machado", "cavadeira", "serra", "pedra", "pa"]
+		_chop_pose.holding = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde"]
 		_chop_pose.tool = _mao if _mao != "" else "machado"
 		if _mao == "cavadeira" or _mao == "pa":
 			_chop_pose.grip_low = 0.04
@@ -1769,8 +1796,16 @@ func equip(id: String) -> void:
 			mi.mesh = Corte.saw_mesh()
 		elif _mao == "pedra":
 			mi.mesh = Lascar.cobble_mesh(77, 0.1)      # pedra de bater, na palma da mão
+		elif _mao == "balde":
+			mi.mesh = Balde.mesh()                     # pendurado pela alça
 		else:
 			mi.mesh = Corte.axe_mesh()
+		mi.material_override = Balde.material() if _mao == "balde" else Corte.axe_material()
+		if _balde_fill == null:
+			_balde_fill = MeshInstance3D.new()
+			mi.add_child(_balde_fill)
+		_balde_fill.visible = _mao == "balde"
+		_update_balde_fill(_balde_fill, _balde_carga)
 		if _pa_dirt == null:
 			var dm := MeshInstance3D.new()
 			dm.mesh = Corte.pa_dirt_mesh()
@@ -1851,7 +1886,8 @@ func _update_dig(delta: float) -> void:
 	_dig_check = 0.3
 	var cell := Vector2i(int(_player.position.x / CELL), int(_player.position.z / CELL))
 	var d: Dictionary = sim.soil_data(cell)
-	var ok: bool = not d.is_empty() and d.clay >= 0.35 and _player_depth() < 0.8
+	# argila agora só com a pá (ver _pa_hit): com a mão não sai mais
+	var ok := false
 	_dig_btn.visible = ok
 	if ok:
 		_dig_btn.text = "Pegar argila"
@@ -1953,7 +1989,15 @@ func _update_chop(delta: float) -> void:
 		_chop_btn.text = "Cavar"
 	if _mao == "pa" and not _air and _carry.is_empty() and _crouch_job == "" and _climb.is_empty() and _player_depth() < 0.3:
 		_chop_btn.visible = true
-		_chop_btn.text = "Jogar terra" if _pa_full else "Cavar"
+		if not _pa_full:
+			_chop_btn.text = "Cavar"
+		elif _bucket_ahead() >= 0:
+			_chop_btn.text = "Pôr no balde"
+		else:
+			_chop_btn.text = "Jogar " + ("argila" if _pa_tipo == "argila" else "terra")
+	if _mao == "balde" and not _air and _carry.is_empty() and _crouch_job == "":
+		_chop_btn.visible = true
+		_chop_btn.text = "Pôr no chão"
 	if not _work.is_empty() and str(_work.get("stage", "")) == "pronto":
 		var sp: Vector3 = _apoios.slice_point(int(_work.i), int(_work.e)) if int(_work.i) < _apoios.rested.size() else Vector3(1e9, 0, 1e9)
 		if Vector2(sp.x - _player.position.x, sp.z - _player.position.z).length() > 3.0:
@@ -3620,6 +3664,15 @@ func _pa_hit() -> void:
 		if v <= 0.0001:
 			_show_toast("Não dá para cavar mais fundo aqui.")
 			return
+		# chão de argila (a jazida da beira das lagoas): a pá sai cheia de argila
+		var cell := Vector2i(int(at.x / CELL), int(at.z / CELL))
+		var sd: Dictionary = sim.soil_data(cell)
+		var depth_now := surface_at(at.x, at.z) - y_old
+		_pa_tipo = "argila" if (not sd.is_empty() and float(sd.clay) >= 0.35 and depth_now < 1.2) else "terra"
+		if _pa_tipo == "argila":
+			sim.dig(cell, PAZADA * DENS.argila * 0.004)     # gasta um pouquinho da argila da beira
+		if _pa_dirt:
+			_pa_dirt.material_override = _clay_mat() if _pa_tipo == "argila" else Corte.axe_material()
 		if _minerios:
 			# o que veio junto com a terra (só debaixo da terra, onde a geologia deixou)
 			var got: Dictionary = _minerios.extract(at, y_old, _escav.ground_at(at.x, at.z))
@@ -3636,6 +3689,10 @@ func _pa_hit() -> void:
 		_pa_full = true
 		_pa_vol = v
 	else:
+		var bi := _bucket_ahead()
+		if bi >= 0:
+			_fill_bucket(bi)
+			return
 		var to := _front(1.05)
 		_escav.dump(to, _pa_vol)
 		_dirt(to)
@@ -3644,6 +3701,122 @@ func _pa_hit() -> void:
 		_pa_vol = 0.0
 	if _pa_dirt:
 		_pa_dirt.visible = _pa_full
+
+
+# ================== BALDE ==================
+
+## Balde no chão bem na frente (onde a pá vai despejar), ou -1.
+func _bucket_ahead() -> int:
+	var to := _front(1.0)
+	var best := -1
+	var bd := 0.75
+	for i in _chao.size():
+		var g: Dictionary = _chao[i]
+		if str(g.id) != "balde":
+			continue
+		var d := Vector2(float(g.x) - to.x, float(g.z) - to.z).length()
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+static func _carga_of(g: Dictionary) -> Dictionary:
+	var dl: Array = g.get("dur", [])
+	if dl.size() == 2 and float(dl[1]) > 0.0:
+		return {"tipo": str(dl[0]), "vol": float(dl[1])}
+	return {}
+
+
+## Despeja a pá no balde do chão (terra com terra, argila com argila).
+func _fill_bucket(i: int) -> void:
+	var g: Dictionary = _chao[i]
+	var c := _carga_of(g)
+	if not c.is_empty() and str(c.tipo) != _pa_tipo:
+		_show_toast("O balde está com %s. Não misture: esvazie ou use outro balde." % c.tipo)
+		return
+	var vol := float(c.get("vol", 0.0))
+	var cap := minf(BALDE_VOL, BALDE_KG / float(DENS[_pa_tipo]))
+	if vol >= cap - 0.0005:
+		_show_toast("O balde já está cheio (uns %d kg). Mais que isso não dá para carregar." % int(BALDE_KG))
+		return
+	var add := minf(PAZADA, cap - vol)
+	vol += add
+	g.dur = [_pa_tipo, vol]
+	var n: Node3D = g.node
+	var fm: MeshInstance3D = n.get_node_or_null("carga")
+	if fm == null:
+		fm = MeshInstance3D.new()
+		fm.name = "carga"
+		n.add_child(fm)
+	_update_balde_fill(fm, {"tipo": _pa_tipo, "vol": vol})
+	Sons.play_at(self, "cavar", n.global_position + Vector3.UP * 0.3, -6.0, 1.3)
+	_pa_full = false
+	_pa_vol = 0.0
+	if _pa_dirt:
+		_pa_dirt.visible = false
+	var kg := vol * float(DENS[_pa_tipo])
+	_show_toast("Balde com %s: %d%% (%s kg)" % [_pa_tipo, int(vol / BALDE_VOL * 100.0), _kg(kg)])
+	_act_check = 0.0
+
+
+## A terra ou argila dentro do balde (um disco na altura do nível, com uns torrões).
+func _update_balde_fill(mi: MeshInstance3D, c: Dictionary) -> void:
+	if mi == null:
+		return
+	if c.is_empty() or float(c.get("vol", 0.0)) <= 0.0:
+		mi.mesh = null
+		return
+	var f := clampf(float(c.vol) / BALDE_VOL, 0.0, 1.0)
+	var y := 0.05 + f * (Balde.H - 0.07)
+	var r := lerpf(Balde.R_BOT, Balde.R_TOP, y / Balde.H) - 0.012
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var col := Color(0.55, 0.3, 0.2) if str(c.tipo) == "argila" else Color(0.3, 0.21, 0.13)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 91
+	var n := 18
+	var top := y + 0.02 * f
+	for k in n:
+		var a0 := TAU * k / n
+		var a1 := TAU * (k + 1) / n
+		var h0 := y + rng.randf_range(-0.006, 0.006)
+		var p0 := Vector3(cos(a0) * r, h0, sin(a0) * r)
+		var p1 := Vector3(cos(a1) * r, h0, sin(a1) * r)
+		var cc := col.darkened(rng.randf_range(0.0, 0.15))
+		for v in [Vector3(0, top, 0), p1, p0]:
+			st.set_color(cc)
+			st.add_vertex(v)
+	st.generate_normals()
+	mi.mesh = st.commit()
+	mi.material_override = Balde.material()
+
+
+func _clay_mat() -> Material:
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.albedo_color = Color(1.9, 1.15, 1.0)        # a terra da pá fica avermelhada (argila)
+	m.roughness = 0.6 
+	return m
+
+
+## Põe o balde da mão no chão, na frente (com o que tiver dentro).
+func _put_bucket_down() -> void:
+	if item_qtd("balde") <= 0:
+		equip("")
+		return
+	var to := _front(0.8)
+	var dur := []
+	if not _balde_carga.is_empty():
+		dur = [str(_balde_carga.tipo), float(_balde_carga.vol)]
+	remove_item("balde", 1)
+	_add_ground("balde", 1, to.x, to.z, 0.0, dur)
+	var g: Dictionary = _chao[_chao.size() - 1]
+	(g.node as Node3D).rotation.y = _face
+	_balde_carga = {}
+	equip("")
+	Sons.play_at(self, "baque", to, -14.0, 1.4)
+	_update_inventory()
 
 
 ## Chão de verdade (com o que a pá cavou ou aterrou).
@@ -3678,6 +3851,9 @@ func _jump() -> void:
 
 ## Toque no botão "Cortar": uma machadada (se já está no meio de uma, guarda a próxima).
 func _start_chop() -> void:
+	if _mao == "balde":
+		_put_bucket_down()
+		return
 	if _mao == "serra":
 		# serra: um toque começa a serrar (vai e vem sozinho), outro toque para
 		if _sawing:
