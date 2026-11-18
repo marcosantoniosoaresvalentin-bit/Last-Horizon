@@ -1,9 +1,9 @@
 {
-  "version": 88,
-  "file": "update_88.zip",
-  "size": 4306019,
-  "sha256": "974989187c42692a2f01819861471a8b1de6a0455c408cee0813be4301cb87c1",
+  "version": 89,
+  "file": "update_89.zip",
+  "size": 4314631,
+  "sha256": "04a65ec3e9fcb99f955e44ac1969d8562a448792fac9ce032b6cd151edffc781",
   "min_build": 1,
-  "notes": "Tora rachada vira pedaço de verdade: pegar no ombro, apoiar nas forquilhas, fincar e rachar de novo quantas vezes quiser (vai virando tábua); face rachada com rachaduras e farpas; cabo da marreta aparece",
+  "notes": "Multiplayer na mesma Wi-Fi (abrir mundo, lista de mundos com dono e jogadores, entrar e ver os outros com o nome em cima); primeira pessoa: ao abaixar e fazer coisas, a cabeça e a barriga não tampam mais a tela",
   "date": "2026-11-18"
 }

@@ -614,6 +614,12 @@ class ChopPose extends SkeletonModifier3D:
 		return lerpf(-9.0, -25.0, smoothstep(0.0, 1.0, (p - 0.65) / 0.35))
 
 	func _process_modification() -> void:
+		_pose_all()
+		var sk2 := get_skeleton()
+		if sk2 and hide_head:
+			_hide_head(sk2)        # primeira pessoa fazendo algo: a cabeça não entra na tela
+
+	func _pose_all() -> void:
 		var sk := get_skeleton()
 		if sk == null or player == null:
 			return

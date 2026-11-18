@@ -286,6 +286,8 @@ var _skel: Skeleton3D = null
 var _head_bone := -1
 var _eye_smooth := Vector3.ZERO
 var _head_axes := []
+var _body_mats: Array = []        # materiais do corpo (some perto da câmera)
+var _busy_f := 0.0                # 0 andando livre, 1 abaixado fazendo algo
 var _bob_t := 0.0
 var _anim: AnimationPlayer
 var _anim_now := ""
@@ -1208,6 +1210,7 @@ func _build_player() -> void:
 					nm.distance_fade_min_distance = 0.27
 					nm.distance_fade_max_distance = 0.34
 					m3.set_surface_override_material(si, nm)
+					_body_mats.append(nm)
 	# machado na mão e golpe feito em código (por cima da animação)
 	var axe := MeshInstance3D.new()
 	axe.mesh = Corte.axe_mesh()
@@ -4549,7 +4552,22 @@ func _fp_camera(delta: float, moved: float) -> void:
 		var hf: Vector3 = (hb * _head_axes[0]).normalized()
 		var hu: Vector3 = (hb * _head_axes[1]).normalized()
 		eye = hg.origin + hu * 0.09 + hf * 0.15
+		# abaixado fazendo algo: os olhos ficam na frente do rosto (no plano), assim o
+		# peito e a barriga ficam para trás da câmera
+		if _busy_f > 0.01:
+			var flat := Vector3(-sin(_yaw), 0, -cos(_yaw))
+			eye = eye.lerp(hg.origin + Vector3.UP * 0.1 + flat * 0.24, _busy_f)
 	_eye_smooth = eye
+	# o que está acontecendo: abaixado pegando/pondo, cavando, modelando...
+	var busy: bool = _crouch_job != "" or _digging or (_chop_pose != null and _chop_pose.crouch > 0.05)
+	_busy_f = move_toward(_busy_f, 1.0 if busy else 0.0, delta * 4.0)
+	if _chop_pose:
+		_chop_pose.hide_head = _busy_f > 0.02 or not _knap.is_empty() or not _vine.is_empty() or _chopping or _sawing
+	for m in _body_mats:
+		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, _busy_f)
+		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, _busy_f)
+	if _crouch_job != "":
+		_pitch = lerpf(_pitch, 0.95, minf(1.0, delta * 4.0))     # olha para onde as mãos vão
 	# trabalhando, o olhar desce para onde as mãos estão (o golpe, a serra, a pá)
 	var work := -1.0
 	if _sawing:
