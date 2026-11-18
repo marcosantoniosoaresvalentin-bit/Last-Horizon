@@ -1,9 +1,9 @@
 {
-  "version": 93,
-  "file": "update_93.zip",
-  "size": 4316159,
-  "sha256": "ae683fd980670cc9e66f1958668b70a682519c5fd51b140f7c6c6b8dcf2d8d53",
+  "version": 94,
+  "file": "update_94.zip",
+  "size": 4316280,
+  "sha256": "f5a90515ab1d8454fcfaf45a050e5ac87b93e352e666398e1322bf014051c266",
   "min_build": 1,
-  "notes": "Mãos fechando de verdade em volta do cabo de todas as ferramentas; serra com os dentes para baixo",
+  "notes": "Primeira pessoa: com ferramenta na mão (e o balde) os braços não aparecem; só a ferramenta, segura por baixo da tela",
   "date": "2026-11-18"
 }

@@ -575,6 +575,7 @@ class ChopPose extends SkeletonModifier3D:
 	var reach_grip := false       # mão fechada (segurando)
 	var hide_head := false        # câmera nos olhos: a cabeça some para não tapar a visão
 	var pour := 0.0               # despejando o balde (0 a 1: o quanto ele virou)
+	var hide_arms := false        # primeira pessoa com ferramenta: os braços somem (só a ferramenta aparece)
 	var fp := false               # primeira pessoa: os braços ficam na frente da câmera
 	var fp_eye := Vector3.ZERO    # onde está a câmera (no mundo)
 	var fp_basis := Basis()       # para onde a câmera olha (no mundo)
@@ -618,6 +619,13 @@ class ChopPose extends SkeletonModifier3D:
 		var sk2 := get_skeleton()
 		if sk2 and hide_head:
 			_hide_head(sk2)        # primeira pessoa fazendo algo: a cabeça não entra na tela
+		if sk2 and hide_arms:
+			for n in ["RightArm", "LeftArm"]:
+				var b := _bone(n)
+				if b >= 0:
+					var hp := sk2.get_bone_global_pose(b)
+					hp.basis = hp.basis.orthonormalized().scaled(Vector3(0.001, 0.001, 0.001))
+					sk2.set_bone_global_pose(b, hp)
 
 	func _pose_all() -> void:
 		var sk := get_skeleton()
@@ -706,7 +714,7 @@ class ChopPose extends SkeletonModifier3D:
 				tgt = eye + cf * 0.26 - cu * 0.66 - cr * 0.24          # a esquerda descansa embaixo
 			elif with_tool and tool == "balde":
 				# balde: braço quase solto, a mão segurando a alça na frente do quadril
-				tgt = eye + fwd * (0.58 + 0.08 * pour) - up * (0.22 - 0.1 * pour) + cr * 0.26 + bob * 0.5
+				tgt = eye + cf * (0.5 + 0.1 * pour) - cu * (0.2 - 0.1 * pour) + cr * 0.24 + bob * 0.5
 			elif with_tool and tool == "marreta":
 				tgt = eye + cf * 0.42 - cu * 0.62 + cr * 0.28 + bob     # marreta pesada: braço baixo
 			elif with_tool:
@@ -798,12 +806,11 @@ class ChopPose extends SkeletonModifier3D:
 			return sh + v.limit_length(0.5)
 		if tool in ["pa", "cavadeira"]:
 			# cabo: do lado direito do quadril, cruzando para a frente e para a esquerda, descendo
-			var d := (cf * 0.8 - cu * 0.38 - cr * 0.38).normalized()
-			var R: Vector3 = reach.call(shR, eye + cf * 0.4 - cu * 0.12 + cr * 0.14 + bob)
+			var d := (cf * 0.85 - cu * 0.18 - cr * 0.42).normalized()
+			var R: Vector3 = eye + cf * 0.4 - cu * 0.26 + cr * 0.2 + bob      # a pega fica logo abaixo da tela
 			var base := R - d * 0.18                      # ponta do cabo (o pegador) logo atrás da mão direita
 			var L: Vector3 = base + d * 0.5               # a esquerda mais para a frente no cabo
-			if L.distance_to(shL) > 0.52:
-				L = base + d * maxf(0.3, 0.5 - (L.distance_to(shL) - 0.52))
+
 			var fr := _orth(-up * 0.6 + right * 0.4, d)   # dedos da direita por cima do cabo
 			var fl := _orth(-up * 0.7 - right * 0.3, d)   # dedos da esquerda por baixo/de lado
 			# os dedos fecham antes (a mão é medida já fechada, para o cabo passar dentro do punho)
@@ -814,20 +821,20 @@ class ChopPose extends SkeletonModifier3D:
 			return
 		# uma mão: a direita segura, a esquerda solta do lado
 		var d2: Vector3
-		var R2: Vector3 = eye + cf * 0.4 - cu * 0.12 + cr * 0.2 + bob
+		var R2: Vector3 = eye + cf * 0.4 - cu * 0.28 + cr * 0.22 + bob      # a mão (escondida) logo abaixo da tela
 		match tool:
 			"marreta":
 				d2 = (cu * 0.8 + cf * 0.5 - cr * 0.1).normalized()
-				R2 = eye + cf * 0.42 - cu * 0.2 + cr * 0.26 + bob
+				R2 = eye + cf * 0.42 - cu * 0.29 + cr * 0.26 + bob
 			"serra":
 				d2 = (cf * 1.0 - cr * 0.3 + cu * 0.05).normalized()
+				R2 = eye + cf * 0.4 - cu * 0.21 + cr * 0.2 + bob
 			"pedra":
 				d2 = (cr * 0.9 + cf * 0.2).normalized()
-				R2 = eye + cf * 0.38 - cu * 0.1 + cr * 0.19 + bob
+				R2 = eye + cf * 0.42 - cu * 0.2 + cr * 0.2 + bob
 			_:
 				d2 = (cu * 0.75 + cf * 0.5 - cr * 0.15).normalized()     # machado em pé, a cabeça para cima e para a frente
-				R2 = eye + cf * 0.42 - cu * 0.17 + cr * 0.24 + bob
-		R2 = reach.call(shR, R2)
+				R2 = eye + cf * 0.42 - cu * 0.29 + cr * 0.24 + bob
 		var fr2 := _orth(-cr * 0.5 - cf_flat * 0.5, d2)
 		_hand_on(sk, "Right", R2, d2, fr2, up, right)      # (a direita já está fechada)
 		var edge := _orth(cf_flat if tool == "machado" else (-up if tool == "serra" else -cr), d2)    # a serra com os dentes para baixo

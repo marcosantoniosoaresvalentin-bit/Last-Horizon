@@ -4580,6 +4580,8 @@ func _fp_camera(delta: float, moved: float) -> void:
 	_busy_f = move_toward(_busy_f, 1.0 if busy else 0.0, delta * 4.0)
 	if _chop_pose:
 		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
+		# com ferramenta na mão os braços não aparecem (só a ferramenta, segura por baixo da tela)
+		_chop_pose.hide_arms = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta"] and _vine.is_empty()
 	for m in _body_mats:
 		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, _busy_f)
 		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, _busy_f)
