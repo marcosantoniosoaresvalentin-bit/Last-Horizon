@@ -31,6 +31,7 @@ const Araras := preload("res://scripts/world/araras.gd")
 const Minerios := preload("res://scripts/world/minerios.gd")
 const Cupins := preload("res://scripts/world/cupins.gd")
 const Tamanduas := preload("res://scripts/world/tamanduas.gd")
+const Construcao := preload("res://scripts/world/construcao.gd")
 const MINERAIS_ITENS := ["hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita", "lasca_silex"]
 const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
@@ -383,6 +384,13 @@ var _araras: Node3D = null
 var _minerios: Node = null
 var _cupins: Node3D = null
 var _tamanduas: Node3D = null
+var _constr: Node3D = null
+var _bld := {}                     # modo construção: {yaw, tilt, roll, ghost, ok, c, b}
+var _bld_btn: Button
+var _bld_t := 0.0
+var _bld_btns: Array = []
+var _bld_cross: Label
+const BLD_TILTS := [0.0, 30.0, 45.0, 60.0, 90.0]
 var _escav: Node3D = null
 var _escav_steps := 0
 var _escav_timer := 0.0
@@ -638,6 +646,21 @@ func _build_hud() -> void:
 	_place_btn = mk.call("Colocar", -290, -146, _place_press)
 	_rot_btn = mk.call("Girar", -150, -286, func(): _place_rot += PI * 0.25)
 	_store_btn = mk.call("Guardar", -290, -286, stop_placing)
+
+	# construção
+	_bld_btn = mk.call("Construir", -430, -286, _bld_start)
+	_bld_btns = [mk.call("Colocar", -290, -146, _bld_place), mk.call("Girar", -150, -286, func(): _bld_turn(1)),
+		mk.call("Inclinar", -290, -286, _bld_tilt), mk.call("Virar", -150, -426, _bld_flip),
+		mk.call("Sair", -290, -426, _bld_stop), mk.call("Girar ←", -430, -286, func(): _bld_turn(-1))]
+	_bld_cross = Label.new()
+	_bld_cross.text = "+"
+	_bld_cross.add_theme_font_size_override("font_size", 40)
+	_bld_cross.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
+	_bld_cross.set_anchors_preset(Control.PRESET_CENTER)
+	_bld_cross.offset_left = -12
+	_bld_cross.offset_top = -30
+	_bld_cross.visible = false
+	_hud.add_child(_bld_cross)
 
 	_plant_btn = Icones.IconButton.new()
 	_plant_btn.text = "Fincar tora"
@@ -928,6 +951,9 @@ func _on_world_ready() -> void:
 	_escav.tint_fn = _minerios.tint_at
 	_convert_bandas()
 	_convert_tabuas()
+	_constr = Construcao.new()
+	add_child(_constr)
+	_constr.build(self, _arvores, _buracos, Mundos.dir(_world_id) + "/construcao.json" if _world_id != "" else "")
 	_cupins = Cupins.new()
 	add_child(_cupins)
 	_cupins.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/cupins.json" if _world_id != "" else "")
@@ -1364,6 +1390,8 @@ func _save_world() -> void:
 		_cupins.save(Mundos.dir(_world_id) + "/cupins.json")
 	if _tamanduas:
 		_tamanduas.save(Mundos.dir(_world_id) + "/tamanduas.json")
+	if _constr:
+		_constr.save(Mundos.dir(_world_id) + "/construcao.json")
 	if _buracos:
 		_buracos.save(Mundos.dir(_world_id) + "/buracos.json")
 	if _galhos:
@@ -2056,6 +2084,12 @@ func _update_chop(delta: float) -> void:
 		return
 	if not _split.is_empty():
 		return          # rachando a tora: os botões normais somem
+	if not _bld.is_empty():
+		_bld_t -= delta
+		if _bld_t <= 0.0:
+			_bld_t = 0.08          # procura o lugar umas 12 vezes por segundo
+			_bld_update()
+		return
 	_act_check -= delta
 	if _act_check > 0.0:
 		return
@@ -2125,6 +2159,9 @@ func _update_ctx_btn() -> void:
 		_ctx_action = "veneno"
 		var pt := _poison_target()
 		_ctx_btn.text = "Envenenar madeira" + (" (com cupim)" if _cupins.dmg_of(pt) > 0.02 else "")
+	elif _constr and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _aimed_piece().is_empty():
+		_ctx_action = "peca"
+		_ctx_btn.text = "Pegar peça"
 	elif _crouch_job == "" and not _chopping and not _air and _galhos != null and _apoios != null:
 		if not _carry.is_empty():
 			if not _apoios.pair_for(_player.position, _arvores.free_log_length(_carry)).is_empty():
@@ -2157,6 +2194,17 @@ func _ctx_press() -> void:
 				var left := add_item("raiz_timbo", n)
 				_show_toast("+%d raiz de timbó%s. 3 raízes fazem o veneno (craft)." % [n - left, "" if left == 0 else " (mochila cheia)"])
 				_update_inventory()
+				_act_check = 0.0
+			return
+		"peca":
+			var pc := _aimed_piece()
+			if not pc.is_empty():
+				if _constr.carrying_others(pc):
+					_show_toast("Tem outra peça apoiada em cima dessa. Tire ela antes.")
+				elif _arvores.free_log_kg(pc.log) > Arvores.CARRY_MAX_KG:
+					_show_toast("Pesada demais para carregar.")
+				else:
+					_hold_log(_constr.remove_piece(pc))
 				_act_check = 0.0
 			return
 		"andiroba":
@@ -2259,7 +2307,9 @@ func _update_log_btn() -> void:
 	_vine_btn.visible = _cipos != null and _carry.is_empty() and _crouch_job == "" and not _chopping and _vine.is_empty() and _knap.is_empty() and not _cipos.harvest_target(_player.position, 1.6).is_empty()
 	if _crouch_job != "" or _chopping or _air:
 		_log_btn.visible = false
+		_bld_btn.visible = false
 		return
+	_bld_btn.visible = not _carry.is_empty()
 	if not _carry.is_empty():
 		_log_btn.visible = true
 		_log_btn.text = "Largar tora"
@@ -4570,6 +4620,8 @@ func _move_player(delta: float) -> void:
 		p = _bacabas.push_out(p)          # nem o tronco das palmeiras
 	if _apoios:
 		p = _apoios.push_out(p)           # nem as forquilhas e a tora em cima delas
+	if _constr:
+		p = _constr.push_out(p, feet)     # nem as paredes e vigas da construção
 	if _escav and not _air:
 		# barranco cavado: parede alta não dá para subir andando
 		var gnew: float = ground_at(p.x, p.z)
@@ -4588,6 +4640,10 @@ func _move_player(delta: float) -> void:
 		var sup: float = _arvores.support_y(p.x, p.z)
 		if sup > ground and feet >= sup - 0.2:
 			ground = sup
+	if _constr:
+		var sup2: float = _constr.support_y(p.x, p.z, feet)
+		if sup2 > ground and feet >= sup2 - 0.2:
+			ground = sup2                 # andando no assoalho
 	if _air:
 		_vy -= 13.0 * delta
 		p.y = feet + _vy * delta
@@ -6154,3 +6210,139 @@ func _poison_target() -> Dictionary:
 	if t.is_empty() or _cupins._treated(t, _cupins.last_day):
 		return {}
 	return t
+
+
+# ================== CONSTRUÇÃO ==================
+# Com uma madeira no ombro (tora, meia tora, tábua): "Construir" mostra a peça
+# fantasma onde o olho mira (verde: dá para pôr; vermelho: não dá). Girar, Inclinar
+# (deitada, 30, 45, 60 graus, em pé) e Virar (tábua deitada ou de lado).
+
+func _aimed_piece() -> Dictionary:
+	if _constr == null or _cam == null:
+		return {}
+	var o: Vector3 = _cam.global_position
+	var d: Vector3 = -_cam.global_transform.basis.z
+	return _constr.aimed_piece(o, d, 2.6)
+
+
+func _bld_start() -> void:
+	if _carry.is_empty() or _constr == null:
+		return
+	var ghost: Node3D = _arvores.free_log_node(_carry)
+	add_child(ghost)
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(0.2, 1.0, 0.3, 0.45)
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for mi in ghost.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).material_override = mat
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var yaw := snappedf(_face, PI / 12.0)
+	_bld = {"yaw": yaw, "tilt": 0, "roll": 0, "ghost": ghost, "mat": mat, "ok": false, "c": Vector3.ZERO, "b": Basis()}
+	if _carry_node:
+		_carry_node.visible = false
+	_bld_btn.visible = false
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn]:
+		(b as Control).visible = false
+	for b in _bld_btns:
+		(b as Control).visible = true
+	_bld_cross.visible = true
+	_show_toast("Mire onde quer pôr a peça. Verde: dá para colocar.")
+
+
+func _bld_stop() -> void:
+	if _bld.is_empty():
+		return
+	(_bld.ghost as Node3D).queue_free()
+	_bld = {}
+	if _carry_node:
+		_carry_node.visible = true
+	for b in _bld_btns:
+		(b as Control).visible = false
+	_bld_cross.visible = false
+	_act_check = 0.0
+
+
+func _bld_turn(s: int) -> void:
+	if not _bld.is_empty():
+		_bld.yaw = float(_bld.yaw) + s * PI / 12.0       # 15 graus
+
+
+func _bld_tilt() -> void:
+	if not _bld.is_empty():
+		_bld.tilt = (int(_bld.tilt) + 1) % BLD_TILTS.size()
+
+
+func _bld_flip() -> void:
+	if not _bld.is_empty():
+		_bld.roll = (int(_bld.roll) + 1) % 2
+
+
+func _bld_basis() -> Basis:
+	var yaw := float(_bld.yaw)
+	var tilt := deg_to_rad(float(BLD_TILTS[int(_bld.tilt)]))
+	var roll := PI * 0.5 * int(_bld.roll)
+	return Basis(Vector3.UP, yaw) * Basis(Vector3.BACK, tilt) * Basis(Vector3.RIGHT, roll)
+
+
+func _bld_update() -> void:
+	if _carry.is_empty():
+		_bld_stop()
+		return
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
+		(b as Control).visible = false
+	var o: Vector3 = _cam.global_position
+	var d: Vector3 = -_cam.global_transform.basis.z
+	var hit: Dictionary = _constr.raycast(o, d, 6.0)
+	var b := _bld_basis()
+	var ghost: Node3D = _bld.ghost
+	if hit.is_empty():
+		ghost.visible = false
+		_bld.ok = false
+		return
+	# deitada em cima de outra peça: gira junto dela (reto ou atravessado) se estiver perto
+	var hb: Dictionary = hit.box
+	if not hb.is_empty() and int(_bld.tilt) == 0:
+		var ax: Vector3 = (hb.b as Basis).x
+		var hy := atan2(-ax.z, ax.x)
+		if Vector2(ax.x, ax.z).length() > 0.5:
+			for k in 4:
+				var cand := hy + k * PI * 0.5
+				if absf(angle_difference(float(_bld.yaw), cand)) < deg_to_rad(12.0):
+					b = Basis(Vector3.UP, cand) * Basis(Vector3.RIGHT, PI * 0.5 * int(_bld.roll))
+	var r: Dictionary = _constr.find_place(_carry, b, hit)
+	b = r.b
+	# longe demais do jogador não
+	if (r.c as Vector3).distance_to(_player.position + Vector3.UP * 0.9) > 4.5:
+		r.ok = false
+		r.why = "Longe demais."
+	ghost.visible = true
+	ghost.transform = Transform3D(b, r.c)
+	_bld.ok = bool(r.ok)
+	_bld.c = r.c
+	_bld.b = b
+	_bld.why = str(r.why)
+	(_bld.mat as StandardMaterial3D).albedo_color = Color(0.2, 1.0, 0.3, 0.45) if bool(r.ok) else Color(1.0, 0.2, 0.15, 0.45)
+	(_bld_btns[0] as Control).modulate = Color(1, 1, 1, 1.0 if bool(r.ok) else 0.45)
+
+
+func _bld_place() -> void:
+	if _bld.is_empty():
+		return
+	if not bool(_bld.ok):
+		var why := str(_bld.get("why", ""))
+		_show_toast(why if why != "" else "Não dá para pôr aqui.")
+		return
+	var fl := _carry
+	var c: Vector3 = _bld.c
+	var b: Basis = _bld.b
+	_carry = {}
+	if _carry_node:
+		_carry_node.queue_free()
+	_carry_node = null
+	if _chop_pose:
+		_chop_pose.log_node = null
+	_constr.add(fl, b, c)
+	Sons.play_at(self, "baque", c, -4.0)
+	_bld_stop()

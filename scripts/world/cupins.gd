@@ -221,6 +221,10 @@ func _wood_list() -> Array:
 	var out := []
 	for fl in _arv.free_logs:
 		out.append({"p": Vector2(float(fl.pos[0]), float(fl.pos[2])), "obj": fl, "kind": "tora", "soft": 0.6 if fl.has("sec") else 0.45})
+	var co = _jogo._constr
+	if co:
+		for pc in co.pieces:
+			out.append({"p": Vector2(float(pc.p[0]), float(pc.p[2])), "obj": pc.log, "kind": "estrutura", "soft": 0.5})
 	var gal = _jogo._galhos
 	if gal:
 		for g in gal.items:
@@ -291,6 +295,14 @@ func _destroy(t: Dictionary) -> void:
 		"tora":
 			_arv.free_logs.erase(t.obj)
 			_arv._rebuild_logs()
+		"estrutura":
+			# peça da construção: some (o que estava apoiado nela fica, sem cair — por enquanto)
+			var co = _jogo._constr
+			if co:
+				for pc in co.pieces:
+					if pc.log == t.obj:
+						co.remove_piece(pc)
+						break
 		"galho":
 			var gi: int = _jogo._galhos.items.find(t.obj)
 			if gi >= 0:
