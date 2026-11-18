@@ -2840,15 +2840,19 @@ func _piece_node(fl: Dictionary) -> Node3D:
 		var r := _cil_r(fl, u)
 		return Vector3((u - 0.5) * L, v.y * r, v.x * r)
 	var n := pts.size()
+	var pcen := Vector2.ZERO
+	for p0 in pts:
+		pcen += Vector2(float(p0[0]), float(p0[1]))
+	pcen /= n
 	var arc := 0.0
 	for k in n:
 		var a := Vector2(float(pts[k][0]), float(pts[k][1]))
 		var b := Vector2(float(pts[(k + 1) % n][0]), float(pts[(k + 1) % n][1]))
 		var typ := int(pts[k][2])
-		var en := Vector2(b.y - a.y, -(b.x - a.x)).normalized()       # para fora (polígono anti-horário)
+		var en := Vector2(b.y - a.y, -(b.x - a.x)).normalized()
 		var mid := (a + b) * 0.5
-		if en.dot(mid) < 0.0 and Vector2.ZERO.distance_to(mid) > 0.0001:
-			pass
+		if en.dot(mid - pcen) < 0.0:
+			en = -en          # sempre para fora do pedaço
 		if typ == 0:
 			var seg := a.distance_to(b)
 			for i in stations:
@@ -2857,10 +2861,9 @@ func _piece_node(fl: Dictionary) -> Node3D:
 				var q := [P.call(a, u0), P.call(b, u0), P.call(b, u1), P.call(a, u1)]
 				var uv := [Vector2(arc, u0 * L), Vector2(arc + seg * 0.3, u0 * L), Vector2(arc + seg * 0.3, u1 * L), Vector2(arc, u1 * L)]
 				var nn := Vector3(0, en.y, en.x)
-				for idx in [0, 2, 1, 0, 3, 2]:
-					bark.set_normal(nn)
-					bark.set_uv(uv[idx])
-					bark.add_vertex(q[idx])
+				var out3 := nn
+				for tri in [[0, 1, 2], [0, 2, 3]]:
+					_tri_out(bark, q[tri[0]], q[tri[1]], q[tri[2]], out3, Color.WHITE, Color.WHITE, Color.WHITE, uv[tri[0]], uv[tri[1]], uv[tri[2]], true, false)
 			arc += a.distance_to(b) * 0.3
 		else:
 			# face rachada: subdivide e desloca para fora/dentro (não fica plana)
@@ -2897,9 +2900,8 @@ func _piece_node(fl: Dictionary) -> Node3D:
 							col = Color(0.1, 0.07, 0.04)
 						cs.append(col)
 						var _r := r
-					for idx in [0, 1, 2, 0, 2, 3]:
-						wood.set_color(cs[idx])
-						wood.add_vertex(q[idx])
+					for tri in [[0, 1, 2], [0, 2, 3]]:
+						_tri_out(wood, q[tri[0]], q[tri[1]], q[tri[2]], nn3, cs[tri[0]], cs[tri[1]], cs[tri[2]])
 			# farpas levantadas da face, no sentido das fibras
 			var fl_len := a.distance_to(b) * _cil_r(fl, 0.5)
 			for f in int(clampf(fl_len * 60.0, 3.0, 24.0)):
@@ -2923,12 +2925,13 @@ func _piece_node(fl: Dictionary) -> Node3D:
 		for k in n:
 			var a := Vector2(float(pts[k][0]), float(pts[k][1]))
 			var b := Vector2(float(pts[(k + 1) % n][0]), float(pts[(k + 1) % n][1]))
-			var tri := [cen, a, b] if end > 0.5 else [cen, b, a]
-			for v in tri:
+			var cols := []
+			for v in [cen, a, b]:
 				var dd: float = (v as Vector2).distance_to(ax)
-				wood.set_color(Color(0.56, 0.42, 0.28).darkened(0.1 * absf(sin(dd * 14.0))))
-				wood.add_vertex(P.call(v, end))
+				cols.append(Color(0.56, 0.42, 0.28).darkened(0.1 * absf(sin(dd * 14.0))))
+			_tri_out(wood, P.call(cen, end), P.call(a, end), P.call(b, end), Vector3(1 if end > 0.5 else -1, 0, 0), cols[0], cols[1], cols[2])
 	wood.generate_normals()
+	bark.generate_normals()
 	bark.commit(mesh)
 	if mesh.get_surface_count() > 0:
 		var age := float(last_day - int(fl.get("dia", last_day)))
@@ -2943,6 +2946,26 @@ func _piece_node(fl: Dictionary) -> Node3D:
 		mi.rotation.x = -PI * 0.5        # nas forquilhas: a face larga fica em pé
 	root.add_child(mi)
 	return root
+
+
+## Põe o triângulo com a frente para "out" (a Godot desenha só a frente).
+static func _tri_out(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, out: Vector3, ca := Color.WHITE, cb := Color.WHITE, cc := Color.WHITE, uva := Vector2.ZERO, uvb := Vector2.ZERO, uvc := Vector2.ZERO, use_uv := false, use_col := true) -> void:
+	if (c - a).cross(b - a).dot(out) < 0.0:
+		var t := b
+		b = c
+		c = t
+		var tc := cb
+		cb = cc
+		cc = tc
+		var tu := uvb
+		uvb = uvc
+		uvc = tu
+	for e in [[a, ca, uva], [b, cb, uvb], [c, cc, uvc]]:
+		if use_col:
+			st.set_color(e[1])
+		if use_uv:
+			st.set_uv(e[2])
+		st.add_vertex(e[0])
 
 
 var _pwm: StandardMaterial3D

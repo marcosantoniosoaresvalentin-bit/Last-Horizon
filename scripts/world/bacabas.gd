@@ -463,10 +463,19 @@ func _trunks_mesh(list: Array) -> ArrayMesh:
 					Vector3(x + cos(a1) * r1, gy + y1, z + sin(a1) * r1), Vector3(x + cos(a0) * r1, gy + y1, z + sin(a0) * r1)]
 				var uv := [Vector2(u0, vofs - y0 / BARK_H), Vector2(u1, vofs - y0 / BARK_H), Vector2(u1, vofs - y1 / BARK_H), Vector2(u0, vofs - y1 / BARK_H)]
 				var nn := [Vector3(cos(a0), 0, sin(a0)), Vector3(cos(a1), 0, sin(a1)), Vector3(cos(a1), 0, sin(a1)), Vector3(cos(a0), 0, sin(a0))]
-				for idx in [0, 2, 1, 0, 3, 2]:
-					st.set_normal(nn[idx])
-					st.set_uv(uv[idx])
-					st.add_vertex(q[idx])
+				# frente virada para fora (a Godot só desenha a frente)
+				for tri in [[0, 1, 2], [0, 2, 3]]:
+					var A: Vector3 = q[tri[0]]
+					var B: Vector3 = q[tri[1]]
+					var C: Vector3 = q[tri[2]]
+					var out: Vector3 = nn[tri[0]]
+					var ord: Array = tri
+					if (C - A).cross(B - A).dot(out) < 0.0:
+						ord = [tri[0], tri[2], tri[1]]
+					for idx in ord:
+						st.set_normal(nn[idx])
+						st.set_uv(uv[idx])
+						st.add_vertex(q[idx])
 	st.generate_tangents()
 	return st.commit()
 

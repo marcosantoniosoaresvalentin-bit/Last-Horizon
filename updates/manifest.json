@@ -1,9 +1,9 @@
 {
-  "version": 90,
-  "file": "update_90.zip",
-  "size": 4314856,
-  "sha256": "8bf3719a761cca553bb0c4d37a6d6bb74cb171d221ec57e32f7d09552688c517",
+  "version": 91,
+  "file": "update_91.zip",
+  "size": 4315268,
+  "sha256": "3147e413d51ff4ce85c9f254fa38d303bb97a7a93e5808f0178a252d29e4fa40",
   "min_build": 1,
-  "notes": "Pedra na mão: cinza e dentro da mão fechada (não é mais bola branca gigante); marreta parada na mão: braço baixo, inteira e longe do rosto",
+  "notes": "Corrige madeira rachada vendo o corte através da casca (também fincada) e o tronco da bacaba invisível de perto",
   "date": "2026-11-18"
 }
