@@ -26,60 +26,12 @@ const VIEW := 230.0
 const CACHO_VIEW := 95.0
 const CROWN_VARIANTS := 4
 
-## Casca da bacaba: cinza clara e lisa, com os anéis (cicatrizes das folhas que caíram)
-## a cada 15 a 20 cm, um pouco tortos; perto do chão mais escura e com limo.
-const TRUNK_SHADER := """
-shader_type spatial;
-varying vec3 wpos;
-varying flat vec3 opos;
-float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float noise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
-	return mix(mix(hash(i), hash(i+vec2(1,0)), f.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y); }
-float fbm(vec2 p){ return noise(p) * 0.55 + noise(p * 2.1 + 3.7) * 0.3 + noise(p * 4.3 + 9.1) * 0.15; }
-// relevo dos anéis: cada cicatriz de folha é um degrauzinho (sobe devagar, cai num risco)
-float rings(float ang, float h, float seed){
-	float y = h * 8.0 + 0.6 * sin(h * 1.3 + seed * 6.0) + (noise(vec2(ang * 1.1 + seed, h * 0.9)) - 0.5) * 0.8 + seed * 5.0;
-	float f = fract(y);
-	float k = 0.5 + 0.5 * hash(vec2(floor(y), seed));      // cada anel de um jeito
-	return (smoothstep(0.0, 0.8, f) * (1.0 - smoothstep(0.93, 1.0, f))) * k + (1.0 - k);
-}
-void vertex(){
-	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	opos = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-}
-void fragment(){
-	vec2 d = wpos.xz - opos.xz;
-	float ang = atan(d.y, d.x);
-	float h = wpos.y - opos.y;
-	float seed = hash(opos.xz);
-	float rg = rings(ang, h, seed);
-	float e = 0.004;
-	float dr = (rings(ang, h + e, seed) - rg) / e;            // inclinação do anel
-	float groove = 1.0 - smoothstep(0.0, 0.06, rg);            // o risco escuro entre um anel e outro
-	// casca: cinza-clara lisa, com fiapos verticais e o tom variando um pouco em volta
-	float fib = noise(vec2(ang * 12.0, h * 1.6)) * 0.06;
-	float tone = fbm(vec2(ang * 2.0 + seed * 9.0, h * 0.6)) * 0.16;
-	float arc = ang * 0.13;                                    // em metros, em volta do tronco
-	vec3 c = vec3(0.56, 0.54, 0.50) * (0.86 + tone + fib + rg * 0.04);
-	c *= 1.0 - groove * 0.32;
-	// líquen: manchas claras esbranquiçadas e algumas esverdeadas
-	float lich = smoothstep(0.66, 0.74, fbm(vec2(arc * 22.0 + seed * 20.0, h * 22.0))) * smoothstep(0.4, 0.65, fbm(vec2(arc * 3.0, h * 1.2)));
-	float dots = smoothstep(0.78, 0.88, noise(vec2(arc * 60.0, h * 60.0))) * smoothstep(0.45, 0.6, fbm(vec2(arc * 3.0, h * 0.7 + 5.0)));
-	c = mix(c, vec3(0.70, 0.71, 0.64), lich * 0.45);
-	c = mix(c, vec3(0.52, 0.60, 0.42), dots * 0.6);
-	// pé: mais escuro, úmido e com musgo
-	float base = smoothstep(1.4, 0.0, h);
-	c *= 1.0 - base * 0.35;
-	float moss = base * smoothstep(0.35, 0.65, fbm(vec2(ang * 4.0, h * 3.0)));
-	c = mix(c, vec3(0.16, 0.22, 0.09), moss * 0.8);
-	ALBEDO = c * c * 1.35;
-	ROUGHNESS = mix(0.82, 0.95, lich);
-	// luz pega na beirada dos anéis
-	vec3 radial = normalize(vec3(d.x, 0.0, d.y) + vec3(0.0001));
-	vec3 nw = normalize(radial - vec3(0.0, 1.0, 0.0) * clamp(dr, -12.0, 12.0) * 0.004);
-	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
-}
-"""
+## Casca da bacaba: textura feita de foto de casca lisa e cinza com os anéis das folhas
+## (ver tools/textura_bacaba.py), dando a volta inteira no tronco.
+const BARK_ALB := "res://texturas/bacaba_casca.imagem"
+const BARK_NRM := "res://texturas/bacaba_casca_n.imagem"
+const BARK_W := 0.75      # a textura cobre 0,75 m em volta do tronco
+const BARK_H := 1.5       # e 1,5 m de altura
 
 ## Palmeira: {x, z, nasc (dia), hmax (m), vig, var, morta (dia ou -1)}
 var palms: Array = []
@@ -94,7 +46,9 @@ var _roots_mesh: ArrayMesh
 var _cacho_green: ArrayMesh
 var _cacho_ripe: ArrayMesh
 var _leaf_mat: StandardMaterial3D
-var _trunk_mat: ShaderMaterial
+var _trunk_mat: StandardMaterial3D
+var _trunk_nodes: Array = []
+var _trunk_sig := -1
 var _dead_leaf_mat: StandardMaterial3D
 var _nodes: Array = []
 var _grid := {}                  # Vector2i(8 m) -> [Vector3(x, z, raio)]
@@ -326,7 +280,7 @@ func _rebuild() -> void:
 		var dead := int(p.morta) >= 0
 		if h > 0.05:
 			var r := TRUNK_R * lerpf(0.75, 1.0, clampf(h / 6.0, 0.0, 1.0))
-			ch.tr.append(Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(r, h + 0.35, r)), Vector3(x, gy - 0.3, z)))
+			ch.tr.append([x, gy, z, h, r, rot])
 			if h > 1.0:
 				ch.rt.append(Transform3D(Basis(Vector3.UP, rot).scaled(Vector3.ONE * clampf(h / 8.0, 0.55, 1.0)), Vector3(x, gy, z)))
 			var gk := Vector2i(floori(x / 8.0), floori(z / 8.0))
@@ -351,9 +305,28 @@ func _rebuild() -> void:
 				var b := Basis(Vector3.UP, a)
 				var t := Transform3D(b, top + b * Vector3(0.22, -0.35, 0))
 				(ch.cm if ripe else ch.cg).append(t)
+	# troncos: uma malha por pedaço do mapa (refeita só quando algum tronco cresceu uns 20 cm)
+	var sig := 0
+	for c in chunks:
+		for t in chunks[c].tr:
+			sig = hash([sig, snappedf(t[0], 0.01), int(float(t[3]) * 5.0)])
+	if sig != _trunk_sig:
+		_trunk_sig = sig
+		for n in _trunk_nodes:
+			if is_instance_valid(n):
+				n.queue_free()
+		_trunk_nodes.clear()
+		for c in chunks:
+			if (chunks[c].tr as Array).is_empty():
+				continue
+			var mi := MeshInstance3D.new()
+			mi.mesh = _trunks_mesh(chunks[c].tr)
+			mi.material_override = _trunk_mat
+			mi.visibility_range_end = VIEW
+			add_child(mi)
+			_trunk_nodes.append(mi)
 	for c in chunks:
 		var ch: Dictionary = chunks[c]
-		_add_mm(_trunk_mesh, _trunk_mat, ch.tr, VIEW, true)
 		_add_mm(_roots_mesh, null, ch.rt, 70.0, false)
 		for v in ch.cr:
 			_add_mm(_crowns[v], _leaf_mat, ch.cr[v], VIEW, true)
@@ -394,10 +367,15 @@ func _make_assets(seed_: int) -> void:
 	_leaf_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	_dead_leaf_mat = _leaf_mat.duplicate()
 	_dead_leaf_mat.albedo_color = Color(1.9, 1.35, 0.7)       # folha seca: palha marrom
-	var sh := Shader.new()
-	sh.code = TRUNK_SHADER
-	_trunk_mat = ShaderMaterial.new()
-	_trunk_mat.shader = sh
+	_trunk_mat = StandardMaterial3D.new()
+	_trunk_mat.albedo_texture = _load_tex(BARK_ALB, Color(0.58, 0.57, 0.52))
+	_trunk_mat.albedo_color = Color(0.66, 0.64, 0.59)
+	var nt := _load_tex(BARK_NRM, Color(0.5, 0.5, 1.0))
+	_trunk_mat.normal_enabled = true
+	_trunk_mat.normal_texture = nt
+	_trunk_mat.normal_scale = 1.4
+	_trunk_mat.roughness = 0.85
+	_trunk_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	_trunk_mesh = _make_trunk()
 	_roots_mesh = _make_roots()
 	var rng := RandomNumberGenerator.new()
@@ -443,6 +421,54 @@ func _frond_texture() -> ImageTexture:
 			img.set_pixel(u, y, Color(0.30, 0.36, 0.14, 1.0))
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
+
+
+static func _load_tex(path: String, fallback: Color) -> Texture2D:
+	var img := Image.new()
+	var bytes := FileAccess.get_file_as_bytes(path)
+	if bytes.is_empty() or img.load_jpg_from_buffer(bytes) != OK:
+		img = Image.create(4, 4, false, Image.FORMAT_RGB8)
+		img.fill(fallback)
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
+
+## Troncos de um pedaço do mapa numa malha só, com a textura dando a volta (sem
+## esticar: 1,5 m de casca a cada 1,5 m de tronco) e o pé um pouco mais grosso.
+func _trunks_mesh(list: Array) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var sides := 14
+	for t in list:
+		var x: float = t[0]
+		var gy: float = t[1]
+		var z: float = t[2]
+		var h: float = t[3]
+		var r: float = t[4]
+		var rot: float = t[5]
+		var rows := [[-0.3, 1.6], [0.04, 1.45], [0.22, 1.12], [minf(0.7, h * 0.5), 1.0], [h + 0.05, 0.86]]
+		var vofs := fmod(rot * 3.7, 1.0)
+		var reps := maxf(1.0, roundf(TAU * r / BARK_W))
+		for i in rows.size() - 1:
+			var y0: float = rows[i][0]
+			var y1: float = rows[i + 1][0]
+			var r0: float = r * float(rows[i][1])
+			var r1: float = r * float(rows[i + 1][1])
+			for k in sides:
+				var a0 := rot + float(k) / sides * TAU
+				var a1 := rot + float(k + 1) / sides * TAU
+				var u0 := float(k) / sides * reps
+				var u1 := float(k + 1) / sides * reps
+				var q := [Vector3(x + cos(a0) * r0, gy + y0, z + sin(a0) * r0), Vector3(x + cos(a1) * r0, gy + y0, z + sin(a1) * r0),
+					Vector3(x + cos(a1) * r1, gy + y1, z + sin(a1) * r1), Vector3(x + cos(a0) * r1, gy + y1, z + sin(a0) * r1)]
+				var uv := [Vector2(u0, vofs - y0 / BARK_H), Vector2(u1, vofs - y0 / BARK_H), Vector2(u1, vofs - y1 / BARK_H), Vector2(u0, vofs - y1 / BARK_H)]
+				var nn := [Vector3(cos(a0), 0, sin(a0)), Vector3(cos(a1), 0, sin(a1)), Vector3(cos(a1), 0, sin(a1)), Vector3(cos(a0), 0, sin(a0))]
+				for idx in [0, 2, 1, 0, 3, 2]:
+					st.set_normal(nn[idx])
+					st.set_uv(uv[idx])
+					st.add_vertex(q[idx])
+	st.generate_tangents()
+	return st.commit()
 
 
 func _make_trunk() -> ArrayMesh:

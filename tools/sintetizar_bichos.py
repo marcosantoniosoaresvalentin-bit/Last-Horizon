@@ -159,18 +159,7 @@ def save(name, s, peak_db=-2.0):
 
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
-    # arara: gritos de voo (contato) — "raaah", às vezes dois seguidos
-    save('arara_voo1', macaw(0.52, 650, 980, 720))
-    save('arara_voo2', macaw(0.44, 700, 1050, 800, rough=0.1))
-    save('arara_voo3', seq(macaw(0.34, 680, 1000, 760), macaw(0.4, 640, 940, 700)))
-    save('arara_voo4', macaw(0.62, 600, 900, 650, rough=0.11))
-    # arara: alarme (gente perto do ninho/pouso) — curto, mais agudo e mais áspero
-    save('arara_alarme1', seq(macaw(0.22, 850, 1250, 1000, rough=0.13), macaw(0.2, 900, 1300, 1050, rough=0.13), gap=(0.05, 0.08)))
-    save('arara_alarme2', macaw(0.28, 900, 1300, 980, rough=0.14))
-    # arara: pousada, conversa baixa do casal / bando comendo
-    save('arara_resmungo1', growl(0.22), -10)
-    save('arara_resmungo2', seq(growl(0.14), growl(0.18)), -10)
-    save('arara_resmungo3', macaw(0.25, 520, 700, 560, rough=0.1, formants=(1000, 2100, 3300)), -7)
+    # (os sons da arara agora são gravações reais: ver sons/LEIA.md)
     # macaco-prego: assobios de contato
     save('macaco_assobio1', whistle(0.16, 4300, 3300))
     save('macaco_assobio2', seq(whistle(0.12, 4600, 3700), whistle(0.14, 4200, 3300), gap=(0.08, 0.14)))

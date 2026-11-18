@@ -24,7 +24,7 @@ const FILES := {
 	"pedra_bate": ["pedra_bate1", "pedra_bate2", "pedra_bate3", "pedra_bate4"],
 	"pedra_lasca": ["pedra_lasca1", "pedra_lasca2"],
 	"pedra_racha": ["pedra_racha1"],
-	# bichos (sintetizados a partir dos chamados reais; ver tools/sintetizar_bichos.py)
+	# araras: gritos reais de papagaios grandes (BigSoundBank, CC0); macacos: sintetizados (tools/sintetizar_bichos.py)
 	"arara_voo": ["arara_voo1", "arara_voo2", "arara_voo3", "arara_voo4"],
 	"arara_alarme": ["arara_alarme1", "arara_alarme2"],
 	"arara_resmungo": ["arara_resmungo1", "arara_resmungo2", "arara_resmungo3"],

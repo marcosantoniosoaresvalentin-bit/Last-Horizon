@@ -1,9 +1,9 @@
 {
-  "version": 76,
-  "file": "update_76.zip",
-  "size": 3636692,
-  "sha256": "10d2902a3e0e6d5284edfd07b9183a5bd3aa64aafb1ee2095dfb56222cb209a1",
+  "version": 77,
+  "file": "update_77.zip",
+  "size": 4199693,
+  "sha256": "032c7613ef23556e22c8018a524fb5cb5db49bf6956e37db9ac6149672d6a5f3",
   "min_build": 1,
-  "notes": "Primeira pessoa com as mãos do personagem; araras-canindé (voam em bando e em casal, ninho em oco, ovos e filhotes, comem bacaba e cipó e espalham as sementes); sons de araras e macacos com motivo; tronco da bacaba mais realista",
+  "notes": "Arara refeita pena por pena; gritos de arara com gravações reais de papagaios; tronco da bacaba com textura de casca de verdade em volta (não some mais)",
   "date": "2026-11-18"
 }
