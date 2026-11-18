@@ -389,6 +389,9 @@ var _constr: Node3D = null
 var _bld := {}                     # modo construção: {yaw, tilt, roll, ghost, ok, c, b}
 var _bld_btn: Button
 var _post_cut := {}               # cortando a ponta da estaca: {i, t, y}
+var _post_mark := {}              # escolhendo a altura do corte na estaca: {i, y, node}
+var _mark_btns: Array = []
+var _bld_why: Label
 var _medida := {}                 # altura medida com o machado na estaca de referência: {i, y}
 var _bld_t := 0.0
 var _bld_btns: Array = []
@@ -656,6 +659,23 @@ func _build_hud() -> void:
 	_bld_btns = [mk.call("Colocar", -290, -146, _bld_place), mk.call("Girar", -150, -286, func(): _bld_turn(1)),
 		mk.call("Inclinar", -290, -286, _bld_tilt), mk.call("Virar", -150, -426, _bld_flip),
 		mk.call("Sair", -290, -426, _bld_stop), mk.call("Girar ←", -430, -286, func(): _bld_turn(-1))]
+	_mark_btns = [mk.call("Cortar aqui", -290, -146, _mark_cut), mk.call("Subir", -150, -286, func(): _mark_move(0.05)),
+		mk.call("Descer", -290, -286, func(): _mark_move(-0.05)), mk.call("Medir", -150, -426, _mark_measure),
+		mk.call("Sair", -290, -426, _mark_close)]
+	_bld_why = Label.new()
+	_bld_why.add_theme_font_size_override("font_size", 22)
+	_bld_why.add_theme_color_override("font_color", Color(1, 0.75, 0.7))
+	_bld_why.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	_bld_why.add_theme_constant_override("outline_size", 6)
+	_bld_why.set_anchors_preset(Control.PRESET_CENTER)
+	_bld_why.offset_left = -420
+	_bld_why.offset_right = 420
+	_bld_why.offset_top = 30
+	_bld_why.offset_bottom = 110
+	_bld_why.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_bld_why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_bld_why.visible = false
+	_hud.add_child(_bld_why)
 	_bld_cross = Label.new()
 	_bld_cross.text = "+"
 	_bld_cross.add_theme_font_size_override("font_size", 40)
@@ -2091,6 +2111,9 @@ func _update_chop(delta: float) -> void:
 	if not _split.is_empty():
 		return          # rachando a tora: os botões normais somem
 	_post_cut_tick(delta)
+	if not _post_mark.is_empty():
+		_mark_tick()
+		return
 	if not _bld.is_empty():
 		_bld_t -= delta
 		if _bld_t <= 0.0:
@@ -2166,15 +2189,14 @@ func _update_ctx_btn() -> void:
 		_ctx_action = "veneno"
 		var pt := _poison_target()
 		_ctx_btn.text = "Envenenar madeira" + (" (com cupim)" if _cupins.dmg_of(pt) > 0.02 else "")
-	elif _mao == "machado" and _buracos and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _walking and _post_cut.is_empty() and _buracos.post_near(_player.position, 1.3) >= 0:
+	elif _mao == "machado" and _buracos and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _walking and _post_cut.is_empty() and _post_mark.is_empty() and _buracos.post_near(_player.position, 1.3) >= 0:
 		var pi2: int = _buracos.post_near(_player.position, 1.3)
 		var top2: float = _buracos.post_top(_buracos.posts[pi2])
 		if not _medida.is_empty() and pi2 != int(_medida.i) and top2 > float(_medida.y) + 0.02:
-			_ctx_action = "cortar_ponta"
-			_ctx_btn.text = "Cortar a ponta (-%d cm)" % roundi((top2 - float(_medida.y)) * 100.0)
-		elif _medida.is_empty() or pi2 != int(_medida.i):
-			_ctx_action = "medir"
-			_ctx_btn.text = "Medir altura"
+			_ctx_btn.text = "Cortar estaca (-%d cm)" % roundi((top2 - float(_medida.y)) * 100.0)
+		else:
+			_ctx_btn.text = "Cortar estaca"
+		_ctx_action = "estaca"
 	elif _constr and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _aimed_piece().is_empty():
 		_ctx_action = "peca"
 		_ctx_btn.text = "Pegar peça"
@@ -2212,38 +2234,10 @@ func _ctx_press() -> void:
 				_update_inventory()
 				_act_check = 0.0
 			return
-		"medir":
-			var mi: int = _buracos.post_near(_player.position, 1.3)
-			if mi >= 0:
-				var my: float = _buracos.post_top(_buracos.posts[mi])
-				_medida = {"i": mi, "y": my}
-				# vai sozinho até a estaca mais alta mais perto
-				var best := -1
-				var bd := 6.0
-				for j in _buracos.posts.size():
-					var po: Dictionary = _buracos.posts[j]
-					if j == mi or _buracos.post_top(po) <= my + 0.02:
-						continue
-					var d := Vector2(float(po.x) - _player.position.x, float(po.z) - _player.position.z).length()
-					if d < bd:
-						bd = d
-						best = j
-				if best < 0:
-					_show_toast("Altura medida. Não tem estaca mais alta aqui perto para cortar.")
-				else:
-					var po2: Dictionary = _buracos.posts[best]
-					var pc := Vector3(float(po2.x), 0, float(po2.z))
-					var away := Vector3(_player.position.x - pc.x, 0, _player.position.z - pc.z)
-					away = away.normalized() if away.length() > 0.01 else Vector3.BACK
-					_walk_to(pc + away * 0.75, "")
-					_show_toast("Altura medida na estaca. Indo até a mais alta: lá é só tocar em \"Cortar a ponta\".")
-				_act_check = 0.0
-			return
-		"cortar_ponta":
+		"estaca":
 			var ci: int = _buracos.post_near(_player.position, 1.3)
-			if ci >= 0 and not _medida.is_empty():
-				_post_cut = {"i": ci, "t": 0.0, "y": float(_medida.y), "s": 0.0}
-				_ctx_btn.visible = false
+			if ci >= 0:
+				_mark_open(ci)
 			return
 		"peca":
 			var pc := _aimed_piece()
@@ -6310,7 +6304,6 @@ func _post_cut_tick(delta: float) -> void:
 	if float(_post_cut.t) >= (0.3 if teste else 3.0):
 		var cut: float = _buracos.cut_post(i, float(_post_cut.y))
 		_post_cut = {}
-		_medida = {}
 		if cut > 0.0:
 			Sons.play_at(self, "estalo", top, -4.0, 1.1)
 			if cut >= 0.12:
@@ -6319,8 +6312,126 @@ func _post_cut_tick(delta: float) -> void:
 				var bit := {"cil": {"L": cut, "ra": r, "rb": r}, "sec": Arvores.circle_sec(), "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0,
 					"bot": {}, "top": {}, "pos": [0, 0, 0], "yaw": 0.0, "dia": _arvores.last_day}
 				_arvores.drop_log(bit, top + Vector3(0.3, 0, 0), randf() * TAU)
-			_show_toast("Ponta cortada: tirou %d cm. Agora as duas estacas estão na mesma altura." % roundi(cut * 100.0))
+			var fell: int = _constr.settle() if _constr else 0
+			_show_toast("Ponta cortada: tirou %d cm." % roundi(cut * 100.0) + (" O que estava em cima dela caiu." if fell > 0 else ""))
 		_act_check = 0.0
+
+
+# ================== CORTAR A ESTACA NA ALTURA QUE QUISER ==================
+# Com o machado perto da estaca: uma marca vermelha em volta dela mostra onde vai
+# cortar; Subir/Descer de 5 em 5 cm, "Cortar aqui". "Medir" guarda a altura do topo
+# dessa estaca (para cortar outra igual) e vai até a mais alta perto.
+
+func _mark_open(i: int) -> void:
+	var po: Dictionary = _buracos.posts[i]
+	var top: float = _buracos.post_top(po)
+	var y := top - 0.1
+	if not _medida.is_empty() and int(_medida.i) != i and float(_medida.y) < top - 0.02:
+		y = float(_medida.y)
+	var mi := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	var r: float = _arvores.free_log_radius(po.log)
+	cm.top_radius = r + 0.03
+	cm.bottom_radius = r + 0.03
+	cm.height = 0.02
+	mi.mesh = cm
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1, 0.15, 0.1, 0.8)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mi.material_override = mat
+	add_child(mi)
+	_post_mark = {"i": i, "y": y, "node": mi}
+	_mark_clamp()
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
+		(b as Control).visible = false
+	for b in _mark_btns:
+		(b as Control).visible = true
+	_bld_why.visible = true
+	_mark_tick()
+
+
+func _mark_clamp() -> void:
+	var i := int(_post_mark.i)
+	var po: Dictionary = _buracos.posts[i]
+	var top: float = _buracos.post_top(po)
+	var gy: float = surface_at(float(po.x), float(po.z))
+	_post_mark.y = clampf(float(_post_mark.y), gy + 0.15, top - 0.02)
+
+
+func _mark_move(dy: float) -> void:
+	if _post_mark.is_empty():
+		return
+	_post_mark.y = float(_post_mark.y) + dy
+	_mark_clamp()
+	_mark_tick()
+
+
+func _mark_tick() -> void:
+	var i := int(_post_mark.i)
+	if i >= _buracos.posts.size() or _mao != "machado" or _buracos.post_near(_player.position, 2.0) != i:
+		_mark_close()
+		return
+	var po: Dictionary = _buracos.posts[i]
+	var top: float = _buracos.post_top(po)
+	var gy: float = surface_at(float(po.x), float(po.z))
+	var y := float(_post_mark.y)
+	(_post_mark.node as Node3D).position = Vector3(float(po.x), y, float(po.z))
+	var txt := "Cortar a %d cm do chão (tira %d cm)" % [roundi((y - gy) * 100.0), roundi((top - y) * 100.0)]
+	if not _medida.is_empty() and absf(float(_medida.y) - y) < 0.006:
+		txt += " · na altura medida"
+	_bld_why.text = txt
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
+		(b as Control).visible = false
+
+
+func _mark_close() -> void:
+	if _post_mark.is_empty():
+		return
+	(_post_mark.node as Node3D).queue_free()
+	_post_mark = {}
+	for b in _mark_btns:
+		(b as Control).visible = false
+	_bld_why.visible = false
+	_act_check = 0.0
+
+
+func _mark_cut() -> void:
+	if _post_mark.is_empty():
+		return
+	var i := int(_post_mark.i)
+	var y := float(_post_mark.y)
+	_mark_close()
+	_post_cut = {"i": i, "t": 0.0, "y": y, "s": 0.0}
+
+
+func _mark_measure() -> void:
+	if _post_mark.is_empty():
+		return
+	var mi := int(_post_mark.i)
+	_mark_close()
+	var my: float = _buracos.post_top(_buracos.posts[mi])
+	_medida = {"i": mi, "y": my}
+	# vai sozinho até a estaca mais alta mais perto
+	var best := -1
+	var bd := 6.0
+	for j in _buracos.posts.size():
+		var po: Dictionary = _buracos.posts[j]
+		if j == mi or _buracos.post_top(po) <= my + 0.02:
+			continue
+		var d := Vector2(float(po.x) - _player.position.x, float(po.z) - _player.position.z).length()
+		if d < bd:
+			bd = d
+			best = j
+	if best < 0:
+		_show_toast("Altura do topo medida. Vá até a estaca que quer cortar e toque em \"Cortar estaca\".")
+		return
+	var po2: Dictionary = _buracos.posts[best]
+	var pc := Vector3(float(po2.x), 0, float(po2.z))
+	var away := Vector3(_player.position.x - pc.x, 0, _player.position.z - pc.z)
+	away = away.normalized() if away.length() > 0.01 else Vector3.BACK
+	_walk_to(pc + away * 0.75, "")
+	_show_toast("Altura medida. Indo até a estaca mais alta: lá toque em \"Cortar estaca\" e a marca já vem na altura medida.")
 
 
 func _aimed_piece() -> Dictionary:
@@ -6367,6 +6478,7 @@ func _bld_stop() -> void:
 	for b in _bld_btns:
 		(b as Control).visible = false
 	_bld_cross.visible = false
+	_bld_why.visible = false
 	_act_check = 0.0
 
 
@@ -6408,6 +6520,8 @@ func _bld_update() -> void:
 		_bld.ok = false
 		_bld.juntas = []
 		(_bld_btns[0] as Button).text = "Colocar"
+		_bld_why.visible = true
+		_bld_why.text = "Mire mais perto (até uns 6 m)."
 		return
 	# deitada em cima de outra peça: gira junto dela (reto ou atravessado) se estiver perto
 	var hb: Dictionary = hit.box
@@ -6436,7 +6550,7 @@ func _bld_update() -> void:
 			if Vector2(float(op.x) - float(po.x), float(op.z) - float(po.z)).length() < L:
 				var dh: float = absf(_buracos.post_top(op) - my)
 				if dh > 0.04:
-					r.why = "As estacas estão em alturas diferentes (%d cm). Com o machado: \"Medir altura\" na mais baixa e \"Cortar a ponta\" na mais alta." % roundi(dh * 100.0)
+					r.why = "As estacas estão em alturas diferentes (%d cm). Com o machado: \"Cortar estaca\" na mais alta (ou \"Medir\" na mais baixa primeiro)." % roundi(dh * 100.0)
 					break
 	# cada encosto em madeira é uma amarração de cipó
 	var need: int = (r.get("juntas", []) as Array).size()
@@ -6445,6 +6559,8 @@ func _bld_update() -> void:
 		r.ok = false
 		r.why = "Precisa de %d cipó%s para amarrar (tem %d)." % [need, "s" if need > 1 else "", have]
 	(_bld_btns[0] as Button).text = "Colocar" if need == 0 else "Colocar (%d cipó%s)" % [need, "s" if need > 1 else ""]
+	_bld_why.visible = not bool(r.ok) and str(r.get("why", "")) != ""
+	_bld_why.text = str(r.get("why", ""))
 	_bld.juntas = r.get("juntas", [])
 	ghost.visible = true
 	ghost.transform = Transform3D(b, r.c)

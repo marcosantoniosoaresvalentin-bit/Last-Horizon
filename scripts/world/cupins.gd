@@ -303,6 +303,7 @@ func _destroy(t: Dictionary) -> void:
 					if pc.log == t.obj:
 						co.remove_piece(pc)
 						break
+			_house_fall()
 		"galho":
 			var gi: int = _jogo._galhos.items.find(t.obj)
 			if gi >= 0:
@@ -330,6 +331,7 @@ func _destroy(t: Dictionary) -> void:
 					bu.posts.remove_at(pi)
 					bu._rebuild()
 					break
+			_house_fall()
 		"toco":
 			_arv.stumps.erase(t.obj)
 			stump_dmg.erase(_key(t))
@@ -374,6 +376,16 @@ func _attack_trees(c: Dictionary, day: int, wet: float) -> void:
 		p.resize(maxi(p.size(), 12))
 		p[11] = day                  # marca de cupim (galerias no tronco)
 		break
+
+
+## Uma estaca ou peça da casa virou pó: o que perdeu o apoio cai.
+func _house_fall() -> void:
+	var co = _jogo._constr
+	if co == null:
+		return
+	var n: int = co.settle()
+	if n > 0 and _jogo.has_method("_show_toast"):
+		_jogo._show_toast("Os cupins comeram uma madeira da construção: %d peça%s caiu!" % [n, "" if n == 1 else "s"])
 
 
 # ================== ESBARRAR ==================

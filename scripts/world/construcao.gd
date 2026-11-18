@@ -157,7 +157,7 @@ func raycast(o: Vector3, d: Vector3, maxd := 6.0) -> Dictionary:
 # ================== ONDE A PEÇA PODE FICAR ==================
 
 ## Testa a peça fl com rotação b no centro c. {ok, why}
-func check(fl: Dictionary, b: Basis, c: Vector3, skip = null) -> Dictionary:
+func check(fl: Dictionary, b: Basis, c: Vector3, skip = null, support_only := false) -> Dictionary:
 	var h := half_ext(fl)
 	var g := {"c": c, "b": b, "h": h}
 	var core := {"c": c, "b": b, "h": (h - Vector3.ONE * SINK).max(Vector3.ONE * 0.004)}
@@ -168,11 +168,13 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null) -> Dictionary:
 		if (bx.c as Vector3).distance_to(c) > h.length() + (bx.h as Vector3).length() + 0.2:
 			continue
 		near.append(bx)
+		if support_only:
+			continue
 		var bc := {"c": bx.c, "b": bx.b, "h": ((bx.h as Vector3) - Vector3.ONE * 0.01).max(Vector3.ONE * 0.004)}
 		if _overlap(core, bc):
 			return {"ok": false, "why": "Bate em outra peça."}
 	# não pode ficar enterrada
-	for sx in [-1.0, 1.0]:
+	for sx in ([] if support_only else [-1.0, 1.0]):
 		for sy in [-1.0, 1.0]:
 			for sz in [-1.0, 1.0]:
 				var p: Vector3 = c + b.x * h.x * sx + b.y * (h.y - SINK) * sy + b.z * (h.z - SINK) * sz
@@ -202,8 +204,10 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null) -> Dictionary:
 					break
 			if touch and lying:
 				var side_v: float = cs.x if down_k == 1 else cs.y
-				if side_v * down_s <= 0.0:
-					touch = false              # não está na face de baixo
+				# só a face de baixo apoia; o lado só vale encostado numa estaca fincada
+				# (amarrado nela com cipó)
+				if side_v * down_s <= 0.0 and not (wood_i >= 0 and (near[wood_i] as Dictionary).has("post")):
+					touch = false
 			if touch and wood_i >= 0:
 				if not joint_u.has(wood_i):
 					joint_u[wood_i] = []
@@ -216,6 +220,20 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null) -> Dictionary:
 				if absf(u) < 0.25 and h.x < 0.3:
 					lo = true          # pecinha curta: encostar no meio já segura
 					hi = true
+	# estaca fincada encostada em qualquer ponto (amarrada nela): conta sempre, no
+	# ponto exato do comprimento (os pontos de teste podem passar do lado da estaca fina)
+	var grown := {"c": c, "b": b, "h": h + Vector3.ONE * TOUCH}
+	for bi in near.size():
+		var nb: Dictionary = near[bi]
+		if not nb.has("post") or not _overlap(grown, nb):
+			continue
+		var u2 := clampf(((nb.c as Vector3) - c).dot(b.x) / maxf(h.x, 0.001), -1.0, 1.0)
+		if u2 <= -0.25:
+			lo = true
+		if u2 >= 0.25:
+			hi = true
+		if not joint_u.has(bi):
+			joint_u[bi] = [u2]
 	if not (lo and hi):
 		return {"ok": false, "why": "Não fica apoiada: precisa encostar nas duas metades.", "juntas": []}
 	# amarrações: uma em cada madeira em que encosta (no meio de onde encosta), até 4
@@ -308,6 +326,34 @@ func _find_place_b(fl: Dictionary, b: Basis, hit: Dictionary) -> Dictionary:
 ## cortadas no nível com o machado). {ok, c, b, why}
 func find_place(fl: Dictionary, b: Basis, hit: Dictionary) -> Dictionary:
 	var r := _find_place_b(fl, b, hit)
+	if not bool(r.ok) and absf(b.x.y) < 0.5:
+		# estacas de alturas diferentes: tenta a viga em cima de cada estaca vizinha
+		# (a mais baixa), passando do lado da mais alta (amarrada no lado dela)
+		var side := Vector3(b.z.x, 0, b.z.z)
+		var L := half_ext(fl).x * 2.0
+		if side.length() > 0.3:
+			side = side.normalized()
+			var cands := []
+			for bx in boxes():
+				if not bx.has("post"):
+					continue
+				var d := Vector2((bx.c as Vector3).x - (hit.p as Vector3).x, (bx.c as Vector3).z - (hit.p as Vector3).z).length()
+				if d < L:
+					cands.append([d, bx])
+			cands.sort_custom(func(x, y): return float(x[0]) < float(y[0]))
+			var done := false
+			for cd in cands:
+				var pb: Dictionary = cd[1]
+				var top := (pb.c as Vector3) + (pb.b as Basis).x * (pb.h as Vector3).x
+				for lat in [0.0, 0.21, -0.21]:
+					var h2 := {"p": top + side * float(lat), "n": Vector3.UP, "box": pb if lat == 0.0 else {}}
+					var r2 := _find_place_b(fl, b, h2)
+					if bool(r2.ok):
+						r = r2
+						done = true
+						break
+				if done:
+					break
 	r.b = b
 	r.juntas = (check(fl, b, r.c).get("juntas", []) as Array) if bool(r.ok) else []
 	return r
@@ -347,6 +393,29 @@ func carrying_others(pc: Dictionary) -> bool:
 		if _overlap(grown, ob):
 			return true
 	return false
+
+
+## Depois que some uma estaca ou peça (cupim): o que ficou sem apoio cai no chão,
+## e o que estava em cima cai junto. Devolve quantas peças caíram.
+func settle() -> int:
+	var fell := 0
+	var changed := true
+	while changed:
+		changed = false
+		for pc in pieces.duplicate():
+			var bx := piece_box(pc)
+			var r := check(pc.log, bx.b, bx.c, pc, true)
+			if bool(r.ok):
+				continue
+			pieces.erase(pc)
+			var ax: Vector3 = (bx.b as Basis).x
+			var yaw := atan2(-ax.z, ax.x) if Vector2(ax.x, ax.z).length() > 0.1 else randf() * TAU
+			_arv.drop_log(pc.log, bx.c, yaw)
+			fell += 1
+			changed = true
+	if fell > 0:
+		_rebuild()
+	return fell
 
 
 func remove_piece(pc: Dictionary) -> Dictionary:
