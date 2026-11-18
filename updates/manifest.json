@@ -1,9 +1,9 @@
 {
-  "version": 96,
-  "file": "update_96.zip",
-  "size": 4327218,
-  "sha256": "16add97530c922247f9335a968fe0697c4cc2a8c2fb08fd7b5774a4b90b02ea4",
+  "version": 97,
+  "file": "update_97.zip",
+  "size": 4328730,
+  "sha256": "a7c5bb8f68fc4fea28d78f2d38bb1fde6e5d2017a20375e6d3cffe91e06c13f3",
   "min_build": 1,
-  "notes": "Cupins: cupinzeiros perto do barro, cupim come toras, galhos, estacas, forquilhas e tábuas; ataca árvores fracas; planta timbó vira veneno contra cupim",
+  "notes": "Tábua pequena serrada cai no chão (carrega na mão, racha em ripas no chão); cunha só racha até 5 cm de grossura; câmera olhando para baixo",
   "date": "2026-11-18"
 }
