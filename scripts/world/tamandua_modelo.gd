@@ -10,9 +10,9 @@ extends RefCounted
 ##   pata_fe, pata_fd, pata_te, pata_td (pivô no ombro/quadril), cada uma com "baixo"
 ##   (pivô no cotovelo/joelho).
 
-const GREY := Color(0.28, 0.26, 0.23)
+const GREY := Color(0.36, 0.33, 0.29)
 const DARK := Color(0.03, 0.025, 0.02)
-const CREAM := Color(0.62, 0.58, 0.5)
+const CREAM := Color(0.8, 0.76, 0.66)
 
 static var _mat: StandardMaterial3D
 
@@ -24,8 +24,27 @@ static func material() -> StandardMaterial3D:
 		_mat.vertex_color_is_srgb = true
 		_mat.roughness = 1.0
 		_mat.metallic_specular = 0.05
+		# pelo grosso: fios deitados ao longo do corpo (projeção nos 3 eixos, sem UV)
+		_mat.albedo_texture = _load_tex("res://texturas/pelo_tamandua.imagem", Color(0.8, 0.8, 0.8))
+		_mat.normal_enabled = true
+		_mat.normal_texture = _load_tex("res://texturas/pelo_tamandua_n.imagem", Color(0.5, 0.5, 1.0))
+		_mat.normal_scale = 1.2
+		_mat.uv1_triplanar = true
+		_mat.uv1_triplanar_sharpness = 4.0
+		_mat.uv1_scale = Vector3(2.4, 2.4, 2.4)
+		_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 		_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return _mat
+
+
+static func _load_tex(path: String, fallback: Color) -> Texture2D:
+	var img := Image.new()
+	var bytes := FileAccess.get_file_as_bytes(path)
+	if bytes.is_empty() or img.load_jpg_from_buffer(bytes) != OK:
+		img = Image.create(4, 4, false, Image.FORMAT_RGB8)
+		img.fill(fallback)
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
 
 
 ## Monta o bicho. s = tamanho (1 adulto, uns 0,4 o filhote recém-nascido).
@@ -113,7 +132,7 @@ static func _body() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rings := []
-	var n := 14
+	var n := 30
 	for i in n + 1:
 		var u := float(i) / n                 # 0 = anca, 1 = pescoço
 		var x := lerpf(-0.52, 0.48, u)
@@ -139,19 +158,34 @@ static func _body() -> ArrayMesh:
 				return CREAM
 		var g := GREY.darkened(0.1 + 0.15 * clampf(-h, 0.0, 1.0))
 		return g
-	_loft(st, rings, 16, colf)
+	_loft(st, rings, 28, colf)
 	# crina: pelo comprido em pé ao longo do lombo
-	for i in 22:
-		var x := lerpf(-0.45, 0.36, float(i) / 21.0)
+	for i in 44:
+		var x := lerpf(-0.45, 0.36, float(i) / 43.0)
 		var u := (x + 0.52) / 1.0
 		var top := 0.5 + 0.03 * u + 0.2 * sin(PI * clampf(u * 0.92 + 0.08, 0.0, 1.0)) + 0.06 + 0.06 * u
 		var hl := 0.07 + 0.04 * sin(float(i) * 1.7)
 		for sd in [-1.0, 1.0]:
-			var b0 := Vector3(x - 0.03, top - 0.02, sd * 0.02)
-			var b1 := Vector3(x + 0.03, top - 0.02, sd * 0.02)
+			var b0 := Vector3(x - 0.016, top - 0.02, sd * 0.02)
+			var b1 := Vector3(x + 0.016, top - 0.02, sd * 0.02)
 			var t := Vector3(x - 0.06, top + hl, sd * 0.05)
 			for v in [b0, b1, t]:
 				st.set_color(GREY.darkened(0.3))
+				st.add_vertex(v)
+	# franja de pelo comprido pendurada embaixo da barriga e no peito
+	for i in 52:
+		var u := float(i) / 51.0
+		var x := lerpf(-0.42, 0.38, u)
+		var uu := (x + 0.52) / 1.0
+		var ry := 0.2 * sin(PI * clampf(uu * 0.92 + 0.08, 0.0, 1.0)) + 0.06 + 0.06 * uu
+		var rz := 0.17 * sin(PI * clampf(uu * 0.9 + 0.1, 0.0, 1.0)) + 0.05
+		var cy := 0.5 + 0.03 * uu
+		for sd in [-1.0, 1.0]:
+			var b0 := Vector3(x - 0.017, cy - ry * 0.75, sd * rz * 0.6)
+			var b1 := Vector3(x + 0.017, cy - ry * 0.75, sd * rz * 0.6)
+			var t := Vector3(x - 0.05, cy - ry - 0.05 - 0.02 * sin(float(i) * 2.3), sd * rz * 0.75)
+			for v in [b0, b1, t]:
+				st.set_color(GREY.darkened(0.25))
 				st.add_vertex(v)
 	return _commit(st)
 
@@ -213,12 +247,12 @@ static func _tail() -> ArrayMesh:
 		return GREY.darkened(0.25 + 0.15 * clampf(-cos(a), 0.0, 1.0))
 	_loft(st, rings, 10, colf)
 	# franja de pelo comprido pendurada
-	for i in 18:
-		var u := float(i) / 17.0
+	for i in 36:
+		var u := float(i) / 35.0
 		var x := -u * 0.72
 		var ry := 0.05 + 0.1 * sin(PI * clampf(u * 0.8 + 0.2, 0.0, 1.0))
 		var y0 := -0.06 * u - 0.05 * ry - ry * 0.9
-		for v in [Vector3(x + 0.03, y0 + 0.02, 0), Vector3(x - 0.03, y0 + 0.02, 0), Vector3(x - 0.05, y0 - 0.05, 0)]:
+		for v in [Vector3(x + 0.015, y0 + 0.02, 0), Vector3(x - 0.015, y0 + 0.02, 0), Vector3(x - 0.04, y0 - 0.06, 0)]:
 			st.set_color(GREY.darkened(0.4))
 			st.add_vertex(v)
 	return _commit(st)
