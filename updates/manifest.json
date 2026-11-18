@@ -1,9 +1,9 @@
 {
-  "version": 99,
-  "file": "update_99.zip",
-  "size": 4335398,
-  "sha256": "026eb411a868f2469a7560115ecf4d36387eade9aaef372eef8fed122f4001de",
+  "version": 100,
+  "file": "update_100.zip",
+  "size": 4345377,
+  "sha256": "3ccf0815b7aa022080a8c7ea1b90100cc4439e3a653b648ee973734a0c0804d0",
   "min_build": 1,
-  "notes": "Timbó: mata os cupins na hora e protege 45 dias. Novo: andirobeiras, sementes de andiroba e óleo de andiroba (protege a madeira por 2 anos)",
+  "notes": "Novo: tamanduá-bandeira, predador dos cupins, com reprodução e rotina próprias",
   "date": "2026-11-18"
 }
