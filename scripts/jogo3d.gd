@@ -2104,6 +2104,12 @@ func _update_ctx_btn() -> void:
 	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and _cupins.nearest_timbo(_player.position, 1.4) >= 0:
 		_ctx_action = "timbo"
 		_ctx_btn.text = "Colher timbó"
+	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and _cupins.nearest_andiroba(_player.position, 1.3) >= 0:
+		_ctx_action = "andiroba"
+		_ctx_btn.text = "Pegar sementes de andiroba"
+	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and item_qtd("oleo_andiroba") > 0 and _oil_target().size() > 0:
+		_ctx_action = "oleo"
+		_ctx_btn.text = "Passar óleo de andiroba"
 	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and item_qtd("veneno_timbo") > 0 and _poison_target().size() > 0:
 		_ctx_action = "veneno"
 		var pt := _poison_target()
@@ -2142,6 +2148,28 @@ func _ctx_press() -> void:
 				_update_inventory()
 				_act_check = 0.0
 			return
+		"andiroba":
+			var ai: int = _cupins.nearest_andiroba(_player.position, 1.3)
+			if ai >= 0:
+				var n: int = _cupins.take_seeds(ai)
+				var left := add_item("semente_andiroba", n)
+				if left > 0:
+					_cupins.andirobas[ai].sem = left
+					_cupins._rebuild()
+				_show_toast("+%d semente de andiroba%s. 6 sementes fazem o óleo (craft)." % [n - left, "" if left == 0 else " (mochila cheia)"])
+				_update_inventory()
+				_act_check = 0.0
+			return
+		"oleo":
+			var ot := _oil_target()
+			if not ot.is_empty():
+				var had2: float = _cupins.dmg_of(ot)
+				_cupins.treat(ot, "oleo")
+				remove_item("oleo_andiroba", 1)
+				_update_inventory()
+				_show_toast(("O cheiro amargo espantou os cupins. " if had2 > 0.02 else "") + "A madeira está protegida contra cupins por uns 2 anos.")
+				_act_check = 0.0
+			return
 		"veneno":
 			var pt := _poison_target()
 			if not pt.is_empty():
@@ -2149,7 +2177,7 @@ func _ctx_press() -> void:
 				_cupins.treat(pt)
 				remove_item("veneno_timbo", 1)
 				_update_inventory()
-				_show_toast(("Os cupins dessa madeira morreram. " if had > 0.02 else "") + "A madeira está protegida contra cupins por uns 2 anos.")
+				_show_toast(("Os cupins dessa madeira morreram. " if had > 0.02 else "") + "O veneno de timbó se desfaz em uns 45 dias. Para proteger por anos, passe óleo de andiroba.")
 				_act_check = 0.0
 			return
 		"despejar":
@@ -6095,6 +6123,16 @@ func _board_mesh(ripa: bool, cracks: int) -> ArrayMesh:
 	mesh.surface_set_material(0, m)
 	return mesh
 
+
+
+## Madeira perto para passar o óleo de andiroba (a que ainda não tem óleo).
+func _oil_target() -> Dictionary:
+	if _cupins == null:
+		return {}
+	var t: Dictionary = _cupins.nearest_wood(_player.position, 1.6)
+	if t.is_empty() or _cupins.oiled(t):
+		return {}
+	return t
 
 
 ## Madeira perto para passar o veneno (a que não está tratada ainda).

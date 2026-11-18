@@ -212,6 +212,17 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_colored_polygon(P.call([[-30, -10], [30, -10], [28, 0], [-28, 0]]), Color(0.75, 0.82, 0.55))
 			ci.draw_polyline(cup + PackedVector2Array([cup[0]]), ink, 2.0 * u, true)
 			ci.draw_colored_polygon(P.call([[-4, -40], [10, -30], [2, -16], [-10, -26]]), Color(0.2, 0.4, 0.15))
+		"semente_andiroba":
+			for k in 3:
+				var o := Vector2(-22 + k * 22, 8 - (k % 2) * 16)
+				ci.draw_colored_polygon(P.call([[o.x - 16, o.y - 12], [o.x + 14, o.y - 14], [o.x + 16, o.y + 12], [o.x - 14, o.y + 14]]), Color(0.45, 0.29, 0.16))
+				ci.draw_line(c + Vector2(o.x - 12, o.y) * u, c + Vector2(o.x + 12, o.y - 2) * u, Color(0.3, 0.19, 0.1), 2.0 * u, true)
+		"oleo_andiroba":
+			var gar: PackedVector2Array = P.call([[-14, -40], [14, -40], [14, -26], [30, -8], [30, 38], [-30, 38], [-30, -8], [-14, -26]])
+			ci.draw_colored_polygon(gar, Color(0.55, 0.42, 0.26))
+			ci.draw_colored_polygon(P.call([[-28, 2], [28, 2], [28, 36], [-28, 36]]), Color(0.86, 0.68, 0.22))
+			ci.draw_polyline(gar + PackedVector2Array([gar[0]]), ink, 2.0 * u, true)
+			ci.draw_colored_polygon(P.call([[-10, -48], [10, -48], [10, -40], [-10, -40]]), Color(0.4, 0.28, 0.16))
 		"tabua", "ripa":
 			var w := 26.0 if id == "tabua" else 9.0
 			var pts := PackedVector2Array([c + Vector2(-44, -w) * u, c + Vector2(44, -w - 8) * u, c + Vector2(44, w - 8) * u, c + Vector2(-44, w) * u])

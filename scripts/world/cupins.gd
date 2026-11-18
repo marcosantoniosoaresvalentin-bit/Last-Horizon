@@ -20,11 +20,14 @@ const MAX_COLONIES := 40
 const START := 9
 const REACH_MIN := 12.0
 const REACH_MAX := 28.0
-const PROTECT_DAYS := 730
+const TIMBO_DAYS := 45          # o veneno de timbó (rotenona) se desfaz rápido no sol e na chuva
+const OLEO_DAYS := 730          # o óleo de andiroba entra na madeira e espanta o cupim por anos
+const ANDIROBA_START := 16
 const TIMBO_START := 26
 
 var colonies: Array = []        # {x, z, nasc, pop}
 var timbos: Array = []          # pés de timbó: {x, z, nasc, colhido (dia ou -1)}
+var andirobas: Array = []       # andirobeiras: {x, z, sem (sementes no chão)}
 var stump_dmg := {}             # "x,z" do toco -> estrago
 var last_day := 0
 var _jogo: Node
@@ -106,6 +109,30 @@ func _generate() -> void:
 		if float(sim.ter[i]) < sim.SEA + 1.4 or float(sim.wat[i]) > 0.01 or float(sim.ground_water(c)) < 0.35:
 			continue
 		timbos.append({"x": x, "z": z, "nasc": last_day - 800, "colhido": -1})
+	_gen_andirobas()
+
+
+## Andirobeiras: árvores grandes de chão úmido (beira de rio, baixada). Debaixo delas
+## caem os ouriços (frutos redondos) que abrem e soltam as sementes.
+func _gen_andirobas() -> void:
+	var cands := []
+	for p in _arv.plants:
+		if int(p[5]) != 0 or _arv.height_of(p, last_day) < 8.0:
+			continue
+		var gw: float = _jogo.sim.ground_water(_cell(float(p[0]), float(p[1])))
+		if gw >= 0.3:
+			cands.append(p)
+	cands.shuffle()
+	for p in cands:
+		if andirobas.size() >= ANDIROBA_START:
+			break
+		var ok := true
+		for a in andirobas:
+			if Vector2(float(a.x) - float(p[0]), float(a.z) - float(p[1])).length() < 25.0:
+				ok = false
+				break
+		if ok:
+			andirobas.append({"x": float(p[0]), "z": float(p[1]), "sem": _rng.randi_range(3, 7)})
 
 
 func _too_close(x: float, z: float, d: float) -> bool:
@@ -178,6 +205,11 @@ func _day(day: int) -> void:
 		keep.append(c)
 	keep.append_array(born)
 	colonies = keep
+	# andiroba: os frutos caem na época das chuvas (janeiro a junho)
+	if month <= 6:
+		for a in andirobas:
+			if int(a.sem) < 10 and _rng.randf() < 0.12:
+				a.sem = int(a.sem) + 1
 	# o timbó colhido volta a crescer em uns 5 meses
 	for t in timbos:
 		if int(t.colhido) >= 0 and day - int(t.colhido) > 150:
@@ -227,7 +259,20 @@ func dmg_of(t: Dictionary) -> float:
 func _treated(t: Dictionary, day: int) -> bool:
 	if t.kind == "toco":
 		return false
-	return day - int((t.obj as Dictionary).get("veneno", -100000)) < PROTECT_DAYS
+	var o: Dictionary = t.obj
+	return day - int(o.get("veneno", -100000)) < TIMBO_DAYS or day - int(o.get("oleo", -100000)) < OLEO_DAYS
+
+
+## Dias de proteção que ainda faltam (o maior dos dois).
+func protect_left(t: Dictionary) -> int:
+	if t.kind == "toco":
+		return 0
+	var o: Dictionary = t.obj
+	return maxi(0, maxi(TIMBO_DAYS - (last_day - int(o.get("veneno", -100000))), OLEO_DAYS - (last_day - int(o.get("oleo", -100000)))))
+
+
+func oiled(t: Dictionary) -> bool:
+	return t.kind != "toco" and last_day - int((t.obj as Dictionary).get("oleo", -100000)) < OLEO_DAYS
 
 
 func _damage(t: Dictionary, v: float, day: int) -> void:
@@ -335,8 +380,9 @@ func nearest_wood(pos: Vector3, r: float) -> Dictionary:
 	return best
 
 
-func treat(t: Dictionary) -> void:
-	(t.obj as Dictionary)["veneno"] = last_day
+## kind "veneno" (timbó: mata os cupins na hora, protege pouco) ou "oleo" (andiroba).
+func treat(t: Dictionary, kind := "veneno") -> void:
+	(t.obj as Dictionary)[kind] = last_day
 	(t.obj as Dictionary)["cupim"] = minf(dmg_of(t), 0.95)     # o estrago fica, mas para
 	_rebuild()
 
@@ -354,6 +400,41 @@ func nearest_timbo(pos: Vector3, r: float) -> int:
 			bd = d
 			best = i
 	return best
+
+
+## Andirobeira com sementes no chão perto, ou -1.
+func nearest_andiroba(pos: Vector3, r: float) -> int:
+	var best := -1
+	var bd := r
+	for i in andirobas.size():
+		var a: Dictionary = andirobas[i]
+		if int(a.sem) <= 0:
+			continue
+		for sp in _seed_spots(a):
+			var d := Vector2(sp.x - pos.x, sp.z - pos.z).length()
+			if d < bd:
+				bd = d
+				best = i
+	return best
+
+
+func take_seeds(i: int) -> int:
+	var n := int(andirobas[i].sem)
+	andirobas[i].sem = 0
+	_rebuild()
+	return n
+
+
+## Onde estão os montinhos de frutos e sementes debaixo da andirobeira.
+func _seed_spots(a: Dictionary) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(float(a.x) * 3.0 + float(a.z) * 5.0)
+	var out := []
+	for k in 3:
+		var ang := rng.randf() * TAU
+		var r := rng.randf_range(1.2, 3.0)
+		out.append(Vector3(float(a.x) + cos(ang) * r, 0, float(a.z) + sin(ang) * r))
+	return out
 
 
 func harvest_timbo(i: int) -> void:
@@ -399,6 +480,15 @@ func _rebuild() -> void:
 	for t in timbos:
 		_timbo(tb, t)
 	_add(tb, _leaf_mat)
+	var sd := SurfaceTool.new()
+	sd.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var anyseed := false
+	for a in andirobas:
+		if int(a.sem) > 0:
+			anyseed = true
+			_seeds(sd, a)
+	if anyseed:
+		_add(sd, _soil_mat)
 	_bugs_dirty = true
 
 
@@ -675,12 +765,61 @@ func _timbo(st: SurfaceTool, t: Dictionary) -> void:
 					st.add_vertex(v)
 
 
+## Debaixo da andirobeira: ouriços redondos (uns fechados, outros abertos em 4 gomos)
+## e as sementes soltas, marrons e meio quadradas.
+func _seeds(st: SurfaceTool, a: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(float(a.x) * 11.0 + float(a.z) * 7.0)
+	var n := int(a.sem)
+	var spots := _seed_spots(a)
+	for k in n:
+		var sp: Vector3 = spots[k % spots.size()]
+		var p := sp + Vector3(rng.randf_range(-0.25, 0.25), 0, rng.randf_range(-0.25, 0.25))
+		var gy: float = _jogo.height_at(p.x, p.z)
+		# ouriço (fruto) de uns 9 cm
+		var fc := Vector3(p.x, gy + 0.04, p.z)
+		var col := Color(0.34, 0.24, 0.13)
+		for i in 4:
+			for j in 8:
+				var q := []
+				for d in [[0, 0], [1, 0], [1, 1], [0, 1]]:
+					var th := PI * float(i + d[0]) / 4.0
+					var ph := TAU * float(j + d[1]) / 8.0
+					q.append(fc + Vector3(sin(th) * cos(ph), cos(th) * 0.9, sin(th) * sin(ph)) * 0.045)
+				var cc := col.darkened(0.25) if j % 2 == 0 else col
+				for idx in [0, 2, 1, 0, 3, 2]:
+					st.set_color(cc)
+					st.add_vertex(q[idx])
+		# 2 sementes soltas do lado (uns 4 cm, cantos retos)
+		for m in 2:
+			var ang := rng.randf() * TAU
+			var sc := Vector3(p.x + cos(ang) * 0.09, gy + 0.015, p.z + sin(ang) * 0.09)
+			_box(st, sc, Vector3(0.022, 0.016, 0.018), rng.randf() * TAU, Color(0.32, 0.2, 0.11).darkened(rng.randf() * 0.15))
+
+
+static func _box(st: SurfaceTool, c: Vector3, h: Vector3, yaw: float, col: Color) -> void:
+	var b := Basis(Vector3.UP, yaw)
+	var faces := [[Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1)], [Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 1, 0)],
+		[Vector3(0, 1, 0), Vector3(0, 0, 1), Vector3(1, 0, 0)], [Vector3(0, -1, 0), Vector3(1, 0, 0), Vector3(0, 0, 1)],
+		[Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 1, 0)], [Vector3(0, 0, -1), Vector3(0, 1, 0), Vector3(1, 0, 0)]]
+	for f in faces:
+		var n: Vector3 = f[0]
+		var u: Vector3 = f[1]
+		var v: Vector3 = f[2]
+		var q := []
+		for d in [[-1, -1], [1, -1], [1, 1], [-1, 1]]:
+			q.append(c + b * ((n + u * float(d[0]) * 0.8 + v * float(d[1]) * 0.8) * h))
+		for idx in [0, 1, 2, 0, 2, 3]:
+			st.set_color(col.darkened(0.1) if n.y < 0.5 else col)
+			st.add_vertex(q[idx])
+
+
 # ================== SALVAR ==================
 
 func save(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "colonias": colonies, "timbos": timbos, "tocos": stump_dmg}))
+		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "colonias": colonies, "timbos": timbos, "andirobas": andirobas, "tocos": stump_dmg}))
 		f.close()
 
 
@@ -692,6 +831,9 @@ func _load(path: String) -> bool:
 		return false
 	colonies = d.get("colonias", [])
 	timbos = d.get("timbos", [])
+	andirobas = d.get("andirobas", [])
+	if andirobas.is_empty():
+		_gen_andirobas()        # mundo de versão antiga: as andirobeiras aparecem agora
 	stump_dmg = d.get("tocos", {})
 	last_day = mini(int(d.get("dia", last_day)), last_day)
 	return true
