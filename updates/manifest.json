@@ -1,9 +1,9 @@
 {
-  "version": 87,
-  "file": "update_87.zip",
-  "size": 4301908,
-  "sha256": "1370ccc39da05a390b8f6e423afdd17de5a9dbd71a5d1470329194b19b67a1f5",
+  "version": 88,
+  "file": "update_88.zip",
+  "size": 4306019,
+  "sha256": "974989187c42692a2f01819861471a8b1de6a0455c408cee0813be4301cb87c1",
   "min_build": 1,
-  "notes": "Ícones certos (Lâmina de Pá, Cunha, Pedra de Marreta, Rachar ao meio); modelar pedra com os braços do próprio personagem (sem a mão falsa); mais 3 cunhas para testar",
+  "notes": "Tora rachada vira pedaço de verdade: pegar no ombro, apoiar nas forquilhas, fincar e rachar de novo quantas vezes quiser (vai virando tábua); face rachada com rachaduras e farpas; cabo da marreta aparece",
   "date": "2026-11-18"
 }

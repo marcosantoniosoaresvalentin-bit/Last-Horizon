@@ -908,6 +908,7 @@ func _on_world_ready() -> void:
 	add_child(_minerios)
 	_minerios.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/minerios.json" if _world_id != "" else "")
 	_escav.tint_fn = _minerios.tint_at
+	_convert_bandas()
 	_escav.water_mat = _water_mat
 	_escav.sea_m = MundoSim.SEA * HS
 	_escav_steps = sim.steps
@@ -2703,6 +2704,11 @@ func _branch_target() -> Dictionary:
 func _open_work_menu() -> void:
 	if _apoios == null or _apoios.nearest_rested(_player.position, 1.8) < 0:
 		return
+	var ri: int = _apoios.nearest_rested(_player.position, 1.8)
+	if _apoios.rested[ri].log.has("sec"):
+		_choice_menu("TRABALHAR NA MADEIRA", "Escolha o que fazer",
+			[["Rachar ao meio", "Racha de novo no comprido com\n3 cunhas e a marreta:\nvai virando tábuas.", func(): _split_begin()]])
+		return
 	_choice_menu("TRABALHAR NA TORA", "Escolha o que fazer",
 		[["Cortar rodela", "Uma fatia fina da ponta da tora.\nÉ o fundo do balde.", func(): _work_choose("rodela")],
 		["Rachar ao meio", "Abre a tora no comprido com\n3 cunhas e a marreta: 2 bandas.", func(): _split_begin()]])
@@ -2790,6 +2796,9 @@ func _work_choose(modo: String) -> void:
 	_close_work_menu()
 	var i: int = _apoios.nearest_rested(_player.position, 1.8)
 	if i < 0:
+		return
+	if _apoios.rested[i].log.has("sec"):
+		_show_toast("Rodela só sai de tora inteira (redonda).")
 		return
 	# a rodela é fina: só a serra de pedra corta (o machado racha a madeira)
 	if item_qtd("serra") <= 0:
@@ -4830,6 +4839,33 @@ func _water_arrays(wat: PackedFloat32Array) -> void:
 	_w_arr = arr
 
 
+## Bandas de versões antigas (eram enfeite no chão): viram pedaços de tora de verdade,
+## que dá para pegar, apoiar, rachar de novo e fincar.
+func _convert_bandas() -> void:
+	var keep := []
+	var any := false
+	for g in _chao:
+		if str(g.id) != "banda":
+			keep.append(g)
+			continue
+		var dl: Array = g.get("dur", [])
+		var L := float(dl[0]) if dl.size() >= 4 else 1.5
+		var ra := float(dl[1]) if dl.size() >= 4 else 0.12
+		var rb := float(dl[2]) if dl.size() >= 4 else 0.1
+		var yaw := float(dl[3]) if dl.size() >= 4 else 0.0
+		var halves: Array = Arvores.split_sec(Arvores.circle_sec(), false)
+		var fl := {"cil": {"L": L, "ra": ra, "rb": rb}, "sec": halves[0], "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0,
+			"bot": {}, "top": {}, "pos": [float(g.x), 0.0, float(g.z)], "yaw": yaw, "dia": _arvores.last_day}
+		fl.pos[1] = height_at(float(g.x), float(g.z)) + ra * 0.5
+		_arvores.free_logs.append(fl)
+		if g.node:
+			(g.node as Node3D).queue_free()
+		any = true
+	if any:
+		_chao = keep
+		_arvores._rebuild_logs()
+
+
 # ================== RACHAR A TORA COM CUNHAS ==================
 # Na tora apoiada nas forquilhas: o jogador põe 3 cunhas (uma perto de cada ponta e uma
 # no meio), com o fio virado para a madeira; depois bate nelas com a marreta, um pouco
@@ -4850,6 +4886,10 @@ func _split_begin() -> void:
 		return
 	if item_qtd("marreta") < 1:
 		_show_toast("Precisa de uma marreta (pedra de marreta + galho + 2 cipós).")
+		return
+	var fl0: Dictionary = _apoios.rested[i].log
+	if fl0.has("sec") and _arvores.free_log_radius(fl0) * 2.0 < 0.035:
+		_show_toast("Essa tábua já está fina demais para rachar de novo.")
 		return
 	equip("")                      # as mãos livres para pôr as cunhas
 	var spots := []
@@ -5248,10 +5288,18 @@ func _split_finish() -> void:
 	var inf: Dictionary = _apoios.info(i)
 	var fl: Dictionary = _apoios.rested[i].log
 	var L := float(inf.L)
-	var ra: float = _arvores.free_log_radius_at(fl, 0.03)
-	var rb: float = _arvores.free_log_radius_at(fl, 0.97)
 	var c: Vector3 = inf.center
 	var dir: Vector3 = inf.dir
+	# os dois pedaços: mesma casca, raio e comprimento da tora; a seção rachada ao meio
+	var cil: Dictionary
+	var sec: Dictionary
+	if fl.has("cil"):
+		cil = fl.cil.duplicate()
+		sec = fl.sec
+	else:
+		cil = {"L": L, "ra": _arvores.free_log_radius_at(fl, 0.02), "rb": _arvores.free_log_radius_at(fl, 0.98)}
+		sec = Arvores.circle_sec()
+	var halves: Array = Arvores.split_sec(sec, bool(fl.get("em_pe", false)))
 	var flat := Vector3(dir.x, 0, dir.z).normalized()
 	var n := Vector3(-flat.z, 0, flat.x)
 	# as cunhas que sobraram voltam para a mochila
@@ -5264,21 +5312,19 @@ func _split_finish() -> void:
 		_itens["cunha"] = int(_itens.get("cunha", 0)) + back
 	_apoios.take_rested(i)
 	var yaw := atan2(-flat.z, flat.x)
-	var rmax := maxf(ra, rb)
-	for side in [-1.0, 1.0]:
-		var p: Vector3 = c + n * side * (rmax + 0.25)
-		_add_ground("banda", 1, p.x, p.z, rmax, [L, ra, rb, yaw])
-		var node: Node3D = _chao[_chao.size() - 1].node
-		var end_pos := node.position
-		node.position = c - Vector3.UP * rmax * 0.5
-		var tw := node.create_tween()
-		tw.tween_method(func(t: float) -> void:
-			node.position = (c - Vector3.UP * rmax * 0.5).lerp(end_pos, t) + Vector3.UP * sin(t * PI) * 0.15
-			node.basis = Basis(flat, side * (1.0 - t) * PI * 0.5), 0.0, 1.0, 0.5).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	var rmax := maxf(float(cil.ra), float(cil.rb))
+	var side := -1.0
+	for hs in halves:
+		var piece := {"cil": cil.duplicate(), "sec": hs, "v": int(fl.get("v", 0)), "s": float(fl.get("s", 1.0)),
+			"h0": float(fl.get("h0", 0.0)), "h1": float(fl.get("h1", 1.0)), "bot": {}, "top": {},
+			"pos": [0, 0, 0], "yaw": yaw, "dia": int(fl.get("dia", _arvores.last_day))}
+		var p: Vector3 = c + n * side * (rmax + 0.3)
+		_arvores.drop_log(piece, p, yaw)
+		side = 1.0
 	Sons.play_at(self, "queda", c, -4.0, 1.3)
 	Sons.play_at(self, "estalo", c, 0.0, 0.8)
 	_update_inventory()
-	_show_toast("A tora rachou ao meio! Duas bandas no chão. As cunhas voltaram para a mochila.")
+	_show_toast("Rachou ao meio! Os dois pedaços estão no chão: dá para pegar, apoiar nas forquilhas e rachar de novo (tábuas) ou fincar. As cunhas voltaram para a mochila.")
 
 
 func _split_end(give_back := true) -> void:

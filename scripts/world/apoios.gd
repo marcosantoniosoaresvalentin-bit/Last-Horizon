@@ -109,6 +109,8 @@ func rest(fl: Dictionary, a: int, b: int) -> void:
 	var yaw := atan2(float(B.z) - float(A.z), float(B.x) - float(A.x))   # o X fica de lado para a tora
 	A.yaw = yaw
 	B.yaw = yaw
+	if fl.has("sec"):
+		fl.em_pe = true          # pedaço rachado: a face larga fica em pé (a cunha racha em tábua)
 	rested.append({"log": fl, "a": a, "b": b, "off": 0.0})
 	_rebuild()
 
@@ -132,6 +134,7 @@ func nearest_rested(pos: Vector3, reach: float) -> int:
 
 func take_rested(i: int) -> Dictionary:
 	var fl: Dictionary = rested[i].log
+	fl.erase("em_pe")
 	rested.remove_at(i)
 	_rebuild()
 	return fl

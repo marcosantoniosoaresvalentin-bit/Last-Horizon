@@ -1208,6 +1208,8 @@ func _release_pieces(p: Array) -> void:
 ## enquanto o chão for inclinado. Devolve [centro final, quanto rolou (m)].
 func _settle(fl: Dictionary) -> Array:
 	var c := Vector2(float(fl.pos[0]), float(fl.pos[2]))
+	if fl.has("sec"):
+		return [c, 0.0]          # pedaço rachado: deita na face reta e não rola
 	var dir := Vector2(cos(float(fl.yaw)), -sin(float(fl.yaw)))
 	var n := Vector2(-dir.y, dir.x)
 	var L := free_log_length(fl)
@@ -1898,6 +1900,8 @@ const CARRY_MAX_KG := 50.0
 ## Tora solta: {v, s, h0, h1, bot, top (pontas), pos [x, y, z] (centro), yaw, dia}.
 ## O desenho usa o tronco do modelo de h0 a h1 (no tamanho s), deitado ao longo de +X.
 func free_log_node(fl: Dictionary) -> Node3D:
+	if fl.has("cil"):
+		return _piece_node(fl)
 	var v := int(fl.v) % VARIANTS
 	var m: Dictionary = _models[v]
 	var s := float(fl.s)
@@ -1943,6 +1947,8 @@ const SLICE_M := 0.05   # grossura da rodela (igual a Apoios.SLICE)
 ## Raio da tora solta no ponto u (0 = ponta h0, 1 = ponta h1), contando o
 ## alargamento do pé da árvore e as sapopemas.
 func free_log_radius_at(fl: Dictionary, u: float) -> float:
+	if fl.has("cil"):
+		return _cil_r(fl, u) * _sec_ext(fl).x
 	var m: Dictionary = _models[int(fl.v) % VARIANTS]
 	var h := lerpf(float(fl.h0), float(fl.h1), clampf(u, 0.0, 1.0))
 	var r := 0.0
@@ -1953,6 +1959,9 @@ func free_log_radius_at(fl: Dictionary, u: float) -> float:
 
 ## Raio maior da tora (para a colisão).
 func free_log_max_radius(fl: Dictionary) -> float:
+	if fl.has("cil"):
+		var e := _sec_ext(fl)
+		return maxf(float(fl.cil.ra), float(fl.cil.rb)) * maxf(e.x, e.y)
 	var r := 0.0
 	for k in 9:
 		r = maxf(r, free_log_radius_at(fl, k / 8.0))
@@ -1961,6 +1970,11 @@ func free_log_max_radius(fl: Dictionary) -> float:
 
 ## Formato da ponta da tora (raio em 24 ângulos, em cm redondos): a rodela sai assim.
 func free_log_end_profile(fl: Dictionary, e: int) -> Array:
+	if fl.has("cil"):
+		var out2 := []
+		for k in 24:
+			out2.append(snappedf(_cil_r(fl, 1.0 if e > 0 else 0.0), 0.01))
+		return out2
 	var m: Dictionary = _models[int(fl.v) % VARIANTS]
 	var h := float(fl.h1) if e > 0 else float(fl.h0)
 	var out := []
@@ -1971,6 +1985,8 @@ func free_log_end_profile(fl: Dictionary, e: int) -> Array:
 
 ## Raio da tora solta numa das pontas (e = 1: ponta h1; -1: ponta h0).
 func free_log_end_radius(fl: Dictionary, e: int) -> float:
+	if fl.has("cil"):
+		return _cil_r(fl, 1.0 if e > 0 else 0.0) * _sec_ext(fl).x
 	var m: Dictionary = _models[int(fl.v) % VARIANTS]
 	var h := float(fl.h1) if e > 0 else float(fl.h0)
 	return _radius_of(m, h, 0.0) * float(fl.s)
@@ -1991,16 +2007,23 @@ func shorten_free_log(fl: Dictionary, e: int, length: float, rough := 0.25) -> v
 
 
 func free_log_length(fl: Dictionary) -> float:
+	if fl.has("cil"):
+		return float(fl.cil.L)
 	var m: Dictionary = _models[int(fl.v) % VARIANTS]
 	return (_axis_of(m, float(fl.h1)) - _axis_of(m, float(fl.h0))).length() * float(fl.s)
 
 
 func free_log_radius(fl: Dictionary) -> float:
+	if fl.has("cil"):
+		return _cil_r(fl, 0.5) * _sec_ext(fl).x
 	var m: Dictionary = _models[int(fl.v) % VARIANTS]
 	return _radius_of(m, (float(fl.h0) + float(fl.h1)) * 0.5, 0.0) * float(fl.s)
 
 
 func free_log_kg(fl: Dictionary) -> float:
+	if fl.has("cil"):
+		var rm := _cil_r(fl, 0.5)
+		return _poly_area(fl.sec) * rm * rm * free_log_length(fl) * WOOD_DENSITY
 	var r := free_log_radius(fl)
 	return PI * r * r * free_log_length(fl) * WOOD_DENSITY
 
@@ -2674,3 +2697,262 @@ func _make_litter_quad() -> Mesh:
 	pc.vert(Vector3(-0.5, 0, 0.5), Vector3.UP, Vector2(0, 1))
 	pc.idx.append_array(PackedInt32Array([i0, i0 + 1, i0 + 2, i0, i0 + 2, i0 + 3]))
 	return _mesh([pc])
+
+
+
+# ================== PEDAÇOS RACHADOS (cunha e marreta) ==================
+# Tora rachada no comprido: um "cilindro" simples {L, ra, rb} (comprimento e raio nas
+# pontas da tora de origem) com uma seção de corte "sec": polígono em unidades do raio
+# (Vector2(z, y): de lado, para cima), cada ponto com o tipo da aresta que sai dele
+# (0 = casca, 1 = madeira rachada). "ax" é onde ficava o eixo (o miolo) na seção.
+# Deitado no chão a face mais larga fica embaixo; nas forquilhas fica "em pé"
+# (em_pe: girado 90°), e a cunha racha de cima para baixo: corta a seção em y = 0.
+
+static func circle_sec() -> Dictionary:
+	var pts := []
+	for k in 24:
+		var a := TAU * k / 24.0
+		pts.append([cos(a), sin(a), 0])
+	return {"pts": pts, "ax": [0.0, 0.0]}
+
+
+func _cil_r(fl: Dictionary, u: float) -> float:
+	return lerpf(float(fl.cil.ra), float(fl.cil.rb), clampf(u, 0.0, 1.0))
+
+
+## Meia altura e meia largura da seção (em unidades do raio), como está agora.
+func _sec_ext(fl: Dictionary) -> Vector2:
+	var hy := 0.0
+	var hz := 0.0
+	for p in fl.sec.pts:
+		hz = maxf(hz, absf(float(p[0])))
+		hy = maxf(hy, absf(float(p[1])))
+	return Vector2(hz, hy) if bool(fl.get("em_pe", false)) else Vector2(hy, hz)
+
+
+static func _poly_area(sec: Dictionary) -> float:
+	var a := 0.0
+	var pts: Array = sec.pts
+	for k in pts.size():
+		var p: Array = pts[k]
+		var q: Array = pts[(k + 1) % pts.size()]
+		a += float(p[0]) * float(q[1]) - float(q[0]) * float(p[1])
+	return absf(a) * 0.5
+
+
+## Racha a seção ao meio (linha y = 0 da posição em pé = no plano vertical da cunha).
+## Devolve as duas seções, cada uma já deitada (face mais larga embaixo) e centrada.
+static func split_sec(sec: Dictionary, em_pe: bool) -> Array:
+	var pts := []
+	for p in sec.pts:
+		pts.append([float(p[0]), float(p[1]), int(p[2])])
+	var out := []
+	for keep in [1.0, -1.0]:
+		var res := []        # [z, y, tipo da aresta que CHEGA no ponto]
+		var n := pts.size()
+		for k in n:
+			var P: Array = pts[k]
+			var Q: Array = pts[(k + 1) % n]
+			var t := int(P[2])
+			# em pé nas forquilhas o plano da cunha (vertical) é o y = 0 da seção
+			# guardada (paralelo à face larga: sai tábua); a tora inteira racha em z = 0
+			var vp: float = float(P[1]) if em_pe else float(P[0])
+			var vq: float = float(Q[1]) if em_pe else float(Q[0])
+			var inP: bool = vp * keep >= 0.0
+			var inQ: bool = vq * keep >= 0.0
+			if inP and inQ:
+				res.append([Q[0], Q[1], t])
+			elif inP != inQ:
+				var f := vp / (vp - vq)
+				var I := [lerpf(float(P[0]), float(Q[0]), f), lerpf(float(P[1]), float(Q[1]), f)]
+				if inP:
+					res.append([I[0], I[1], t])
+				else:
+					res.append([I[0], I[1], 1])
+					res.append([Q[0], Q[1], t])
+		if res.size() < 3:
+			continue
+		# tipo da aresta que SAI de cada ponto = o que chega no próximo
+		var poly := []
+		for k in res.size():
+			poly.append([float(res[k][0]), float(res[k][1]), int(res[(k + 1) % res.size()][2])])
+		out.append(_lay_flat(poly, sec.ax))
+	return out
+
+
+## Deita a seção na aresta mais comprida (embaixo, reta) e centra no meio da caixa.
+static func _lay_flat(poly: Array, ax: Array) -> Dictionary:
+	var best := 0
+	var bl := -1.0
+	for k in poly.size():
+		var p: Array = poly[k]
+		var q: Array = poly[(k + 1) % poly.size()]
+		var l := Vector2(float(q[0]) - float(p[0]), float(q[1]) - float(p[1])).length()
+		if l > bl:
+			bl = l
+			best = k
+	var A: Array = poly[best]
+	var B: Array = poly[(best + 1) % poly.size()]
+	var ang := -atan2(float(B[1]) - float(A[1]), float(B[0]) - float(A[0]))
+	var rot := func(v: Vector2) -> Vector2:
+		return v.rotated(ang)
+	var cen := Vector2.ZERO
+	for p in poly:
+		cen += Vector2(float(p[0]), float(p[1]))
+	cen /= poly.size()
+	var ya: float = (rot.call(Vector2(float(A[0]), float(A[1]))) as Vector2).y
+	if (rot.call(cen) as Vector2).y < ya:
+		ang += PI
+	var r2 := []
+	var mn := Vector2(1e9, 1e9)
+	var mx := Vector2(-1e9, -1e9)
+	for p in poly:
+		var v := Vector2(float(p[0]), float(p[1])).rotated(ang)
+		r2.append([v.x, v.y, int(p[2])])
+		mn = mn.min(v)
+		mx = mx.max(v)
+	var c := (mn + mx) * 0.5
+	for p in r2:
+		p[0] = snappedf(float(p[0]) - c.x, 0.0001)
+		p[1] = snappedf(float(p[1]) - c.y, 0.0001)
+	var a2 := Vector2(float(ax[0]), float(ax[1])).rotated(ang) - c
+	return {"pts": r2, "ax": [a2.x, a2.y]}
+
+
+## Malha do pedaço rachado: casca nas arestas de casca; madeira rachada nas outras
+## (ondulada nas fibras, com degraus, rachaduras, o miolo escuro e farpas); pontas com anéis.
+func _piece_node(fl: Dictionary) -> Node3D:
+	var L := float(fl.cil.L)
+	var pts: Array = fl.sec.pts
+	var ax := Vector2(float(fl.sec.ax[0]), float(fl.sec.ax[1]))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = absi(hash(str(pts.size()) + str(L) + str(pts[0])))
+	var nz := FastNoiseLite.new()
+	nz.seed = rng.randi()
+	nz.frequency = 1.0
+	var mesh := ArrayMesh.new()
+	var bark := SurfaceTool.new()
+	bark.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var wood := SurfaceTool.new()
+	wood.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var stations := 16
+	var P := func(v: Vector2, u: float) -> Vector3:
+		var r := _cil_r(fl, u)
+		return Vector3((u - 0.5) * L, v.y * r, v.x * r)
+	var n := pts.size()
+	var arc := 0.0
+	for k in n:
+		var a := Vector2(float(pts[k][0]), float(pts[k][1]))
+		var b := Vector2(float(pts[(k + 1) % n][0]), float(pts[(k + 1) % n][1]))
+		var typ := int(pts[k][2])
+		var en := Vector2(b.y - a.y, -(b.x - a.x)).normalized()       # para fora (polígono anti-horário)
+		var mid := (a + b) * 0.5
+		if en.dot(mid) < 0.0 and Vector2.ZERO.distance_to(mid) > 0.0001:
+			pass
+		if typ == 0:
+			var seg := a.distance_to(b)
+			for i in stations:
+				var u0 := float(i) / stations
+				var u1 := float(i + 1) / stations
+				var q := [P.call(a, u0), P.call(b, u0), P.call(b, u1), P.call(a, u1)]
+				var uv := [Vector2(arc, u0 * L), Vector2(arc + seg * 0.3, u0 * L), Vector2(arc + seg * 0.3, u1 * L), Vector2(arc, u1 * L)]
+				var nn := Vector3(0, en.y, en.x)
+				for idx in [0, 2, 1, 0, 3, 2]:
+					bark.set_normal(nn)
+					bark.set_uv(uv[idx])
+					bark.add_vertex(q[idx])
+			arc += a.distance_to(b) * 0.3
+		else:
+			# face rachada: subdivide e desloca para fora/dentro (não fica plana)
+			var across := 30
+			var nn3 := Vector3(0, en.y, en.x)
+			for i in stations * 3:
+				for j in across:
+					var q := []
+					var cs := []
+					for e in [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]]:
+						var u := float(e[0]) / (stations * 3)
+						var w := float(e[1]) / across
+						var v := a.lerp(b, w)
+						var x := (u - 0.5) * L
+						var edge := 1.0 - smoothstep(0.82, 1.0, absf(w * 2.0 - 1.0))
+						var h := nz.get_noise_2d(x * 1.2 + k * 31.0, w * 4.0) * 0.02 + nz.get_noise_2d(x * 5.0, w * 16.0) * 0.006
+						h += 0.008 if nz.get_noise_2d(x * 0.8 + 100.0 + k, w * 2.0) > 0.25 else 0.0
+						# rachaduras: riscos finos e compridos no sentido das fibras
+						var crack := false
+						for cc in 3:
+							var cw := 0.5 + 0.38 * nz.get_noise_1d(x * 0.35 + cc * 57.0 + k * 13.0)
+							var on := nz.get_noise_1d(x * 0.5 + cc * 91.0 + k * 7.0) > 0.05
+							if on and absf(w - cw) < 0.026:
+								crack = true
+						if crack:
+							h -= 0.01
+						var r := _cil_r(fl, u)
+						var pw: Vector3 = P.call(v, u) + nn3 * h * edge
+						q.append(pw)
+						var core := 1.0 - smoothstep(0.0, 0.12, v.distance_to(ax))
+						var grain := 0.07 * nz.get_noise_2d(x * 2.0, w * 30.0 + k)
+						var col := Color(0.36, 0.27, 0.18).darkened(core * 0.35 + grain)
+						if crack:
+							col = Color(0.1, 0.07, 0.04)
+						cs.append(col)
+						var _r := r
+					for idx in [0, 1, 2, 0, 2, 3]:
+						wood.set_color(cs[idx])
+						wood.add_vertex(q[idx])
+			# farpas levantadas da face, no sentido das fibras
+			var fl_len := a.distance_to(b) * _cil_r(fl, 0.5)
+			for f in int(clampf(fl_len * 60.0, 3.0, 24.0)):
+				var u := rng.randf_range(0.03, 0.97)
+				var v := a.lerp(b, rng.randf_range(0.05, 0.95))
+				var base: Vector3 = P.call(v, u)
+				var dx := 1.0 if rng.randf() < 0.5 else -1.0
+				var ln := rng.randf_range(0.04, 0.13)
+				var tip := base + Vector3(dx * ln, 0, 0) + nn3 * rng.randf_range(0.01, 0.035)
+				var side := Vector3(0, -en.x, en.y) * rng.randf_range(0.004, 0.009)
+				var col := Color(0.58, 0.43, 0.28).darkened(rng.randf() * 0.15)
+				for vtx in [base - side, base + side, tip]:
+					wood.set_color(col)
+					wood.add_vertex(vtx)
+	# pontas: a seção com os anéis em volta do miolo
+	var cen := Vector2.ZERO
+	for p in pts:
+		cen += Vector2(float(p[0]), float(p[1]))
+	cen /= n
+	for end in [0.0, 1.0]:
+		for k in n:
+			var a := Vector2(float(pts[k][0]), float(pts[k][1]))
+			var b := Vector2(float(pts[(k + 1) % n][0]), float(pts[(k + 1) % n][1]))
+			var tri := [cen, a, b] if end > 0.5 else [cen, b, a]
+			for v in tri:
+				var dd: float = (v as Vector2).distance_to(ax)
+				wood.set_color(Color(0.56, 0.42, 0.28).darkened(0.1 * absf(sin(dd * 14.0))))
+				wood.add_vertex(P.call(v, end))
+	wood.generate_normals()
+	bark.commit(mesh)
+	if mesh.get_surface_count() > 0:
+		var age := float(last_day - int(fl.get("dia", last_day)))
+		mesh.surface_set_material(0, _bark if age < 200 else _bark_dead)
+	wood.commit(mesh)
+	mesh.surface_set_material(mesh.get_surface_count() - 1, _piece_wood_mat())
+	var root := Node3D.new()
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.visibility_range_end = VIEW_DIST
+	if bool(fl.get("em_pe", false)):
+		mi.rotation.x = -PI * 0.5        # nas forquilhas: a face larga fica em pé
+	root.add_child(mi)
+	return root
+
+
+var _pwm: StandardMaterial3D
+
+func _piece_wood_mat() -> StandardMaterial3D:
+	if _pwm == null:
+		_pwm = StandardMaterial3D.new()
+		_pwm.vertex_color_use_as_albedo = true
+		_pwm.vertex_color_is_srgb = true
+		_pwm.roughness = 1.0
+		_pwm.metallic_specular = 0.1
+		_pwm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return _pwm
