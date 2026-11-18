@@ -1,9 +1,9 @@
 {
-  "version": 107,
-  "file": "update_107.zip",
-  "size": 4580287,
-  "sha256": "ec77f42beafb625e1165951df93da04380c8bd6e7656298e68a8a2555999b79d",
+  "version": 108,
+  "file": "update_108.zip",
+  "size": 4582063,
+  "sha256": "4c2b54574b3e5c27988301dba657d2edda136e15e147a11576e479d89c3d70a6",
   "min_build": 1,
-  "notes": "Novo: Modo de teste nas Configurações (fabricar sem gastar, pedra pronta na hora, madeira corta numa batida)",
+  "notes": "Construção: cortar estaca em qualquer altura, viga amarrada no lado da estaca, motivo na tela, casa cai se o cupim comer o apoio",
   "date": "2026-11-18"
 }
