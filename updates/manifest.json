@@ -1,9 +1,9 @@
 {
-  "version": 95,
-  "file": "update_95.zip",
-  "size": 4318610,
-  "sha256": "5ea09e53ec4a400089385c7ed9f32fdc1104702cb77dac92b864cf650e6598bf",
+  "version": 96,
+  "file": "update_96.zip",
+  "size": 4327218,
+  "sha256": "16add97530c922247f9335a968fe0697c4cc2a8c2fb08fd7b5774a4b90b02ea4",
   "min_build": 1,
-  "notes": "Tábua rachada na forquilha: Serrar tábua pequena (40 cm, vai para a mochila, repete até acabar); tábua pequena no chão: Rachar tábua com o machado (4 batidas) solta 4 ripas (mata-juntas) para o balde",
+  "notes": "Cupins: cupinzeiros perto do barro, cupim come toras, galhos, estacas, forquilhas e tábuas; ataca árvores fracas; planta timbó vira veneno contra cupim",
   "date": "2026-11-18"
 }
