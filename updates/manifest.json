@@ -1,9 +1,9 @@
 {
-  "version": 103,
-  "file": "update_103.zip",
-  "size": 4578238,
-  "sha256": "d7aca61aab12587f2c9545e535d2a1b4fd8783a458bdab3b6af7d41247f44b06",
+  "version": 104,
+  "file": "update_104.zip",
+  "size": 4578430,
+  "sha256": "063872f4e5bf383c02b586578bb1954c30f8e201e3795bb2ca4bec4abee044fd",
   "min_build": 1,
-  "notes": "Nivelar estaca com a serra; viga se apoia em estacas de alturas diferentes; colisão nas peças da construção e nos cupinzeiros",
+  "notes": "Machado: Medir altura na estaca mais baixa e Cortar a ponta da mais alta; viga sem inclinação automática",
   "date": "2026-11-18"
 }
