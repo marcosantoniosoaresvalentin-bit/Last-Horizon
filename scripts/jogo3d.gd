@@ -24,6 +24,7 @@ const GalhoGeo := preload("res://scripts/world/galho_geo.gd")
 const Pedras := preload("res://scripts/world/pedras.gd")
 const Lascar := preload("res://scripts/world/lascar.gd")
 const Macacos := preload("res://scripts/world/macacos.gd")
+const Bacabas := preload("res://scripts/world/bacabas.gd")
 const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
@@ -363,6 +364,7 @@ var _ctx_action := ""
 var _work_btn: Button             # "Trabalhar" na tora apoiada nas forquilhas (ou "Modelar pedra")
 var _pedras: Node3D = null
 var _macacos: Node3D = null
+var _bacabas: Node3D = null
 var _escav: Node3D = null
 var _escav_steps := 0
 var _escav_timer := 0.0
@@ -851,9 +853,13 @@ func _on_world_ready() -> void:
 	_cipos = Cipos.new()
 	add_child(_cipos)
 	_cipos.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/cipos.json" if _world_id != "" else "")
+	_bacabas = Bacabas.new()
+	add_child(_bacabas)
+	_bacabas.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/bacabas.json" if _world_id != "" else "")
+	print("bacabas: %d (%d adultas)" % [_bacabas.palms.size(), _bacabas.adult_palms().size()])
 	_macacos = Macacos.new()
 	add_child(_macacos)
-	_macacos.build(self, _arvores, _cipos, int(sim.world_seed), Mundos.dir(_world_id) + "/macacos.json" if _world_id != "" else "")
+	_macacos.build(self, _arvores, _cipos, _bacabas, int(sim.world_seed), Mundos.dir(_world_id) + "/macacos.json" if _world_id != "" else "")
 	print("macacos: %d em %d bandos" % [_macacos.count(), _macacos.troops.size()])
 	_arvores.fell_hook = _cipos.attach_falling
 	_arvores.fall_done_hook = _cipos._rebuild
@@ -1193,6 +1199,8 @@ func _process(delta: float) -> void:
 		_arvores.tick()   # quando vira o dia: sementes, brotos, crescimento
 		if _cipos:
 			_cipos.tick()
+		if _bacabas:
+			_bacabas.tick()
 		if _macacos:
 			_macacos.tick()
 			_macacos.update(delta)
@@ -1260,6 +1268,8 @@ func _save_world() -> void:
 		_cipos.save(Mundos.dir(_world_id) + "/cipos.json")
 	if _macacos:
 		_macacos.save(Mundos.dir(_world_id) + "/macacos.json")
+	if _bacabas:
+		_bacabas.save(Mundos.dir(_world_id) + "/bacabas.json")
 	if _buracos:
 		_buracos.save(Mundos.dir(_world_id) + "/buracos.json")
 	if _galhos:
@@ -3965,6 +3975,8 @@ func _move_player(delta: float) -> void:
 		p = _arvores.push_out(p, feet)   # não atravessa troncos e toras (pulando passa por cima)
 	if _buracos:
 		p = _buracos.push_out(p)          # nem as toras fincadas
+	if _bacabas:
+		p = _bacabas.push_out(p)          # nem o tronco das palmeiras
 	if _apoios:
 		p = _apoios.push_out(p)           # nem as forquilhas e a tora em cima delas
 	if _escav and not _air:

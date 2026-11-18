@@ -1,19 +1,20 @@
 extends Node3D
-## Macacos-prego: bandos que vivem do cipó-titica e espalham as sementes dele.
+## Macacos-prego: bandos que vivem da palmeira bacaba e espalham os caroços dela.
 ##
-## - Um depende do outro: o macaco come os frutos (dezembro a fevereiro) e solta as
-##   sementes longe, onde passa; é o único jeito do cipó nascer em lugar novo.
-## - O ano todo o bando precisa de cipó adulto por perto (frutos, brotos e folhas):
-##   sem cipó ao alcance, passa fome e os macacos vão morrendo.
+## - Um depende do outro: o macaco come os frutos maduros (outubro a dezembro) e solta
+##   os caroços longe, onde passa; é assim que a bacaba nasce em lugar novo.
+## - O ano todo o bando precisa de bacaba adulta por perto (frutos, flores, o miolo e os
+##   bichinhos que vivem na copa): sem bacaba ao alcance, passa fome e vão morrendo.
+## - Sobem em qualquer árvore ou palmeira (para comer, dormir e fugir).
 ## - Reprodução: de outubro a março as fêmeas adultas (4 anos ou mais) bem alimentadas
 ##   podem emprenhar; a gestação dura uns 5 a 6 meses e nasce um filhote só. O filhote
 ##   anda agarrado nas costas da mãe nos primeiros 6 meses. Com fome, perde a gestação.
 ## Perto do jogador, os macacos aparecem: andam de quatro, sobem nos troncos e sentam.
 
 const Modelo := preload("res://scripts/world/macaco_modelo.gd")
-const RANGE := 200.0          # até onde o bando procura cipó (m)
+const RANGE := 200.0          # até onde o bando procura bacaba (m)
 const EAT_RANGE := 120.0      # de onde come frutos no dia
-const STARVE_DAYS := 15       # dias sem cipó até começarem a morrer
+const STARVE_DAYS := 15       # dias sem bacaba até começarem a morrer
 const MAX_TROOP := 14
 const SHOW := 80.0            # perto assim do jogador o bando aparece
 
@@ -24,6 +25,7 @@ var last_day := 0
 var _jogo: Node
 var _arv: Node
 var _cip: Node
+var _bac: Node
 var _rng := RandomNumberGenerator.new()
 var _agents := {}             # índice do bando -> [agentes]
 var _next_id := 1
@@ -31,21 +33,42 @@ const ADULT_F := 1460         # dias: fêmea pode ter filhote a partir dos 4 ano
 const CARRY_DAYS := 180       # filhote nas costas da mãe
 
 
-func build(jogo: Node, arvores: Node, cipos: Node, seed_: int, save_path := "") -> void:
+func build(jogo: Node, arvores: Node, cipos: Node, bacabas: Node, seed_: int, save_path := "") -> void:
 	_jogo = jogo
 	_arv = arvores
 	_cip = cipos
+	_bac = bacabas
 	_rng.seed = (seed_ if seed_ != 0 else randi()) + 7717
 	last_day = int(jogo.sim.elapsed_days())
 	if save_path == "" or not _load(save_path):
 		_generate()
+	else:
+		_move_to_bacaba()
+
+
+## Bando de jogo antigo (que vivia do cipó) sem bacaba por perto: muda para a bacaba
+## adulta mais perto.
+func _move_to_bacaba() -> void:
+	var adults: Array = _bac.adult_palms()
+	for t in troops:
+		var best = null
+		var bd := 1e9
+		for p in adults:
+			var d := Vector2(float(p.x) - float(t.x), float(p.z) - float(t.z)).length()
+			if d < bd:
+				bd = d
+				best = p
+		if best != null and bd > RANGE * 0.8:
+			t.x = float(best.x)
+			t.z = float(best.z)
+			t.fome = 0
 
 
 func _generate() -> void:
-	var adults: Array = _cip.adult_plants()
+	var adults: Array = _bac.adult_palms()
 	if adults.is_empty():
 		return
-	# dois bandos onde tem mais cipó adulto junto
+	# dois bandos onde tem mais bacaba adulta junto
 	var used := []
 	for b in 2:
 		var best = null
@@ -99,16 +122,16 @@ static func _month(day: int) -> int:
 
 
 func _day(day: int) -> void:
-	var adults: Array = _cip.adult_plants()
+	var adults: Array = _bac.adult_palms()
 	var month := _month(day)
-	var fruit := month == 12 or month <= 2
+	var fruit: bool = _bac.ripe_season(day)
 	var keep := []
 	for t in troops:
 		var near := []
 		for pl in adults:
 			if Vector2(float(pl.x) - float(t.x), float(pl.z) - float(t.z)).length() < RANGE:
 				near.append(pl)
-		# fome: sem cipó adulto ao alcance
+		# fome: sem bacaba adulta ao alcance
 		if near.is_empty():
 			t.fome = int(t.fome) + 1
 		else:
@@ -141,13 +164,22 @@ func _day(day: int) -> void:
 		mem.append_array(born)
 		if mem.is_empty():
 			continue          # o bando acabou
-		# muda de árvore: vai para uma que tem cipó (andam uns 1 a 3 km por dia)
+		# muda de lugar todo dia (andam uns 1 a 3 km): vai para uma bacaba, ou para
+		# uma árvore qualquer perto dela (sobem em qualquer uma)
 		if not near.is_empty():
 			var pl: Dictionary = near[_rng.randi() % near.size()]
-			var host = _cip._host_of(pl)
-			if host != null:
-				t.x = float(host[0])
-				t.z = float(host[1])
+			t.x = float(pl.x)
+			t.z = float(pl.z)
+			if _rng.randf() < 0.4:
+				var opts := []
+				for p in _arv.plants:
+					if int(p[5]) != 2 and _arv.height_of(p, day) >= 6.0 \
+							and Vector2(float(p[0]) - float(pl.x), float(p[1]) - float(pl.z)).length() < 30.0:
+						opts.append(p)
+				if not opts.is_empty():
+					var tr: Array = opts[_rng.randi() % opts.size()]
+					t.x = float(tr[0])
+					t.z = float(tr[1])
 		# época dos frutos: comem e soltam as sementes pelo caminho
 		if fruit:
 			for pl in near:
@@ -160,7 +192,7 @@ func _day(day: int) -> void:
 				for k in bites:
 					var a := _rng.randf() * TAU
 					var d := _rng.randf_range(10.0, 80.0)
-					_cip.drop_seed(float(pl.x) + cos(a) * d, float(pl.z) + sin(a) * d, day)
+					_bac.drop_seed(float(pl.x) + cos(a) * d, float(pl.z) + sin(a) * d, day)
 		keep.append(t)
 	troops = keep
 
@@ -185,7 +217,23 @@ func _tree_at(x: float, z: float):
 	for p in _arv.plants:
 		if absf(float(p[0]) - x) < 0.05 and absf(float(p[1]) - z) < 0.05 and int(p[5]) != 2:
 			return p
+	for p in _bac.palms:
+		if absf(float(p.x) - x) < 0.05 and absf(float(p.z) - z) < 0.05 and int(p.morta) < 0 and _bac.trunk_h(p) > 2.0:
+			return p
 	return null
+
+
+# a árvore (Array) ou a palmeira (Dictionary) onde o macaco sobe
+func _host_ok(h) -> bool:
+	if h is Dictionary:
+		return _bac.alive(h)
+	return h != null and int(h[5]) != 2
+
+
+func _host_point(h, y: float, ang: float, out := 0.0) -> Vector3:
+	if h is Dictionary:
+		return _bac.trunk_point(h, y, ang, out)
+	return _arv.trunk_point(h, y, ang, out)
 
 
 ## Põe e tira os macacos da tela conforme a distância do jogador.
@@ -288,7 +336,7 @@ func _agent_step(a: Dictionary, t: Dictionary, host, pp: Vector3, delta: float) 
 		_start_climb(a, host)
 	# a árvore em que estava foi derrubada: pula para o chão e foge
 	var mine = a.get("tree")
-	var mine_ok: bool = mine != null and int(mine[5]) != 2
+	var mine_ok: bool = _host_ok(mine)
 	if not mine_ok and str(a.state) in ["subir", "descer", "no_alto", "ate_tronco"]:
 		var away := Vector3(pos.x - float(t.x), 0, pos.z - float(t.z))
 		if away.length() < 0.05:
@@ -351,8 +399,8 @@ func _agent_step(a: Dictionary, t: Dictionary, host, pp: Vector3, delta: float) 
 				host = mine
 				var up := str(a.state) == "subir"
 				a.h = clampf(float(a.h) + (1.0 if up else -1.0) * 1.1 * delta, 0.0, float(a.top))
-				pos = _arv.trunk_point(host, float(a.h) + 0.15, float(a.ang), 0.12)
-				var c: Vector3 = _arv.trunk_point(host, float(a.h) + 0.15, float(a.ang), 0.0)
+				pos = _host_point(host, float(a.h) + 0.15, float(a.ang), 0.12)
+				var c: Vector3 = _host_point(host, float(a.h) + 0.15, float(a.ang), 0.0)
 				var face := c - pos
 				n.rotation = Vector3(0, atan2(-face.x, -face.z), 0)
 				n.mode = "climb"
@@ -378,14 +426,19 @@ func _agent_step(a: Dictionary, t: Dictionary, host, pp: Vector3, delta: float) 
 		n.basis = (Basis(Quaternion(Vector3.UP, up)) * Basis(Vector3.UP, yaw)).scaled(n.scale)
 
 
-func _start_climb(a: Dictionary, host: Array) -> void:
+func _start_climb(a: Dictionary, host) -> void:
 	a.tree = host
 	var pos: Vector3 = a.pos
-	var ang := atan2(pos.z - float(host[1]), pos.x - float(host[0])) + _rng.randf_range(-0.5, 0.5)
+	var hx: float = float(host.x) if host is Dictionary else float(host[0])
+	var hz: float = float(host.z) if host is Dictionary else float(host[1])
+	var ang := atan2(pos.z - hz, pos.x - hx) + _rng.randf_range(-0.5, 0.5)
 	a.ang = ang
 	a.h = 0.0
-	a.top = clampf(_arv.height_of(host, last_day) * _rng.randf_range(0.25, 0.55), 2.0, 9.0)
-	a.goal = _arv.trunk_point(host, 0.15, ang, 0.35)
+	if host is Dictionary:
+		a.top = maxf(1.5, _bac.trunk_h(host) - _rng.randf_range(0.3, 0.6))   # sobe até a copa (onde ficam os cachos)
+	else:
+		a.top = clampf(_arv.height_of(host, last_day) * _rng.randf_range(0.25, 0.55), 2.0, 9.0)
+	a.goal = _host_point(host, 0.15, ang, 0.35)
 	a.goal.y = 0.0
 	a.state = "ate_tronco"
 

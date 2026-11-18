@@ -1,9 +1,9 @@
 {
-  "version": 74,
-  "file": "update_74.zip",
-  "size": 3505843,
-  "sha256": "7754f8cca6444aac0d2a02c495845b27b178a66084c7e6a2ca319da8ffb58ab3",
+  "version": 75,
+  "file": "update_75.zip",
+  "size": 3514648,
+  "sha256": "066d75f526ad98a14312ee767942720c94675e89392571a2db0f534a0a5aa663",
   "min_build": 1,
-  "notes": "Sem árvores, mudas, sementes e cipós dentro do mar; beira do mar lisa (sem quadrados)",
+  "notes": "Palmeira bacaba: nasce, cresce, dá cachos (verdes jul-set, maduros out-dez); macacos-prego agora vivem da bacaba e espalham os caroços; sobem em qualquer árvore ou palmeira",
   "date": "2026-11-18"
 }
