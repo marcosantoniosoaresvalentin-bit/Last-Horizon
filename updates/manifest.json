@@ -1,9 +1,9 @@
 {
-  "version": 97,
-  "file": "update_97.zip",
-  "size": 4328730,
-  "sha256": "a7c5bb8f68fc4fea28d78f2d38bb1fde6e5d2017a20375e6d3cffe91e06c13f3",
+  "version": 98,
+  "file": "update_98.zip",
+  "size": 4333213,
+  "sha256": "30e1e64a88b26ff7c05af2ea3fbd2ffc1328853920a8b14c6e50ff71ca22f6db",
   "min_build": 1,
-  "notes": "Tábua pequena serrada cai no chão (carrega na mão, racha em ripas no chão); cunha só racha até 5 cm de grossura; câmera olhando para baixo",
+  "notes": "Cupins andando em volta do cupinzeiro, nos buracos, em trilha e em cima da madeira; buracos no cupinzeiro",
   "date": "2026-11-18"
 }
