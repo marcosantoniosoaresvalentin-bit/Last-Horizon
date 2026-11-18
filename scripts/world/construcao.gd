@@ -188,20 +188,26 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null) -> Dictionary:
 	var down_k := 1 if absf(b.y.y) >= absf(b.z.y) else 2          # o eixo da peça que aponta para baixo
 	var down_s := -signf((b[down_k] as Vector3).y)
 	var cross := [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1), Vector2(1, 1), Vector2(1, -1), Vector2(-1, 1), Vector2(-1, -1)]
+	var joint_u := {}                # caixa encostada (madeira) -> lista dos u onde encosta
 	for i in n:
 		var u := lerpf(-1.0, 1.0, float(i) / (n - 1))
 		for cs in cross:
 			var p: Vector3 = c + b.x * h.x * u + b.y * h.y * cs.x + b.z * h.z * cs.y
 			var touch: bool = p.y - float(_jogo.height_at(p.x, p.z)) < 0.05
-			if not touch:
-				for bx in near:
-					if _dist(bx, p) < TOUCH:
-						touch = true
-						break
+			var wood_i := -1
+			for bi in near.size():
+				if _dist(near[bi], p) < TOUCH:
+					touch = true
+					wood_i = bi
+					break
 			if touch and lying:
 				var side_v: float = cs.x if down_k == 1 else cs.y
 				if side_v * down_s <= 0.0:
 					touch = false              # não está na face de baixo
+			if touch and wood_i >= 0:
+				if not joint_u.has(wood_i):
+					joint_u[wood_i] = []
+				joint_u[wood_i].append(u)
 			if touch:
 				if u <= -0.25:
 					lo = true
@@ -211,8 +217,19 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null) -> Dictionary:
 					lo = true          # pecinha curta: encostar no meio já segura
 					hi = true
 	if not (lo and hi):
-		return {"ok": false, "why": "Não fica apoiada: precisa encostar nas duas metades."}
-	return {"ok": true, "why": ""}
+		return {"ok": false, "why": "Não fica apoiada: precisa encostar nas duas metades.", "juntas": []}
+	# amarrações: uma em cada madeira em que encosta (no meio de onde encosta), até 4
+	var juntas := []
+	for k in joint_u:
+		var us: Array = joint_u[k]
+		var m := 0.0
+		for v in us:
+			m += float(v)
+		juntas.append(snappedf(m / us.size(), 0.01))
+	juntas.sort()
+	if juntas.size() > 4:
+		juntas = [juntas[0], juntas[1], juntas[juntas.size() - 2], juntas[juntas.size() - 1]]
+	return {"ok": true, "why": "", "juntas": juntas}
 
 
 ## Acha o lugar da peça perto de onde o olho bateu: encosta a face na superfície e
@@ -292,14 +309,15 @@ func _find_place_b(fl: Dictionary, b: Basis, hit: Dictionary) -> Dictionary:
 func find_place(fl: Dictionary, b: Basis, hit: Dictionary) -> Dictionary:
 	var r := _find_place_b(fl, b, hit)
 	r.b = b
+	r.juntas = (check(fl, b, r.c).get("juntas", []) as Array) if bool(r.ok) else []
 	return r
 
 
-func add(fl: Dictionary, b: Basis, c: Vector3) -> void:
+func add(fl: Dictionary, b: Basis, c: Vector3, juntas := []) -> void:
 	fl.erase("em_pe")
 	fl.erase("racha")
 	var q := b.get_rotation_quaternion()
-	pieces.append({"log": fl, "p": [c.x, c.y, c.z], "q": [q.x, q.y, q.z, q.w]})
+	pieces.append({"log": fl, "p": [c.x, c.y, c.z], "q": [q.x, q.y, q.z, q.w], "amarras": juntas})
 	_rebuild()
 
 
@@ -407,6 +425,64 @@ func _rebuild() -> void:
 		var bx := piece_box(pc)
 		n.transform = Transform3D(bx.b, bx.c)
 		_nodes.append(n)
+		var am: Array = pc.get("amarras", [])
+		if not am.is_empty():
+			var mi := MeshInstance3D.new()
+			mi.mesh = _lash_mesh(bx.h, am)
+			mi.material_override = _lash_mat()
+			n.add_child(mi)
+
+
+static var _lmat: StandardMaterial3D
+
+
+static func _lash_mat() -> StandardMaterial3D:
+	if _lmat == null:
+		_lmat = StandardMaterial3D.new()
+		_lmat.vertex_color_use_as_albedo = true
+		_lmat.vertex_color_is_srgb = true
+		_lmat.roughness = 0.9
+	return _lmat
+
+
+## As voltas de cipó em volta da peça em cada amarração (no eixo da peça: x é o
+## comprido): umas voltas retas apertadas e duas cruzadas, por cima da madeira.
+static func _lash_mesh(h: Vector3, juntas: Array) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var ry := h.y + 0.008
+	var rz := h.z + 0.008
+	var tube := 0.0065
+	for ju in juntas:
+		var x0 := float(ju) * h.x
+		var turns := []
+		for t in 4:
+			turns.append([x0 + (t - 1.5) * 0.017, 0.0])
+		turns.append([x0, 0.045])           # as duas cruzadas (em X)
+		turns.append([x0, -0.045])
+		var ti := 0
+		for tr in turns:
+			var xc := float(tr[0])
+			var lean := float(tr[1])
+			var col := Color(0.2, 0.15, 0.07).darkened(0.1 * (ti % 2))
+			var segs := 14
+			var pts := []
+			for k in segs + 1:
+				var a := TAU * k / segs
+				# a volta inclinada vai de um lado ao outro no comprido (o X)
+				pts.append(Vector3(xc + lean * sin(a) * 1.4, cos(a) * ry, sin(a) * rz))
+			for k in segs:
+				var A: Vector3 = pts[k]
+				var B: Vector3 = pts[k + 1]
+				var out := Vector3(0, A.y, A.z).normalized()
+				var side := Vector3(1, 0, 0) * tube
+				var up := out * tube
+				for v in [A - side, B - side, B + side, A - side, B + side, A + side, A + up, B + up, B - side, A + up, B - side, A - side]:
+					st.set_color(col)
+					st.add_vertex(v)
+			ti += 1
+	st.generate_normals()
+	return st.commit()
 
 
 func save(path: String) -> void:

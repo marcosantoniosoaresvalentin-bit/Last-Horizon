@@ -2249,7 +2249,12 @@ func _ctx_press() -> void:
 				elif _arvores.free_log_kg(pc.log) > Arvores.CARRY_MAX_KG:
 					_show_toast("Pesada demais para carregar.")
 				else:
+					var nam: int = (pc.get("amarras", []) as Array).size()
 					_hold_log(_constr.remove_piece(pc))
+					if nam > 0:
+						var left := add_item("cipo", nam)
+						_update_inventory()
+						_show_toast("Desamarrou: +%d cipó%s" % [nam - left, "s" if nam - left != 1 else ""] + (" (mochila cheia)" if left > 0 else ""))
 				_act_check = 0.0
 			return
 		"andiroba":
@@ -6394,6 +6399,8 @@ func _bld_update() -> void:
 	if hit.is_empty():
 		ghost.visible = false
 		_bld.ok = false
+		_bld.juntas = []
+		(_bld_btns[0] as Button).text = "Colocar"
 		return
 	# deitada em cima de outra peça: gira junto dela (reto ou atravessado) se estiver perto
 	var hb: Dictionary = hit.box
@@ -6424,6 +6431,14 @@ func _bld_update() -> void:
 				if dh > 0.04:
 					r.why = "As estacas estão em alturas diferentes (%d cm). Com o machado: \"Medir altura\" na mais baixa e \"Cortar a ponta\" na mais alta." % roundi(dh * 100.0)
 					break
+	# cada encosto em madeira é uma amarração de cipó
+	var need: int = (r.get("juntas", []) as Array).size()
+	var have := item_qtd("cipo")
+	if bool(r.ok) and need > have:
+		r.ok = false
+		r.why = "Precisa de %d cipó%s para amarrar (tem %d)." % [need, "s" if need > 1 else "", have]
+	(_bld_btns[0] as Button).text = "Colocar" if need == 0 else "Colocar (%d cipó%s)" % [need, "s" if need > 1 else ""]
+	_bld.juntas = r.get("juntas", [])
 	ghost.visible = true
 	ghost.transform = Transform3D(b, r.c)
 	_bld.ok = bool(r.ok)
@@ -6450,6 +6465,12 @@ func _bld_place() -> void:
 	_carry_node = null
 	if _chop_pose:
 		_chop_pose.log_node = null
-	_constr.add(fl, b, c)
+	var juntas: Array = _bld.get("juntas", [])
+	if juntas.size() > 0:
+		remove_item("cipo", juntas.size())
+		_update_inventory()
+	_constr.add(fl, b, c, juntas)
 	Sons.play_at(self, "baque", c, -4.0)
+	if juntas.size() > 0:
+		_show_toast("Peça amarrada com %d cipó%s." % [juntas.size(), "s" if juntas.size() > 1 else ""])
 	_bld_stop()
