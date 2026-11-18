@@ -1,9 +1,9 @@
 {
-  "version": 104,
-  "file": "update_104.zip",
-  "size": 4578430,
-  "sha256": "063872f4e5bf383c02b586578bb1954c30f8e201e3795bb2ca4bec4abee044fd",
+  "version": 105,
+  "file": "update_105.zip",
+  "size": 4579719,
+  "sha256": "7c2202a5c3f98dba589a5388ef6d65ebde49281477dc2a01f5e5c195d83d4521",
   "min_build": 1,
-  "notes": "Machado: Medir altura na estaca mais baixa e Cortar a ponta da mais alta; viga sem inclinação automática",
+  "notes": "Construção: peças amarradas com cipó nas juntas",
   "date": "2026-11-18"
 }
