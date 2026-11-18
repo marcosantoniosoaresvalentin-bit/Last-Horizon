@@ -1681,12 +1681,18 @@ func _pick_ground_now(i: int) -> void:
 		if not c.is_empty() and not _balde_carga.is_empty() and item_qtd("balde") > 0:
 			_show_toast("Você já está com um balde cheio. Esvazie ou largue ele antes.")
 			return
-		if _bag_total() + Itens.kg("balde") > BAG_MAX + 0.0001:
-			_show_toast("A mochila está cheia (%d kg)." % int(BAG_MAX))
-			return
-		if not c.is_empty():
-			_balde_carga = c
-			_show_toast("Balde com %s kg de %s" % [_kg(ckg), c.tipo])
+		# o balde vai direto para a mão (levado pela alça, não na mochila)
+		_balde_carga = c
+		_itens["balde"] = int(_itens.get("balde", 0)) + 1
+		g.qtd = int(g.qtd) - 1
+		if int(g.qtd) <= 0:
+			g.node.queue_free()
+			_chao.remove_at(i)
+		equip("balde")
+		_update_inventory()
+		_show_toast("Balde na mão" + ("" if c.is_empty() else " com %s kg de %s" % [_kg(ckg), c.tipo]))
+		_act_check = 0.0
+		return
 	var kg := Itens.kg(str(g.id))
 	var fit := int(g.qtd)
 	if kg > 0.0:
@@ -4153,9 +4159,14 @@ func _move_player(delta: float) -> void:
 		var right := Vector3(cos(_yaw), 0, -sin(_yaw))
 		var move := (right * dir.x - fwd * dir.y).normalized()
 		var running := amount > 0.85 and _carry.is_empty()
+		if _mao == "balde" and not _balde_carga.is_empty() and float(_balde_carga.vol) * float(DENS.get(_balde_carga.tipo, 1500.0)) >= 8.0:
+			running = false      # com balde pesado não dá para correr
 		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow
 		if not _carry.is_empty():
 			sp *= lerpf(0.9, 0.4, clampf(_carry_kg / 300.0, 0.0, 1.0))   # tora pesada: anda devagar
+		if _mao == "balde" and not _balde_carga.is_empty():
+			var bkg := float(_balde_carga.vol) * float(DENS.get(_balde_carga.tipo, 1500.0))
+			sp *= lerpf(1.0, 0.72, clampf(bkg / BALDE_KG, 0.0, 1.0))   # balde pesado: mais devagar
 		p += move * sp * delta
 		p.x = clampf(p.x, 1.0, MundoSim.W * CELL - 1.0)
 		p.z = clampf(p.z, 1.0, MundoSim.H * CELL - 1.0)

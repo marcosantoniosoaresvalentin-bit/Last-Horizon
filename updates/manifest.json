@@ -1,9 +1,9 @@
 {
-  "version": 82,
-  "file": "update_82.zip",
-  "size": 4289710,
-  "sha256": "491972c7858970781d104c77f2ff752bfc481ab9dfe659e04ff3f34517c2b25b",
+  "version": 83,
+  "file": "update_83.zip",
+  "size": 4289870,
+  "sha256": "56975e3483f1125257398d153946cce60c5f0a186ab116c0f939cf5321e3dc83",
   "min_build": 1,
-  "notes": "Um balde na mochila para testar; a argila da mochila foi tirada (agora vai no balde, com a pá)",
+  "notes": "Pegar o balde do chão põe ele direto na mão (com o que tem dentro), para levar terra e argila longe; balde pesado: anda mais devagar e não corre",
   "date": "2026-11-18"
 }
