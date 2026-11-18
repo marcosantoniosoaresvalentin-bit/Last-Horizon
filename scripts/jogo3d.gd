@@ -1340,7 +1340,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1349,7 +1349,7 @@ func _save_player() -> void:
 
 func _load_player() -> void:
 	# todo mapa novo começa com um machado de pedra na mochila
-	_itens = {"machado": 1, "cavadeira": 1, "serra": 1, "pa": 1}
+	_itens = {"machado": 1, "cavadeira": 1, "serra": 1, "pa": 1, "balde": 1}
 	if _world_id == "" or not sim.loaded_from_save:
 		return
 	var path := Mundos.dir(_world_id) + "/jogador.json"
@@ -1371,6 +1371,8 @@ func _load_player() -> void:
 			_itens["pa"] = 1        # a pá chegou numa atualização: uma para testar
 		if not bool(d.get("ganhou_serra", false)) and not _itens.has("serra"):
 			_itens["serra"] = 1
+		if not bool(d.get("ganhou_balde", false)) and not _itens.has("balde"):
+			_itens["balde"] = 1     # um balde para testar (encher de terra ou argila com a pá)
 	if d.get("rodelas") is Array:
 		_rodelas = d.rodelas
 	if d.has("dur") and d.dur is Dictionary:
@@ -1400,7 +1402,7 @@ func _load_player() -> void:
 	_face = float(d.get("face", 0.0))
 	_yaw = float(d.get("yaw", 0.0))
 	_pitch = clampf(float(d.get("pitch", _pitch)), -0.4, 0.6)
-	_bag = clampf(float(d.get("argila", 0.0)), 0.0, BAG_MAX)
+	_bag = 0.0      # a argila agora vai no balde (com a pá): a da mochila foi tirada
 	_seeds = maxi(0, int(d.get("sementes", 0)))
 	_update_inventory()
 
