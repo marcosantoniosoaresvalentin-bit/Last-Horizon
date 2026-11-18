@@ -3896,7 +3896,7 @@ func _update_balde_fill(mi: MeshInstance3D, c: Dictionary) -> void:
 		m.normal_enabled = true
 		m.normal_texture = nt
 		m.roughness = 0.85 if clay else 1.0
-		m.specular = 0.06 if clay else 0.02
+		m.metallic_specular = 0.06 if clay else 0.02
 		_fill_mats[key] = m
 	mi.material_override = _fill_mats[key]
 
@@ -5156,6 +5156,13 @@ func _split_update_visuals() -> void:
 		var y := z.cross(x)
 		var s := 0.28
 		mi.global_transform = Transform3D(Basis(x * s, y * s, z * s), g.top + Vector3.UP * (0.1 - float(sp.depth) * 0.075))
+	_split_crack_mesh()
+
+
+## Rachadura ao longo da tora: sai de cada cunha para os dois lados, tortinha, mais
+## aberta perto da cunha e mais funda quanto mais a cunha entrou; quando chega na
+## ponta, desce pela cara da tora. Mostra até onde a tora vai abrir.
+func _split_crack_mesh() -> void:
 	var pr := _split_progress()
 	if pr <= 0.0:
 		return
@@ -5163,21 +5170,85 @@ func _split_update_visuals() -> void:
 	if crack == null:
 		crack = MeshInstance3D.new()
 		var m := StandardMaterial3D.new()
-		m.albedo_color = Color(0.08, 0.05, 0.03)
+		m.albedo_color = Color(0.06, 0.035, 0.02)
+		m.roughness = 1.0
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		crack.material_override = m
 		add_child(crack)
 		_split.crack = crack
-	var inf: Dictionary = _apoios.info(int(_split.i))
-	var bm := BoxMesh.new()
-	var L := float(inf.L) * clampf(pr * 1.15, 0.0, 1.0)
-	bm.size = Vector3(0.006 + pr * 0.018, 0.05, L)
-	crack.mesh = bm
-	var g2 := _split_geo(0.5)
-	var dz: Vector3 = inf.dir
-	var bz := dz.normalized()
-	var bx := Vector3.UP.cross(bz).normalized()
-	var by := bz.cross(bx)
-	crack.global_transform = Transform3D(Basis(bx, by, bz), g2.top + Vector3.UP * 0.005)
+	# quanto a rachadura está aberta em cada ponto u da tora (0 a 1)
+	var open_at := func(u: float) -> float:
+		var o := 0.0
+		for sp in _split.spots:
+			var dpt := float(sp.depth)
+			var reach := dpt * 0.45                       # até onde a rachadura desta cunha já correu
+			var dd := absf(u - float(sp.u))
+			if dd < reach + 0.001:
+				o = maxf(o, dpt * (1.0 - 0.6 * dd / maxf(reach, 0.001)))
+		return o
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var steps := 90
+	var prev_l := Vector3.ZERO
+	var prev_r := Vector3.ZERO
+	var has_prev := false
+	var nz := FastNoiseLite.new()
+	nz.seed = int(_split.i) * 7 + 3
+	nz.frequency = 9.0
+	for q in steps + 1:
+		var u := float(q) / steps
+		var o: float = open_at.call(u)
+		if o <= 0.0:
+			has_prev = false
+			continue
+		var g := _split_geo(u)
+		var dir: Vector3 = g.dir
+		var n := dir.cross(Vector3.UP).normalized()
+		var wob := nz.get_noise_1d(u) * 0.018 + nz.get_noise_1d(u * 5.0 + 9.0) * 0.006
+		var c: Vector3 = g.top + n * wob + Vector3.UP * 0.014
+		var w := 0.005 + o * 0.028
+		var l := c - n * w
+		var r := c + n * w
+		if has_prev:
+			for v in [prev_l, l, r, prev_l, r, prev_r]:
+				st.add_vertex(v)
+			# rachadurinhas de lado (farpas abrindo) de vez em quando
+			if q % 7 == 0 and o > 0.3:
+				var side := 1.0 if (q / 7) % 2 == 0 else -1.0
+				var tip := c + n * side * (0.02 + o * 0.03) + dir * 0.03 - Vector3.UP * 0.004
+				for v in [c - dir * 0.006, c + dir * 0.006, tip]:
+					st.add_vertex(v)
+		prev_l = l
+		prev_r = r
+		has_prev = true
+	# chegou na ponta: a rachadura desce pela cara da tora
+	for end in [0.0, 1.0]:
+		var o: float = open_at.call(end)
+		if o <= 0.0:
+			continue
+		var g := _split_geo(end)
+		var dir: Vector3 = g.dir
+		var n := dir.cross(Vector3.UP).normalized()
+		var out := -dir if end == 0.0 else dir
+		var rad: float = g.rad
+		var down := rad * clampf(o * 1.6, 0.0, 1.9)
+		var segs := 8
+		var pl := Vector3.ZERO
+		var prr := Vector3.ZERO
+		for k in segs + 1:
+			var t := float(k) / segs
+			var c: Vector3 = g.top + out * 0.004 - Vector3.UP * down * t + n * nz.get_noise_1d(t * 3.0 + end * 10.0) * 0.015
+			var w := (0.002 + o * 0.01) * (1.0 - t * 0.7)
+			var l := c - n * w
+			var r := c + n * w
+			if k > 0:
+				for v in [pl, l, r, pl, r, prr]:
+					st.add_vertex(v)
+			pl = l
+			prr = r
+	st.generate_normals()
+	crack.mesh = st.commit()
+	crack.global_transform = Transform3D.IDENTITY
 
 
 func _split_finish() -> void:
@@ -5417,24 +5488,83 @@ func _banda_mesh(L: float, ra: float, rb: float) -> ArrayMesh:
 	wood.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(L * 1000.0)
-	# face aberta (em cima): madeira clara, o miolo escuro no meio e veios compridos
-	for i in segs:
-		for j in 8:
+	# face aberta (em cima): rachada com cunha não sai lisa: ondulada no sentido das
+	# fibras, com degraus onde a madeira rasgou, rachaduras compridas, o miolo escuro e
+	# farpas levantadas
+	var nz := FastNoiseLite.new()
+	nz.seed = rng.randi()
+	nz.frequency = 1.0
+	var cracks := []
+	for c in 4:
+		cracks.append([rng.randf_range(-0.75, 0.75), rng.randf_range(0.0, 6.0), rng.randf_range(0.2, 0.9), rng.randf_range(-0.4, 0.4)])
+	var fx := 60
+	var fv := 34
+	var face_h := func(t: float, v: float) -> float:
+		var x := (t - 0.5) * L
+		var h := nz.get_noise_2d(x * 1.2, v * 6.0) * 0.022 + nz.get_noise_2d(x * 5.0, v * 22.0) * 0.007
+		h += nz.get_noise_2d(x * 0.3 + 40.0, 0.0) * 0.02 * v           # a face torce de leve
+		var step_ := nz.get_noise_2d(x * 0.8 + 100.0, v * 2.0)
+		h += 0.008 if step_ > 0.25 else 0.0                              # degrau onde a fibra rasgou
+		for c in cracks:
+			var cv: float = float(c[0]) + sin(x * 2.0 + float(c[1])) * 0.08
+			if t > float(c[2]) - 0.35 and t < float(c[2]) + 0.35 and absf(v - cv) < 0.035:
+				h -= 0.012
+		return h
+	var face_c := func(t: float, v: float) -> Color:
+		var x := (t - 0.5) * L
+		var core := 1.0 - smoothstep(0.0, 0.1, absf(v + nz.get_noise_1d(x * 2.0) * 0.05))
+		var grain := 0.07 * nz.get_noise_2d(x * 2.0, v * 40.0)
+		var col := Color(0.4, 0.28, 0.17).darkened(core * 0.35 + grain)
+		for c in cracks:
+			var cv: float = float(c[0]) + sin(x * 2.0 + float(c[1])) * 0.08
+			if t > float(c[2]) - 0.35 and t < float(c[2]) + 0.35 and absf(v - cv) < 0.03:
+				col = Color(0.1, 0.07, 0.04)                               # rachadura
+		return col
+	for i in fx:
+		for j in fv:
 			var q := []
 			var cs := []
 			for e in [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]]:
-				var t := float(e[0]) / segs
-				var v := float(e[1]) / 8.0 * 2.0 - 1.0
+				var t := float(e[0]) / fx
+				var v := float(e[1]) / fv * 2.0 - 1.0
 				var r := lerpf(ra, rb, t)
-				q.append(Vector3((t - 0.5) * L, rmax, v * r))
-				var core := 1.0 - smoothstep(0.0, 0.12, absf(v))
-				var grain := 0.06 * sin(v * 40.0 + t * 3.0)
-				cs.append(Color(0.5, 0.36, 0.23).darkened(core * 0.3 + grain + rng.randf() * 0.03))
+				var edge := 1.0 - smoothstep(0.85, 1.0, absf(v))         # na beira a casca segura a altura
+				q.append(Vector3((t - 0.5) * L, rmax + float(face_h.call(t, v)) * edge, v * r))
+				cs.append(face_c.call(t, v))
 			for idx in [0, 1, 2, 0, 2, 3]:
-				wood.set_normal(Vector3.UP)
 				wood.set_color(cs[idx])
 				wood.add_vertex(q[idx])
+	# farpas: lascas finas e compridas levantadas da face, no sentido das fibras
+	for k in 26:
+		var t := rng.randf_range(0.03, 0.97)
+		var v := rng.randf_range(-0.9, 0.9)
+		var r := lerpf(ra, rb, t)
+		var base := Vector3((t - 0.5) * L, rmax + float(face_h.call(t, v)), v * r)
+		var dirx := 1.0 if rng.randf() < 0.5 else -1.0
+		var ln := rng.randf_range(0.04, 0.14)
+		var tip := base + Vector3(dirx * ln, rng.randf_range(0.01, 0.04), rng.randf_range(-0.01, 0.01))
+		var wd := rng.randf_range(0.004, 0.01)
+		var col := Color(0.58, 0.43, 0.28).darkened(rng.randf() * 0.15)
+		for vtx in [base + Vector3(0, 0, -wd), base + Vector3(0, 0, wd), tip, base + Vector3(0, 0.003, 0), base + Vector3(0, -0.002, wd), tip]:
+			wood.set_color(col)
+			wood.add_vertex(vtx)
+	# farpas na beira da madeira, junto da casca (onde a fibra arrebentou)
+	for k in 18:
+		var t := rng.randf_range(0.02, 0.98)
+		var sgn := 1.0 if rng.randf() < 0.5 else -1.0
+		var r := lerpf(ra, rb, t)
+		var base := Vector3((t - 0.5) * L, rmax, sgn * r * 0.97)
+		var tip := base + Vector3(rng.randf_range(-0.08, 0.08), rng.randf_range(0.01, 0.03), sgn * rng.randf_range(0.01, 0.03))
+		var col := Color(0.55, 0.4, 0.26)
+		for vtx in [base + Vector3(-0.01, 0, 0), base + Vector3(0.01, 0, 0), tip]:
+			wood.set_color(col)
+			wood.add_vertex(vtx)
 	# pontas (meia-lua de madeira com anéis)
+	wood.generate_normals()
+	var wood_mesh := wood.commit()
+	wood = SurfaceTool.new()
+	wood.begin(Mesh.PRIMITIVE_TRIANGLES)
+	wood.append_from(wood_mesh, 0, Transform3D.IDENTITY)
 	for end in [0, 1]:
 		var r := ra if end == 0 else rb
 		var x := (float(end) - 0.5) * L
@@ -5454,7 +5584,8 @@ func _banda_mesh(L: float, ra: float, rb: float) -> ArrayMesh:
 	var wm := StandardMaterial3D.new()
 	wm.vertex_color_use_as_albedo = true
 	wm.vertex_color_is_srgb = true
-	wm.roughness = 0.85
+	wm.roughness = 1.0
+	wm.metallic_specular = 0.1
 	wm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mesh.surface_set_material(1, wm)
 	return mesh

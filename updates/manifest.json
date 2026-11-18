@@ -1,9 +1,9 @@
 {
-  "version": 85,
-  "file": "update_85.zip",
-  "size": 4300014,
-  "sha256": "d6322be081a9fb6840fe2d7b347d319a3ea3b19215c76882de7aa4aec0cbe9ca",
+  "version": 86,
+  "file": "update_86.zip",
+  "size": 4301782,
+  "sha256": "5f846f19afefd5948bb1227263a2bc10a75fcfd9c92784bb3e8a3f74f93f8d03",
   "min_build": 1,
-  "notes": "Cunha e pedra de marreta (modelar pedra), marreta (craft); Trabalhar na tora: Rachar ao meio com 3 cunhas e a marreta, barra de acerto (vermelho quebra a cunha), vira 2 bandas; corrige o botão Pular por baixo do Bater",
+  "notes": "Cunha com costas quadradas e fio só na frente; rachadura correndo ao longo da tora conforme as cunhas entram; bandas com a face irregular, rachaduras e farpas",
   "date": "2026-11-18"
 }

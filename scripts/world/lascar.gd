@@ -115,12 +115,12 @@ static func _limits(kind: String, x: float, z: float) -> Vector3:
 			var t := 0.05 * (1.0 - 0.7 * clampf(z / 0.15, 0.0, 1.0)) * (1.0 - 0.5 * pow(e, 3.0))
 			return Vector3(a, maxf(t, 0.008), maxf(w, 0.012))
 		"cunha":
-			# cunha: grossa atrás (-x, onde a marreta bate), afinando até o fio reto (+x)
+			# cunha: costas retas e quadradas atrás (-x, onde a marreta bate), lados retos,
+			# e só a frente (+x) afina até o fio reto que corta a madeira
 			var a := 0.42
 			var u := clampf((x + a) / (2.0 * a), 0.0, 1.0)
-			var w := 0.2 * (1.0 - 0.25 * pow(absf(x) / a, 6.0))
-			var t := lerpf(0.15, 0.012, pow(u, 0.9))
-			return Vector3(a, maxf(t, 0.01), w)
+			var t := 0.15 * (1.0 - smoothstep(0.25, 1.0, u) * 0.93)
+			return Vector3(a, maxf(t, 0.01), 0.2)
 		"pedra_marreta":
 			# cabeça de marreta: bloco grosso e comprido, pontas meio arredondadas (as faces de bater)
 			var a := 0.4
@@ -155,6 +155,8 @@ static func target(kind: String, scale := 1.0) -> PackedFloat32Array:
 		st[j] = _outline(kind, _ang(j)) * scale
 	for k in R + 1:
 		var taper := pow(maxf(0.0, 1.0 - pow(_rho(k), 2.2)), 0.45)
+		if kind in ["cunha", "pedra_marreta"]:
+			taper = 1.0          # faces e quinas retas (costas quadradas para bater)
 		for j in N:
 			var a := _ang(j)
 			var x := cos(a) * st[j] / scale * _rho(k)
@@ -332,6 +334,30 @@ static func mesh(cur: PackedFloat32Array, orig: PackedFloat32Array, seed_: int, 
 					st.add_vertex(a)
 					st.add_vertex(b)
 					st.add_vertex(c)
+	# parede da beirada (onde a face de cima e a de baixo não se encontram: costas e
+	# lados retos da cunha e da cabeça da marreta)
+	for j in N:
+		var a := _pos(cur, R, j, true)
+		var b := _pos(cur, R, j + 1, true)
+		var c := _pos(cur, R, j + 1, false)
+		var d := _pos(cur, R, j, false)
+		if a.y - d.y < 0.004 and b.y - c.y < 0.004:
+			continue
+		var out := Vector3(a.x + b.x, 0, a.z + b.z).normalized()
+		var col := fresh.darkened(float(absi(hash(Vector2i(j, seed_))) % 100) * 0.0012)
+		st.set_smooth_group(0xFFFFFFFF)
+		for tri in [[a, b, c], [a, c, d]]:
+			var p0: Vector3 = tri[0]
+			var p1: Vector3 = tri[1]
+			var p2: Vector3 = tri[2]
+			if (p2 - p0).cross(p1 - p0).dot(out) < 0.0:
+				var t2 := p1
+				p1 = p2
+				p2 = t2
+			st.set_color(col)
+			st.add_vertex(p0)
+			st.add_vertex(p1)
+			st.add_vertex(p2)
 	st.index()
 	st.generate_normals()
 	return st.commit()
