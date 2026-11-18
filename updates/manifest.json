@@ -1,9 +1,9 @@
 {
-  "version": 68,
-  "file": "update_68.zip",
-  "size": 3491192,
-  "sha256": "75fe5212559db52fc55d9cd3e38c4f46e44621cdb4750c29ea2c1f580fd19fed",
+  "version": 69,
+  "file": "update_69.zip",
+  "size": 3493339,
+  "sha256": "2b5588957b9731371e9a2eb09da79fd69274d46b50c2479655b3ebb6e813e42e",
   "min_build": 1,
-  "notes": "Macaco-prego com pelagem de verdade e reprodução (out-mar, gestação de 5-6 meses, 1 filhote nas costas da mãe)",
-  "date": "2026-11-17"
+  "notes": "Macaco com corpo liso, pés no chão, pulam e fogem quando a árvore cai, e tronco que caiu sozinho dá para cortar",
+  "date": "2026-11-18"
 }

@@ -113,6 +113,14 @@ func build(jogo: Node, seed_: int, save_path := "") -> void:
 		_generate(seed_)
 	trees = plants
 	_rebuild()
+	# troncos que caíram sozinhos em jogos antigos: viram toco + tronco que dá para cortar
+	var snapped_any := false
+	for p in plants:
+		if int(p[5]) == FALLEN and not (p.size() > 9 and p[9] is Array):
+			_snap_natural(p, int(p[6]))
+			snapped_any = true
+	if snapped_any:
+		_rebuild()
 	# toras já cortadas de jogos antigos ainda presas na árvore caída: caem no chão agora
 	for p in plants:
 		if int(p[5]) == FALLEN and p.size() > 10 and p[10] is Array and (p[10] as Array).size() > 1 and p[9] is Array:
@@ -253,6 +261,32 @@ func fell(p: Array, day: int) -> void:
 	p[5] = FALLEN
 	p[6] = day
 	p[7] = _rng.randf() * TAU
+	_snap_natural(p, day)
+
+
+## Árvore seca que caiu sozinha: o tronco podre quebra a 1 m do chão. Fica o toco e o
+## tronco deitado, que dá para cortar em toras como o das árvores derrubadas a machado.
+func _snap_natural(p: Array, day: int) -> void:
+	if p.size() > 9 and p[9] is Array:
+		return
+	var h := height_of(p, day)
+	if h < SAPLING_MAX_H + 0.5:
+		return
+	var v := int(p[4]) % VARIANTS
+	var s: float = h / float(_models[v].height)
+	if p.size() < 10:
+		p.resize(10)
+	p[8] = 0
+	var a := float(p[7])
+	p[9] = [hits_to_fell(p), a + PI]
+	# a árvore seca já tinha perdido os galhos
+	if p.size() < 13:
+		p.resize(13)
+	var gone := []
+	for bi in (_models[v].binfo as Array).size():
+		gone.append(bi)
+	p[12] = gone
+	stumps.append([float(p[0]), float(p[1]), int(p[6]), v, s, _cut_from(p, p[9], s)])
 
 
 ## Cada árvore adulta solta 25 a 60 sementes por ano, espalhadas pela temporada.

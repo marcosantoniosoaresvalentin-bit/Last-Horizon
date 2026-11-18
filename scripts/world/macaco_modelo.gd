@@ -106,18 +106,77 @@ func _furry(parent: Node3D, mesh: Mesh, xf: Transform3D, col: Color, length: flo
 		stn.begin(Mesh.PRIMITIVE_TRIANGLES)
 		_building[part] = stn
 	var st: SurfaceTool = _building[part]
-	var arr: Array = mesh.get_mesh_arrays()
+	var arr: Array = mesh.surface_get_arrays(0) if mesh is ArrayMesh else mesh.get_mesh_arrays()
 	var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 	var ns: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
-	var ids: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+	var ids: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+	if ids.is_empty():
+		ids = PackedInt32Array(range(vs.size()))
+	var cs = arr[Mesh.ARRAY_COLOR]
 	var nb := xf.basis.inverse().transposed()
 	for k in FUR_LAYERS:
 		var layer := float(k) / (FUR_LAYERS - 1)
 		for i in ids:
-			st.set_color(col)
+			st.set_color(col if cs == null or (cs as PackedColorArray).is_empty() else (cs as PackedColorArray)[i])
 			st.set_uv2(Vector2(layer, length))
 			st.set_normal((nb * ns[i]).normalized())
 			st.add_vertex(xf * vs[i])
+
+
+## Corpo liso, de uma peça só: anéis em elipse ao longo de Z, ligados (sem "bolinhas").
+## prof: [[z, y, rx, ry, cor de cima, cor de baixo], ...]
+static func _loft(prof: Array, seg := 16) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rings := []
+	for pr in prof:
+		var ring := []
+		for j in seg + 1:
+			var a := TAU * j / seg
+			var p := Vector3(cos(a) * float(pr[2]), float(pr[1]) + sin(a) * float(pr[3]), float(pr[0]))
+			var n := Vector3(cos(a) / float(pr[2]), sin(a) / float(pr[3]), 0).normalized()
+			var t := smoothstep(-0.6, 0.6, sin(a))
+			ring.append([p, n, (pr[5] as Color).lerp(pr[4] as Color, t)])
+		rings.append(ring)
+	var add := func(v: Array) -> void:
+		st.set_color(v[2])
+		st.set_normal(v[1])
+		st.add_vertex(v[0])
+	for i in rings.size() - 1:
+		for j in seg:
+			var a: Array = rings[i][j]
+			var b: Array = rings[i][j + 1]
+			var c: Array = rings[i + 1][j + 1]
+			var d: Array = rings[i + 1][j]
+			for tri in [[a, b, c], [a, c, d]]:
+				var pa: Vector3 = tri[0][0]
+				var pb: Vector3 = tri[1][0]
+				var pc: Vector3 = tri[2][0]
+				var out: Vector3 = (tri[0][1] as Vector3) + (tri[1][1] as Vector3) + (tri[2][1] as Vector3)
+				if (pc - pa).cross(pb - pa).dot(out) < 0.0:
+					tri = [tri[0], tri[2], tri[1]]
+				for v in tri:
+					add.call(v)
+	# pontas fechadas
+	for e in [0, rings.size() - 1]:
+		var ring: Array = rings[e]
+		var cen := Vector3.ZERO
+		for v in ring:
+			cen += v[0] as Vector3
+		cen /= ring.size()
+		var nz := Vector3(0, 0, -1.0 if e == 0 else 1.0)
+		if float(prof[0][0]) > float(prof[prof.size() - 1][0]):
+			nz = -nz
+		for j in seg:
+			var tri := [[cen, nz, ring[j][2]], ring[j], ring[j + 1]]
+			var pa: Vector3 = tri[0][0]
+			var pb: Vector3 = tri[1][0]
+			var pc: Vector3 = tri[2][0]
+			if (pc - pa).cross(pb - pa).dot(nz) < 0.0:
+				tri = [tri[0], tri[2], tri[1]]
+			for v in tri:
+				add.call([v[0], nz, v[2]])
+	return st.commit()
 
 
 func _part(parent: Node3D, name: String) -> void:
@@ -157,7 +216,14 @@ static func _skin(parent: Node3D, pos: Vector3, size: Vector3, mat: Material = n
 
 ## Pedaço de pata pendurado para baixo (-Y) a partir do pivô.
 func _limb(parent: Node3D, length: float, r: float, col: Color) -> void:
-	_furry(parent, _cap_mesh(length, r), Transform3D(Basis(), Vector3(0, -length * 0.5, 0)), col, 0.009)
+	# pata afinando (músculo em cima, fina embaixo), ao longo de -Y
+	var key := "pata_%.3f_%.3f_%s" % [length, r, col.to_html()]
+	if not _caps.has(key):
+		var c2 := col.darkened(0.15)
+		_caps[key] = _loft([[r * 0.4, 0.0, r * 0.6, r * 0.6, col, c2], [0.0, 0.0, r * 1.05, r, col, c2],
+			[-length * 0.3, 0.0, r * 1.0, r * 0.95, col, c2], [-length * 0.75, 0.0, r * 0.78, r * 0.72, col, c2],
+			[-length - r * 0.3, 0.0, r * 0.62, r * 0.58, col, c2], [-length - r * 0.85, 0.0, r * 0.25, r * 0.25, col, c2]])
+	_furry(parent, _caps[key], Transform3D(Basis(Vector3.RIGHT, -PI * 0.5), Vector3.ZERO), col, 0.009)
 
 
 func _ready() -> void:
@@ -170,14 +236,23 @@ func _ready() -> void:
 	add_child(_body)
 	_part(_body, "corpo")
 	# tronco: quadril e peito, deitado ao longo de Z (de quatro)
-	_ball(_body, Vector3(0, 0, 0.09), Vector3(0.15, 0.15, 0.2), back, 0.014)
-	_ball(_body, Vector3(0, 0.005, -0.06), Vector3(0.16, 0.155, 0.2), brown, 0.016)
-	_ball(_body, Vector3(0, -0.035, -0.1), Vector3(0.12, 0.1, 0.13), cream, 0.012)    # peito claro
+	# tronco liso de uma peça: rabo -> quadril -> cintura -> peito -> pescoço;
+	# costas escuras em cima, barriga marrom, peito creme na frente
+	var belly := brown.lerp(cream, 0.2)
+	_furry(_body, _loft([
+		[0.24, 0.035, 0.022, 0.022, back, back],
+		[0.2, 0.025, 0.052, 0.055, back, brown],
+		[0.13, 0.008, 0.074, 0.076, back, belly],
+		[0.05, 0.0, 0.07, 0.072, back, belly],
+		[-0.03, 0.002, 0.074, 0.08, brown, belly],
+		[-0.1, 0.008, 0.08, 0.082, brown, cream],
+		[-0.15, 0.022, 0.066, 0.066, brown, cream],
+		[-0.19, 0.045, 0.044, 0.046, brown, cream],
+		[-0.215, 0.06, 0.032, 0.034, brown, cream]], 18), Transform3D.IDENTITY, brown, 0.014)
 	back_point = Node3D.new()
 	back_point.position = Vector3(0, 0.1, 0.02)
 	_body.add_child(back_point)
 	# pescoço e cabeça
-	_ball(_body, Vector3(0, 0.035, -0.16), Vector3(0.085, 0.085, 0.09), brown, 0.014)
 	_head = Node3D.new()
 	_head.position = Vector3(0, 0.07, -0.21)
 	_body.add_child(_head)
@@ -235,6 +310,22 @@ func _process(delta: float) -> void:
 			_pose_ride()
 		_:
 			_pose_sit(delta)
+	if mode == "walk" or mode == "sit":
+		_sit_on_ground()
+
+
+## Apoia no chão: o ponto mais baixo (mãos, pés, barriga) fica bem na altura do chão
+## (nem dentro da terra, nem flutuando).
+func _sit_on_ground() -> void:
+	var inv := global_transform.affine_inverse()
+	var lo := 1e9
+	for key in _limbs:
+		var low: Node3D = _limbs[key][1]
+		lo = minf(lo, (inv * (low.global_transform * Vector3(0, -0.12, 0))).y)
+	for z in [0.13, 0.03, -0.08]:
+		lo = minf(lo, (inv * (_body.global_transform * Vector3(0, -0.07, z))).y)
+	if lo < 1e8:
+		_body.position.y -= lo / maxf(scale.y, 0.01)
 
 
 func _set_limb(key: String, a: float, b: float) -> void:

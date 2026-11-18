@@ -239,7 +239,7 @@ func _ground_spot(t: Dictionary) -> Vector3:
 	var r := _rng.randf_range(1.5, 6.0)
 	var x := float(t.x) + cos(a) * r
 	var z := float(t.z) + sin(a) * r
-	return Vector3(x, _jogo.height_at(x, z), z)
+	return Vector3(x, _jogo.surface_at(x, z), z)
 
 
 ## Movimento de cada macaco (chamado todo quadro).
@@ -249,6 +249,20 @@ func update(delta: float) -> void:
 	for i in _agents:
 		var t: Dictionary = troops[int(i)]
 		var host = _tree_at(float(t.x), float(t.z))
+		if host == null:
+			# a árvore do bando caiu: muda para a árvore em pé mais perto
+			var best = null
+			var bd := 1e9
+			for p in _arv.plants:
+				if int(p[5]) == 2 or _arv.height_of(p, last_day) < 6.0:
+					continue
+				var d := Vector2(float(p[0]) - float(t.x), float(p[1]) - float(t.z)).length()
+				if d < bd and d > 3.0:
+					bd = d
+					best = p
+			if best != null:
+				t.x = float(best[0])
+				t.z = float(best[1])
 		var by_id := {}
 		for a in _agents[i]:
 			by_id[int(a.id)] = a
@@ -272,18 +286,41 @@ func _agent_step(a: Dictionary, t: Dictionary, host, pp: Vector3, delta: float) 
 	# jogador muito perto: foge para o tronco e sobe
 	if str(a.state) in ["sentar", "andar"] and Vector2(pos.x - pp.x, pos.z - pp.z).length() < 3.5 and host != null:
 		_start_climb(a, host)
+	# a árvore em que estava foi derrubada: pula para o chão e foge
+	var mine = a.get("tree")
+	var mine_ok: bool = mine != null and int(mine[5]) != 2
+	if not mine_ok and str(a.state) in ["subir", "descer", "no_alto", "ate_tronco"]:
+		var away := Vector3(pos.x - float(t.x), 0, pos.z - float(t.z))
+		if away.length() < 0.05:
+			away = Vector3(_rng.randf_range(-1, 1), 0, _rng.randf_range(-1, 1))
+		a.vel = away.normalized() * _rng.randf_range(1.5, 3.0) + Vector3.UP * 1.5
+		a.state = "cair"
 	match str(a.state):
+		"cair":
+			var v: Vector3 = a.vel
+			v.y -= 9.8 * delta
+			pos += v * delta
+			a.vel = v
+			var gy: float = _jogo.surface_at(pos.x, pos.z)
+			n.mode = "climb"
+			if pos.y <= gy:
+				pos.y = gy
+				# foge correndo para longe de onde a árvore caiu
+				var far := Vector3(pos.x - float(t.x), 0, pos.z - float(t.z)).normalized() * 12.0
+				a.goal = Vector3(pos.x + far.x, 0, pos.z + far.z)
+				a.goal.y = _jogo.surface_at(a.goal.x, a.goal.z)
+				a.state = "andar"
 		"andar":
 			var to: Vector3 = a.goal - pos
 			to.y = 0.0
-			var sp := 1.6 if to.length() > 4.0 else 1.0
+			var sp := 3.0 if to.length() > 6.0 else (1.6 if to.length() > 4.0 else 1.0)
 			if to.length() < 0.15:
 				a.state = "sentar"
 				a.timer = _rng.randf_range(3.0, 9.0)
 			else:
 				var stp := minf(to.length(), sp * delta)
 				pos += to.normalized() * stp
-				pos.y = _jogo.height_at(pos.x, pos.z)
+				pos.y = _jogo.surface_at(pos.x, pos.z)
 				n.rotation.y = lerp_angle(n.rotation.y, atan2(-to.x, -to.z), minf(1.0, delta * 8.0))
 			n.mode = "walk"
 			n.speed = sp
@@ -302,21 +339,22 @@ func _agent_step(a: Dictionary, t: Dictionary, host, pp: Vector3, delta: float) 
 				a.state = "subir"
 			else:
 				pos += to.normalized() * minf(to.length(), 2.2 * delta)
-				pos.y = _jogo.height_at(pos.x, pos.z)
+				pos.y = _jogo.surface_at(pos.x, pos.z)
 				n.rotation.y = lerp_angle(n.rotation.y, atan2(-to.x, -to.z), minf(1.0, delta * 10.0))
 			n.mode = "walk"
 			n.speed = 2.2
 		"subir", "descer":
-			if host == null:
+			if not mine_ok:
 				a.state = "andar"
 				a.goal = _ground_spot(t)
 			else:
+				host = mine
 				var up := str(a.state) == "subir"
 				a.h = clampf(float(a.h) + (1.0 if up else -1.0) * 1.1 * delta, 0.0, float(a.top))
 				pos = _arv.trunk_point(host, float(a.h) + 0.15, float(a.ang), 0.12)
 				var c: Vector3 = _arv.trunk_point(host, float(a.h) + 0.15, float(a.ang), 0.0)
 				var face := c - pos
-				n.rotation.y = atan2(-face.x, -face.z)
+				n.rotation = Vector3(0, atan2(-face.x, -face.z), 0)
 				n.mode = "climb"
 				if up and float(a.h) >= float(a.top) - 0.01:
 					a.state = "no_alto"
@@ -330,9 +368,18 @@ func _agent_step(a: Dictionary, t: Dictionary, host, pp: Vector3, delta: float) 
 				a.state = "descer"
 	a.pos = pos
 	n.global_position = pos
+	if str(a.state) in ["andar", "sentar", "ate_tronco"]:
+		# o corpo acompanha a inclinação do chão
+		var e := 0.2
+		var nx: float = (_jogo.surface_at(pos.x + e, pos.z) - _jogo.surface_at(pos.x - e, pos.z)) / (2.0 * e)
+		var nz: float = (_jogo.surface_at(pos.x, pos.z + e) - _jogo.surface_at(pos.x, pos.z - e)) / (2.0 * e)
+		var up := Vector3(-nx, 1.0, -nz).normalized()
+		var yaw := n.rotation.y
+		n.basis = (Basis(Quaternion(Vector3.UP, up)) * Basis(Vector3.UP, yaw)).scaled(n.scale)
 
 
 func _start_climb(a: Dictionary, host: Array) -> void:
+	a.tree = host
 	var pos: Vector3 = a.pos
 	var ang := atan2(pos.z - float(host[1]), pos.x - float(host[0])) + _rng.randf_range(-0.5, 0.5)
 	a.ang = ang
