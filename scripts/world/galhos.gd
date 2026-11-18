@@ -252,5 +252,9 @@ func _load(path: String) -> bool:
 		return false
 	items = d.get("galhos", [])
 	folhas = d.get("folhas", [])
+	if _jogo.sim.converted:
+		# o mundo virou ilha e o chão subiu: as folhas vão junto
+		for fo in folhas:
+			fo.y = _jogo.surface_at(float(fo.x), float(fo.z))
 	last_day = mini(int(d.get("dia", last_day)), last_day)
 	return true

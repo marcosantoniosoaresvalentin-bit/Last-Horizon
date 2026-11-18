@@ -1,9 +1,9 @@
 {
-  "version": 72,
-  "file": "update_72.zip",
-  "size": 3500808,
-  "sha256": "93dec86aedd4795c5cabf549e2ba58847b17a9984321a38f91d21bcbf08c02d0",
+  "version": 73,
+  "file": "update_73.zip",
+  "size": 3505464,
+  "sha256": "e9f17bf34e09c08f6fb3cf31fe0ba604aaaecdd0fabe01379a48e6899e85ee49",
   "min_build": 1,
-  "notes": "Pá: buraco de verdade (22 cm por pá, parede íngreme) com borda redonda e irregular, sem quadradinhos",
+  "notes": "Ilha com mar em volta e praias de areia; buracos enchem com a chuva e secam na seca; buracos abaixo do nível do mar enchem de água do mar",
   "date": "2026-11-18"
 }

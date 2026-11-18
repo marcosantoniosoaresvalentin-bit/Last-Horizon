@@ -106,13 +106,13 @@ void fragment(){
 	float bed = smoothstep(0.3, 0.7, b.r);    // leito de lagoa (com ou sem água)
 	float surf = b.g;                          // umidade da superfície
 	vec3 loam = vec3(0.34, 0.25, 0.17);
-	vec3 sandc = vec3(0.74, 0.64, 0.47);
+	vec3 sandc = vec3(0.80, 0.74, 0.60);
 	vec3 clayc = vec3(0.56, 0.30, 0.19);       // terra avermelhada da jazida de argila
 	vec3 mud = vec3(0.31, 0.27, 0.21);         // lama do fundo
 	vec3 soil = mix(loam, sandc, sand * 0.8);
 	float patch = smoothstep(0.15, 0.55, clay + (noise(wpos.xz * 0.45) - 0.5) * 0.35);
 	soil = mix(soil, clayc, patch * (1.0 - bed));
-	soil = mix(soil, mud, bed);
+	soil = mix(soil, mud, bed * (1.0 - sand * 0.85));   // fundo de mar e praia é areia, não lama
 	float soaked = smoothstep(0.5, 0.9, surf);
 	soil *= mix(1.0, 0.55, soaked);
 	// fundo de lagoa que secou: a lama clareia e racha em placas
@@ -202,6 +202,9 @@ uniform float rain = 0.0;
 uniform vec3 deep = vec3(0.012, 0.03, 0.025);
 uniform vec3 shallow = vec3(0.09, 0.08, 0.04);
 uniform vec3 mud = vec3(0.36, 0.26, 0.15);
+uniform float sea_level = -1000.0;
+uniform vec3 sea_deep = vec3(0.015, 0.075, 0.10);
+uniform vec3 sea_shallow = vec3(0.10, 0.28, 0.27);
 varying float depth;
 varying float murk;
 varying vec3 wpos;
@@ -229,17 +232,26 @@ void fragment(){
 	float e = 0.08;
 	float h0 = waves(wpos.xz, t);
 	vec3 nw = normalize(vec3(h0 - waves(wpos.xz + vec2(e, 0.0), t), e * 1.6, h0 - waves(wpos.xz + vec2(0.0, e), t)));
+	// longe a onda some no brilho geral (senão vira chuvisco de pixels)
+	float far = smoothstep(25.0, 260.0, length(wpos - CAMERA_POSITION_WORLD));
+	// água rasa e pequena (poça, buraco) quase não faz onda
+	float calm = max(far * 0.85, (1.0 - smoothstep(0.2, 3.0, depth)) * 0.65);
+	nw = normalize(mix(nw, vec3(0.0, 1.0, 0.0), calm));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 	float d = clamp(depth / 1.6, 0.0, 1.0);
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
 	// barro: enxurrada marrom; lagoa e rio ficam só um pouco sujos depois da chuva
 	float m = clamp(murk, 0.0, 1.0) * (0.85 + noise(wpos.xz * 0.15 + vec2(t * 0.02, 0.0)) * 0.3);
 	vec3 clean = mix(shallow, deep, sqrt(d));
+	// água do mar (no nível do mar): verde-azulada, bem mais funda
+	float salt = (1.0 - smoothstep(0.03, 0.12, abs(wpos.y - sea_level))) * smoothstep(0.1, 0.8, depth);
+	clean = mix(clean, mix(sea_shallow, sea_deep, sqrt(clamp(depth / 6.0, 0.0, 1.0))), salt);
 	vec3 muddy = mud * mix(1.0, 0.55, sqrt(d));
 	ALBEDO = mix(clean, muddy, clamp(m, 0.0, 1.0) * 0.9) + vec3(0.05, 0.07, 0.08) * fres;
 	ALPHA = clamp(mix(0.45, 0.93, sqrt(d)) + m * 0.3 + fres * 0.15, 0.0, 1.0) * smoothstep(0.0, 0.06, depth);
-	ROUGHNESS = 0.12;
-	SPECULAR = 0.45;
+	// água barrenta brilha menos (o barro tira o espelho)
+	ROUGHNESS = mix(0.12, 0.4, clamp(m, 0.0, 1.0));
+	SPECULAR = mix(0.45, 0.2, clamp(m, 0.0, 1.0));
 }
 """
 
@@ -350,6 +362,8 @@ var _work_btn: Button             # "Trabalhar" na tora apoiada nas forquilhas (
 var _pedras: Node3D = null
 var _macacos: Node3D = null
 var _escav: Node3D = null
+var _escav_steps := 0
+var _escav_timer := 0.0
 var _pa_vol := 0.0                # quanta terra está na pá (m³)
 var _knap := {}                   # modelando pedra no chão: ver _knap_start
 var _knap_ui: Control = null
@@ -781,6 +795,7 @@ func _build_environment() -> void:
 	_grass_mat.set_shader_parameter("fade_start", fade_end - 9.0)
 	_water_mat = ShaderMaterial.new()
 	_water_mat.shader = _shader(WATER_SHADER)
+	_water_mat.set_shader_parameter("sea_level", MundoSim.SEA * HS)
 
 
 func _shader(code: String) -> Shader:
@@ -806,6 +821,7 @@ func _on_world_ready() -> void:
 	_water_mi.material_override = _water_mat
 	_water_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_water_mi)
+	_build_ocean()
 	var w: PackedFloat32Array = sim.take_water()
 	if not w.is_empty():
 		_update_water(w)
@@ -855,6 +871,9 @@ func _on_world_ready() -> void:
 	_escav = Escavacao.new()
 	add_child(_escav)
 	_escav.build(self, _buracos._soil_mat, Mundos.dir(_world_id) + "/escavacao.json" if _world_id != "" else "")
+	_escav.water_mat = _water_mat
+	_escav.sea_m = MundoSim.SEA * HS
+	_escav_steps = sim.steps
 	for m in [_terrain_mat, _grass_mat]:
 		m.set_shader_parameter("dig_mask", _escav.mask_tex)
 		m.set_shader_parameter("dig_on", true)
@@ -1193,6 +1212,7 @@ func _process(delta: float) -> void:
 		_apply_soil()
 		# a informação do solo não aparece mais na tela
 	_update_dig(delta)
+	_tick_hole_water(delta)
 	_seed_check -= delta
 	if _seed_check <= 0.0 and _arvores:
 		_seed_check = 0.25
@@ -1307,6 +1327,11 @@ func _load_player() -> void:
 		_pending_carry = tora      # volta com a tora no ombro (depois que as árvores carregam)
 	var x := clampf(float(d.get("x", _player.position.x)), 1.0, MundoSim.W * CELL - 1.0)
 	var z := clampf(float(d.get("z", _player.position.z)), 1.0, MundoSim.H * CELL - 1.0)
+	var ci := clampi(int(z / CELL), 0, MundoSim.H - 1) * MundoSim.W + clampi(int(x / CELL), 0, MundoSim.W - 1)
+	if sim.ter[ci] < MundoSim.SEA + 0.3:
+		# o mundo virou ilha e aqui agora é mar: volta para a terra firme
+		x = (float(sim.spawn.x) + 0.5) * CELL
+		z = (float(sim.spawn.y) + 0.5) * CELL
 	_player.position = _ground_pos(Vector2(x, z))
 	_face = float(d.get("face", 0.0))
 	_yaw = float(d.get("yaw", 0.0))
@@ -1708,9 +1733,10 @@ func _show_toast(text: String) -> void:
 func _player_depth() -> float:
 	var p := _player.position
 	var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
+	var hd := hole_water_depth(p.x, p.z)
 	if _water_level.size() != MundoSim.W * MundoSim.H or cell.x < 0 or cell.y < 0 or cell.x >= MundoSim.W or cell.y >= MundoSim.H:
-		return 0.0
-	return maxf(0.0, _water_level[cell.y * MundoSim.W + cell.x] - height_at(p.x, p.z))
+		return hd
+	return maxf(hd, _water_level[cell.y * MundoSim.W + cell.x] - height_at(p.x, p.z))
 
 
 ## Pega a semente mais perto do chão e põe na mochila.
@@ -2876,6 +2902,7 @@ func _update_placing() -> void:
 	var cell := Vector2i(int(pos.x / CELL), int(pos.z / CELL))
 	if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
 		depth = maxf(0.0, _water_level[cell.y * MundoSim.W + cell.x] - height_at(pos.x, pos.z))
+	depth = maxf(depth, hole_water_depth(pos.x, pos.z))
 	_place_ok = depth < 0.25
 	(_ghost.material_override as StandardMaterial3D).albedo_color = Color(1, 1, 1, 0.55) if _place_ok else Color(1, 0.35, 0.3, 0.55)
 	_ghost.global_position = pos
@@ -3864,6 +3891,7 @@ func _move_player(delta: float) -> void:
 	var depth := 0.0
 	if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
 		depth = maxf(0.0, _water_level[cell.y * MundoSim.W + cell.x] - height_at(p.x, p.z))
+	depth = maxf(depth, hole_water_depth(p.x, p.z))
 	var water_slow := lerpf(1.0, 0.4, clampf(depth / 0.8, 0.0, 1.0))
 	if amount > 0.12:
 		# anda na direção para onde a câmera está olhando
@@ -4127,6 +4155,71 @@ func _finish_water() -> void:
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _w_arr)
 	_water_mi.mesh = mesh
+
+
+## Água nos buracos cavados: a chuva enche, o sol seca, o mar entra nos que passam do nível dele.
+func _tick_hole_water(delta: float) -> void:
+	if _escav == null:
+		return
+	_escav_timer -= delta
+	if _escav_timer > 0.0:
+		return
+	_escav_timer = 1.0
+	var hrs: float = float(sim.steps - _escav_steps) * MundoSim.STEP_HOURS
+	_escav_steps = sim.steps
+	if hrs < 0.0:
+		hrs = 0.0
+	var rain: float = sim.rain_mmh if sim.raining else 0.0
+	var evap: float = 0.02 if sim.raining else lerpf(0.6, 0.25, sim.wetness()) * (0.3 + 1.4 * sim.sun())
+	evap += lerpf(1.6, 0.15, sim.wetness())   # a terra seca chupa a água do fundo; na chuva ela já está encharcada
+	_escav.water_tick(minf(hrs, 24.0 * 30.0), rain, evap)
+
+
+## Profundidade da água dos buracos cavados no ponto.
+func hole_water_depth(x: float, z: float) -> float:
+	if _escav == null:
+		return 0.0
+	var L: float = _escav.water_level_at(x, z)
+	if L < -1e8:
+		return 0.0
+	return maxf(0.0, L - _escav.ground_at(x, z))
+
+
+## O mar em volta da ilha: vai do fim do mapa até o horizonte, com o fundo de areia embaixo.
+func _build_ocean() -> void:
+	var sea := MundoSim.SEA * HS
+	var bed := MundoSim.SEA_FLOOR * HS
+	var MW := MundoSim.W * CELL
+	var MH := MundoSim.H * CELL
+	var F := 6000.0
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var bst := SurfaceTool.new()
+	bst.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# quatro faixas em volta do mapa (sem cobrir o mapa, que tem a sua própria água)
+	var rects := [[-F, -F, MW + F, 0.0], [-F, MH, MW + F, MH + F], [-F, 0.0, 0.0, MH], [MW, 0.0, MW + F, MH]]
+	for r in rects:
+		var x0: float = r[0]; var z0: float = r[1]; var x1: float = r[2]; var z1: float = r[3]
+		var q := [Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1)]
+		for t in [0, 2, 1, 0, 3, 2]:
+			st.set_color(Color(0.0, 1, 1, sea - bed))
+			st.set_normal(Vector3.UP)
+			st.add_vertex(Vector3(q[t].x, sea, q[t].y))
+			bst.set_normal(Vector3.UP)
+			bst.add_vertex(Vector3(q[t].x, bed - 0.05, q[t].y))
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = _water_mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+	var bmat := StandardMaterial3D.new()
+	bmat.albedo_color = Color(0.55, 0.5, 0.38)
+	bmat.roughness = 1.0
+	var bmi := MeshInstance3D.new()
+	bmi.mesh = bst.commit()
+	bmi.material_override = bmat
+	bmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(bmi)
 
 
 ## Calcula a malha da água: lagoas, córregos e poças.

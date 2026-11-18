@@ -31,6 +31,10 @@ const H := 96
 const N := W * H
 const SC := 200.0 / W
 const GW_CAP := 1.6
+const SEA := 3.0                # nível do mar (unidades de altura da simulação; ×1,2 = metros)
+const SEA_FLOOR := -7.0         # fundo do mar longe da costa
+var island := false
+var converted := false      # o mundo salvo era antigo (sem mar) e acabou de virar ilha             # o mapa já virou ilha (mundos antigos são convertidos)
 const STEPS_PER_SEC := 6.0
 const STEP_MULT := 5.0
 const STEPS_DAY := 2880           # um dia de jogo = 8 minutos
@@ -158,7 +162,7 @@ func request_save() -> void:
 func _save_state() -> void:
 	var data := {"versao": SAVE_VERSION, "max_h": max_h, "steps": steps, "rain_t": rain_t, "dry_t": dry_t,
 		"raining": raining, "spawn": spawn, "drain_min": drain_min, "rock_name": rock_name,
-		"rain_mmh": rain_mmh, "long_rain": long_rain, "murk": murk, "tsoil": tsoil}
+		"rain_mmh": rain_mmh, "long_rain": long_rain, "murk": murk, "tsoil": tsoil, "ilha": island}
 	for a in SAVE_ARRAYS:
 		data[a] = get(a)
 	DirAccess.make_dir_recursive_absolute(save_dir)
@@ -215,6 +219,11 @@ func _load_state() -> bool:
 		_calm_old_flood()
 	spawn = data.spawn
 	drain_min = float(data.drain_min)
+	island = bool(data.get("ilha", false))
+	if not island:
+		_convert_to_island()
+		converted = true
+		_find_spawn()
 	return true
 
 
@@ -454,7 +463,7 @@ func _find_spawn() -> void:
 		var y := randi_range(10, H - 11)
 		var i := y * W + x
 		var h := ter[i] / max_h
-		if wat[i] > 0.02 or h > 0.5:
+		if wat[i] > 0.02 or h > 0.5 or ter[i] < SEA + 1.0:
 			continue
 		# perto de um lugar que alaga, mas no seco
 		var near := 0.0
@@ -584,6 +593,7 @@ func _generate() -> void:
 	for i in N:
 		ter[i] -= mn
 		max_h = maxf(max_h, ter[i])
+	_make_island(s)
 
 	_initial_soil(soiln)
 
@@ -618,6 +628,102 @@ func _generate() -> void:
 			cover[i] *= 0.35
 	for i in N:
 		top[i] = 1.0 if wat[i] > 0.02 else clampf(gw[i] / GW_CAP, 0.0, 0.6)
+	_beaches()
+	_fill_sea()
+
+
+# ================== ILHA E MAR ==================
+
+## O mapa vira uma ilha: a terra sobe acima do nível do mar e, perto da borda, desce
+## para o fundo do mar. A costa é irregular (enseadas, pontas e baías), nada de quadrado.
+func _make_island(seed_: int) -> void:
+	var coast := FastNoiseLite.new()
+	coast.seed = seed_ + 77
+	coast.noise_type = FastNoiseLite.TYPE_PERLIN
+	coast.fractal_octaves = 4
+	coast.frequency = 0.045
+	for y in H:
+		for x in W:
+			var i := y * W + x
+			# distância até a borda (0 no meio, 1 na borda), redonda nos cantos
+			var u := (float(x) / (W - 1) - 0.5) * 2.0
+			var v := (float(y) / (H - 1) - 0.5) * 2.0
+			var dist := pow(pow(absf(u), 3.0) + pow(absf(v), 3.0), 1.0 / 3.0)
+			dist += (_n01(coast, x * 1.0, y * 1.0) - 0.5) * 0.42
+			var f := smoothstep(0.66, 0.97, dist)          # 0 terra, 1 mar aberto
+			var land := ter[i] + SEA + 0.6
+			# perto da costa a terra desce até a praia: uma faixa larga e quase plana
+			# de areia que entra devagar no mar, e depois o fundo vai afundando
+			var top := SEA + 1.0 + (_n01(coast, x * 3.1 + 50.0, y * 3.1) - 0.5) * 0.5
+			if f < 0.28:
+				ter[i] = lerpf(land, top, smoothstep(0.0, 0.28, f))
+			else:
+				var shore := lerpf(top, SEA - 1.0, smoothstep(0.28, 0.5, f))
+				ter[i] = lerpf(shore, SEA_FLOOR, smoothstep(0.5, 1.0, f))
+	max_h = 0.0
+	for i in N:
+		max_h = maxf(max_h, ter[i])
+	island = true
+
+
+## Praias: perto do mar e baixas, areia clara sem capim nem argila.
+func _beaches() -> void:
+	for y in H:
+		for x in W:
+			var i := y * W + x
+			var h := ter[i]
+			if h > SEA + 1.9:
+				continue
+			# tem mar por perto?
+			var near := false
+			for oy in range(-5, 6):
+				for ox in range(-5, 6):
+					var xx := x + ox
+					var yy := y + oy
+					if xx >= 0 and yy >= 0 and xx < W and yy < H and ter[yy * W + xx] < SEA - 0.1:
+						near = true
+			if not near:
+				continue
+			var b := 1.0 - smoothstep(SEA + 1.1, SEA + 1.9, h)
+			sand[i] = maxf(sand[i], b)
+			clay[i] *= 1.0 - b * 0.9
+			cover[i] *= 1.0 - b * 0.95
+			deposit[i] *= 1.0 - b
+			bank[i] *= 1.0 - b
+
+
+## Enche de mar tudo o que está abaixo do nível do mar e ligado à borda do mapa.
+func _fill_sea() -> void:
+	var seen := PackedByteArray()
+	seen.resize(N)
+	var todo := []
+	for x in W:
+		todo.append(x)
+		todo.append((H - 1) * W + x)
+	for y in H:
+		todo.append(y * W)
+		todo.append(y * W + W - 1)
+	while not todo.is_empty():
+		var i: int = todo.pop_back()
+		if seen[i] or ter[i] >= SEA:
+			continue
+		seen[i] = 1
+		wat[i] = maxf(wat[i], SEA - ter[i])
+		var x := i % W
+		var y := i / W
+		if x > 0: todo.append(i - 1)
+		if x < W - 1: todo.append(i + 1)
+		if y > 0: todo.append(i - W)
+		if y < H - 1: todo.append(i + W)
+
+
+## Mundo salvo antes de existir o mar: vira ilha agora (a terra sobe junto, então nada
+## muda de altura relativa; só a borda afunda no mar).
+func _convert_to_island() -> void:
+	_make_island(world_seed if world_seed != 0 else 12345)
+	_beaches()
+	_fill_sea()
+	_update_shore()
 
 
 ## Geologia e solo inicial, como se milhões de anos tivessem passado.
@@ -871,7 +977,7 @@ func _step(rain_now: bool, mult: float) -> void:
 			if y < H - 1: inn += U[i + W]
 			var w := maxf(0.0, Wt[i] + inn - L[i] - R[i] - U[i] - D[i])
 			if x == 0 or y == 0 or x == W - 1 or y == H - 1:
-				w *= 0.8  # a água sai pelas bordas do mapa
+				w = maxf(0.0, SEA - T[i])   # além da borda é mar: o nível fica no nível do mar
 			Wt[i] = w
 			M[i] = M[i] * 0.9993 + (0.0007 if w > 0.03 else 0.0)
 			i += 1

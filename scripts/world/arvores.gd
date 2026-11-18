@@ -532,6 +532,8 @@ func _load(path: String) -> bool:
 	free_logs = []
 	for fl in d.get("toras", []):
 		if fl is Dictionary and fl.has("pos"):
+			if _jogo.sim.converted:
+				fl.pos[1] = float(fl.pos[1]) + (MundoSim.SEA + 0.6) * _jogo.HS   # o mundo virou ilha: o chão subiu
 			free_logs.append(fl)
 	cuts = {}
 	for c in d.get("cortes", []):

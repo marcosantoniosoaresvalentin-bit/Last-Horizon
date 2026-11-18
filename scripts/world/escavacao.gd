@@ -150,6 +150,7 @@ func _changed(touched: Dictionary) -> void:
 		for ox in [-2, -1, 0, 1]:
 			for oz in [-2, -1, 0, 1]:
 				cks[_chunk_of(k + Vector2i(ox, oz))] = true
+	_basins_dirty = true
 	if mask_tex:
 		mask_tex.update(_mask)
 	for ck in cks:
@@ -200,7 +201,8 @@ func _rebuild_chunk(ck: Vector2i) -> void:
 				var z := k.y * RES
 				var dv := _v(k)
 				# um tiquinho abaixo: na borda fica por baixo do chão normal (que é recortado redondo)
-				ps.append(Vector3(x, _jogo.surface_at(x, z) + dv - 0.015, z))
+				# (onde não mexeu, bem mais abaixo: nas dobras do terreno a malha fina não pode aparecer por cima)
+				ps.append(Vector3(x, _jogo.surface_at(x, z) + dv - (0.015 if absf(dv) > 0.002 else 0.08), z))
 				cs.append(_soil_color(dv, k))
 			for tri in [[0, 1, 2], [0, 2, 3]]:
 				for t in tri:
@@ -247,7 +249,10 @@ func save(path: String) -> void:
 		out.append([k.x, k.y, snappedf(float(d[k]), 0.001)])
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"versao": 1, "res": RES, "pontos": out}))
+		var wat := []
+		for key in water:
+			wat.append([key.x, key.y, snappedf(float(water[key]), 0.0001)])
+		f.store_string(JSON.stringify({"versao": 1, "res": RES, "pontos": out, "agua": wat}))
 		f.close()
 
 
@@ -261,3 +266,200 @@ func _load(path: String) -> void:
 	for e in j.get("pontos", []):
 		var k := Vector2i(roundi(float(e[0]) * r0 / RES), roundi(float(e[1]) * r0 / RES))
 		d[k] = minf(float(d.get(k, 0.0)), float(e[2])) if float(e[2]) < 0.0 else maxf(float(d.get(k, 0.0)), float(e[2]))
+	if is_equal_approx(r0, RES):
+		for e in j.get("agua", []):
+			_basin_of[Vector2i(int(e[0]), int(e[1]))] = Vector2i(int(e[0]), int(e[1]))
+			water[Vector2i(int(e[0]), int(e[1]))] = float(e[2])
+
+
+# ================== ÁGUA NOS BURACOS ==================
+# Cada buraco (bacia) guarda um volume de água. A chuva enche (a água que cai em volta
+# também escorre para dentro), o sol e a terra secam. Buraco que passa do nível do mar
+# enche de água do mar pelo chão, até o nível do mar.
+
+var sea_m := -1e9                # nível do mar (m)
+var water := {}                  # chave da bacia (ponto mais fundo) -> volume (m³)
+var _basin_of := {}              # ponto -> chave da bacia
+var _basins := {}                # chave -> {pts: [pontos], rim (m), low (m), level (m)}
+var _water_mi: MeshInstance3D = null
+var water_mat: Material
+var _basins_dirty := true
+
+
+func _ground_k(k: Vector2i) -> float:
+	return _jogo.surface_at(k.x * RES, k.y * RES) + _v(k)
+
+
+var _gc := {}      # chão já calculado em cada ponto (limpo quando a terra muda)
+
+func _gk(k: Vector2i) -> float:
+	var v = _gc.get(k)
+	if v == null:
+		v = _ground_k(k)
+		_gc[k] = v
+	return v
+
+
+func _find_basins() -> void:
+	var old := water
+	var old_of := _basin_of
+	var old_n := {}     # quantos pontos tinha cada bacia antiga
+	for k in old_of:
+		old_n[old_of[k]] = int(old_n.get(old_of[k], 0)) + 1
+	# água salva sem os pontos (carregou do arquivo): fica toda no ponto mais fundo dela
+	for key in old:
+		if not old_n.has(key) or int(old_n[key]) <= 1:
+			old_n[key] = 1
+	_basins = {}
+	_basin_of = {}
+	_gc = {}
+	water = {}
+	var seen := {}
+	for k0 in d:
+		if seen.has(k0) or _v(k0) > -0.03:
+			continue
+		var pts := []
+		var todo := [k0]
+		var low_k: Vector2i = k0
+		while not todo.is_empty():
+			var k: Vector2i = todo.pop_back()
+			if seen.has(k) or _v(k) > -0.03:
+				continue
+			seen[k] = true
+			pts.append(k)
+			if _gk(k) < _gk(low_k):
+				low_k = k
+			for nb in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				todo.append(k + nb)
+		# borda: o ponto mais baixo em volta do buraco (por ali a água transborda)
+		var rim := 1e9
+		for k in pts:
+			for nb in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var n: Vector2i = k + nb
+				if not seen.has(n) or _v(n) > -0.03:
+					rim = minf(rim, _gk(n))
+		var vol := 0.0
+		for k in pts:
+			var ob = old_of.get(k)
+			if ob != null and old.has(ob):
+				vol += float(old[ob]) / maxf(float(old_n.get(ob, 1)), 1.0)
+			_basin_of[k] = low_k
+		var gs := PackedFloat32Array()
+		for k in pts:
+			gs.append(_gk(k))
+		gs.sort()
+		_basins[low_k] = {"pts": pts, "g": gs, "rim": rim, "low": _gk(low_k), "level": -1e9}
+		water[low_k] = vol
+	_basins_dirty = false
+
+
+## Nível da água de uma bacia com esse volume (enche de baixo para cima).
+func _level_for(b: Dictionary, vol: float) -> float:
+	var g: PackedFloat32Array = b.g
+	var n := g.size()
+	if vol <= 0.0 or n == 0:
+		return float(b.low) - 1.0
+	var t := vol / (RES * RES)
+	var pre := 0.0
+	for i in n:
+		pre += g[i]
+		var nxt: float = g[i + 1] if i + 1 < n else 1e9
+		var L := (t + pre) / float(i + 1)
+		if L <= nxt:
+			return minf(L, float(b.rim))
+	return float(b.rim)
+
+
+func _vol_at(b: Dictionary, level: float) -> float:
+	var g: PackedFloat32Array = b.g
+	var v := 0.0
+	for x in g:
+		if x >= level:
+			break
+		v += level - x
+	return v * RES * RES
+
+
+## Passa o tempo: chuva enche, sol seca, mar entra pelo chão nos buracos abaixo dele.
+func water_tick(hours: float, rain_mmh: float, evap_mmh: float) -> void:
+	var redraw := false
+	if _basins_dirty:
+		_find_basins()
+		redraw = true
+	if _basins.is_empty():
+		if redraw:
+			_draw_water()
+		return
+	for key in _basins:
+		var b: Dictionary = _basins[key]
+		var area := float((b.pts as Array).size()) * RES * RES
+		var vol := float(water.get(key, 0.0))
+		var full := _vol_at(b, float(b.rim))
+		vol += rain_mmh / 1000.0 * hours * area * 2.5        # a chuva em volta escorre para dentro
+		var lvl := _level_for(b, vol)
+		var wet_area := 0.0
+		for x in (b.g as PackedFloat32Array):
+			if x >= lvl:
+				break
+			wet_area += RES * RES
+		vol -= evap_mmh / 1000.0 * hours * wet_area   # sol e a terra chupando
+		if float(b.low) < sea_m:
+			vol = maxf(vol, _vol_at(b, minf(sea_m, float(b.rim))))   # o mar entra pelo chão
+		vol = clampf(vol, 0.0, full)
+		water[key] = vol
+		var nl: float = _level_for(b, vol) if vol > 0.0005 else -1e9
+		if absf(nl - float(b.level)) > 0.004:
+			b.level = nl
+			redraw = true
+	if redraw:
+		_draw_water()
+
+
+## Nível da água no ponto (ou -1e9 se não tem água de buraco ali).
+func water_level_at(x: float, z: float) -> float:
+	var k := Vector2i(roundi(x / RES), roundi(z / RES))
+	var key = _basin_of.get(k)
+	if key == null or not _basins.has(key):
+		return -1e9
+	return float(_basins[key].level)
+
+
+func _draw_water() -> void:
+	if _water_mi == null:
+		_water_mi = MeshInstance3D.new()
+		_water_mi.material_override = water_mat
+		_water_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_water_mi)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var any := false
+	for key in _basins:
+		var b: Dictionary = _basins[key]
+		var L := float(b.level)
+		if L < -1e8:
+			continue
+		var drawn := {}
+		for k in b.pts:
+			for o in [Vector2i(0, 0), Vector2i(-1, 0), Vector2i(0, -1), Vector2i(-1, -1)]:
+				var c: Vector2i = k + o
+				if drawn.has(c):
+					continue
+				drawn[c] = true
+				# fundura em cada canto: na beirada vai a zero e a água some suave (as paredes cobrem o resto)
+				var p := []
+				var cols := []
+				var wet := false
+				for q in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1)]:
+					var kk: Vector2i = c + q
+					var dep := L - _gk(kk)
+					wet = wet or dep > 0.0
+					p.append(Vector3(kk.x * RES, L, kk.y * RES))
+					cols.append(Color(0.85, 1, 1, dep))
+				if not wet:
+					continue
+				any = true
+				for t in [0, 1, 2, 0, 2, 3]:
+					st.set_color(cols[t])
+					st.set_normal(Vector3.UP)
+					st.add_vertex(p[t])
+	_water_mi.mesh = st.commit() if any else null
