@@ -8,11 +8,11 @@ extends Node3D
 ## (cavado) ou subiu (terra jogada). Ali o chão normal some (máscara) e é desenhado este
 ## chão de terra mexida no lugar.
 
-const RES := 0.25               # tamanho de cada quadradinho da grade (m)
+const RES := 0.2                # tamanho de cada quadradinho da grade (m)
 const CH := 16                  # quadradinhos por bloco (4 m)
 const MAX_DEPTH := 10.0
-const DIG_R := 0.42             # raio da pá de terra
-const DIG_D := 0.1              # quanto a pá tira no meio (m)
+const DIG_R := 0.36             # raio da pá de terra
+const DIG_D := 0.22             # quanto a pá entra na terra (m): fundo quase reto, parede íngreme
 const REPOSE := 0.75            # terra solta escorre se o desnível passar disso por quadradinho (≈37°)
 
 var d := {}                     # Vector2i (ponto da grade) -> quanto subiu (+) ou desceu (-) (m)
@@ -73,17 +73,20 @@ func ground_at(x: float, z: float) -> float:
 func dig(c: Vector3) -> float:
 	var vol := 0.0
 	var touched := {}
-	var r := int(ceil(DIG_R / RES))
+	var r := int(ceil(DIG_R * 1.2 / RES))
 	var cx := roundi(c.x / RES)
 	var cz := roundi(c.z / RES)
 	for ix in range(cx - r, cx + r + 1):
 		for iz in range(cz - r, cz + r + 1):
 			var p := Vector2(ix * RES, iz * RES)
 			var dist := p.distance_to(Vector2(c.x, c.z))
-			if dist > DIG_R:
-				continue
 			var k := Vector2i(ix, iz)
-			var amount := DIG_D * (1.0 - pow(dist / DIG_R, 2.0))
+			# a beira de cada pá é irregular (torrão que sai junto ou fica)
+			var wob := 1.0 + 0.18 * sin(atan2(p.y - c.z, p.x - c.x) * 3.0 + c.x * 7.0 + c.z * 5.0)
+			var u := clampf(dist / (DIG_R * wob), 0.0, 1.0)
+			if u >= 1.0:
+				continue
+			var amount := DIG_D * (1.0 - pow(u, 4.0))
 			var now := _v(k)
 			var nv := maxf(now - amount, -MAX_DEPTH)
 			vol += (now - nv) * RES * RES
@@ -144,8 +147,9 @@ func _changed(touched: Dictionary) -> void:
 			d.erase(k)
 		_mark(k)
 		# os blocos vizinhos também (o ponto da grade fica na borda de até 4 blocos)
-		for o in [Vector2i(0, 0), Vector2i(-1, 0), Vector2i(0, -1), Vector2i(-1, -1)]:
-			cks[_chunk_of(k + o)] = true
+		for ox in [-2, -1, 0, 1]:
+			for oz in [-2, -1, 0, 1]:
+				cks[_chunk_of(k + Vector2i(ox, oz))] = true
 	if mask_tex:
 		mask_tex.update(_mask)
 	for ck in cks:
@@ -185,7 +189,7 @@ func _rebuild_chunk(ck: Vector2i) -> void:
 	for ix in range(x0, x0 + CH):
 		for iz in range(z0, z0 + CH):
 			var c := Vector2i(ix, iz)
-			if ix < 0 or iz < 0 or ix >= _mw or iz >= _mh or _mask.get_pixel(ix, iz).r < 0.5:
+			if ix < 0 or iz < 0 or ix >= _mw or iz >= _mh or not _near_mark(c):
 				continue
 			any = true
 			var ps := []
@@ -195,7 +199,8 @@ func _rebuild_chunk(ck: Vector2i) -> void:
 				var x := k.x * RES
 				var z := k.y * RES
 				var dv := _v(k)
-				ps.append(Vector3(x, _jogo.surface_at(x, z) + dv, z))
+				# um tiquinho abaixo: na borda fica por baixo do chão normal (que é recortado redondo)
+				ps.append(Vector3(x, _jogo.surface_at(x, z) + dv - 0.015, z))
 				cs.append(_soil_color(dv, k))
 			for tri in [[0, 1, 2], [0, 2, 3]]:
 				for t in tri:
@@ -209,6 +214,16 @@ func _rebuild_chunk(ck: Vector2i) -> void:
 	mi.material_override = _mat
 	add_child(mi)
 	_chunks[ck] = mi
+
+
+## Quadradinho mexido ou vizinho de um mexido (a terra é desenhada com uma margem).
+func _near_mark(c: Vector2i) -> bool:
+	for ox in [-1, 0, 1]:
+		for oz in [-1, 0, 1]:
+			var q: Vector2i = c + Vector2i(ox, oz)
+			if q.x >= 0 and q.y >= 0 and q.x < _mw and q.y < _mh and _mask.get_pixel(q.x, q.y).r > 0.5:
+				return true
+	return false
 
 
 ## Cor da terra: em cima o húmus escuro, mais fundo a terra amarelada/avermelhada com
@@ -232,7 +247,7 @@ func save(path: String) -> void:
 		out.append([k.x, k.y, snappedf(float(d[k]), 0.001)])
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"versao": 1, "pontos": out}))
+		f.store_string(JSON.stringify({"versao": 1, "res": RES, "pontos": out}))
 		f.close()
 
 
@@ -242,5 +257,7 @@ func _load(path: String) -> void:
 	var j = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if not j is Dictionary:
 		return
+	var r0 := float(j.get("res", 0.25))
 	for e in j.get("pontos", []):
-		d[Vector2i(int(e[0]), int(e[1]))] = float(e[2])
+		var k := Vector2i(roundi(float(e[0]) * r0 / RES), roundi(float(e[1]) * r0 / RES))
+		d[k] = minf(float(d.get(k, 0.0)), float(e[2])) if float(e[2]) < 0.0 else maxf(float(d.get(k, 0.0)), float(e[2]))

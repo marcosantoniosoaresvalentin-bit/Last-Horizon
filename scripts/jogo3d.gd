@@ -71,7 +71,7 @@ uniform vec2 world_size = vec2(640.0, 480.0);
 // buracos cavados perto do jogador: (x, z, raio, 0). O chão não é desenhado dentro deles.
 uniform vec4 holes[32];
 uniform int hole_n = 0;
-uniform sampler2D dig_mask : filter_nearest, repeat_disable;   // terra mexida pela pá (o chão normal some ali)
+uniform sampler2D dig_mask : filter_linear, repeat_disable;    // terra mexida pela pá (o chão normal some ali)
 uniform bool dig_on = false;
 varying vec3 wpos;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -97,7 +97,8 @@ void fragment(){
 		if (distance(wpos.xz, holes[i].xy) < holes[i].z) { discard; }
 	}
 	vec2 uv = wpos.xz / world_size;
-	if (dig_on && texture(dig_mask, uv).r > 0.5) { discard; }
+	// borda arredondada e irregular (nada de quadradinho)
+	if (dig_on && texture(dig_mask, uv).r > 0.5 + (noise(wpos.xz * 5.0) - 0.5) * 0.36) { discard; }
 	vec4 a = texture(soil_a, uv);
 	vec4 b = texture(soil_b, uv);
 	float rock = COLOR.a;
@@ -151,7 +152,7 @@ uniform float wind = 0.12;
 uniform float wet = 0.0;
 uniform vec3 player_pos = vec3(0.0);
 uniform vec4 flat_spot = vec4(0.0);
-uniform sampler2D dig_mask : filter_nearest, repeat_disable;
+uniform sampler2D dig_mask : filter_linear, repeat_disable;
 uniform bool dig_on = false;
 uniform vec2 dig_world = vec2(640.0, 480.0);   // xyz = lugar, w = raio: capim amassado (modelando pedra)
 uniform float fade_start = 26.0;

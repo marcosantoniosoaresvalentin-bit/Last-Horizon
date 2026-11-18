@@ -1,9 +1,9 @@
 {
-  "version": 71,
-  "file": "update_71.zip",
-  "size": 3500386,
-  "sha256": "e9cb090baff60670a791f7489eb78752976ef853d8660ad6d13cb736e59696ca",
+  "version": 72,
+  "file": "update_72.zip",
+  "size": 3500808,
+  "sha256": "93dec86aedd4795c5cabf549e2ba58847b17a9984321a38f91d21bcbf08c02d0",
   "min_build": 1,
-  "notes": "Pá tira a terra do próprio chão onde bate (cava qualquer forma, largura e fundura) e joga onde quiser",
+  "notes": "Pá: buraco de verdade (22 cm por pá, parede íngreme) com borda redonda e irregular, sem quadradinhos",
   "date": "2026-11-18"
 }
