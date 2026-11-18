@@ -688,6 +688,9 @@ class ChopPose extends SkeletonModifier3D:
 		var cf := (-cb.z).normalized()
 		var cu := cb.y.normalized()
 		var cr := cb.x.normalized()
+		if with_tool and tool != "balde":
+			_fp_grip(sk, up, fwd, right, eye, cf, cu, cr)
+			return
 		for side in ["Right", "Left"]:
 			var sg := 1.0 if side == "Right" else -1.0
 			var out := cr * sg
@@ -779,6 +782,63 @@ class ChopPose extends SkeletonModifier3D:
 		var center: Vector3 = hp.origin + g.offset
 		var edge := _orth(cf if tool in ["machado", "serra"] else -cr, handle)
 		_set_tool(sk, _tool_xf(center - handle * carry_grip, handle, edge))
+
+	## Primeira pessoa com ferramenta: a mão fecha em volta do cabo de verdade (o cabo
+	## passa por dentro da mão, dedos e polegar em volta). Pá e cavadeira com as duas
+	## mãos, o cabo atravessado na frente do corpo e a lâmina para a frente e para baixo.
+	func _fp_grip(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3, eye: Vector3, cf: Vector3, cu: Vector3, cr: Vector3) -> void:
+		var bob := cr * fp_bob.x + cu * fp_bob.y
+		var cf_flat := (cf - up * cf.dot(up)).normalized()
+		# as mãos ficam ao alcance dos braços: mede a partir dos olhos, mas puxa para perto
+		# do ombro se passar do comprimento do braço
+		var shR := sk.get_bone_global_pose(_bone("RightArm")).origin
+		var shL := sk.get_bone_global_pose(_bone("LeftArm")).origin
+		var reach := func(sh: Vector3, p: Vector3) -> Vector3:
+			var v := p - sh
+			return sh + v.limit_length(0.5)
+		if tool in ["pa", "cavadeira"]:
+			# cabo: do lado direito do quadril, cruzando para a frente e para a esquerda, descendo
+			var d := (cf * 0.8 - cu * 0.38 - cr * 0.38).normalized()
+			var R: Vector3 = reach.call(shR, eye + cf * 0.4 - cu * 0.12 + cr * 0.14 + bob)
+			var base := R - d * 0.18                      # ponta do cabo (o pegador) logo atrás da mão direita
+			var L: Vector3 = base + d * 0.5               # a esquerda mais para a frente no cabo
+			if L.distance_to(shL) > 0.52:
+				L = base + d * maxf(0.3, 0.5 - (L.distance_to(shL) - 0.52))
+			var fr := _orth(-up * 0.6 + right * 0.4, d)   # dedos da direita por cima do cabo
+			var fl := _orth(-up * 0.7 - right * 0.3, d)   # dedos da esquerda por baixo/de lado
+			_hand_on(sk, "Right", R, d, fr, up, right)
+			_hand_on(sk, "Left", L, d, fl, up, -right)
+			_close_fingers(sk, "Right")
+			_close_fingers(sk, "Left")
+			_set_tool(sk, _tool_xf(base, d, _orth(up, d)))
+			return
+		# uma mão: a direita segura, a esquerda solta do lado
+		var d2: Vector3
+		var R2: Vector3 = eye + cf * 0.4 - cu * 0.12 + cr * 0.2 + bob
+		match tool:
+			"marreta":
+				d2 = (cu * 0.8 + cf * 0.5 - cr * 0.1).normalized()
+				R2 = eye + cf * 0.42 - cu * 0.2 + cr * 0.26 + bob
+			"serra":
+				d2 = (cf * 1.0 - cr * 0.3 + cu * 0.05).normalized()
+			"pedra":
+				d2 = (cr * 0.9 + cf * 0.2).normalized()
+				R2 = eye + cf * 0.38 - cu * 0.1 + cr * 0.19 + bob
+			_:
+				d2 = (cu * 0.75 + cf * 0.5 - cr * 0.15).normalized()     # machado em pé, a cabeça para cima e para a frente
+				R2 = eye + cf * 0.42 - cu * 0.17 + cr * 0.24 + bob
+		R2 = reach.call(shR, R2)
+		var fr2 := _orth(-cr * 0.5 - cf_flat * 0.5, d2)
+		_hand_on(sk, "Right", R2, d2, fr2, up, right)
+		_close_fingers(sk, "Right")
+		var edge := _orth(cf_flat if tool in ["machado", "serra"] else -cr, d2)
+		_set_tool(sk, _tool_xf(R2 - d2 * carry_grip, d2, edge))
+		# a esquerda solta, relaxada do lado
+		var sbl := _bone("LeftArm")
+		if sbl >= 0:
+			var sh := sk.get_bone_global_pose(sbl).origin
+			_ik(sk, "LeftArm", "LeftForeArm", "LeftHand", sh - up * 0.55 + fwd * 0.12 - right * 0.06, sh - up * 0.3 - right * 0.4 - fwd * 0.3)
+			_curl_fingers(sk, "Left", 0.4)
 
 	## Ângulo do golpe de cima para baixo (graus de elevação do cabo):
 	## 115 = machado lá em cima, atrás da cabeça; -42 = batendo na tora no chão.

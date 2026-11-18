@@ -1,9 +1,9 @@
 {
-  "version": 91,
-  "file": "update_91.zip",
-  "size": 4315268,
-  "sha256": "3147e413d51ff4ce85c9f254fa38d303bb97a7a93e5808f0178a252d29e4fa40",
+  "version": 92,
+  "file": "update_92.zip",
+  "size": 4316101,
+  "sha256": "b57de349e60cfd12b4f0b7b46b0c430c626accbaf0b266e22566fe59f359b3d6",
   "min_build": 1,
-  "notes": "Corrige madeira rachada vendo o corte através da casca (também fincada) e o tronco da bacaba invisível de perto",
+  "notes": "Primeira pessoa: pá e cavadeira com as duas mãos; a mão fecha de verdade em volta do cabo de todas as ferramentas (sem mão torcida); a cabeça do personagem nunca aparece",
   "date": "2026-11-18"
 }

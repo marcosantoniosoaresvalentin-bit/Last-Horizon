@@ -4568,7 +4568,7 @@ func _fp_camera(delta: float, moved: float) -> void:
 			_head_axes = [_best_axis(hb, bfwd), _best_axis(hb, Vector3.UP)]
 		var hf: Vector3 = (hb * _head_axes[0]).normalized()
 		var hu: Vector3 = (hb * _head_axes[1]).normalized()
-		eye = hg.origin + hu * 0.09 + hf * 0.15
+		eye = hg.origin + hu * 0.1 - hf * 0.03        # dentro da cabeça (que some para a câmera): as mãos alcançam a frente da vista
 		# abaixado fazendo algo: os olhos ficam na frente do rosto (no plano), assim o
 		# peito e a barriga ficam para trás da câmera
 		if _busy_f > 0.01:
@@ -4579,7 +4579,7 @@ func _fp_camera(delta: float, moved: float) -> void:
 	var busy: bool = _crouch_job != "" or _digging or (_chop_pose != null and _chop_pose.crouch > 0.05)
 	_busy_f = move_toward(_busy_f, 1.0 if busy else 0.0, delta * 4.0)
 	if _chop_pose:
-		_chop_pose.hide_head = _busy_f > 0.02 or not _knap.is_empty() or not _vine.is_empty() or _chopping or _sawing
+		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
 	for m in _body_mats:
 		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, _busy_f)
 		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, _busy_f)
