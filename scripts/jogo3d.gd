@@ -387,7 +387,8 @@ var _tamanduas: Node3D = null
 var _constr: Node3D = null
 var _bld := {}                     # modo construção: {yaw, tilt, roll, ghost, ok, c, b}
 var _bld_btn: Button
-var _post_cut := {}               # serrando o topo da estaca: {i, t, y}
+var _post_cut := {}               # cortando a ponta da estaca: {i, t, y}
+var _medida := {}                 # altura medida com o machado na estaca de referência: {i, y}
 var _bld_t := 0.0
 var _bld_btns: Array = []
 var _bld_cross: Label
@@ -2161,11 +2162,15 @@ func _update_ctx_btn() -> void:
 		_ctx_action = "veneno"
 		var pt := _poison_target()
 		_ctx_btn.text = "Envenenar madeira" + (" (com cupim)" if _cupins.dmg_of(pt) > 0.02 else "")
-	elif _mao == "serra" and _buracos and _carry.is_empty() and _crouch_job == "" and not _sawing and not _air and _post_cut.is_empty() and _level_post() >= 0:
-		_ctx_action = "nivelar"
-		var li := _level_post()
-		var dh: float = _buracos.post_top(_buracos.posts[li]) - _buracos.level_target(li)
-		_ctx_btn.text = "Nivelar estaca (-%d cm)" % roundi(dh * 100.0)
+	elif _mao == "machado" and _buracos and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _walking and _post_cut.is_empty() and _buracos.post_near(_player.position, 1.3) >= 0:
+		var pi2: int = _buracos.post_near(_player.position, 1.3)
+		var top2: float = _buracos.post_top(_buracos.posts[pi2])
+		if not _medida.is_empty() and pi2 != int(_medida.i) and top2 > float(_medida.y) + 0.02:
+			_ctx_action = "cortar_ponta"
+			_ctx_btn.text = "Cortar a ponta (-%d cm)" % roundi((top2 - float(_medida.y)) * 100.0)
+		elif _medida.is_empty() or pi2 != int(_medida.i):
+			_ctx_action = "medir"
+			_ctx_btn.text = "Medir altura"
 	elif _constr and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _aimed_piece().is_empty():
 		_ctx_action = "peca"
 		_ctx_btn.text = "Pegar peça"
@@ -2203,11 +2208,37 @@ func _ctx_press() -> void:
 				_update_inventory()
 				_act_check = 0.0
 			return
-		"nivelar":
-			var li := _level_post()
-			if li >= 0:
-				_post_cut = {"i": li, "t": 0.0, "y": _buracos.level_target(li), "s": 0.0}
-				_show_toast("Serrando o topo da estaca para ficar na altura da mais baixa...")
+		"medir":
+			var mi: int = _buracos.post_near(_player.position, 1.3)
+			if mi >= 0:
+				var my: float = _buracos.post_top(_buracos.posts[mi])
+				_medida = {"i": mi, "y": my}
+				# vai sozinho até a estaca mais alta mais perto
+				var best := -1
+				var bd := 6.0
+				for j in _buracos.posts.size():
+					var po: Dictionary = _buracos.posts[j]
+					if j == mi or _buracos.post_top(po) <= my + 0.02:
+						continue
+					var d := Vector2(float(po.x) - _player.position.x, float(po.z) - _player.position.z).length()
+					if d < bd:
+						bd = d
+						best = j
+				if best < 0:
+					_show_toast("Altura medida. Não tem estaca mais alta aqui perto para cortar.")
+				else:
+					var po2: Dictionary = _buracos.posts[best]
+					var pc := Vector3(float(po2.x), 0, float(po2.z))
+					var away := Vector3(_player.position.x - pc.x, 0, _player.position.z - pc.z)
+					away = away.normalized() if away.length() > 0.01 else Vector3.BACK
+					_walk_to(pc + away * 0.75, "")
+					_show_toast("Altura medida na estaca. Indo até a mais alta: lá é só tocar em \"Cortar a ponta\".")
+				_act_check = 0.0
+			return
+		"cortar_ponta":
+			var ci: int = _buracos.post_near(_player.position, 1.3)
+			if ci >= 0 and not _medida.is_empty():
+				_post_cut = {"i": ci, "t": 0.0, "y": float(_medida.y), "s": 0.0}
 				_ctx_btn.visible = false
 			return
 		"peca":
@@ -6245,20 +6276,12 @@ func _poison_target() -> Dictionary:
 # fantasma onde o olho mira (verde: dá para pôr; vermelho: não dá). Girar, Inclinar
 # (deitada, 30, 45, 60 graus, em pé) e Virar (tábua deitada ou de lado).
 
-## Estaca perto (com a serra) que está mais alta que a vizinha mais baixa, ou -1.
-func _level_post() -> int:
-	var i: int = _buracos.post_near(_player.position, 1.3)
-	if i < 0 or _buracos.level_target(i) < -1e8:
-		return -1
-	return i
-
-
-## Serrando o topo da estaca: uns 3 segundos de vai-e-vem; andar cancela.
+## Cortando a ponta da estaca com o machado (uns 3 segundos de batidas); andar cancela.
 func _post_cut_tick(delta: float) -> void:
 	if _post_cut.is_empty():
 		return
 	var i := int(_post_cut.i)
-	if i >= _buracos.posts.size() or _mao != "serra" or _buracos.post_near(_player.position, 1.6) != i:
+	if i >= _buracos.posts.size() or _mao != "machado" or _buracos.post_near(_player.position, 1.6) != i:
 		_post_cut = {}
 		return
 	var po: Dictionary = _buracos.posts[i]
@@ -6268,21 +6291,23 @@ func _post_cut_tick(delta: float) -> void:
 	var to := Vector2(top.x - _player.position.x, top.z - _player.position.z)
 	_face = lerp_angle(_face, atan2(-to.x, -to.y), minf(1.0, delta * 8.0))
 	if float(_post_cut.s) <= 0.0:
-		_post_cut.s = 0.45
-		Sons.play_at(self, "serra", top, 0.0, 0.95 + randf() * 0.1)
-		_sawdust(top)
+		_post_cut.s = 0.6
+		var cutp := Vector3(top.x, float(_post_cut.y) + 0.02, top.z)
+		Sons.play_at(self, "machado", cutp, -2.0, 1.0 + randf() * 0.1)
+		_chips(cutp)
 	if float(_post_cut.t) >= 3.0:
 		var cut: float = _buracos.cut_post(i, float(_post_cut.y))
 		_post_cut = {}
+		_medida = {}
 		if cut > 0.0:
-			Sons.play_at(self, "baque", top, -10.0, 1.3)
+			Sons.play_at(self, "estalo", top, -4.0, 1.1)
 			if cut >= 0.12:
-				# o pedaço de cima cai do lado
+				# a ponta cortada cai do lado
 				var r: float = _arvores.free_log_radius(po.log)
 				var bit := {"cil": {"L": cut, "ra": r, "rb": r}, "sec": Arvores.circle_sec(), "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0,
 					"bot": {}, "top": {}, "pos": [0, 0, 0], "yaw": 0.0, "dia": _arvores.last_day}
 				_arvores.drop_log(bit, top + Vector3(0.3, 0, 0), randf() * TAU)
-			_show_toast("Estaca nivelada: tirou %d cm do topo." % roundi(cut * 100.0))
+			_show_toast("Ponta cortada: tirou %d cm. Agora as duas estacas estão na mesma altura." % roundi(cut * 100.0))
 		_act_check = 0.0
 
 
@@ -6397,7 +6422,7 @@ func _bld_update() -> void:
 			if Vector2(float(op.x) - float(po.x), float(op.z) - float(po.z)).length() < L:
 				var dh: float = absf(_buracos.post_top(op) - my)
 				if dh > 0.04:
-					r.why = "As estacas estão em alturas diferentes (%d cm). Pegue a serra e use \"Nivelar estaca\" na mais alta." % roundi(dh * 100.0)
+					r.why = "As estacas estão em alturas diferentes (%d cm). Com o machado: \"Medir altura\" na mais baixa e \"Cortar a ponta\" na mais alta." % roundi(dh * 100.0)
 					break
 	ghost.visible = true
 	ghost.transform = Transform3D(b, r.c)

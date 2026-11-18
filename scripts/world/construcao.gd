@@ -287,19 +287,11 @@ func _find_place_b(fl: Dictionary, b: Basis, hit: Dictionary) -> Dictionary:
 	return {"ok": true, "c": c + b.x * mid, "why": ""}
 
 
-## Como _find_place_b, mas peça deitada pode inclinar um pouco sozinha (até 20 graus)
-## para encostar nos dois apoios quando eles não estão na mesma altura. {ok, c, b, why}
+## Lugar da peça (sem inclinar sozinha: estacas de alturas diferentes precisam ser
+## cortadas no nível com o machado). {ok, c, b, why}
 func find_place(fl: Dictionary, b: Basis, hit: Dictionary) -> Dictionary:
 	var r := _find_place_b(fl, b, hit)
 	r.b = b
-	if bool(r.ok) or absf(b.x.y) > 0.2:
-		return r
-	for deg in [3.0, -3.0, 6.0, -6.0, 9.0, -9.0, 12.0, -12.0, 16.0, -16.0, 20.0, -20.0]:
-		var bb := Basis(b.z.normalized(), deg_to_rad(deg)) * b
-		var r2 := _find_place_b(fl, bb, hit)
-		if bool(r2.ok):
-			r2.b = bb
-			return r2
 	return r
 
 
