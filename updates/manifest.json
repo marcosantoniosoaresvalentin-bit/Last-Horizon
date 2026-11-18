@@ -1,9 +1,9 @@
 {
-  "version": 100,
-  "file": "update_100.zip",
-  "size": 4345377,
-  "sha256": "3ccf0815b7aa022080a8c7ea1b90100cc4439e3a653b648ee973734a0c0804d0",
+  "version": 101,
+  "file": "update_101.zip",
+  "size": 4568758,
+  "sha256": "090681b946ca36642ec69fad4946e1b99008ae1a802e6f8118f487418fbe5037",
   "min_build": 1,
-  "notes": "Novo: tamanduá-bandeira, predador dos cupins, com reprodução e rotina próprias",
+  "notes": "Tamanduá com textura de pelo, faixa mais nítida e pelagem mais fina",
   "date": "2026-11-18"
 }
