@@ -181,12 +181,17 @@ func info(i: int) -> Dictionary:
 
 ## Lado da tora apoiada onde dá para cortar a rodela (a ponta passa bem da forquilha):
 ## o mais perto do jogador. 0 se nenhum.
+func cut_len(i: int) -> float:
+	return float(rested[i].get("cut", SLICE))
+
+
 func slice_side(i: int, pos: Vector3) -> int:
 	var inf := info(i)
+	var need := maxf(MIN_OVER, cut_len(i) + 0.08)
 	var best := 0
 	var bd := 1e9
 	for e in [-1, 1]:
-		if float(inf.over[e]) < MIN_OVER:
+		if float(inf.over[e]) < need:
 			continue
 		var d := pos.distance_to(end_point(i, e))
 		if d < bd:
@@ -204,7 +209,7 @@ func end_point(i: int, e: int) -> Vector3:
 ## Onde a lâmina corta a rodela (no eixo, a SLICE da ponta).
 func slice_point(i: int, e: int) -> Vector3:
 	var inf := info(i)
-	return inf.center + inf.dir * float(e) * (float(inf.L) * 0.5 - SLICE)
+	return inf.center + inf.dir * float(e) * (float(inf.L) * 0.5 - cut_len(i))
 
 
 ## Plano para mudar a forquilha de lugar quando nenhuma ponta passa o suficiente:
@@ -217,7 +222,7 @@ func fix_plan(i: int, pos: Vector3) -> Dictionary:
 	for e in [-1, 1]:
 		var fi := int(r.b) if e > 0 else int(r.a)
 		var other := int(r.a) if e > 0 else int(r.b)
-		var to: Vector3 = inf.center + inf.dir * float(e) * (float(inf.L) * 0.5 - FIX_OVER)
+		var to: Vector3 = inf.center + inf.dir * float(e) * (float(inf.L) * 0.5 - maxf(FIX_OVER, cut_len(i) + 0.15))
 		var o: Dictionary = forks[other]
 		if Vector2(to.x - float(o.x), to.z - float(o.z)).length() < 0.5:
 			continue
@@ -259,8 +264,9 @@ func slice_stroke(i: int, e: int) -> float:
 		_rebuild()
 		return 0.0
 	fl.erase("entalhe")
-	_arv.shorten_free_log(fl, e, SLICE, 0.5)     # serra de pedra: acabamento irregular
-	r.off = float(r.get("off", 0.0)) - float(e) * SLICE * 0.5
+	var cl := cut_len(i)
+	_arv.shorten_free_log(fl, e, cl, 0.5)     # serra de pedra: acabamento irregular
+	r.off = float(r.get("off", 0.0)) - float(e) * cl * 0.5
 	_rebuild()
 	return rad
 

@@ -201,6 +201,14 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				var y := -18 + k * 5
 				ci.draw_line(c + Vector2(8 + k * 3, y) * u, c + Vector2(22 + k * 3, y - 12) * u, Color(0.45, 0.4, 0.18), 3.0 * u, true)
 			var _h := hd
+		"tabua", "ripa":
+			var w := 26.0 if id == "tabua" else 9.0
+			var pts := PackedVector2Array([c + Vector2(-44, -w) * u, c + Vector2(44, -w - 8) * u, c + Vector2(44, w - 8) * u, c + Vector2(-44, w) * u])
+			ci.draw_colored_polygon(pts, Color(0.6, 0.44, 0.28))
+			for k in 3:
+				var y := -w + (k + 1) * w * 0.5
+				ci.draw_line(c + Vector2(-40, y) * u, c + Vector2(40, y - 8) * u, Color(0.45, 0.31, 0.18), 1.5 * u, true)
+			ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 2.0 * u, true)
 		"banda":
 			var pts := PackedVector2Array()
 			for k in 13:

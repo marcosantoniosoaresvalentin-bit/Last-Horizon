@@ -1,9 +1,9 @@
 {
-  "version": 94,
-  "file": "update_94.zip",
-  "size": 4316280,
-  "sha256": "f5a90515ab1d8454fcfaf45a050e5ac87b93e352e666398e1322bf014051c266",
+  "version": 95,
+  "file": "update_95.zip",
+  "size": 4318610,
+  "sha256": "5ea09e53ec4a400089385c7ed9f32fdc1104702cb77dac92b864cf650e6598bf",
   "min_build": 1,
-  "notes": "Primeira pessoa: com ferramenta na mão (e o balde) os braços não aparecem; só a ferramenta, segura por baixo da tela",
+  "notes": "Tábua rachada na forquilha: Serrar tábua pequena (40 cm, vai para a mochila, repete até acabar); tábua pequena no chão: Rachar tábua com o machado (4 batidas) solta 4 ripas (mata-juntas) para o balde",
   "date": "2026-11-18"
 }

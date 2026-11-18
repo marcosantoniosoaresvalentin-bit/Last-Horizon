@@ -1995,6 +1995,16 @@ func free_log_end_radius(fl: Dictionary, e: int) -> float:
 ## Tira um pedaço da ponta da tora (a rodela): fica mais curta, com a ponta
 ## nova cortada a machado.
 func shorten_free_log(fl: Dictionary, e: int, length: float, rough := 0.25) -> void:
+	if fl.has("cil"):
+		# pedaço rachado: fica mais curto (o raio de cada ponta acompanha a tora de origem)
+		var L := float(fl.cil.L)
+		var f := clampf(length / L, 0.0, 0.95)
+		if e > 0:
+			fl.cil.rb = lerpf(float(fl.cil.ra), float(fl.cil.rb), 1.0 - f)
+		else:
+			fl.cil.ra = lerpf(float(fl.cil.ra), float(fl.cil.rb), f)
+		fl.cil.L = L - length
+		return
 	var dh := length / float(fl.s)
 	var cap := {"ac": PI, "seed": absi(hash(Vector3(float(fl.h0), float(fl.h1), float(e)))) % 100000,
 		"rough": rough, "sign": -1.0 if e > 0 else 1.0}

@@ -400,6 +400,9 @@ var _balde_carga := {}            # o que tem no balde da mochila/mão: {tipo, v
 var _balde_fill: MeshInstance3D = null
 var _pour_t := -1.0               # despejando o balde (segundos)
 var _split := {}                  # rachando a tora com cunhas (ver _split_begin)
+const TAB_L := 0.4                # comprimento da tábua pequena (m)
+const RIPAS_POR_TABUA := 4
+const BOARD_HITS := 4
 var _rede: Node = null            # multiplayer (ver rede.gd)
 var _remotos := {}                # peer id -> JogadorRemoto
 var _mp_t := 0.0
@@ -1636,6 +1639,11 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 			fm.name = "carga"
 			node.add_child(fm)
 			_update_balde_fill(fm, {"tipo": str(dur[0]), "vol": float(dur[1])})
+	elif id == "tabua" or id == "ripa":
+		var mi := MeshInstance3D.new()
+		mi.mesh = _board_mesh(id == "ripa", int(dur[0]) if dur.size() > 0 and id == "tabua" else 0)
+		mi.rotation.y = randf() * TAU
+		node.add_child(mi)
 	elif id == "banda":
 		var mi := MeshInstance3D.new()
 		var L := float(dur[0]) if dur.size() >= 3 else 1.5
@@ -2059,7 +2067,10 @@ func _update_chop(delta: float) -> void:
 			_chop_btn.visible = true
 			_chop_btn.text = "Serrar rodela"
 			return
-	if _mao == "machado" and _arvores != null and not _digging and not _air and _carry.is_empty() and _crouch_job == "":
+	if _mao == "machado" and not _digging and not _air and _carry.is_empty() and _crouch_job == "" and _board_ahead() >= 0:
+		_chop_btn.visible = true
+		_chop_btn.text = "Rachar tábua"
+	elif _mao == "machado" and _arvores != null and not _digging and not _air and _carry.is_empty() and _crouch_job == "":
 		if _arvores.nearest_standing(_player.position, 1.3) != null:
 			_chop_btn.visible = true
 			_chop_btn.text = "Cortar"
@@ -2727,8 +2738,10 @@ func _open_work_menu() -> void:
 		return
 	var ri: int = _apoios.nearest_rested(_player.position, 1.8)
 	if _apoios.rested[ri].log.has("sec"):
-		_choice_menu("TRABALHAR NA MADEIRA", "Escolha o que fazer",
-			[["Rachar ao meio", "Racha de novo no comprido com\n3 cunhas e a marreta:\nvai virando tábuas.", func(): _split_begin()]])
+		var opts := [["Rachar ao meio", "Racha de novo no comprido com\n3 cunhas e a marreta:\nvai virando tábuas.", func(): _split_begin()]]
+		if _is_board(_apoios.rested[ri].log):
+			opts.append(["Serrar tábua pequena", "Serra um pedaço de 40 cm da ponta\n(vai para a mochila). Dá para\nrepetir até acabar a tábua.", func(): _work_choose("tabua")])
+		_choice_menu("TRABALHAR NA MADEIRA", "Escolha o que fazer", opts)
 		return
 	_choice_menu("TRABALHAR NA TORA", "Escolha o que fazer",
 		[["Cortar rodela", "Uma fatia fina da ponta da tora.\nÉ o fundo do balde.", func(): _work_choose("rodela")],
@@ -2818,12 +2831,14 @@ func _work_choose(modo: String) -> void:
 	var i: int = _apoios.nearest_rested(_player.position, 1.8)
 	if i < 0:
 		return
-	if _apoios.rested[i].log.has("sec"):
+	var is_tab := modo == "tabua"
+	if _apoios.rested[i].log.has("sec") and not is_tab:
 		_show_toast("Rodela só sai de tora inteira (redonda).")
 		return
+	_apoios.rested[i]["cut"] = TAB_L if is_tab else Apoios.SLICE
 	# a rodela é fina: só a serra de pedra corta (o machado racha a madeira)
 	if item_qtd("serra") <= 0:
-		_show_toast("Precisa de uma serra de pedra para cortar a rodela.")
+		_show_toast("Precisa de uma serra de pedra para serrar.")
 		return
 	if _mao != "serra":
 		equip("serra")
@@ -2835,7 +2850,7 @@ func _work_choose(modo: String) -> void:
 	var fx: Dictionary = _apoios.fix_plan(i, _player.position)
 	if fx.is_empty():
 		_work = {}
-		_show_toast("Essa tora ficou curta demais para tirar rodela.")
+		_show_toast("Essa madeira ficou curta demais para serrar de novo." if is_tab else "Essa tora ficou curta demais para tirar rodela.")
 		return
 	_work.fix = fx
 	var f: Dictionary = _apoios.forks[int(fx.fork)]
@@ -3020,6 +3035,8 @@ func start_placing(id: String) -> bool:
 		_ghost.mesh = _apoios.preview_mesh()
 	elif id == "balde":
 		_ghost.mesh = Balde.mesh()
+	elif id == "tabua":
+		_ghost.mesh = _board_mesh(false, 0)
 	else:
 		var bm := BoxMesh.new()
 		bm.size = Vector3(0.22, 0.12, 0.18)
@@ -3210,6 +3227,11 @@ func _saw_update(delta: float) -> void:
 			var rad: float = _apoios.slice_stroke(wi, we)
 			var broke := wear("serra")
 			if rad > 0.0:
+				if str(_work.get("modo", "")) == "tabua":
+					_tabua_cortada(wi)
+					_stop_saw()
+					_work = {}
+					return
 				_drop_rodela(end_before - dir * float(we) * Apoios.SLICE * 0.5, dir * float(we), rad, pf)
 				_stop_saw()
 				_work = {}
@@ -4126,6 +4148,9 @@ func _start_chop() -> void:
 			_chop_pose.ready_pose = true
 		_begin_swing()
 		return
+	if _mao == "machado" and _board_ahead() >= 0:
+		_start_board_chop(_board_ahead())
+		return
 	var t = _arvores.nearest_standing(_player.position, 1.3)
 	_chop_log = {}
 	_chop_branch = {}
@@ -4195,6 +4220,9 @@ func _chop_hit_now() -> void:
 		_dirt(at)
 		Sons.play_at(self, "cavar", at)
 		_show_toast("Buraco com %d cm de fundura" % int(round(d * 100.0)) if d < Buracos.MAX_DEPTH else "O buraco já está bem fundo (80 cm)")
+		return
+	if bool(_chop_log.get("tabua", false)):
+		_board_hit()
 		return
 	if not _chop_log.is_empty():
 		var lp: Array = _chop_log.p
@@ -5753,3 +5781,159 @@ func _mp_tick(delta: float) -> void:
 		if not _rede.jogadores.has(pid):
 			(_remotos[pid] as Node).queue_free()
 			_remotos.erase(pid)
+
+
+
+# ================== TÁBUAS PEQUENAS E RIPAS ==================
+
+## Pedaço rachado fino o bastante para ser tábua (até uns 12 cm de grossura).
+func _is_board(fl: Dictionary) -> bool:
+	if not fl.has("sec"):
+		return false
+	var e: Vector2 = _arvores._sec_ext(fl)
+	var r: float = _arvores._cil_r(fl, 0.5)
+	return minf(e.x, e.y) * r * 2.0 <= 0.12
+
+
+## Serrou um pedaço da ponta: vai para a mochila. Se o que sobrou é curto, também vira tábua.
+func _tabua_cortada(wi: int) -> void:
+	var n := 1
+	var fl: Dictionary = _apoios.rested[wi].log
+	if _arvores.free_log_length(fl) < TAB_L + 0.12:
+		_apoios.take_rested(wi)
+		n += 1
+	var left := add_item("tabua", n)
+	if left > 0:
+		var to := _front(0.8)
+		_add_ground("tabua", left, to.x, to.z)
+	Sons.play_at(self, "baque", _player.position + Vector3.UP * 0.5, -14.0, 1.4)
+	_update_inventory()
+	_show_toast("+%d tábua pequena. Ponha no chão (mochila → Colocar) e rache com o machado para tirar as ripas." % n)
+
+
+## Tábua pequena no chão bem na frente, ou -1.
+func _board_ahead() -> int:
+	var to := _front(0.7)
+	var best := -1
+	var bd := 0.75
+	for i in _chao.size():
+		var g: Dictionary = _chao[i]
+		if str(g.id) != "tabua":
+			continue
+		var d := Vector2(float(g.x) - to.x, float(g.z) - to.z).length()
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+func _start_board_chop(i: int) -> void:
+	var g: Dictionary = _chao[i]
+	var c := Vector3(float(g.x), height_at(float(g.x), float(g.z)), float(g.z))
+	var yaw := float((g.node as Node3D).rotation.y)
+	var along := Vector3(cos(yaw), 0, -sin(yaw))
+	_chop_log = {"tabua": true, "i": i, "axis": c, "along": along, "r": 0.02, "dist": 0.62, "point": c + Vector3.UP * 0.035}
+	_chop_branch = {}
+	_chop_tree = null
+	_chopping = true
+	if _chop_pose:
+		_chop_pose.vertical = true
+		_chop_pose.down_hit = -42.0
+		_chop_pose.ready_pose = true
+	_swing_queued = false
+	_play("Idle", 0.5)
+	_begin_swing()
+
+
+## O machado bateu na tábua: cada batida abre uma rachadura; na última ela solta as ripas.
+func _board_hit() -> void:
+	var i := int(_chop_log.get("i", -1))
+	if i < 0 or i >= _chao.size() or str(_chao[i].id) != "tabua":
+		_cancel_chop()
+		return
+	var g: Dictionary = _chao[i]
+	var at: Vector3 = _chop_log.point
+	_chips(at)
+	Sons.play_at(self, "machado", at, -2.0, 1.15)
+	var dl: Array = g.get("dur", [])
+	var hits := (int(dl[0]) if dl.size() > 0 else 0) + 1
+	g.dur = [hits]
+	var mi: MeshInstance3D = (g.node as Node3D).get_child(0)
+	mi.mesh = _board_mesh(false, hits)
+	if hits < BOARD_HITS:
+		Sons.play_at(self, "estalo", at, -10.0, 1.3)
+		_show_toast("Rachando a tábua: %d de %d" % [hits, BOARD_HITS])
+		return
+	# soltou: as ripas caem lado a lado
+	var c := Vector3(float(g.x), 0, float(g.z))
+	var yaw := float((g.node as Node3D).rotation.y)
+	g.qtd = int(g.qtd) - 1
+	if int(g.qtd) <= 0:
+		(g.node as Node3D).queue_free()
+		_chao.remove_at(i)
+	else:
+		g.dur = []
+		mi.mesh = _board_mesh(false, 0)
+	var across := Vector3(sin(yaw), 0, cos(yaw))
+	for k in RIPAS_POR_TABUA:
+		var p := c + across * (float(k) - 1.5) * 0.06
+		_add_ground("ripa", 1, p.x, p.z)
+		(_chao[_chao.size() - 1].node as Node3D).get_child(0).rotation.y = yaw
+	Sons.play_at(self, "estalo", at, 0.0, 1.1)
+	_show_toast("A tábua rachou em %d ripas (mata-juntas). Pegue elas!" % RIPAS_POR_TABUA)
+	_cancel_chop()
+
+
+## Tábua pequena (40 x 14 x 3 cm) ou ripa (40 x 3,5 x 1,5 cm): madeira com veios, a
+## face rachada ondulada; na tábua, as rachaduras do machado aparecendo.
+func _board_mesh(ripa: bool, cracks: int) -> ArrayMesh:
+	var L := TAB_L
+	var W := 0.035 if ripa else 0.14
+	var T := 0.015 if ripa else 0.03
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var nz := FastNoiseLite.new()
+	nz.seed = 7 if ripa else 11
+	var nx := 10
+	var nzs := 4 if ripa else 16
+	var wood := Color(0.36, 0.26, 0.16)
+	var top := func(i: int, j: int) -> Vector3:
+		var x := (float(i) / nx - 0.5) * L
+		var z := (float(j) / nzs - 0.5) * W
+		return Vector3(x, T + nz.get_noise_2d(x * 12.0, z * 40.0) * 0.003, z)
+	for i in nx:
+		for j in nzs:
+			var q := [top.call(i, j), top.call(i + 1, j), top.call(i + 1, j + 1), top.call(i, j + 1)]
+			var zc := (float(j) + 0.5) / nzs
+			var col := wood.darkened(0.08 * nz.get_noise_2d(float(i) * 3.0, zc * 30.0) + 0.04)
+			# rachaduras do machado ao longo da tábua
+			for k in cracks:
+				if absf(zc - (float(k) + 1.0) / float(RIPAS_POR_TABUA)) < 0.035:
+					col = Color(0.12, 0.08, 0.05)
+			for idx in [0, 2, 1, 0, 3, 2]:
+				st.set_color(col)
+				st.add_vertex(q[idx])
+	# lados e embaixo (caixa)
+	var hx := L * 0.5
+	var hz := W * 0.5
+	var box := [[Vector3(-hx, 0, -hz), Vector3(hx, 0, -hz), Vector3(hx, T, -hz), Vector3(-hx, T, -hz)],
+		[Vector3(hx, 0, hz), Vector3(-hx, 0, hz), Vector3(-hx, T, hz), Vector3(hx, T, hz)],
+		[Vector3(-hx, 0, hz), Vector3(-hx, 0, -hz), Vector3(-hx, T, -hz), Vector3(-hx, T, hz)],
+		[Vector3(hx, 0, -hz), Vector3(hx, 0, hz), Vector3(hx, T, hz), Vector3(hx, T, -hz)],
+		[Vector3(-hx, 0, -hz), Vector3(-hx, 0, hz), Vector3(hx, 0, hz), Vector3(hx, 0, -hz)]]
+	var k2 := 0
+	for f in box:
+		var col := wood.darkened(0.15) if k2 < 2 else Color(0.46, 0.34, 0.22)     # pontas serradas mais claras
+		for idx in [0, 2, 1, 0, 3, 2]:
+			st.set_color(col)
+			st.add_vertex(f[idx])
+		k2 += 1
+	st.generate_normals()
+	var mesh := st.commit()
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
+	m.roughness = 0.95
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mesh.surface_set_material(0, m)
+	return mesh
