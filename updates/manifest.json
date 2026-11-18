@@ -1,9 +1,9 @@
 {
-  "version": 108,
-  "file": "update_108.zip",
-  "size": 4582063,
-  "sha256": "4c2b54574b3e5c27988301dba657d2edda136e15e147a11576e479d89c3d70a6",
+  "version": 109,
+  "file": "update_109.zip",
+  "size": 4584293,
+  "sha256": "156085722e7c60e82946145f2d17810840f096aa666e367fe73790b6e891b824",
   "min_build": 1,
-  "notes": "Construção: cortar estaca em qualquer altura, viga amarrada no lado da estaca, motivo na tela, casa cai se o cupim comer o apoio",
+  "notes": "Multiplayer: tudo que um jogador faz aparece para os outros em tempo real",
   "date": "2026-11-18"
 }
