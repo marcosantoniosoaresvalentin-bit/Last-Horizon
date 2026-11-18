@@ -36,6 +36,20 @@ const ITENS := {
 		"desc": "Fatia fina cortada da ponta da tora apoiada nas forquilhas. É o fundo do balde."},
 	"ripa": {"nome": "Ripa", "kg": 0.4, "cat": "Recursos",
 		"desc": "Tábua fina lascada da tora. Vai sair da tora apoiada nas forquilhas, com ferramentas que ainda vão chegar."},
+	"hematita": {"nome": "Hematita", "kg": 2.0, "cat": "Recursos",
+		"desc": "Minério de ferro vermelho-escuro, pesado; riscado numa pedra deixa um traço vermelho. Achado cavando nas faixas de rocha antiga das serras. Vai ser fundido para tirar ferro."},
+	"magnetita": {"nome": "Magnetita", "kg": 2.4, "cat": "Recursos",
+		"desc": "Minério de ferro preto e muito pesado, que puxa ferro (é magnético). Fica mais fundo que a hematita, nas mesmas faixas de rocha e no contato do granito."},
+	"goetita": {"nome": "Goethita", "kg": 1.6, "cat": "Recursos",
+		"desc": "Minério de ferro amarelo-amarronzado (deixa traço amarelo), formado quando a chuva altera a rocha por muito tempo. Fica na couraça dos platôs, nos brejos e em cima dos veios de cobre."},
+	"silex": {"nome": "Nódulo de Sílex", "kg": 1.2, "cat": "Recursos",
+		"desc": "Pederneira: pedra duríssima de sílica que nasce em camadas dentro do calcário. Quebrada, dá lascas muito afiadas; batida contra pirita ou aço solta faísca."},
+	"lasca_silex": {"nome": "Lasca de Sílex", "kg": 0.08, "cat": "Recursos",
+		"desc": "Fragmento afiado de sílex: faca, raspador, ponta de lança e de flecha, e para trabalhar madeira."},
+	"malaquita": {"nome": "Malaquita", "kg": 1.2, "cat": "Recursos",
+		"desc": "Minério de cobre verde, com faixas. Forma-se perto da superfície, onde a chuva e o ar alteraram um veio de cobre. Fundido, dá cobre."},
+	"calcopirita": {"nome": "Calcopirita", "kg": 1.6, "cat": "Recursos",
+		"desc": "Minério de cobre amarelo-latão, brilhante, das partes fundas dos veios (onde a água da chuva não chegou). Precisa ser torrado e fundido."},
 	"balde": {"nome": "Balde de Madeira", "kg": 2.8, "cat": "Equipamentos",
 		"desc": "Ripas em volta de um fundo redondo, apertadas com aros de cipó. Alça de cipó trançado.", "colocar": true},
 }
@@ -50,6 +64,7 @@ const RECEITAS_MAO := [
 	{"id": "serra", "qtd": 1, "ingredientes": [["lamina_serra", 1], ["galho", 1], ["cipo", 1]]},
 	{"id": "forquilha", "qtd": 1, "ingredientes": [["galho", 2], ["cipo", 2]]},
 	{"id": "cipo_trancado", "qtd": 1, "ingredientes": [["cipo", 3]]},
+	{"id": "lasca_silex", "qtd": 3, "ingredientes": [["silex", 1]]},
 	{"id": "balde", "qtd": 1, "ingredientes": [["ripa", 12], ["rodela", 1], ["cipo", 6], ["cipo_trancado", 1]]},
 ]
 

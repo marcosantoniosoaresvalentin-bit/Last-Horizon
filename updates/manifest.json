@@ -1,9 +1,9 @@
 {
-  "version": 78,
-  "file": "update_78.zip",
-  "size": 4277414,
-  "sha256": "f80b3dd1ce2f7bb3cebd24c8477fc516890447ab51ac646260bb4ccfcbe7c6f9",
+  "version": 79,
+  "file": "update_79.zip",
+  "size": 4287141,
+  "sha256": "0de840ebad8c9a8cb398417876022ecd65e9fb69f367b3e4acc7bd0165fa6661",
   "min_build": 1,
-  "notes": "Sons dos macacos mais naturais (piados, trinados, latidos de alarme e guinchos com eco da mata); corrige o rosto do personagem passando na frente da câmera ao começar a andar",
+  "notes": "Minérios e sílex debaixo da terra, conforme a geologia da ilha: hematita, magnetita e goethita (ferro), sílex no calcário, malaquita e calcopirita (cobre) nos veios; achados cavando com a pá; a chuva leva aos poucos pedaços para o cascalho dos leitos",
   "date": "2026-11-18"
 }

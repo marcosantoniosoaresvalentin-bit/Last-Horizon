@@ -15,6 +15,7 @@ const DIG_R := 0.36             # raio da pá de terra
 const DIG_D := 0.22             # quanto a pá entra na terra (m): fundo quase reto, parede íngreme
 const REPOSE := 0.75            # terra solta escorre se o desnível passar disso por quadradinho (≈37°)
 
+var tint_fn := Callable()       # (x, y, z) -> Color: minério à vista no buraco (a = quanto)
 var d := {}                     # Vector2i (ponto da grade) -> quanto subiu (+) ou desceu (-) (m)
 var mask_tex: ImageTexture
 var _mask: Image
@@ -203,7 +204,13 @@ func _rebuild_chunk(ck: Vector2i) -> void:
 				# um tiquinho abaixo: na borda fica por baixo do chão normal (que é recortado redondo)
 				# (onde não mexeu, bem mais abaixo: nas dobras do terreno a malha fina não pode aparecer por cima)
 				ps.append(Vector3(x, _jogo.surface_at(x, z) + dv - (0.015 if absf(dv) > 0.002 else 0.08), z))
-				cs.append(_soil_color(dv, k))
+				var sc := _soil_color(dv, k)
+				if dv < -0.002 and tint_fn.is_valid():
+					# o que a pá deixou à vista: minério, sílex ou rocha alterada na parede do buraco
+					var tc: Color = tint_fn.call(x, _jogo.surface_at(x, z) + dv, z)
+					if tc.a > 0.0:
+						sc = sc.lerp(Color(tc.r, tc.g, tc.b).darkened(0.4 * smoothstep(0.1, 2.5, -dv)), tc.a)
+				cs.append(sc)
 			for tri in [[0, 1, 2], [0, 2, 3]]:
 				for t in tri:
 					st.set_color(cs[t])

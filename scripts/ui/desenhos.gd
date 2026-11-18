@@ -184,9 +184,48 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			# lâmina de cavadeira: estreita em cima (onde encaixa no cabo), larga e chata embaixo
 			flint(ci, P.call([[-12, -42], [12, -42], [16, -24], [26, -2], [34, 20], [30, 36], [12, 42], [-12, 42], [-30, 36], [-34, 20], [-26, -2], [-16, -24]]),
 				Color(0.47, 0.43, 0.35), 5, u, [6, 7])
+		"hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita":
+			_mineral(ci, id, c, u)
+		"lasca_silex":
+			var sh: PackedVector2Array = P.call([[-36, 18], [-10, -30], [8, -38], [34, -6], [10, 30], [-20, 34]])
+			ci.draw_colored_polygon(sh, Color(0.36, 0.37, 0.4))
+			ci.draw_colored_polygon(P.call([[-10, -30], [8, -38], [34, -6], [14, -2]]), Color(0.55, 0.56, 0.6))
+			ci.draw_polyline(sh + PackedVector2Array([sh[0]]), ink, 2.0 * u, true)
 		_:
 			return false
 	return true
+
+
+## Pedaço de minério: forma de pedra irregular, com a cor e o jeito de cada um.
+static func _mineral(ci: CanvasItem, id: String, c: Vector2, u: float) -> void:
+	var base: Color = {"hematita": Color(0.5, 0.17, 0.12), "magnetita": Color(0.14, 0.14, 0.16), "goetita": Color(0.64, 0.44, 0.18),
+		"silex": Color(0.3, 0.31, 0.34), "malaquita": Color(0.14, 0.55, 0.32), "calcopirita": Color(0.66, 0.58, 0.26)}[id]
+	var pts := PackedVector2Array()
+	var sd := hash(id)
+	for k in 9:
+		var a := TAU * k / 9.0
+		var rr := 34.0 + float((sd >> (k * 3)) & 7) * 1.8
+		pts.append(c + Vector2(cos(a) * rr * 1.15, sin(a) * rr * 0.85 + 4.0) * u)
+	ci.draw_colored_polygon(pts, base)
+	# luz em cima
+	var hi := PackedVector2Array()
+	for q in pts:
+		hi.append(c + (q - c) * 0.55 + Vector2(-6, -10) * u)
+	ci.draw_colored_polygon(hi, base.lightened(0.18))
+	match id:
+		"silex":
+			ci.draw_arc(c + Vector2(4, 6) * u, 30.0 * u, 0.0, TAU, 24, Color(0.82, 0.8, 0.72), 5.0 * u, true)   # córtex branco
+		"malaquita":
+			for k in 4:
+				ci.draw_arc(c + Vector2(10, 14) * u, (8.0 + k * 7.0) * u, 3.4, 5.6, 10, Color(0.06, 0.3, 0.17), 2.0 * u, true)
+		"calcopirita":
+			ci.draw_circle(c + Vector2(-8, -6) * u, 5.0 * u, Color(0.95, 0.85, 0.45))
+			ci.draw_circle(c + Vector2(10, 4) * u, 3.0 * u, Color(0.6, 0.35, 0.55))     # brilho furta-cor
+		"magnetita":
+			ci.draw_circle(c + Vector2(-6, -8) * u, 4.0 * u, Color(0.5, 0.5, 0.55))
+		"hematita":
+			ci.draw_line(c + Vector2(-20, 24) * u, c + Vector2(18, 26) * u, Color(0.7, 0.2, 0.15), 4.0 * u, true)
+	ci.draw_polyline(pts + PackedVector2Array([pts[0]]), Color(0.08, 0.06, 0.05), 2.0 * u, true)
 
 
 ## Balde de ripas com aros de cipó e alça de cipó trançado.

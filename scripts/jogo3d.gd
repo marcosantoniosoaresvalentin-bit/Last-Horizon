@@ -26,6 +26,8 @@ const Lascar := preload("res://scripts/world/lascar.gd")
 const Macacos := preload("res://scripts/world/macacos.gd")
 const Bacabas := preload("res://scripts/world/bacabas.gd")
 const Araras := preload("res://scripts/world/araras.gd")
+const Minerios := preload("res://scripts/world/minerios.gd")
+const MINERAIS_ITENS := ["hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita", "lasca_silex"]
 const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
@@ -371,6 +373,7 @@ var _pedras: Node3D = null
 var _macacos: Node3D = null
 var _bacabas: Node3D = null
 var _araras: Node3D = null
+var _minerios: Node = null
 var _escav: Node3D = null
 var _escav_steps := 0
 var _escav_timer := 0.0
@@ -889,6 +892,10 @@ func _on_world_ready() -> void:
 	_escav = Escavacao.new()
 	add_child(_escav)
 	_escav.build(self, _buracos._soil_mat, Mundos.dir(_world_id) + "/escavacao.json" if _world_id != "" else "")
+	_minerios = Minerios.new()
+	add_child(_minerios)
+	_minerios.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/minerios.json" if _world_id != "" else "")
+	_escav.tint_fn = _minerios.tint_at
 	_escav.water_mat = _water_mat
 	_escav.sea_m = MundoSim.SEA * HS
 	_escav_steps = sim.steps
@@ -1226,6 +1233,8 @@ func _process(delta: float) -> void:
 			_cipos.tick()
 		if _bacabas:
 			_bacabas.tick()
+		if _minerios:
+			_minerios.tick()
 		if _araras:
 			_araras.tick()
 			_araras.update(delta)
@@ -1300,6 +1309,8 @@ func _save_world() -> void:
 		_bacabas.save(Mundos.dir(_world_id) + "/bacabas.json")
 	if _araras:
 		_araras.save(Mundos.dir(_world_id) + "/araras.json")
+	if _minerios:
+		_minerios.save(Mundos.dir(_world_id) + "/minerios.json")
 	if _buracos:
 		_buracos.save(Mundos.dir(_world_id) + "/buracos.json")
 	if _galhos:
@@ -1555,6 +1566,16 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 		mi.scale = Vector3(sz, sz, sz)
 		mi.rotation.y = float(dur[1]) if dur.size() == 2 else randf() * TAU
 		mi.position.y = -mi.mesh.get_aabb().position.y * sz
+		node.add_child(mi)
+	elif id in MINERAIS_ITENS:
+		var mi := MeshInstance3D.new()
+		mi.mesh = Lascar.cobble_mesh(absi(hash(Vector2(x, z))) % 1000, 0.07 if id != "lasca_silex" else 0.035)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Minerios.COR.get(id, Minerios.COR.silex) if id != "lasca_silex" else Color(0.4, 0.41, 0.44)
+		mat.roughness = 0.35 if id in ["calcopirita", "magnetita", "silex", "lasca_silex"] else 0.8
+		mat.metallic = 0.6 if id in ["calcopirita", "magnetita"] else 0.0
+		mi.material_override = mat
+		mi.position.y = 0.03
 		node.add_child(mi)
 	elif id == "cipo":
 		var mi := MeshInstance3D.new()
@@ -3593,10 +3614,22 @@ func _stone_chips(at: Vector3, n: int) -> void:
 func _pa_hit() -> void:
 	var at := _front(0.75)
 	if not _pa_full:
+		var y_old: float = _escav.ground_at(at.x, at.z)
 		var v: float = _escav.dig(at)
 		if v <= 0.0001:
 			_show_toast("Não dá para cavar mais fundo aqui.")
 			return
+		if _minerios:
+			# o que veio junto com a terra (só debaixo da terra, onde a geologia deixou)
+			var got: Dictionary = _minerios.extract(at, y_old, _escav.ground_at(at.x, at.z))
+			var msg := []
+			for m in got:
+				var left := add_item(m, int(got[m]))
+				if left > 0:
+					_add_ground(m, left, at.x + randf_range(-0.4, 0.4), at.z + randf_range(-0.4, 0.4))
+				msg.append("%d %s" % [int(got[m]), Itens.ITENS[m].nome])
+			if not msg.is_empty():
+				_show_toast("Junto com a terra veio: " + ", ".join(msg))
 		_dirt(at)
 		Sons.play_at(self, "cavar", at, 0.0, 0.9)
 		_pa_full = true
