@@ -1,9 +1,9 @@
 {
-  "version": 101,
-  "file": "update_101.zip",
-  "size": 4568758,
-  "sha256": "090681b946ca36642ec69fad4946e1b99008ae1a802e6f8118f487418fbe5037",
+  "version": 102,
+  "file": "update_102.zip",
+  "size": 4576214,
+  "sha256": "71cbf795a8e4112091f224c1fc133aa2d2ae16ea8e58f725c25d5c77aeb1aa19",
   "min_build": 1,
-  "notes": "Tamanduá com textura de pelo, faixa mais nítida e pelagem mais fina",
+  "notes": "Novo: sistema de construção livre com toras, meias toras e tábuas em cima das estacas fincadas",
   "date": "2026-11-18"
 }
