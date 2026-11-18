@@ -1823,7 +1823,9 @@ func equip(id: String) -> void:
 		elif _mao == "serra":
 			_chop_pose.carry_grip = Corte.SAW_LEN * 0.5
 		elif _mao == "pedra":
-			_chop_pose.carry_grip = 0.0
+			_chop_pose.carry_grip = 0.0          # a pedra fica dentro da mão fechada
+		elif _mao == "marreta":
+			_chop_pose.carry_grip = 0.08     # segura perto da ponta do cabo: a cabeça fica longe dos olhos
 		else:
 			_chop_pose.grip_low = Corte.ChopPose.GRIP_LOW
 			_chop_pose.grip_high = Corte.ChopPose.GRIP_HIGH
@@ -1837,14 +1839,19 @@ func equip(id: String) -> void:
 		elif _mao == "serra":
 			mi.mesh = Corte.saw_mesh()
 		elif _mao == "pedra":
-			mi.mesh = Lascar.cobble_mesh(77, 0.1)      # pedra de bater, na palma da mão
+			mi.mesh = Lascar.cobble_mesh(77, 0.085)    # pedra de bater, na palma da mão
 		elif _mao == "balde":
 			mi.mesh = Balde.mesh()                     # pendurado pela alça
 		elif _mao == "marreta":
 			mi.mesh = Corte.marreta_mesh()
 		else:
 			mi.mesh = Corte.axe_mesh()
-		mi.material_override = Balde.material() if _mao == "balde" else Corte.axe_material()
+		if _mao == "balde":
+			mi.material_override = Balde.material()
+		elif _mao == "pedra":
+			mi.material_override = _hand_stone_mat()
+		else:
+			mi.material_override = Corte.axe_material()
 		if _balde_fill == null:
 			_balde_fill = MeshInstance3D.new()
 			mi.add_child(_balde_fill)
@@ -3935,6 +3942,16 @@ static func _lump(st: SurfaceTool, c: Vector3, s: float, col: Color, rng: Random
 				st.set_color(col)
 				st.set_uv(Vector2(v[idx].x, v[idx].z) * 6.0)
 				st.add_vertex(v[idx])
+
+
+var _hstone: StandardMaterial3D
+
+func _hand_stone_mat() -> Material:
+	if _hstone == null:
+		_hstone = StandardMaterial3D.new()
+		_hstone.albedo_color = Color(0.24, 0.23, 0.21)
+		_hstone.roughness = 0.9
+	return _hstone
 
 
 func _clay_mat() -> Material:

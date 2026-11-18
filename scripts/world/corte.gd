@@ -704,6 +704,8 @@ class ChopPose extends SkeletonModifier3D:
 			elif with_tool and tool == "balde":
 				# balde: braço quase solto, a mão segurando a alça na frente do quadril
 				tgt = eye + fwd * (0.58 + 0.08 * pour) - up * (0.22 - 0.1 * pour) + cr * 0.26 + bob * 0.5
+			elif with_tool and tool == "marreta":
+				tgt = eye + cf * 0.42 - cu * 0.62 + cr * 0.28 + bob     # marreta pesada: braço baixo
 			elif with_tool:
 				tgt = eye + cf * 0.4 - cu * 0.16 + cr * 0.19 + bob
 			else:
@@ -760,6 +762,10 @@ class ChopPose extends SkeletonModifier3D:
 		var want: Vector3
 		if tool in ["pa", "cavadeira"]:
 			want = cf * 0.55 - cu * 0.8 - cr * 0.1
+		elif tool == "marreta":
+			want = cu * 0.85 + cf * 0.4 - cr * 0.12       # em pé, com a mão baixa: a cabeça fica longe e abaixo dos olhos
+		elif tool == "pedra":
+			want = cr * 0.9 + cf * 0.2      # a pedra atravessada na mão, aparecendo dos dois lados do punho
 		elif tool == "serra":
 			want = cf * 1.0 - cr * 0.35 + cu * 0.1
 		else:
