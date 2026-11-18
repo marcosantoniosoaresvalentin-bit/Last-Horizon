@@ -30,6 +30,7 @@ const Bacabas := preload("res://scripts/world/bacabas.gd")
 const Araras := preload("res://scripts/world/araras.gd")
 const Minerios := preload("res://scripts/world/minerios.gd")
 const Cupins := preload("res://scripts/world/cupins.gd")
+const Tamanduas := preload("res://scripts/world/tamanduas.gd")
 const MINERAIS_ITENS := ["hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita", "lasca_silex"]
 const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
@@ -381,6 +382,7 @@ var _bacabas: Node3D = null
 var _araras: Node3D = null
 var _minerios: Node = null
 var _cupins: Node3D = null
+var _tamanduas: Node3D = null
 var _escav: Node3D = null
 var _escav_steps := 0
 var _escav_timer := 0.0
@@ -929,6 +931,10 @@ func _on_world_ready() -> void:
 	_cupins = Cupins.new()
 	add_child(_cupins)
 	_cupins.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/cupins.json" if _world_id != "" else "")
+	_tamanduas = Tamanduas.new()
+	add_child(_tamanduas)
+	_tamanduas.build(self, _arvores, _cupins, int(sim.world_seed), Mundos.dir(_world_id) + "/tamanduas.json" if _world_id != "" else "")
+	print("tamanduás: %d" % _tamanduas.count())
 	_escav.water_mat = _water_mat
 	_escav.sea_m = MundoSim.SEA * HS
 	_escav_steps = sim.steps
@@ -1272,6 +1278,9 @@ func _process(delta: float) -> void:
 			_minerios.tick()
 		if _cupins:
 			_cupins.tick()
+		if _tamanduas:
+			_tamanduas.tick()
+			_tamanduas.update(delta)
 		if _araras:
 			_araras.tick()
 			_araras.update(delta)
@@ -1353,6 +1362,8 @@ func _save_world() -> void:
 		_minerios.save(Mundos.dir(_world_id) + "/minerios.json")
 	if _cupins:
 		_cupins.save(Mundos.dir(_world_id) + "/cupins.json")
+	if _tamanduas:
+		_tamanduas.save(Mundos.dir(_world_id) + "/tamanduas.json")
 	if _buracos:
 		_buracos.save(Mundos.dir(_world_id) + "/buracos.json")
 	if _galhos:
