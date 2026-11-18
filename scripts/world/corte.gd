@@ -642,6 +642,8 @@ class ChopPose extends SkeletonModifier3D:
 			_close_fingers(sk, "Right")
 			_close_fingers(sk, "Left")
 			_knap(sk, up, fwd, right)
+			if hide_head:
+				_hide_head(sk)
 			return
 		if axe:
 			axe.visible = holding

@@ -71,6 +71,14 @@ static func kind_for(text: String) -> String:
 		return "it_pedra_cavadeira"
 	if t.begins_with("lâmina de serra"):
 		return "it_lamina_serra"
+	if t.begins_with("lâmina de pá"):
+		return "it_pedra_pa"
+	if t.begins_with("cunha"):
+		return "it_cunha"
+	if t.begins_with("pedra de marreta"):
+		return "it_pedra_marreta"
+	if t.begins_with("rachar"):
+		return "rachar"
 	if t.begins_with("serrar"):
 		return "serrar"
 	if t.begins_with("parar"):
@@ -317,6 +325,22 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 				var arr: PackedVector2Array = P.call([[22, -14], [22, -28], [12, -28], [32, -48], [52, -28], [42, -28], [42, -14]])
 				ci.draw_colored_polygon(arr, col.call(Color(0.98, 0.62, 0.25)))
 				ci.draw_polyline(arr + PackedVector2Array([arr[0]]), ink, 2 * u, true)
+		"rachar":
+			# tora deitada com a rachadura em cima, a cunha cravada e a marreta descendo
+			var log: PackedVector2Array = P.call([[-46, 6], [40, 6], [46, 20], [40, 34], [-46, 34], [-50, 20]])
+			ci.draw_colored_polygon(log, col.call(Color(0.42, 0.29, 0.17)))
+			if not shadow:
+				ci.draw_circle(c + Vector2(42, 20) * u, 12 * u, Color(0.78, 0.62, 0.4))
+				ci.draw_arc(c + Vector2(42, 20) * u, 7 * u, 0, TAU, 14, Color(0.55, 0.4, 0.25), 1.5 * u, true)
+				ci.draw_polyline(P.call([[-40, 7], [-24, 9], [-12, 6], [2, 9], [16, 6], [30, 8]]), Color(0.1, 0.06, 0.03), 3 * u, true)
+			ci.draw_polyline(log + PackedVector2Array([log[0]]), ink, 2 * u, true)
+			var wd: PackedVector2Array = P.call([[-4, -14], [10, -14], [10, -4], [3, 10], [-4, -4]])
+			ci.draw_colored_polygon(wd, col.call(Color(0.5, 0.5, 0.48)))
+			ci.draw_polyline(wd + PackedVector2Array([wd[0]]), ink, 2 * u, true)
+			if shadow:
+				ci.draw_line(c + Vector2(22, -50) * u, c + Vector2(4, -26) * u, sh, 12 * u, true)
+			else:
+				Desenhos.item(ci, "marreta", c + Vector2(14, -36) * u, s * 0.55)
 		"cavar":
 			# chão com buraco e a cavadeira cravada
 			ci.draw_colored_polygon(P.call([[-46, 22], [46, 22], [46, 46], [-46, 46]]), col.call(Color(0.42, 0.3, 0.18)))

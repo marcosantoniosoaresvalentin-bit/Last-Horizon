@@ -1346,7 +1346,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1377,6 +1377,8 @@ func _load_player() -> void:
 			_itens["pa"] = 1        # a pá chegou numa atualização: uma para testar
 		if not bool(d.get("ganhou_serra", false)) and not _itens.has("serra"):
 			_itens["serra"] = 1
+		if not bool(d.get("ganhou_cunhas2", false)):
+			_itens["cunha"] = int(_itens.get("cunha", 0)) + 3     # mais 3 cunhas para testar
 		if not bool(d.get("ganhou_cunhas", false)):
 			_itens["cunha"] = int(_itens.get("cunha", 0)) + 3     # para testar o rachar a tora
 			_itens["marreta"] = maxi(1, int(_itens.get("marreta", 0)))
@@ -3246,7 +3248,7 @@ func _knap_go(i: int, kind: String) -> void:
 	if away.length() < 0.05:
 		away = Vector3(0, 0, 1)
 	_crouch_target = {"i": i, "kind": kind}
-	_walk_to(c + away.normalized() * 0.5, "modelar")
+	_walk_to(c + away.normalized() * 0.72, "modelar")
 
 
 func _knap_start(i: int, kind: String) -> void:
@@ -3269,10 +3271,12 @@ func _knap_start(i: int, kind: String) -> void:
 	_knap_mi.material_override = Lascar.material()
 	add_child(_knap_mi)
 	_knap_refresh_mesh()
-	# só a mão aparece (o corpo some, para não ficar na frente da câmera)
-	_player.visible = false
-	_knap_hand = Maos.right_hand(Color(0.4, 0.27, 0.2), Color(0.1, 0.14, 0.18))
-	add_child(_knap_hand)
+	# o próprio personagem se abaixa e bate com as duas mãos (a câmera fica nos olhos dele)
+	if _chop_pose:
+		_chop_pose.knapping = true
+		_chop_pose.hide_head = true
+		_chop_pose.crouch = 1.0
+		_chop_pose.crouch_spine = 0.55
 	_knap_camera(1.0)
 	_place_knap_hand(0.0)
 	_play("Idle", 0.5)
@@ -3330,38 +3334,19 @@ func _knap_near(m: float) -> bool:
 ## A mão com a pedra de bater: parada do lado (fora da pedra), e na batida vai até o
 ## ponto, levanta, desce e volta. a = 0 a 1 (momento da batida), < 0 parada.
 func _place_knap_hand(a: float) -> void:
-	if _knap_hand == null or _knap_mi == null:
+	if _chop_pose == null or _knap_mi == null:
 		return
-	var c := _knap_mi.global_position
-	var cam_b := _cam.global_transform.basis
-	var right := cam_b.x
-	right.y = 0.0
-	right = right.normalized()
-	var back := cam_b.z
-	back.y = 0.0
-	back = back.normalized()
-	var idle := c + right * 0.21 + back * 0.04 + Vector3.UP * 0.05
-	var spot := _knap_spot_world()
-	var hit := spot
-	var p := idle
-	var tilt := 0.0
+	# levanta a pedra de bater, desce rápido no ponto e volta
+	var lift := 0.55
 	if a >= 0.0:
-		var above := spot + Vector3.UP * 0.13 + back * 0.03
 		if a < 0.4:
-			p = idle.lerp(above, smoothstep(0.0, 1.0, a / 0.4))
-			tilt = lerpf(0.0, -0.35, a / 0.4)
+			lift = lerpf(0.55, 1.0, smoothstep(0.0, 1.0, a / 0.4))
 		elif a < 0.55:
-			p = above.lerp(hit, pow((a - 0.4) / 0.15, 2.0))
-			tilt = lerpf(-0.35, 0.25, (a - 0.4) / 0.15)
+			lift = lerpf(1.0, 0.0, pow((a - 0.4) / 0.15, 2.0))
 		else:
-			p = hit.lerp(idle, smoothstep(0.0, 1.0, (a - 0.55) / 0.45))
-			tilt = lerpf(0.25, 0.0, (a - 0.55) / 0.45)
-	# a mão entra pela frente da câmera (de baixo da tela), virada para a pedra
-	var fwd := -back
-	var b := Basis(right, Vector3.UP, back) * Basis(Vector3.RIGHT, tilt)
-	b = b.rotated(Vector3.UP, -0.35)
-	_knap_hand.global_transform = Transform3D(b, p - b * Maos.CONTACT)
-	var _u := fwd
+			lift = lerpf(0.0, 0.55, smoothstep(0.0, 1.0, (a - 0.55) / 0.45))
+	_chop_pose.knap_point = _knap_spot_world()
+	_chop_pose.knap_lift = lift
 
 
 func _build_knap_ui() -> void:
@@ -3552,10 +3537,14 @@ func _knap_hit() -> void:
 
 func _knap_camera(_delta: float) -> void:
 	var c := _knap_mi.global_position
-	var toward := Vector3(_player.position.x - c.x, 0, _player.position.z - c.z).normalized()
-	# de cima, do lado de onde o personagem está (ele está escondido: só a mão aparece)
-	_cam.global_position = c + toward * 0.5 + Vector3.UP * 0.66
-	_cam.look_at(c + toward * 0.02)
+	# nos olhos do personagem abaixado, olhando a pedra
+	var eye := _player.global_position + Vector3.UP * 1.0
+	if _skel and _head_bone >= 0:
+		var hg: Transform3D = _skel.global_transform * _skel.get_bone_global_pose(_head_bone)
+		var to := Vector3(c.x - hg.origin.x, 0, c.z - hg.origin.z).normalized()
+		eye = hg.origin + Vector3.UP * 0.06 + to * 0.3
+	_cam.global_position = eye
+	_cam.look_at(c + Vector3.UP * 0.02)
 
 
 func _update_knap(delta: float) -> void:
@@ -3665,6 +3654,9 @@ func _knap_end() -> void:
 	_knap_hand = null
 	_player.visible = true
 	_jump_btn.visible = true
+	if _chop_pose:
+		_chop_pose.crouch_spine = 1.0
+		_chop_pose.hide_head = false
 	_grass_mat.set_shader_parameter("flat_spot", Vector4.ZERO)
 	if _pedras:
 		_pedras.hide_stone(-1)

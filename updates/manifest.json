@@ -1,9 +1,9 @@
 {
-  "version": 86,
-  "file": "update_86.zip",
-  "size": 4301782,
-  "sha256": "5f846f19afefd5948bb1227263a2bc10a75fcfd9c92784bb3e8a3f74f93f8d03",
+  "version": 87,
+  "file": "update_87.zip",
+  "size": 4301908,
+  "sha256": "1370ccc39da05a390b8f6e423afdd17de5a9dbd71a5d1470329194b19b67a1f5",
   "min_build": 1,
-  "notes": "Cunha com costas quadradas e fio só na frente; rachadura correndo ao longo da tora conforme as cunhas entram; bandas com a face irregular, rachaduras e farpas",
+  "notes": "Ícones certos (Lâmina de Pá, Cunha, Pedra de Marreta, Rachar ao meio); modelar pedra com os braços do próprio personagem (sem a mão falsa); mais 3 cunhas para testar",
   "date": "2026-11-18"
 }
