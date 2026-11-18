@@ -11,6 +11,7 @@ const Updater := preload("res://scripts/updater.gd")
 const Mundos := preload("res://scripts/mundos.gd")
 const Perfil := preload("res://scripts/perfil.gd")
 const Conta := preload("res://scripts/conta.gd")
+const Rede := preload("res://scripts/rede.gd")
 
 const PASSO_NOME := {
 	"gerando mundo": "a geração do mundo",
@@ -104,7 +105,7 @@ func _build_layout() -> void:
 	sv.add_child(sub)
 	sv.add_child(_spacer(18))
 
-	for sec in ["Mundos", "Skin", "Configurações"]:
+	for sec in ["Mundos", "Multiplayer", "Skin", "Configurações"]:
 		var b := Button.new()
 		b.text = sec
 		b.toggle_mode = true
@@ -156,8 +157,11 @@ func _show(section: String) -> void:
 	_skin_view = null
 	_skin_pivots.clear()
 	_skin_buttons.clear()
+	var rede: Node = Rede.get_rede(get_tree())
+	rede.procurar(section == "Multiplayer")
 	match section:
 		"Mundos": _page = _page_worlds()
+		"Multiplayer": _page = _page_multi()
 		"Skin": _page = _page_skin()
 		_: _page = _page_settings()
 	_content.add_child(_page)
@@ -266,7 +270,7 @@ func _world_card(m: Dictionary) -> Control:
 	return card
 
 
-func _ask_new_world() -> void:
+func _ask_new_world(multi := false) -> void:
 	var box := _dialog("Novo mundo")
 	var hint := Label.new()
 	hint.text = "Dê um nome ao seu mundo. Ele é gerado na hora e fica salvo para você voltar quando quiser."
@@ -292,7 +296,10 @@ func _ask_new_world() -> void:
 			err.visible = true
 			return
 		var id := Mundos.create(nm)
-		_enter_world(id)
+		if multi:
+			_mp_host(id, nm)
+		else:
+			_enter_world(id)
 	edit.text_submitted.connect(func(_t): create.call())
 	_dialog_buttons(box, "Criar mundo", create)
 	edit.call_deferred("grab_focus")
@@ -317,6 +324,183 @@ func _enter_world(id: String) -> void:
 	Engine.set_meta("personagem", Perfil.skin())
 	Diag.marcar("gerando mundo")
 	get_tree().change_scene_to_file("res://scenes/jogo3d.tscn")
+
+
+# ================== MULTIPLAYER ==================
+
+var _mp_list: VBoxContainer
+
+func _page_multi() -> Control:
+	var rede: Node = Rede.get_rede(get_tree())
+	if rede.modo != "":
+		rede.parar()
+	rede.procurar(true)
+	var fr := _page_frame("Multiplayer")
+	var v: VBoxContainer = fr[0]
+	v.add_child(_note("Jogue junto com quem está na mesma internet (mesma Wi-Fi). Abra um mundo seu, ou entre no mundo de alguém da lista.", C_DIM))
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	v.add_child(scroll)
+	var body := VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", 12)
+	scroll.add_child(body)
+	# mundos de outros jogadores na rede
+	var h1 := Label.new()
+	h1.text = "Mundos abertos na sua rede"
+	h1.add_theme_font_size_override("font_size", 24)
+	h1.add_theme_color_override("font_color", C_EMBER)
+	body.add_child(h1)
+	_mp_list = VBoxContainer.new()
+	_mp_list.add_theme_constant_override("separation", 10)
+	body.add_child(_mp_list)
+	_mp_fill()
+	if not rede.lista_mudou.is_connected(_mp_fill):
+		rede.lista_mudou.connect(_mp_fill)
+	# abrir um mundo meu
+	body.add_child(_spacer(10))
+	var h2row := HBoxContainer.new()
+	var h2 := Label.new()
+	h2.text = "Abrir um mundo seu"
+	h2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h2.add_theme_font_size_override("font_size", 24)
+	h2.add_theme_color_override("font_color", C_EMBER)
+	h2row.add_child(h2)
+	var add := _button("+  Criar mundo", true)
+	add.custom_minimum_size = Vector2(220, 52)
+	add.pressed.connect(_ask_new_world.bind(true))
+	h2row.add_child(add)
+	body.add_child(h2row)
+	for m in Mundos.list():
+		body.add_child(_mp_world_card(m))
+	# entrar pelo número (se a lista não achar)
+	body.add_child(_spacer(10))
+	var ipr := HBoxContainer.new()
+	ipr.add_theme_constant_override("separation", 10)
+	var ip := LineEdit.new()
+	ip.placeholder_text = "Ou digite o IP do outro celular (ex.: 192.168.0.12)"
+	ip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ip.custom_minimum_size = Vector2(0, 52)
+	ip.add_theme_font_size_override("font_size", 18)
+	ipr.add_child(ip)
+	var go := _button("Entrar")
+	go.custom_minimum_size = Vector2(140, 52)
+	go.pressed.connect(func():
+		if ip.text.strip_edges() != "":
+			_mp_join(ip.text.strip_edges(), Rede.PORT_GAME, "o mundo"))
+	ipr.add_child(go)
+	body.add_child(ipr)
+	var ips: Array = rede.meus_ips()
+	if not ips.is_empty():
+		body.add_child(_note("O IP deste celular: " + ", ".join(ips), C_DIM))
+	return v
+
+
+func _mp_fill() -> void:
+	if _mp_list == null or not is_instance_valid(_mp_list):
+		return
+	for c in _mp_list.get_children():
+		c.queue_free()
+	var rede: Node = Rede.get_rede(get_tree())
+	if rede.achados.is_empty():
+		_mp_list.add_child(_note("Procurando mundos na rede… (o outro jogador precisa abrir o mundo dele aqui no Multiplayer)", C_DIM))
+		return
+	for k in rede.achados:
+		var d: Dictionary = rede.achados[k]
+		var card := PanelContainer.new()
+		card.add_theme_stylebox_override("panel", _box(C_CARD, 10, C_LINE, 1))
+		var mc := MarginContainer.new()
+		for kk in ["left", "right"]:
+			mc.add_theme_constant_override("margin_" + kk, 20)
+		for kk in ["top", "bottom"]:
+			mc.add_theme_constant_override("margin_" + kk, 12)
+		card.add_child(mc)
+		var h := HBoxContainer.new()
+		mc.add_child(h)
+		var info := VBoxContainer.new()
+		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(info)
+		var n := Label.new()
+		n.text = str(d.get("nome", "Mundo"))
+		n.add_theme_font_size_override("font_size", 24)
+		n.add_theme_color_override("font_color", C_BONE)
+		info.add_child(n)
+		var sub := Label.new()
+		sub.text = "Dono: %s   ·   %d/%d jogadores" % [str(d.get("dono", "?")), int(d.get("n", 1)), int(d.get("max", 8))]
+		sub.add_theme_font_size_override("font_size", 17)
+		sub.add_theme_color_override("font_color", C_DIM)
+		info.add_child(sub)
+		var play := _button("Jogar", true)
+		play.custom_minimum_size = Vector2(140, 52)
+		play.disabled = int(d.get("n", 1)) >= int(d.get("max", 8))
+		play.pressed.connect(_mp_join.bind(str(d.ip), int(d.get("porta", Rede.PORT_GAME)), str(d.get("nome", "o mundo"))))
+		h.add_child(play)
+		_mp_list.add_child(card)
+
+
+func _mp_world_card(m: Dictionary) -> Control:
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", _box(C_CARD, 10, C_LINE, 1))
+	var mc := MarginContainer.new()
+	for k in ["left", "right"]:
+		mc.add_theme_constant_override("margin_" + k, 20)
+	for k in ["top", "bottom"]:
+		mc.add_theme_constant_override("margin_" + k, 12)
+	card.add_child(mc)
+	var h := HBoxContainer.new()
+	mc.add_child(h)
+	var n := Label.new()
+	n.text = str(m.get("nome", "Mundo"))
+	n.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	n.add_theme_font_size_override("font_size", 22)
+	n.add_theme_color_override("font_color", C_BONE)
+	h.add_child(n)
+	var open := _button("Abrir para jogar junto", true)
+	open.custom_minimum_size = Vector2(250, 50)
+	open.pressed.connect(_mp_host.bind(str(m.id), str(m.get("nome", "Mundo"))))
+	h.add_child(open)
+	return card
+
+
+func _mp_host(id: String, nome: String) -> void:
+	var rede: Node = Rede.get_rede(get_tree())
+	rede.procurar(false)
+	if not rede.abrir_mundo(id, nome):
+		var box := _dialog("Não deu para abrir")
+		box.add_child(_note("Não conseguiu abrir o mundo na rede. Feche e abra o jogo e tente de novo.", C_DIM))
+		_dialog_buttons(box, "Ok", _close_overlay)
+		return
+	_enter_world(id)
+
+
+func _mp_join(ip: String, porta: int, nome: String) -> void:
+	var rede: Node = Rede.get_rede(get_tree())
+	var box := _dialog("Entrando")
+	var msg := _note("Conectando em \"%s\" e baixando o mundo…" % nome, C_DIM)
+	box.add_child(msg)
+	var cancel := _button("Cancelar")
+	cancel.custom_minimum_size = Vector2(150, 54)
+	cancel.pressed.connect(func():
+		rede.parar()
+		_close_overlay()
+		rede.procurar(true))
+	box.add_child(cancel)
+	if not rede.entrar(ip, porta):
+		msg.text = "Não deu para conectar nesse endereço."
+		return
+	var ok := func(id: String):
+		_enter_world(id)
+	var bad := func(m: String):
+		if is_instance_valid(msg):
+			msg.text = m
+	rede.conectou_e_baixou.connect(ok, CONNECT_ONE_SHOT)
+	rede.falhou.connect(bad, CONNECT_ONE_SHOT)
+	# sem resposta em 12 s: desiste
+	get_tree().create_timer(12.0).timeout.connect(func():
+		if rede.modo == "convidado" and rede.mundo_id != "mp_convidado" and is_instance_valid(msg):
+			rede.parar()
+			msg.text = "O outro celular não respondeu. Vocês estão na mesma Wi-Fi?")
 
 
 # ================== SKIN ==================

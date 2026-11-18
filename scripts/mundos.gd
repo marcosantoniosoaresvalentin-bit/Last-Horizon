@@ -19,6 +19,8 @@ static func list() -> Array:
 	if d == null:
 		return out
 	for id in d.get_directories():
+		if id.begins_with("mp_"):
+			continue          # cópia de mundo de outro jogador (multiplayer)
 		var m := read_meta(id)
 		if not m.is_empty():
 			out.append(m)

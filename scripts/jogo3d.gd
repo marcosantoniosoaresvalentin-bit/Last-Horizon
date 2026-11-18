@@ -10,6 +10,8 @@ const Perfil := preload("res://scripts/perfil.gd")
 const Calendario := preload("res://scripts/ui/calendario.gd")
 const Mochila := preload("res://scripts/ui/mochila.gd")
 const Arvores := preload("res://scripts/world/arvores.gd")
+const Rede := preload("res://scripts/rede.gd")
+const JogadorRemoto := preload("res://scripts/world/jogador_remoto.gd")
 const Itens := preload("res://scripts/itens.gd")
 const Corte := preload("res://scripts/world/corte.gd")
 const Craft := preload("res://scripts/ui/craft.gd")
@@ -396,6 +398,11 @@ var _balde_carga := {}            # o que tem no balde da mochila/mão: {tipo, v
 var _balde_fill: MeshInstance3D = null
 var _pour_t := -1.0               # despejando o balde (segundos)
 var _split := {}                  # rachando a tora com cunhas (ver _split_begin)
+var _rede: Node = null            # multiplayer (ver rede.gd)
+var _remotos := {}                # peer id -> JogadorRemoto
+var _mp_t := 0.0
+var _mp_tempo_t := 0.0
+var _mp_perto := false
 var _split_ui: Control = null
 var _split_rng := RandomNumberGenerator.new()
 const BALDE_VOL := 0.024          # cabe uns 24 litros
@@ -459,6 +466,8 @@ func _notification(what: int) -> void:
 
 func _exit_tree() -> void:
 	_save_player()
+	if _rede and _rede.ativo():
+		_rede.parar()
 	Diag.marcar("menu")
 	if _water_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_water_task)
@@ -924,6 +933,7 @@ func _on_world_ready() -> void:
 	# hora e dia não aparecem na tela (o calendário vai mostrar a data)
 	_ready_world = true
 	Diag.marcar("entrando no mundo")
+	_mp_start()
 
 
 ## Altura do terreno (metros) num ponto do mundo.
@@ -1273,6 +1283,7 @@ func _process(delta: float) -> void:
 		# a informação do solo não aparece mais na tela
 	_update_dig(delta)
 	_update_pour(delta)
+	_mp_tick(delta)
 	_update_split(delta)
 	_tick_hole_water(delta)
 	_seed_check -= delta
@@ -5627,3 +5638,81 @@ func _banda_mesh(L: float, ra: float, rb: float) -> ArrayMesh:
 	wm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mesh.surface_set_material(1, wm)
 	return mesh
+
+
+
+# ================== MULTIPLAYER ==================
+
+func _mp_start() -> void:
+	var r := get_tree().root.get_node_or_null("Rede")
+	if r == null or not r.ativo():
+		return
+	_rede = r
+	if _rede.modo == "dono":
+		_rede.hook_salvar = _save_world
+		_rede.hook_tempo = func() -> int: return int(sim.steps)
+		_show_toast("Mundo aberto no multiplayer: quem estiver na mesma Wi-Fi pode entrar.")
+	else:
+		if int(_rede.tempo_recebido) >= 0:
+			sim.steps = int(_rede.tempo_recebido)
+		_show_toast("Você entrou no mundo de %s." % _dono_nome())
+	_rede.falhou.connect(func(msg: String):
+		_show_toast(msg + " Voltando para o menu…")
+		get_tree().create_timer(2.5).timeout.connect(func():
+			get_tree().change_scene_to_file("res://scenes/main_menu.tscn")))
+
+
+func _dono_nome() -> String:
+	if _rede and _rede.jogadores.has(1):
+		return str(_rede.jogadores[1].nome)
+	return "outro jogador"
+
+
+func _mp_tick(delta: float) -> void:
+	if _rede == null or not _rede.ativo():
+		return
+	_mp_t -= delta
+	if _mp_t <= 0.0:
+		_mp_t = 0.1          # 10 vezes por segundo
+		var p := _player.global_position
+		var crouch := 0.0
+		if _crouch_job != "" or not _knap.is_empty() or _digging:
+			crouch = 1.0
+		_rede.mandar_estado({"p": [snappedf(p.x, 0.01), snappedf(p.y, 0.01), snappedf(p.z, 0.01)], "y": snappedf(_face, 0.01),
+			"a": _anim_now, "s": _anim.speed_scale if _anim else 1.0, "c": crouch})
+	if _rede.modo == "dono":
+		_mp_tempo_t -= delta
+		if _mp_tempo_t <= 0.0:
+			_mp_tempo_t = 5.0
+			_rede.mandar_tempo(int(sim.steps))
+	elif int(_rede.tempo_recebido) >= 0:
+		if absi(int(sim.steps) - int(_rede.tempo_recebido)) > 40:
+			sim.steps = int(_rede.tempo_recebido)
+		_rede.tempo_recebido = -1
+	# os outros jogadores
+	var me := multiplayer.get_unique_id()
+	for id in _rede.jogadores:
+		var pid := int(id)
+		if pid == me:
+			continue
+		if not _remotos.has(pid):
+			var j := JogadorRemoto.new()
+			add_child(j)
+			j.setup(str(_rede.jogadores[id].nome), str(_rede.jogadores[id].get("skin", "homem")))
+			j.visible = false
+			_remotos[pid] = j
+		var e = _rede.estados.get(pid)
+		if e != null:
+			var j: Node3D = _remotos[pid]
+			j.visible = true
+			j.aplicar(e)
+			# quem acabou de entrar aparece do lado do dono
+			if pid == 1 and _rede.modo == "convidado" and not _mp_perto:
+				_mp_perto = true
+				var hp: Array = e.p
+				var spot := Vector3(float(hp[0]) + 1.5, 0, float(hp[2]) + 1.0)
+				_player.position = _ground_pos(Vector2(spot.x, spot.z))
+	for pid in _remotos.keys():
+		if not _rede.jogadores.has(pid):
+			(_remotos[pid] as Node).queue_free()
+			_remotos.erase(pid)
