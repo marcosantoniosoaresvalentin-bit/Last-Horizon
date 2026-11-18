@@ -1,9 +1,9 @@
 {
-  "version": 73,
-  "file": "update_73.zip",
-  "size": 3505464,
-  "sha256": "e9f17bf34e09c08f6fb3cf31fe0ba604aaaecdd0fabe01379a48e6899e85ee49",
+  "version": 74,
+  "file": "update_74.zip",
+  "size": 3505843,
+  "sha256": "7754f8cca6444aac0d2a02c495845b27b178a66084c7e6a2ca319da8ffb58ab3",
   "min_build": 1,
-  "notes": "Ilha com mar em volta e praias de areia; buracos enchem com a chuva e secam na seca; buracos abaixo do nível do mar enchem de água do mar",
+  "notes": "Sem árvores, mudas, sementes e cipós dentro do mar; beira do mar lisa (sem quadrados)",
   "date": "2026-11-18"
 }

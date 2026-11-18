@@ -454,7 +454,7 @@ func _draw_water() -> void:
 					var dep := L - _gk(kk)
 					wet = wet or dep > 0.0
 					p.append(Vector3(kk.x * RES, L, kk.y * RES))
-					cols.append(Color(0.85, 1, 1, dep))
+					cols.append(_jogo._wcol(0.85, dep))
 				if not wet:
 					continue
 				any = true

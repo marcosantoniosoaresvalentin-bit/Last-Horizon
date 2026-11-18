@@ -47,6 +47,7 @@ func build(jogo: Node, arvores: Node, seed_: int, save_path := "") -> void:
 	last_day = int(jogo.sim.elapsed_days())
 	if save_path == "" or not _load(save_path):
 		_generate()
+	plants = plants.filter(func(pl): return not _arv._in_sea(float(pl.x), float(pl.z)))   # nada de cipó no mar
 	_rebuild()
 
 

@@ -223,7 +223,8 @@ float waves(vec2 p, float t){
 	return h;
 }
 void vertex(){
-	depth = COLOR.a;
+	// fundura com sinal: A = 0..8 m de água, G = quanto o chão passa acima da água (beirada)
+	depth = COLOR.a * 8.0 - COLOR.g * 0.5;
 	murk = COLOR.r;
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
@@ -242,9 +243,10 @@ void fragment(){
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
 	// barro: enxurrada marrom; lagoa e rio ficam só um pouco sujos depois da chuva
 	float m = clamp(murk, 0.0, 1.0) * (0.85 + noise(wpos.xz * 0.15 + vec2(t * 0.02, 0.0)) * 0.3);
+	m *= 1.0 - smoothstep(0.03, 0.12, abs(wpos.y - sea_level)) * 0.85;   // o mar não fica barrento
 	vec3 clean = mix(shallow, deep, sqrt(d));
 	// água do mar (no nível do mar): verde-azulada, bem mais funda
-	float salt = (1.0 - smoothstep(0.03, 0.12, abs(wpos.y - sea_level))) * smoothstep(0.1, 0.8, depth);
+	float salt = 1.0 - smoothstep(0.03, 0.12, abs(wpos.y - sea_level));
 	clean = mix(clean, mix(sea_shallow, sea_deep, sqrt(clamp(depth / 6.0, 0.0, 1.0))), salt);
 	vec3 muddy = mud * mix(1.0, 0.55, sqrt(d));
 	ALBEDO = mix(clean, muddy, clamp(m, 0.0, 1.0) * 0.9) + vec3(0.05, 0.07, 0.08) * fres;
@@ -4185,6 +4187,11 @@ func hole_water_depth(x: float, z: float) -> float:
 	return maxf(0.0, L - _escav.ground_at(x, z))
 
 
+## Cor de vértice da água: R barro, G chão acima da água (beirada), A fundura.
+static func _wcol(murk: float, depth: float) -> Color:
+	return Color(murk, clampf(-depth / 0.5, 0.0, 1.0), 1.0, clampf(depth / 8.0, 0.0, 1.0))
+
+
 ## O mar em volta da ilha: vai do fim do mapa até o horizonte, com o fundo de areia embaixo.
 func _build_ocean() -> void:
 	var sea := MundoSim.SEA * HS
@@ -4202,7 +4209,7 @@ func _build_ocean() -> void:
 		var x0: float = r[0]; var z0: float = r[1]; var x1: float = r[2]; var z1: float = r[3]
 		var q := [Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1)]
 		for t in [0, 2, 1, 0, 3, 2]:
-			st.set_color(Color(0.0, 1, 1, sea - bed))
+			st.set_color(_wcol(0.0, sea - bed))
 			st.set_normal(Vector3.UP)
 			st.add_vertex(Vector3(q[t].x, sea, q[t].y))
 			bst.set_normal(Vector3.UP)
@@ -4213,7 +4220,7 @@ func _build_ocean() -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	var bmat := StandardMaterial3D.new()
-	bmat.albedo_color = Color(0.55, 0.5, 0.38)
+	bmat.albedo_color = Color(0.75, 0.65, 0.45)
 	bmat.roughness = 1.0
 	var bmi := MeshInstance3D.new()
 	bmi.mesh = bst.commit()
@@ -4285,8 +4292,8 @@ func _water_arrays(wat: PackedFloat32Array) -> void:
 				if x < W and y > 0 and lvl[(y - 1) * W + x] <= NONE: edge = true
 				if x > 0 and y < H and lvl[y * W + x - 1] <= NONE: edge = true
 				if x < W and y < H and lvl[y * W + x] <= NONE: edge = true
-				if edge:
-					lv = minf(lv, _corner_h[y * cw + x])
+				if edge and absf(lv - MundoSim.SEA * HS) > 0.06:
+					lv = minf(lv, _corner_h[y * cw + x])   # (o mar não: a areia corta a beirada dele)
 				corner[y * cw + x] = lv
 	var verts := PackedVector3Array(); verts.resize(count * 6)
 	var cols := PackedColorArray(); cols.resize(count * 6)
@@ -4301,10 +4308,10 @@ func _water_arrays(wat: PackedFloat32Array) -> void:
 			var p10 := Vector3((x + 1) * CELL, corner[c10], y * CELL)
 			var p01 := Vector3(x * CELL, corner[c01], (y + 1) * CELL)
 			var p11 := Vector3((x + 1) * CELL, corner[c11], (y + 1) * CELL)
-			var d00 := Color(cmurk[c00], 1, 1, maxf(0.0, corner[c00] - _corner_h[c00]))
-			var d10 := Color(cmurk[c10], 1, 1, maxf(0.0, corner[c10] - _corner_h[c10]))
-			var d01 := Color(cmurk[c01], 1, 1, maxf(0.0, corner[c01] - _corner_h[c01]))
-			var d11 := Color(cmurk[c11], 1, 1, maxf(0.0, corner[c11] - _corner_h[c11]))
+			var d00 := _wcol(cmurk[c00], corner[c00] - _corner_h[c00])
+			var d10 := _wcol(cmurk[c10], corner[c10] - _corner_h[c10])
+			var d01 := _wcol(cmurk[c01], corner[c01] - _corner_h[c01])
+			var d11 := _wcol(cmurk[c11], corner[c11] - _corner_h[c11])
 			verts[k] = p00; cols[k] = d00
 			verts[k + 1] = p10; cols[k + 1] = d10
 			verts[k + 2] = p11; cols[k + 2] = d11

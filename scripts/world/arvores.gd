@@ -111,6 +111,10 @@ func build(jogo: Node, seed_: int, save_path := "") -> void:
 	last_day = int(jogo.sim.elapsed_days())
 	if save_path == "" or not _load(save_path):
 		_generate(seed_)
+	# nada de árvore, muda, semente ou toco dentro do mar (mundo antigo que virou ilha)
+	plants = plants.filter(func(p): return not _in_sea(float(p[0]), float(p[1])))
+	seeds = seeds.filter(func(sd): return not _in_sea(float(sd[0]), float(sd[1])))
+	stumps = stumps.filter(func(st): return not _in_sea(float(st[0]), float(st[1])))
 	trees = plants
 	_rebuild()
 	# troncos que caíram sozinhos em jogos antigos: viram toco + tronco que dá para cortar
@@ -357,9 +361,16 @@ func _shaded(p: Array, day: int) -> bool:
 	return false
 
 
+## No mar ou na beira dele (água salgada e areia da praia: árvore não nasce).
+func _in_sea(x: float, z: float) -> bool:
+	return _jogo.height_at(x, z) < MundoSim.SEA * _jogo.HS + 0.6
+
+
 func _ground_ok(x: float, z: float) -> bool:
 	var sim = _jogo.sim
 	var cell: float = _jogo.CELL
+	if _in_sea(x, z):
+		return false
 	if x < 4.0 or z < 4.0 or x > MundoSim.W * cell - 4.0 or z > MundoSim.H * cell - 4.0:
 		return false
 	var ci := int(z / cell) * MundoSim.W + int(x / cell)
