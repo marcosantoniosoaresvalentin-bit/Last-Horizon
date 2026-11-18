@@ -2246,8 +2246,6 @@ func _ctx_press() -> void:
 			if not pc.is_empty():
 				if _constr.carrying_others(pc):
 					_show_toast("Tem outra peça apoiada em cima dessa. Tire ela antes.")
-				elif _arvores.free_log_kg(pc.log) > Arvores.CARRY_MAX_KG:
-					_show_toast("Pesada demais para carregar.")
 				else:
 					var nam: int = (pc.get("amarras", []) as Array).size()
 					_hold_log(_constr.remove_piece(pc))
