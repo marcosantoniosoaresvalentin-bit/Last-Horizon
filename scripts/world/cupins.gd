@@ -493,6 +493,8 @@ func harvest_timbo(i: int) -> void:
 
 ## Para o tamanduá (futuro): come parte da colônia.
 func eat_colony(i: int, amount: float) -> void:
+	if _jogo.has_method("_mp_client") and _jogo._mp_client():
+		return                   # convidado: quem simula os cupins é o dono
 	colonies[i].pop = maxf(0.0, float(colonies[i].pop) - amount)
 
 

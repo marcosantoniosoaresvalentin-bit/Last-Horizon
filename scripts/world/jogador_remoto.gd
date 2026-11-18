@@ -13,6 +13,8 @@ var _body: Node3D
 var _alvo := Vector3.ZERO
 var _yaw_alvo := 0.0
 var _tem_alvo := false
+var _tora: MeshInstance3D           # a tora no ombro (quando está carregando)
+var _tora_k := []
 
 
 func setup(n: String, s: String) -> void:
@@ -86,6 +88,26 @@ func aplicar(e: Dictionary) -> void:
 		_tem_alvo = true
 	play(str(e.get("a", "Idle")), float(e.get("s", 1.0)))
 	_body.rotation.x = 0.45 * float(e.get("c", 0.0))      # abaixado (pegando algo do chão)
+	# carregando madeira no ombro
+	var t: Array = e.get("tora", [])
+	if t != _tora_k:
+		_tora_k = t
+		if _tora:
+			_tora.queue_free()
+			_tora = null
+		if t.size() == 2:
+			_tora = MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.height = float(t[0])
+			cm.top_radius = float(t[1])
+			cm.bottom_radius = float(t[1])
+			_tora.mesh = cm
+			var m := StandardMaterial3D.new()
+			m.albedo_color = Color(0.36, 0.28, 0.2)
+			_tora.material_override = m
+			_tora.rotation = Vector3(PI * 0.5, 0, 0)
+			_tora.position = Vector3(0.22, 1.5, 0)
+			add_child(_tora)
 
 
 func _process(delta: float) -> void:

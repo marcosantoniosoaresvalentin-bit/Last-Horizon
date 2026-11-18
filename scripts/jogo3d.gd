@@ -1318,7 +1318,16 @@ func _process(delta: float) -> void:
 			_water_timer = 3.0
 	_move_player(delta)
 	_update_grass()
-	if _arvores:
+	if _arvores and _mp_client():
+		# convidado: a natureza (crescer, cupins, frutos, bichos comendo) roda no dono e
+		# chega pela rede; aqui só os bichos andando
+		if _araras:
+			_araras.update(delta)
+		if _macacos:
+			_macacos.update(delta)
+		if _tamanduas:
+			_tamanduas.update(delta)
+	elif _arvores:
 		_arvores.tick()   # quando vira o dia: sementes, brotos, crescimento
 		if _cipos:
 			_cipos.tick()
@@ -1357,6 +1366,7 @@ func _process(delta: float) -> void:
 	_update_dig(delta)
 	_update_pour(delta)
 	_mp_tick(delta)
+	_sync_tick(delta)
 	_update_split(delta)
 	_tick_hole_water(delta)
 	_seed_check -= delta
@@ -5936,6 +5946,8 @@ func _mp_start() -> void:
 	if r == null or not r.ativo():
 		return
 	_rede = r
+	_rede.parte_mundo.connect(_sync_receive)
+	_sync_baseline()
 	if _rede.modo == "dono":
 		_rede.hook_salvar = _save_world
 		_rede.hook_tempo = func() -> int: return int(sim.steps)
@@ -5966,8 +5978,11 @@ func _mp_tick(delta: float) -> void:
 		var crouch := 0.0
 		if _crouch_job != "" or not _knap.is_empty() or _digging:
 			crouch = 1.0
-		_rede.mandar_estado({"p": [snappedf(p.x, 0.01), snappedf(p.y, 0.01), snappedf(p.z, 0.01)], "y": snappedf(_face, 0.01),
-			"a": _anim_now, "s": _anim.speed_scale if _anim else 1.0, "c": crouch})
+		var est := {"p": [snappedf(p.x, 0.01), snappedf(p.y, 0.01), snappedf(p.z, 0.01)], "y": snappedf(_face, 0.01),
+			"a": _anim_now, "s": _anim.speed_scale if _anim else 1.0, "c": crouch, "m": _mao}
+		if not _carry.is_empty():
+			est["tora"] = [snappedf(_arvores.free_log_length(_carry), 0.01), snappedf(_arvores.free_log_radius(_carry), 0.01)]
+		_rede.mandar_estado(est)
 	if _rede.modo == "dono":
 		_mp_tempo_t -= delta
 		if _mp_tempo_t <= 0.0:
@@ -6597,3 +6612,169 @@ func _bld_place() -> void:
 	if juntas.size() > 0:
 		_show_toast("Peça amarrada com %d cipó%s." % [juntas.size(), "s" if juntas.size() > 1 else ""])
 	_bld_stop()
+
+
+
+# ================== MUNDO IGUAL PARA TODOS (MULTIPLAYER) ==================
+# Cada parte do mundo que muda (construção, buracos e estacas, forquilhas, toras e
+# árvores cortadas, galhos, pedras, coisas no chão, terra cavada, cupins, cipós...) é
+# conferida algumas vezes por segundo; mudou aqui, vai para os outros. A natureza
+# (crescer, cupins comendo, frutos) só roda no dono: os convidados recebem dele.
+
+var _sync_hash := {}               # parte -> hash do que todos já têm
+var _sync_t := {}                  # parte -> tempo até conferir de novo
+const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
+	"escavacao": 0.5, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "minerios": 3.0}
+const SYNC_ONLY_HOST := ["bacabas"]        # só o dono manda (os bichos comem os frutos)
+
+
+func _mp_client() -> bool:
+	return _rede != null and _rede.ativo() and _rede.modo == "convidado"
+
+
+func _sync_tmp(nome: String) -> String:
+	return "user://sync_%d_%s.json" % [OS.get_process_id(), nome]
+
+
+func _file_text(path: String) -> String:
+	return FileAccess.get_file_as_string(path) if FileAccess.file_exists(path) else ""
+
+
+## O estado da parte, em texto (o mesmo formato do arquivo salvo do mundo).
+func _sync_get(nome: String) -> String:
+	var tmp := _sync_tmp(nome)
+	match nome:
+		"chao":
+			var chao := []
+			for g in _chao:
+				chao.append({"id": g.id, "qtd": g.qtd, "x": snappedf(float(g.x), 0.001), "z": snappedf(float(g.z), 0.001), "r": g.get("r", 0.0), "dur": g.get("dur", [])})
+			return JSON.stringify(chao)
+		"escavacao":
+			# só a terra mexida (a água nos buracos sobe e desce sozinha em cada celular)
+			var pts := []
+			var ks: Array = _escav.d.keys()
+			ks.sort()
+			for k in ks:
+				pts.append([k.x, k.y, snappedf(float(_escav.d[k]), 0.001)])
+			var cl := []
+			var cks: Array = _escav.clay.keys()
+			cks.sort()
+			for k in cks:
+				cl.append([k.x, k.y])
+			return JSON.stringify({"pontos": pts, "argila": cl})
+	var mod = _sync_mod(nome)
+	if mod == null:
+		return ""
+	mod.save(tmp)
+	return _file_text(tmp)
+
+
+func _sync_mod(nome: String):
+	match nome:
+		"construcao": return _constr
+		"buracos": return _buracos
+		"apoios": return _apoios
+		"galhos": return _galhos
+		"pedras": return _pedras
+		"arvores": return _arvores
+		"cupins": return _cupins
+		"cipos": return _cipos
+		"bacabas": return _bacabas
+		"minerios": return _minerios
+	return null
+
+
+## Aplica o que chegou de outro jogador.
+func _sync_set(nome: String, txt: String) -> void:
+	match nome:
+		"chao":
+			var lst = JSON.parse_string(txt)
+			if not lst is Array:
+				return
+			for g in _chao:
+				if g.node:
+					(g.node as Node3D).queue_free()
+			_chao = []
+			for e in lst:
+				_add_ground(str(e.id), int(e.qtd), float(e.x), float(e.z), float(e.get("r", 0.0)), e.get("dur", []))
+			_act_check = 0.0
+			return
+		"escavacao":
+			var j = JSON.parse_string(txt)
+			if not j is Dictionary:
+				return
+			var nd := {}
+			for e in j.get("pontos", []):
+				nd[Vector2i(int(e[0]), int(e[1]))] = float(e[2])
+			var ncl := {}
+			for e in j.get("argila", []):
+				ncl[Vector2i(int(e[0]), int(e[1]))] = true
+			var touched := {}
+			for k in _escav.d:
+				touched[k] = true
+			for k in nd:
+				touched[k] = true
+			_escav.d = nd
+			_escav.clay = ncl
+			_escav._changed(touched)
+			_update_holes()
+			return
+	var mod = _sync_mod(nome)
+	if mod == null:
+		return
+	var tmp := _sync_tmp(nome)
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(txt)
+	f.close()
+	# o dia de cada parte: o convidado fica com o do dono; o dono nunca volta no tempo
+	var has_day: bool = "last_day" in mod
+	var keep_day: int = int(mod.last_day) if has_day else 0
+	if has_day:
+		mod.last_day = 1 << 30
+	mod._load(tmp)
+	if has_day and not _mp_client():
+		mod.last_day = maxi(keep_day, int(mod.last_day))
+	match nome:
+		"pedras":
+			mod._rebuild_all()
+		"arvores":
+			mod._rebuild()
+			mod._rebuild_logs()
+		"minerios":
+			pass
+		_:
+			mod._rebuild()
+	_act_check = 0.0
+
+
+## Depois de entrar (ou de receber): o que tem aqui é o que todos têm.
+func _sync_baseline() -> void:
+	for nome in SYNC_EVERY:
+		_sync_hash[nome] = _sync_get(nome).hash()
+		_sync_t[nome] = randf() * float(SYNC_EVERY[nome])
+
+
+func _sync_receive(nome: String, txt: String) -> void:
+	if not _ready_world or not SYNC_EVERY.has(nome):
+		return
+	_sync_set(nome, txt)
+	_sync_hash[nome] = _sync_get(nome).hash()       # o que ficou aqui agora (não manda de volta)
+
+
+func _sync_tick(delta: float) -> void:
+	if _rede == null or not _rede.ativo() or not _ready_world:
+		return
+	for nome in SYNC_EVERY:
+		_sync_t[nome] = float(_sync_t.get(nome, 0.0)) - delta
+		if float(_sync_t[nome]) > 0.0:
+			continue
+		_sync_t[nome] = float(SYNC_EVERY[nome])
+		if _mp_client() and nome in SYNC_ONLY_HOST:
+			continue
+		var txt := _sync_get(nome)
+		var h := txt.hash()
+		if h != int(_sync_hash.get(nome, 0)):
+			_sync_hash[nome] = h
+			_rede.mandar_parte(nome, txt)

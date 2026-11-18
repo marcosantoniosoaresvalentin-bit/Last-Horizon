@@ -315,6 +315,22 @@ func _estado(e: Dictionary) -> void:
 	estados[who] = e
 
 
+## Uma parte do mundo mudou aqui: manda para os outros (compactada).
+signal parte_mundo(nome: String, dados: String)
+
+func mandar_parte(nome: String, dados: String) -> void:
+	if not ativo():
+		return
+	var raw := dados.to_utf8_buffer()
+	rpc("_parte", nome, raw.compress(FileAccess.COMPRESSION_GZIP), raw.size())
+
+
+@rpc("any_peer", "reliable")
+func _parte(nome: String, z: PackedByteArray, n: int) -> void:
+	var raw := z.decompress(n, FileAccess.COMPRESSION_GZIP)
+	parte_mundo.emit(nome, raw.get_string_from_utf8())     # (o dono repassa sozinho: server_relay)
+
+
 ## Tempo do jogo do dono (os convidados acertam o relógio).
 func mandar_tempo(steps: int) -> void:
 	if modo == "dono" and ativo():
