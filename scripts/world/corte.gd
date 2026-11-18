@@ -806,10 +806,10 @@ class ChopPose extends SkeletonModifier3D:
 				L = base + d * maxf(0.3, 0.5 - (L.distance_to(shL) - 0.52))
 			var fr := _orth(-up * 0.6 + right * 0.4, d)   # dedos da direita por cima do cabo
 			var fl := _orth(-up * 0.7 - right * 0.3, d)   # dedos da esquerda por baixo/de lado
+			# os dedos fecham antes (a mão é medida já fechada, para o cabo passar dentro do punho)
+			_close_fingers(sk, "Left")
 			_hand_on(sk, "Right", R, d, fr, up, right)
 			_hand_on(sk, "Left", L, d, fl, up, -right)
-			_close_fingers(sk, "Right")
-			_close_fingers(sk, "Left")
 			_set_tool(sk, _tool_xf(base, d, _orth(up, d)))
 			return
 		# uma mão: a direita segura, a esquerda solta do lado
@@ -829,9 +829,8 @@ class ChopPose extends SkeletonModifier3D:
 				R2 = eye + cf * 0.42 - cu * 0.17 + cr * 0.24 + bob
 		R2 = reach.call(shR, R2)
 		var fr2 := _orth(-cr * 0.5 - cf_flat * 0.5, d2)
-		_hand_on(sk, "Right", R2, d2, fr2, up, right)
-		_close_fingers(sk, "Right")
-		var edge := _orth(cf_flat if tool in ["machado", "serra"] else -cr, d2)
+		_hand_on(sk, "Right", R2, d2, fr2, up, right)      # (a direita já está fechada)
+		var edge := _orth(cf_flat if tool == "machado" else (-up if tool == "serra" else -cr), d2)    # a serra com os dentes para baixo
 		_set_tool(sk, _tool_xf(R2 - d2 * carry_grip, d2, edge))
 		# a esquerda solta, relaxada do lado
 		var sbl := _bone("LeftArm")

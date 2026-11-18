@@ -1,9 +1,9 @@
 {
-  "version": 92,
-  "file": "update_92.zip",
-  "size": 4316101,
-  "sha256": "b57de349e60cfd12b4f0b7b46b0c430c626accbaf0b266e22566fe59f359b3d6",
+  "version": 93,
+  "file": "update_93.zip",
+  "size": 4316159,
+  "sha256": "ae683fd980670cc9e66f1958668b70a682519c5fd51b140f7c6c6b8dcf2d8d53",
   "min_build": 1,
-  "notes": "Primeira pessoa: pá e cavadeira com as duas mãos; a mão fecha de verdade em volta do cabo de todas as ferramentas (sem mão torcida); a cabeça do personagem nunca aparece",
+  "notes": "Mãos fechando de verdade em volta do cabo de todas as ferramentas; serra com os dentes para baixo",
   "date": "2026-11-18"
 }
