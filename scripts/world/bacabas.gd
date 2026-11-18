@@ -31,10 +31,18 @@ const CROWN_VARIANTS := 4
 const TRUNK_SHADER := """
 shader_type spatial;
 varying vec3 wpos;
-varying vec3 opos;
+varying flat vec3 opos;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
 	return mix(mix(hash(i), hash(i+vec2(1,0)), f.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y); }
+float fbm(vec2 p){ return noise(p) * 0.55 + noise(p * 2.1 + 3.7) * 0.3 + noise(p * 4.3 + 9.1) * 0.15; }
+// relevo dos anéis: cada cicatriz de folha é um degrauzinho (sobe devagar, cai num risco)
+float rings(float ang, float h, float seed){
+	float y = h * 8.0 + 0.6 * sin(h * 1.3 + seed * 6.0) + (noise(vec2(ang * 1.1 + seed, h * 0.9)) - 0.5) * 0.8 + seed * 5.0;
+	float f = fract(y);
+	float k = 0.5 + 0.5 * hash(vec2(floor(y), seed));      // cada anel de um jeito
+	return (smoothstep(0.0, 0.8, f) * (1.0 - smoothstep(0.93, 1.0, f))) * k + (1.0 - k);
+}
 void vertex(){
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	opos = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
@@ -43,17 +51,33 @@ void fragment(){
 	vec2 d = wpos.xz - opos.xz;
 	float ang = atan(d.y, d.x);
 	float h = wpos.y - opos.y;
-	float y = h * 5.6 + (noise(vec2(ang * 1.3, h * 0.7)) - 0.5) * 0.5 + noise(vec2(opos.x, opos.z)) * 7.0;
-	float r = abs(fract(y) - 0.5);
-	float ring = smoothstep(0.43, 0.48, r);                  // risco fino e escuro
-	float lip = smoothstep(0.30, 0.42, r) * (1.0 - ring) * 0.08;   // e a beirada clara do anel
-	float streak = noise(vec2(ang * 6.0, h * 1.5)) * 0.10 + noise(vec2(ang * 20.0, h * 6.0)) * 0.05;
-	vec3 c = vec3(0.50, 0.49, 0.45) * (0.9 + streak + lip);
-	c *= 1.0 - ring * 0.35;
-	float moss = smoothstep(1.2, 0.0, h) * noise(vec2(ang * 3.0, h * 4.0));
-	c = mix(c, vec3(0.20, 0.24, 0.12), moss * 0.7);
-	ALBEDO = c * c * 1.3;
-	ROUGHNESS = 0.8;
+	float seed = hash(opos.xz);
+	float rg = rings(ang, h, seed);
+	float e = 0.004;
+	float dr = (rings(ang, h + e, seed) - rg) / e;            // inclinação do anel
+	float groove = 1.0 - smoothstep(0.0, 0.06, rg);            // o risco escuro entre um anel e outro
+	// casca: cinza-clara lisa, com fiapos verticais e o tom variando um pouco em volta
+	float fib = noise(vec2(ang * 12.0, h * 1.6)) * 0.06;
+	float tone = fbm(vec2(ang * 2.0 + seed * 9.0, h * 0.6)) * 0.16;
+	float arc = ang * 0.13;                                    // em metros, em volta do tronco
+	vec3 c = vec3(0.56, 0.54, 0.50) * (0.86 + tone + fib + rg * 0.04);
+	c *= 1.0 - groove * 0.32;
+	// líquen: manchas claras esbranquiçadas e algumas esverdeadas
+	float lich = smoothstep(0.66, 0.74, fbm(vec2(arc * 22.0 + seed * 20.0, h * 22.0))) * smoothstep(0.4, 0.65, fbm(vec2(arc * 3.0, h * 1.2)));
+	float dots = smoothstep(0.78, 0.88, noise(vec2(arc * 60.0, h * 60.0))) * smoothstep(0.45, 0.6, fbm(vec2(arc * 3.0, h * 0.7 + 5.0)));
+	c = mix(c, vec3(0.70, 0.71, 0.64), lich * 0.45);
+	c = mix(c, vec3(0.52, 0.60, 0.42), dots * 0.6);
+	// pé: mais escuro, úmido e com musgo
+	float base = smoothstep(1.4, 0.0, h);
+	c *= 1.0 - base * 0.35;
+	float moss = base * smoothstep(0.35, 0.65, fbm(vec2(ang * 4.0, h * 3.0)));
+	c = mix(c, vec3(0.16, 0.22, 0.09), moss * 0.8);
+	ALBEDO = c * c * 1.35;
+	ROUGHNESS = mix(0.82, 0.95, lich);
+	// luz pega na beirada dos anéis
+	vec3 radial = normalize(vec3(d.x, 0.0, d.y) + vec3(0.0001));
+	vec3 nw = normalize(radial - vec3(0.0, 1.0, 0.0) * clamp(dr, -12.0, 12.0) * 0.004);
+	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 }
 """
 
@@ -66,6 +90,7 @@ var _arv: Node
 var _rng := RandomNumberGenerator.new()
 var _crowns: Array = []          # malhas da copa (variantes)
 var _trunk_mesh: ArrayMesh
+var _roots_mesh: ArrayMesh
 var _cacho_green: ArrayMesh
 var _cacho_ripe: ArrayMesh
 var _leaf_mat: StandardMaterial3D
@@ -293,7 +318,7 @@ func _rebuild() -> void:
 		var z := float(p.z)
 		var c := Vector2i(floori(x / CHUNK), floori(z / CHUNK))
 		if not chunks.has(c):
-			chunks[c] = {"tr": [], "cr": {}, "dead": [], "cg": [], "cm": []}
+			chunks[c] = {"tr": [], "rt": [], "cr": {}, "dead": [], "cg": [], "cm": []}
 		var ch: Dictionary = chunks[c]
 		var gy: float = _jogo.height_at(x, z)
 		var h := trunk_h(p)
@@ -302,6 +327,8 @@ func _rebuild() -> void:
 		if h > 0.05:
 			var r := TRUNK_R * lerpf(0.75, 1.0, clampf(h / 6.0, 0.0, 1.0))
 			ch.tr.append(Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(r, h + 0.35, r)), Vector3(x, gy - 0.3, z)))
+			if h > 1.0:
+				ch.rt.append(Transform3D(Basis(Vector3.UP, rot).scaled(Vector3.ONE * clampf(h / 8.0, 0.55, 1.0)), Vector3(x, gy, z)))
 			var gk := Vector2i(floori(x / 8.0), floori(z / 8.0))
 			if not _grid.has(gk):
 				_grid[gk] = []
@@ -327,6 +354,7 @@ func _rebuild() -> void:
 	for c in chunks:
 		var ch: Dictionary = chunks[c]
 		_add_mm(_trunk_mesh, _trunk_mat, ch.tr, VIEW, true)
+		_add_mm(_roots_mesh, null, ch.rt, 70.0, false)
 		for v in ch.cr:
 			_add_mm(_crowns[v], _leaf_mat, ch.cr[v], VIEW, true)
 		_add_mm(_crowns[0], _dead_leaf_mat, ch.dead, VIEW, true)
@@ -371,6 +399,7 @@ func _make_assets(seed_: int) -> void:
 	_trunk_mat = ShaderMaterial.new()
 	_trunk_mat.shader = sh
 	_trunk_mesh = _make_trunk()
+	_roots_mesh = _make_roots()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_ + 4401
 	for v in CROWN_VARIANTS:
@@ -419,7 +448,7 @@ func _frond_texture() -> ImageTexture:
 func _make_trunk() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var sides := 9
+	var sides := 16
 	var rows := [0.0, 0.08, 0.2, 1.0]
 	var rad := [1.7, 1.35, 1.05, 0.85]     # base um pouco grossa, afina para cima
 	for i in rows.size() - 1:
@@ -432,6 +461,33 @@ func _make_trunk() -> ArrayMesh:
 			for t in [0, 2, 1, 0, 3, 2]:
 				st.set_normal(nrm[t])
 				st.add_vertex(p[t])
+	return st.commit()
+
+
+## Cone de raízes no pé: dezenas de raízes finas avermelhadas que saem do tronco
+## um pouco acima do chão e descem abrindo em volta (como na bacaba de verdade).
+func _make_roots() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 515
+	for k in 34:
+		var a := rng.randf() * TAU
+		var top_h := rng.randf_range(0.12, 0.55)
+		var top := Vector3(cos(a) * 0.15, top_h, sin(a) * 0.15)
+		var out_r := rng.randf_range(0.2, 0.42) + top_h * 0.3
+		var a2 := a + rng.randf_range(-0.15, 0.15)
+		var bot := Vector3(cos(a2) * out_r, -0.06, sin(a2) * out_r)
+		var mid := top.lerp(bot, 0.5) + Vector3(cos(a), 0, sin(a)) * 0.04
+		var col := Color(0.42, 0.22, 0.16).lerp(Color(0.32, 0.27, 0.2), rng.randf())
+		var rr := rng.randf_range(0.009, 0.016)
+		_tube(st, top, mid, rr, col)
+		_tube(st, mid, bot, rr * 0.9, col.darkened(0.15))
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
+	mat.roughness = 0.9
+	st.set_material(mat)
 	return st.commit()
 
 

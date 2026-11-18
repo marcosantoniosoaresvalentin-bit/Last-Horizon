@@ -1,9 +1,9 @@
 {
-  "version": 75,
-  "file": "update_75.zip",
-  "size": 3514648,
-  "sha256": "066d75f526ad98a14312ee767942720c94675e89392571a2db0f534a0a5aa663",
+  "version": 76,
+  "file": "update_76.zip",
+  "size": 3636692,
+  "sha256": "10d2902a3e0e6d5284edfd07b9183a5bd3aa64aafb1ee2095dfb56222cb209a1",
   "min_build": 1,
-  "notes": "Palmeira bacaba: nasce, cresce, dá cachos (verdes jul-set, maduros out-dez); macacos-prego agora vivem da bacaba e espalham os caroços; sobem em qualquer árvore ou palmeira",
+  "notes": "Primeira pessoa com as mãos do personagem; araras-canindé (voam em bando e em casal, ninho em oco, ovos e filhotes, comem bacaba e cipó e espalham as sementes); sons de araras e macacos com motivo; tronco da bacaba mais realista",
   "date": "2026-11-18"
 }

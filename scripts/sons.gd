@@ -24,9 +24,19 @@ const FILES := {
 	"pedra_bate": ["pedra_bate1", "pedra_bate2", "pedra_bate3", "pedra_bate4"],
 	"pedra_lasca": ["pedra_lasca1", "pedra_lasca2"],
 	"pedra_racha": ["pedra_racha1"],
+	# bichos (sintetizados a partir dos chamados reais; ver tools/sintetizar_bichos.py)
+	"arara_voo": ["arara_voo1", "arara_voo2", "arara_voo3", "arara_voo4"],
+	"arara_alarme": ["arara_alarme1", "arara_alarme2"],
+	"arara_resmungo": ["arara_resmungo1", "arara_resmungo2", "arara_resmungo3"],
+	"macaco_assobio": ["macaco_assobio1", "macaco_assobio2", "macaco_assobio3"],
+	"macaco_trinado": ["macaco_trinado1", "macaco_trinado2"],
+	"macaco_alarme": ["macaco_alarme1", "macaco_alarme2"],
+	"macaco_guincho": ["macaco_guincho1"],
 }
 ## Volume de cada som (dB): passos baixos e a água bem baixinha.
-const VOLUME := {"machado": 0.0, "corrida": -12.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0, "serra": -9.0, "pedra_bate": -4.0, "pedra_lasca": -3.0, "pedra_racha": 0.0}
+const VOLUME := {"machado": 0.0, "corrida": -12.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0, "serra": -9.0, "pedra_bate": -4.0, "pedra_lasca": -3.0, "pedra_racha": 0.0,
+	"arara_voo": 2.0, "arara_alarme": 3.0, "arara_resmungo": -8.0, "macaco_assobio": -6.0, "macaco_trinado": -7.0,
+	"macaco_alarme": -1.0, "macaco_guincho": -2.0}
 
 static var _cache := {}
 
@@ -49,13 +59,13 @@ static func pick(name: String) -> AudioStream:
 
 
 ## Toca um som num ponto do mundo (o volume cai com a distância).
-static func play_at(parent: Node, name: String, pos: Vector3, volume_db := 0.0, pitch := 1.0) -> void:
+static func play_at(parent: Node, name: String, pos: Vector3, volume_db := 0.0, pitch := 1.0, max_dist := 90.0, unit := 6.0) -> void:
 	var p := AudioStreamPlayer3D.new()
 	p.stream = pick(name)
 	p.volume_db = volume_db + float(VOLUME.get(name, 0.0))
 	p.pitch_scale = pitch * randf_range(0.94, 1.06)
-	p.unit_size = 6.0
-	p.max_distance = 90.0
+	p.unit_size = unit
+	p.max_distance = max_dist
 	parent.add_child(p)
 	p.global_position = pos
 	p.play()

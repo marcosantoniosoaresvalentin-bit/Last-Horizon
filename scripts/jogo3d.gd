@@ -25,6 +25,7 @@ const Pedras := preload("res://scripts/world/pedras.gd")
 const Lascar := preload("res://scripts/world/lascar.gd")
 const Macacos := preload("res://scripts/world/macacos.gd")
 const Bacabas := preload("res://scripts/world/bacabas.gd")
+const Araras := preload("res://scripts/world/araras.gd")
 const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
@@ -277,6 +278,10 @@ var _rain: CPUParticles3D
 
 var _player: Node3D
 var _model: Node3D
+var _skel: Skeleton3D = null
+var _head_bone := -1
+var _eye_smooth := Vector3.ZERO
+var _bob_t := 0.0
 var _anim: AnimationPlayer
 var _anim_now := ""
 
@@ -365,6 +370,7 @@ var _work_btn: Button             # "Trabalhar" na tora apoiada nas forquilhas (
 var _pedras: Node3D = null
 var _macacos: Node3D = null
 var _bacabas: Node3D = null
+var _araras: Node3D = null
 var _escav: Node3D = null
 var _escav_steps := 0
 var _escav_timer := 0.0
@@ -861,6 +867,10 @@ func _on_world_ready() -> void:
 	add_child(_macacos)
 	_macacos.build(self, _arvores, _cipos, _bacabas, int(sim.world_seed), Mundos.dir(_world_id) + "/macacos.json" if _world_id != "" else "")
 	print("macacos: %d em %d bandos" % [_macacos.count(), _macacos.troops.size()])
+	_araras = Araras.new()
+	add_child(_araras)
+	_araras.build(self, _arvores, _bacabas, _cipos, int(sim.world_seed), Mundos.dir(_world_id) + "/araras.json" if _world_id != "" else "")
+	print("araras: %d, %d ninhos" % [_araras.count(), _araras.nests.size()])
 	_arvores.fell_hook = _cipos.attach_falling
 	_arvores.fall_done_hook = _cipos._rebuild
 	_buracos = Buracos.new()
@@ -1171,6 +1181,9 @@ func _build_player() -> void:
 		pose.ground_fn = surface_at
 		sks[0].add_child(pose)
 		_chop_pose = pose
+		pose.fp = true
+		_skel = sks[0]
+		_head_bone = _skel.find_bone("Head")
 
 
 func _play(name: String, speed := 1.0) -> void:
@@ -1201,6 +1214,9 @@ func _process(delta: float) -> void:
 			_cipos.tick()
 		if _bacabas:
 			_bacabas.tick()
+		if _araras:
+			_araras.tick()
+			_araras.update(delta)
 		if _macacos:
 			_macacos.tick()
 			_macacos.update(delta)
@@ -1270,6 +1286,8 @@ func _save_world() -> void:
 		_macacos.save(Mundos.dir(_world_id) + "/macacos.json")
 	if _bacabas:
 		_bacabas.save(Mundos.dir(_world_id) + "/bacabas.json")
+	if _araras:
+		_araras.save(Mundos.dir(_world_id) + "/araras.json")
 	if _buracos:
 		_buracos.save(Mundos.dir(_world_id) + "/buracos.json")
 	if _galhos:
@@ -1347,7 +1365,7 @@ func _load_player() -> void:
 	_player.position = _ground_pos(Vector2(x, z))
 	_face = float(d.get("face", 0.0))
 	_yaw = float(d.get("yaw", 0.0))
-	_pitch = float(d.get("pitch", _pitch))
+	_pitch = clampf(float(d.get("pitch", _pitch)), -0.4, 0.6)
 	_bag = clampf(float(d.get("argila", 0.0)), 0.0, BAG_MAX)
 	_seeds = maxi(0, int(d.get("sementes", 0)))
 	_update_inventory()
@@ -3917,7 +3935,7 @@ func _move_player(delta: float) -> void:
 		p += move * sp * delta
 		p.x = clampf(p.x, 1.0, MundoSim.W * CELL - 1.0)
 		p.z = clampf(p.z, 1.0, MundoSim.H * CELL - 1.0)
-		_face = lerp_angle(_face, atan2(-move.x, -move.z), minf(1.0, delta * 10.0))
+		_face = _yaw          # primeira pessoa: o corpo olha para onde a câmera olha
 		_play("Run" if running else "Walk", water_slow)
 	elif _walking and not _chopping and _crouch_job == "":
 		# indo sozinho até o lugar do trabalho (a forquilha ou a ponta da tora)
@@ -4037,6 +4055,12 @@ func _move_player(delta: float) -> void:
 			_step_dist = 0.0
 			_footstep(p, depth, landed, running)
 	_player.position = p
+	# primeira pessoa: livre, o corpo vira para onde a câmera olha; trabalhando (cortar,
+	# serrar, ir até o lugar...) é o corpo que manda e a câmera vai junto
+	if _chopping or _sawing or _walking or _digging or _crouch_job != "" or not _climb.is_empty():
+		_yaw = lerp_angle(_yaw, _face, minf(1.0, delta * 8.0))
+	else:
+		_face = _yaw
 	_player.rotation.y = _face
 
 	if not _knap.is_empty():
@@ -4045,21 +4069,43 @@ func _move_player(delta: float) -> void:
 	if not _vine.is_empty():
 		_vine_camera()
 		return
-	# câmera em terceira pessoa, atrás do personagem
-	var target := p + Vector3(0, 1.55, 0)
-	var pitch := _pitch
-	var dist := CAM_DIST
-	if _placing != "":
-		# colocando item: a câmera sobe e olha para baixo, mostrando o lugar na frente
-		# (mira na prévia, de cima: a linha da câmera passa por cima da cabeça do personagem)
-		target = _place_pos + Vector3(0, 0.15, 0)
-		pitch = maxf(_pitch, 1.0)
-		dist = CAM_DIST + 1.2
-	var back := Vector3(sin(_yaw) * cos(pitch), sin(pitch), cos(_yaw) * cos(pitch))
-	var cam_pos := target + back * dist
-	cam_pos.y = maxf(cam_pos.y, height_at(cam_pos.x, cam_pos.z) + 0.4)
-	_cam.position = _cam.position.lerp(cam_pos, minf(1.0, delta * 12.0)) if _cam.position.distance_to(cam_pos) < 8.0 else cam_pos
-	_cam.look_at(target + Vector3(0, 0.15, 0))
+	_fp_camera(delta, moved)
+
+
+## Primeira pessoa: a câmera fica nos olhos do personagem (segue a cabeça dele, que
+## abaixa, anda e balança junto) e as mãos dele aparecem na frente.
+func _fp_camera(delta: float, moved: float) -> void:
+	var body := _player.global_transform.basis
+	var bfwd := -body.z
+	var eye := _player.global_position + Vector3(0, 1.62, 0) + bfwd * 0.1
+	if _skel and _head_bone >= 0:
+		var hp: Vector3 = _skel.global_transform * _skel.get_bone_global_pose(_head_bone).origin
+		eye = hp + Vector3.UP * 0.085 + bfwd * 0.115
+	# o balanço da cabeça andando chega pela metade (senão enjoa)
+	if _eye_smooth == Vector3.ZERO or _eye_smooth.distance_to(eye) > 2.0:
+		_eye_smooth = eye
+	_eye_smooth.x = eye.x
+	_eye_smooth.z = eye.z
+	_eye_smooth.y = lerpf(_eye_smooth.y, eye.y, minf(1.0, delta * 9.0))
+	# trabalhando, o olhar desce para onde as mãos estão (o golpe, a serra, a pá)
+	var work := -1.0
+	if _sawing:
+		work = 0.95
+	elif _digging:
+		work = 0.9
+	elif _chopping:
+		work = 0.85 if (not _chop_log.is_empty() or not _chop_branch.is_empty()) else 0.6
+	if work > -1.0:
+		_pitch = lerpf(_pitch, work, minf(1.0, delta * 3.0))
+	var cam_basis := Basis.from_euler(Vector3(-_pitch, _yaw, 0.0))
+	_cam.global_transform = Transform3D(cam_basis, _eye_smooth)
+	if _chop_pose:
+		var speed := moved / maxf(delta, 0.001)
+		_bob_t += delta * (6.0 + speed * 1.6) if speed > 0.3 else 0.0
+		var amp := clampf(speed / 4.0, 0.0, 1.0) * 0.018
+		_chop_pose.fp_eye = _eye_smooth
+		_chop_pose.fp_basis = cam_basis
+		_chop_pose.fp_bob = Vector2(sin(_bob_t) * amp, absf(cos(_bob_t)) * amp * 0.8)
 
 
 # ================== CONTROLE ==================
@@ -4140,7 +4186,7 @@ func _input(e: InputEvent) -> void:
 			var d: Vector2 = e.position - _look_last
 			_look_last = e.position
 			_yaw -= d.x * 0.006
-			_pitch = clampf(_pitch + d.y * 0.004, -0.15, 1.1)
+			_pitch = clampf(_pitch + d.y * 0.004, -1.3, 1.35)
 
 
 func _draw_joy() -> void:

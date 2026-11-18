@@ -10,7 +10,8 @@ extends Node3D
 ##  - Adulta (passou de ~4 m de altura): solta raízes aéreas, as "titicas", que
 ##    descem do alto até o chão. Raiz que chegou no chão está madura e pode ser colhida.
 ##  - Flores (setembro a novembro): insetos polinizam. Frutos laranja (dezembro a
-##    fevereiro): aves e bichos pequenos comem e soltam as sementes por perto.
+##    fevereiro): as araras comem e soltam as sementes longe, onde passam. Sem arara,
+##    o cipó não nasce em lugar novo.
 ##  - Se a árvore de apoio morre ou é derrubada, a titica morre junto. Seca forte
 ##    mata mudas.
 ## Coleta: o jogador puxa as raízes que quiser e pode até arrancar o pé inteiro
@@ -147,9 +148,7 @@ func _process_day(day: int) -> void:
 						rt[2] = 0.0
 					continue
 				rt[2] = minf(float(rt[2]) + 0.02 * clampf(water * 1.6, 0.2, 1.0), float(rt[1]))
-			# frutos (dezembro a fevereiro): aves e bichos pequenos comem e espalham as sementes
-			if (month == 12 or month <= 2) and _day_of_month(day) == 15:
-				_disperse(pl, day)
+			# frutos (dezembro a fevereiro): as araras comem e espalham as sementes (araras.gd)
 		keep.append(pl)
 	plants = keep
 	# sementes que caíram: brotam se o solo está úmido e tem árvore perto
@@ -178,7 +177,7 @@ func adult_plants() -> Array:
 	return out
 
 
-## Caiu uma semente aqui (brota em 2 a 3 meses se tiver árvore perto).
+## Uma arara soltou uma semente aqui (brota em 2 a 3 meses se tiver árvore perto).
 func drop_seed(x: float, z: float, day: int) -> void:
 	if seeds.size() > 400:
 		return

@@ -536,6 +536,10 @@ class ChopPose extends SkeletonModifier3D:
 	var reach_target := Vector3.ZERO   # no mundo
 	var reach_grip := false       # mão fechada (segurando)
 	var hide_head := false        # câmera nos olhos: a cabeça some para não tapar a visão
+	var fp := false               # primeira pessoa: os braços ficam na frente da câmera
+	var fp_eye := Vector3.ZERO    # onde está a câmera (no mundo)
+	var fp_basis := Basis()       # para onde a câmera olha (no mundo)
+	var fp_bob := Vector2.ZERO    # balanço das mãos andando
 	var knapping := false         # agachado batendo uma pedra na outra (modelando)
 	var knap_point := Vector3.ZERO  # onde bate (no mundo)
 	var knap_lift := 0.35         # 0 = encostou na pedra do chão, 1 = levantada
@@ -608,6 +612,8 @@ class ChopPose extends SkeletonModifier3D:
 		if axe:
 			axe.visible = holding
 		if not holding:
+			if fp and crouch <= 0.001:
+				_fp_arms(sk, up, fwd, right, false)
 			return
 		_close_fingers(sk, "Right")
 		if sawing:
@@ -622,8 +628,82 @@ class ChopPose extends SkeletonModifier3D:
 				_two_hands_down(sk, up, fwd, right, down_angle(phase, down_hit) if swinging else -30.0)
 			else:
 				_two_hands(sk, up, fwd, right, swing_angle(phase) if swinging else -25.0)
+		elif fp and crouch <= 0.001:
+			_fp_arms(sk, up, fwd, right, true)
 		else:
 			_carry(sk, up, fwd, right)
+
+	# ---------- primeira pessoa: as mãos do personagem na frente dos olhos ----------
+	func _fp_arms(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3, with_tool: bool) -> void:
+		var to_skel := sk.global_transform.affine_inverse()
+		var eye: Vector3 = to_skel * fp_eye
+		var cb: Basis = to_skel.basis * fp_basis
+		var cf := (-cb.z).normalized()
+		var cu := cb.y.normalized()
+		var cr := cb.x.normalized()
+		for side in ["Right", "Left"]:
+			var sg := 1.0 if side == "Right" else -1.0
+			var out := cr * sg
+			var sb := _bone(side + "Arm")
+			var hb := _bone(side + "Hand")
+			var fb := _bone(side + "ForeArm")
+			if sb < 0 or hb < 0 or fb < 0:
+				continue
+			var sh := sk.get_bone_global_pose(sb).origin
+			var bob := cr * fp_bob.x * sg + cu * fp_bob.y
+			var tgt: Vector3
+			if with_tool and side == "Left":
+				tgt = eye + cf * 0.26 - cu * 0.66 - cr * 0.24          # a esquerda descansa embaixo
+			elif with_tool:
+				tgt = eye + cf * 0.4 - cu * 0.16 + cr * 0.19 + bob
+			else:
+				tgt = eye + cf * 0.38 - cu * 0.16 + out * 0.16 + bob
+			_ik(sk, side + "Arm", side + "ForeArm", side + "Hand", tgt, sh - up * 0.5 + out * 0.6 - fwd * 0.1)
+			if with_tool and side == "Right":
+				continue
+			# mão relaxada: dedos para a frente e um pouco para dentro, polegar para cima
+			# (as palmas ficam uma de frente para a outra) e os dedos meio dobrados
+			var hp := sk.get_bone_global_pose(hb)
+			var want := (cf * 0.85 - out * 0.35 - cu * 0.12).normalized()
+			var cur := hp.basis.orthonormalized()
+			hp.basis = Basis(Quaternion((cur * Vector3.UP).normalized(), want)) * cur
+			sk.set_bone_global_pose(hb, hp)
+			var i1 := _bone(side + "HandIndex1")
+			var p1 := _bone(side + "HandPinky1")
+			if i1 >= 0 and p1 >= 0:
+				hp = sk.get_bone_global_pose(hb)
+				var across := sk.get_bone_global_pose(i1).origin - sk.get_bone_global_pose(p1).origin
+				var fing := want
+				var a0 := _orth(across, fing)
+				var a1 := _orth(cu * 0.85 - out * 0.15, fing)      # do mindinho para o indicador: para cima
+				var ang := a0.signed_angle_to(a1, fing)
+				hp.basis = Basis(fing, ang) * hp.basis
+				sk.set_bone_global_pose(hb, hp)
+			_curl_fingers(sk, side, 0.35)
+		if not with_tool:
+			return
+		# ferramenta na mão direita, em pé na frente (a de cabo comprido vai inclinada para baixo)
+		_close_fingers(sk, "Right")
+		var hb := _bone("RightHand")
+		var fa := _bone("RightForeArm")
+		var hp := sk.get_bone_global_pose(hb)
+		var arm_dir := (hp.origin - sk.get_bone_global_pose(fa).origin).normalized()
+		var want: Vector3
+		if tool in ["pa", "cavadeira"]:
+			want = cf * 0.55 - cu * 0.8 - cr * 0.1
+		elif tool == "serra":
+			want = cf * 1.0 - cr * 0.35 + cu * 0.1
+		else:
+			want = cu * 0.85 + cf * 0.4 - cr * 0.2
+		var handle := _orth(want, arm_dir)
+		var g := _grip_rotate("Right", sk, handle, arm_dir)
+		if g.is_empty():
+			return
+		hp.basis = g.basis
+		sk.set_bone_global_pose(hb, hp)
+		var center: Vector3 = hp.origin + g.offset
+		var edge := _orth(cf if tool in ["machado", "serra"] else -cr, handle)
+		_set_tool(sk, _tool_xf(center - handle * carry_grip, handle, edge))
 
 	## Ângulo do golpe de cima para baixo (graus de elevação do cabo):
 	## 115 = machado lá em cima, atrás da cabeça; -42 = batendo na tora no chão.
@@ -1155,6 +1235,19 @@ class ChopPose extends SkeletonModifier3D:
 		sk.set_bone_global_pose(b, g)
 
 	## Dedos fechados em volta do cabo (cada falange dobra no próprio eixo X).
+	## Dedos meio dobrados, mão relaxada (amount 0 a 1 do fechado).
+	func _curl_fingers(sk: Skeleton3D, side: String, amount: float) -> void:
+		var i := 0
+		for f in ["Index", "Middle", "Ring", "Pinky"]:
+			var angs := [1.15, 1.35, 0.9]
+			var a := amount * (0.75 + 0.15 * i)        # o mindinho dobra mais que o indicador
+			for k in 3:
+				var b := _bone("%sHand%s%d" % [side, f, k + 1])
+				if b < 0:
+					continue
+				sk.set_bone_pose_rotation(b, sk.get_bone_pose_rotation(b) * Quaternion(Vector3.RIGHT, angs[k] * a))
+			i += 1
+
 	func _close_fingers(sk: Skeleton3D, side: String) -> void:
 		for f in ["Index", "Middle", "Ring", "Pinky"]:
 			var angs := [1.15, 1.35, 0.9]

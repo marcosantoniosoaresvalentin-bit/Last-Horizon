@@ -12,6 +12,7 @@ extends Node3D
 ## Perto do jogador, os macacos aparecem: andam de quatro, sobem nos troncos e sentam.
 
 const Modelo := preload("res://scripts/world/macaco_modelo.gd")
+const Sons := preload("res://scripts/sons.gd")
 const RANGE := 200.0          # até onde o bando procura bacaba (m)
 const EAT_RANGE := 120.0      # de onde come frutos no dia
 const STARVE_DAYS := 15       # dias sem bacaba até começarem a morrer
@@ -29,6 +30,9 @@ var _bac: Node
 var _rng := RandomNumberGenerator.new()
 var _agents := {}             # índice do bando -> [agentes]
 var _next_id := 1
+var _call_t := {}             # bando -> segundos até o próximo assobio de contato
+var _alarm_t := {}            # bando -> espera até poder dar alarme de novo
+var _cur := -1                # bando sendo animado agora
 const ADULT_F := 1460         # dias: fêmea pode ter filhote a partir dos 4 anos
 const CARRY_DAYS := 180       # filhote nas costas da mãe
 
@@ -311,6 +315,8 @@ func update(delta: float) -> void:
 			if best != null:
 				t.x = float(best[0])
 				t.z = float(best[1])
+		_cur = int(i)
+		_calls(int(i), delta)
 		var by_id := {}
 		for a in _agents[i]:
 			by_id[int(a.id)] = a
@@ -334,6 +340,7 @@ func _agent_step(a: Dictionary, t: Dictionary, host, pp: Vector3, delta: float) 
 	# jogador muito perto: foge para o tronco e sobe
 	if str(a.state) in ["sentar", "andar"] and Vector2(pos.x - pp.x, pos.z - pp.z).length() < 3.5 and host != null:
 		_start_climb(a, host)
+		_alarm(pos)
 	# a árvore em que estava foi derrubada: pula para o chão e foge
 	var mine = a.get("tree")
 	var mine_ok: bool = _host_ok(mine)
@@ -343,6 +350,8 @@ func _agent_step(a: Dictionary, t: Dictionary, host, pp: Vector3, delta: float) 
 			away = Vector3(_rng.randf_range(-1, 1), 0, _rng.randf_range(-1, 1))
 		a.vel = away.normalized() * _rng.randf_range(1.5, 3.0) + Vector3.UP * 1.5
 		a.state = "cair"
+		if _rng.randf() < 0.5:
+			Sons.play_at(self, "macaco_guincho", pos, 0.0, _rng.randf_range(0.9, 1.15), 120.0, 8.0)   # susto: a árvore caiu
 	match str(a.state):
 		"cair":
 			var v: Vector3 = a.vel
@@ -424,6 +433,35 @@ func _agent_step(a: Dictionary, t: Dictionary, host, pp: Vector3, delta: float) 
 		var up := Vector3(-nx, 1.0, -nz).normalized()
 		var yaw := n.rotation.y
 		n.basis = (Basis(Quaternion(Vector3.UP, up)) * Basis(Vector3.UP, yaw)).scaled(n.scale)
+
+
+## Sons: o bando conversa com assobios de contato de vez em quando (procurando comida,
+## para não se perder um do outro); de noite fica quieto. Na época da bacaba madura, mais
+## trinados (estão comendo juntos). Alarme só quando o jogador chega perto.
+func _calls(i: int, delta: float) -> void:
+	_alarm_t[i] = maxf(0.0, float(_alarm_t.get(i, 0.0)) - delta)
+	var h: float = _jogo.sim.hour()
+	if h < 5.8 or h > 18.3:
+		return
+	var t := float(_call_t.get(i, _rng.randf_range(3.0, 10.0))) - delta
+	if t <= 0.0:
+		var list: Array = _agents[i]
+		var who: Dictionary = list[_rng.randi() % list.size()]
+		if int(who.get("ride", -1)) < 0:
+			var trill: bool = _rng.randf() < (0.4 if _bac.ripe_season(last_day) else 0.2)
+			Sons.play_at(self, "macaco_trinado" if trill else "macaco_assobio", who.pos + Vector3.UP * 0.4,
+				0.0, _rng.randf_range(0.92, 1.1), 110.0, 7.0)
+		t = _rng.randf_range(7.0, 24.0)
+		if _jogo.sim.raining:
+			t *= 2.5                  # na chuva quase não chamam
+	_call_t[i] = t
+
+
+func _alarm(pos: Vector3) -> void:
+	if float(_alarm_t.get(_cur, 0.0)) > 0.0:
+		return
+	_alarm_t[_cur] = _rng.randf_range(10.0, 16.0)
+	Sons.play_at(self, "macaco_alarme", pos + Vector3.UP * 0.4, 0.0, _rng.randf_range(0.95, 1.08), 140.0, 9.0)
 
 
 func _start_climb(a: Dictionary, host) -> void:
