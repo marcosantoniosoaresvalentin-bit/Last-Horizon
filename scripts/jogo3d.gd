@@ -283,6 +283,7 @@ var _model: Node3D
 var _skel: Skeleton3D = null
 var _head_bone := -1
 var _eye_smooth := Vector3.ZERO
+var _head_axes := []
 var _bob_t := 0.0
 var _anim: AnimationPlayer
 var _anim_now := ""
@@ -1182,8 +1183,8 @@ func _build_player() -> void:
 				if mat is BaseMaterial3D:
 					var nm: BaseMaterial3D = mat.duplicate()
 					nm.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_DITHER
-					nm.distance_fade_min_distance = 0.2
-					nm.distance_fade_max_distance = 0.3
+					nm.distance_fade_min_distance = 0.27
+					nm.distance_fade_max_distance = 0.34
 					m3.set_surface_override_material(si, nm)
 	# machado na mão e golpe feito em código (por cima da animação)
 	var axe := MeshInstance3D.new()
@@ -4117,6 +4118,18 @@ func _move_player(delta: float) -> void:
 	_fp_camera(delta, moved)
 
 
+## Eixo do osso (±X, ±Y, ±Z) que mais aponta para "want".
+static func _best_axis(b: Basis, want: Vector3) -> Vector3:
+	var best := Vector3.ZERO
+	var bd := -2.0
+	for ax in [Vector3.RIGHT, Vector3.LEFT, Vector3.UP, Vector3.DOWN, Vector3.BACK, Vector3.FORWARD]:
+		var d: float = (b * ax).normalized().dot(want)
+		if d > bd:
+			bd = d
+			best = ax
+	return best
+
+
 ## Primeira pessoa: a câmera fica nos olhos do personagem (segue a cabeça dele, que
 ## abaixa, anda e balança junto) e as mãos dele aparecem na frente.
 func _fp_camera(delta: float, moved: float) -> void:
@@ -4124,14 +4137,16 @@ func _fp_camera(delta: float, moved: float) -> void:
 	var bfwd := -body.z
 	var eye := _player.global_position + Vector3(0, 1.62, 0) + bfwd * 0.1
 	if _skel and _head_bone >= 0:
-		var hp: Vector3 = _skel.global_transform * _skel.get_bone_global_pose(_head_bone).origin
-		eye = hp + Vector3.UP * 0.085 + bfwd * 0.115
-	# o balanço da cabeça andando chega pela metade (senão enjoa)
-	if _eye_smooth == Vector3.ZERO or _eye_smooth.distance_to(eye) > 2.0:
-		_eye_smooth = eye
-	_eye_smooth.x = eye.x
-	_eye_smooth.z = eye.z
-	_eye_smooth.y = lerpf(_eye_smooth.y, eye.y, minf(1.0, delta * 9.0))
+		# os olhos ficam presos na cabeça (seguem ela inclinando no passo, sem atraso):
+		# assim a câmera nunca fica atrás ou em cima da própria cabeça
+		var hg: Transform3D = _skel.global_transform * _skel.get_bone_global_pose(_head_bone)
+		var hb := hg.basis.orthonormalized()
+		if _head_axes.is_empty():
+			_head_axes = [_best_axis(hb, bfwd), _best_axis(hb, Vector3.UP)]
+		var hf: Vector3 = (hb * _head_axes[0]).normalized()
+		var hu: Vector3 = (hb * _head_axes[1]).normalized()
+		eye = hg.origin + hu * 0.09 + hf * 0.15
+	_eye_smooth = eye
 	# trabalhando, o olhar desce para onde as mãos estão (o golpe, a serra, a pá)
 	var work := -1.0
 	if _sawing:
