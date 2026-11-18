@@ -1,9 +1,9 @@
 {
-  "version": 109,
-  "file": "update_109.zip",
-  "size": 4584293,
-  "sha256": "156085722e7c60e82946145f2d17810840f096aa666e367fe73790b6e891b824",
+  "version": 110,
+  "file": "update_110.zip",
+  "size": 4586213,
+  "sha256": "ddd321f947a5cd49e71ae1f54d59a727814b50db41ef613ae2550719427ddc05",
   "min_build": 1,
-  "notes": "Multiplayer: tudo que um jogador faz aparece para os outros em tempo real",
+  "notes": "Construção: arrastar o dedo para girar, inclinar, virar, mover e subir/descer a peça devagar",
   "date": "2026-11-18"
 }
