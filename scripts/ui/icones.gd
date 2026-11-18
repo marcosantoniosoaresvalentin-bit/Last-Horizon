@@ -93,6 +93,8 @@ static func kind_for(text: String) -> String:
 		return "forquilha"
 	if t.begins_with("apoiar"):
 		return "apoiar"
+	if t.begins_with("jogar terra"):
+		return "cavar"
 	if t.begins_with("cavar"):
 		return "cavar"
 	if t.begins_with("fincar"):

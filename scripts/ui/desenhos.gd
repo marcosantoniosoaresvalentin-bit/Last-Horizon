@@ -169,6 +169,17 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			# cabeça de machado de pedra lascada: nuca estreita (esq.), fio largo e curvo (dir.)
 			flint(ci, P.call([[-40, -6], [-30, -16], [-10, -24], [14, -30], [34, -30], [44, -14], [46, 4], [40, 22], [30, 30], [8, 24], [-12, 16], [-32, 10], [-42, 4]]),
 				Color(0.2, 0.21, 0.19), 3, u, [9, 10])
+		"pa":
+			# cabo comprido com pegador em T e a lâmina larga de pedra
+			ci.draw_line(c + Vector2(40, -44) * u, c + Vector2(-8, 10) * u, Color(0.4, 0.26, 0.14), 7.0 * u, true)
+			ci.draw_line(c + Vector2(32, -50) * u, c + Vector2(48, -38) * u, Color(0.36, 0.23, 0.12), 7.0 * u, true)
+			flint(ci, P.call([[-2, 4], [8, 14], [-6, 36], [-28, 48], [-46, 40], [-44, 22], [-26, 6]]), Color(0.47, 0.43, 0.35), 21, u, [2, 3, 4])
+			for k in 3:
+				var pa := c + Vector2(-8, 10).lerp(Vector2(40, -44), 0.05 + k * 0.07) * u
+				ci.draw_line(pa + Vector2(-6, -6) * u, pa + Vector2(6, 6) * u, Color(0.45, 0.4, 0.18), 3.0 * u, true)
+		"pedra_pa":
+			flint(ci, P.call([[-16, -40], [16, -40], [30, -14], [38, 14], [30, 36], [0, 44], [-30, 36], [-38, 14], [-30, -14]]),
+				Color(0.47, 0.43, 0.35), 9, u, [4, 5, 6])
 		"pedra_cavadeira":
 			# lâmina de cavadeira: estreita em cima (onde encaixa no cabo), larga e chata embaixo
 			flint(ci, P.call([[-12, -42], [12, -42], [16, -24], [26, -2], [34, 20], [30, 36], [12, 42], [-12, 42], [-30, 36], [-34, 20], [-26, -2], [-16, -24]]),

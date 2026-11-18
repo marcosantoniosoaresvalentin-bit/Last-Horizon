@@ -215,6 +215,90 @@ static func digger_mesh() -> ArrayMesh:
 	return st.commit()
 
 
+## Pá de pedra: o mesmo cabo comprido de galho, com uma lâmina de pedra bem mais larga
+## e côncava (para levar terra), amarrada com cipó, e um pegador em T em cima.
+## Cabo de y = 0 (em cima) até 1,22; a lâmina vai até ~1,5 m.
+static func pa_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 8282
+	_digger_haft(st, rng)
+	# pegador em T na ponta de cima
+	_tube_r(st, [Vector3(-0.07, 0.0, 0.0), Vector3(0.07, 0.0, 0.0)], 0.017, 0.017, Color(0.22, 0.15, 0.08), 7, rng)
+	_helix(st, -0.02, 0.03, 0.022, 2.5, 0.004, Color(0.17, 0.19, 0.08), rng)
+	# lâmina larga e côncava (a concha da pá)
+	var y0 := 1.1
+	var y1 := 1.5
+	var cols := 8
+	var rows := 8
+	var grid := []
+	for i in cols + 1:
+		var u := float(i) / cols
+		var y := lerpf(y0, y1, u)
+		var half_w := lerpf(0.05, 0.13, smoothstep(0.0, 0.45, u)) * (1.0 - 0.25 * pow(maxf(u - 0.75, 0.0) / 0.25, 2.0))
+		var thick := lerpf(0.014, 0.003, pow(u, 1.3))
+		var col := []
+		for j in rows + 1:
+			var v := float(j) / rows * 2.0 - 1.0
+			var x := v * half_w + rng.randf_range(-0.003, 0.003)
+			var dish := 0.03 * (1.0 - v * v) * sin(u * PI)        # côncava para a frente (+Z)
+			var yy := y - 0.035 * v * v * u + rng.randf_range(-0.002, 0.002)
+			col.append([Vector3(x, yy, -dish + thick), Vector3(x, yy, -dish - thick)])
+		grid.append(col)
+	var stone := Color(0.4, 0.37, 0.31)
+	for side in 2:
+		for i in cols:
+			for j in rows:
+				var a: Vector3 = grid[i][j][side]
+				var b: Vector3 = grid[i + 1][j][side]
+				var c: Vector3 = grid[i + 1][j + 1][side]
+				var d: Vector3 = grid[i][j + 1][side]
+				var cc := stone * rng.randf_range(0.85, 1.12)
+				cc = cc.lerp(Color(0.58, 0.55, 0.47), smoothstep(0.75, 1.0, float(i) / cols))
+				cc.a = 1.0
+				if side == 0:
+					_quad(st, a, b, c, d, cc)
+				else:
+					_quad(st, d, c, b, a, cc)
+	for i in cols:
+		for j in [0, rows]:
+			_quad(st, grid[i][j][0], grid[i + 1][j][0], grid[i + 1][j][1], grid[i][j][1], stone * 0.8)
+	for j in rows:
+		_quad(st, grid[cols][j][0], grid[cols][j + 1][0], grid[cols][j + 1][1], grid[cols][j][1], Color(0.6, 0.57, 0.5))
+	var vine := Color(0.17, 0.19, 0.08)
+	_helix(st, 1.03, 1.13, 0.024, 4.5, 0.0045, vine, rng)
+	for sx in [1.0, -1.0]:
+		_tube(st, [Vector3(sx * 0.02, 1.08, 0.014), Vector3(sx * 0.04, 1.15, 0.02), Vector3(sx * 0.03, 1.2, 0.0), Vector3(sx * 0.04, 1.15, -0.02), Vector3(sx * 0.02, 1.08, -0.014)], 0.004, vine.lightened(0.06), rng)
+	st.generate_normals()
+	return st.commit()
+
+
+## Terra em cima da concha da pá (aparece quando a pá está cheia).
+static func pa_dirt_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 33
+	var c0 := Vector3(0, 1.32, 0.005)
+	var n := 14
+	var top := []
+	for k in n:
+		var a := TAU * k / n
+		var r := Vector2(0.1 * cos(a), 0.15 * sin(a)) * rng.randf_range(0.85, 1.1)
+		top.append(c0 + Vector3(r.x, r.y, -0.012))
+	var peak := c0 + Vector3(0, 0, -0.07)
+	for k in n:
+		var a: Vector3 = top[k]
+		var b: Vector3 = top[(k + 1) % n]
+		var col := Color(0.29, 0.2, 0.12).darkened(rng.randf_range(0.0, 0.2))
+		_quad(st, a, b, peak.lerp(b, 0.35) + Vector3(0, 0, rng.randf_range(-0.01, 0.01)), peak.lerp(a, 0.35), col)
+		st.set_color(col.lightened(0.05))
+		st.add_vertex(peak.lerp(a, 0.35)); st.add_vertex(peak.lerp(b, 0.35)); st.add_vertex(peak)
+	st.generate_normals()
+	return st.commit()
+
+
 ## Serra de pedra (dos antigos, para dois): um cabo comprido de galho (1,3 m) com um
 ## pegador em pé em cada ponta, e no meio uma lâmina de pedra lascada com dentes
 ## (como a da foto), encaixada embaixo do cabo e amarrada com cipó.
@@ -397,7 +481,7 @@ static func worked_stone_mesh(kind: String) -> ArrayMesh:
 			var k := 1.0 / 0.36
 			xf = Transform3D(Basis(Vector3(0, 0, k), Vector3(k, 0, 0), Vector3(0, k, 0)), Vector3.ZERO) * Transform3D(Basis(), Vector3(0, -1.29, 0))
 		_:
-			var blade: ArrayMesh = Lascar.mesh(Lascar.target("lamina_serra"), Lascar.rock(31), 31)
+			var blade: ArrayMesh = Lascar.mesh(Lascar.target(kind), Lascar.rock(31), 31)
 			return blade
 	st.generate_normals()
 	var m := st.commit()
@@ -1105,7 +1189,7 @@ class ChopPose extends SkeletonModifier3D:
 			var b := _bone(pr[1])
 			if a >= 0 and b >= 0:
 				caps.append([sk.get_bone_global_pose(a).origin, sk.get_bone_global_pose(b).origin, float(pr[2])])
-		var length := 0.62 if tool == "machado" else 1.45
+		var length := 0.62 if tool == "machado" else (1.5 if tool == "pa" else 1.45)
 		var t := txf
 		for it in 10:
 			var worst := 0.0

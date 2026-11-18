@@ -350,6 +350,9 @@ var _vine_hand: Node3D = null
 var _knap_rng := RandomNumberGenerator.new()
 var _work_menu: Control = null
 var _work := {}                   # trabalho escolhido: {i (tora apoiada), modo, e (ponta), stage, fix}
+var _pa_full := false            # a pá está cheia de terra (precisa jogar fora)
+var _pa_dirt: Node3D = null       # a terra em cima da pá
+var _climb := {}                  # saindo da cova funda: {t, dur, from, to}
 var _sawing := false              # serrando a rodela (vai e vem sozinho até terminar ou parar)
 var _saw_t := 0.0
 var _saw_half := 0
@@ -1236,7 +1239,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "dur": _dur, "rodelas": _rodelas}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "pa_cheia": _pa_full, "dur": _dur, "rodelas": _rodelas}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1245,7 +1248,7 @@ func _save_player() -> void:
 
 func _load_player() -> void:
 	# todo mapa novo começa com um machado de pedra na mochila
-	_itens = {"machado": 1, "cavadeira": 1, "serra": 1}
+	_itens = {"machado": 1, "cavadeira": 1, "serra": 1, "pa": 1}
 	if _world_id == "" or not sim.loaded_from_save:
 		return
 	var path := Mundos.dir(_world_id) + "/jogador.json"
@@ -1263,6 +1266,8 @@ func _load_player() -> void:
 		if not bool(d.get("ganhou_cavadeira", false)) and not _itens.has("cavadeira"):
 			_itens["cavadeira"] = 1
 		# a serra de pedra também chegou numa atualização: uma para testar
+		if not bool(d.get("ganhou_pa", false)) and not _itens.has("pa"):
+			_itens["pa"] = 1        # a pá chegou numa atualização: uma para testar
 		if not bool(d.get("ganhou_serra", false)) and not _itens.has("serra"):
 			_itens["serra"] = 1
 	if d.get("rodelas") is Array:
@@ -1275,6 +1280,7 @@ func _load_player() -> void:
 		for g in d.chao:
 			if g is Dictionary and Itens.ITENS.has(str(g.get("id", ""))):
 				_add_ground(str(g.id), int(g.get("qtd", 1)), float(g.get("x", 0.0)), float(g.get("z", 0.0)), float(g.get("r", 0.0)), g.get("dur", []))
+	_pa_full = bool(d.get("pa_cheia", false))
 	equip(str(d.get("mao", "")))
 	var tora = d.get("tora", {})
 	if tora is Dictionary and tora.has("v"):
@@ -1630,9 +1636,9 @@ func equip(id: String) -> void:
 	if _sawing:
 		_stop_saw()
 	if _chop_pose:
-		_chop_pose.holding = _mao in ["machado", "cavadeira", "serra", "pedra"]
+		_chop_pose.holding = _mao in ["machado", "cavadeira", "serra", "pedra", "pa"]
 		_chop_pose.tool = _mao if _mao != "" else "machado"
-		if _mao == "cavadeira":
+		if _mao == "cavadeira" or _mao == "pa":
 			_chop_pose.grip_low = 0.04
 			_chop_pose.grip_high = 0.4
 			_chop_pose.carry_grip = 0.22
@@ -1648,12 +1654,21 @@ func equip(id: String) -> void:
 		var mi := _axe_node as MeshInstance3D
 		if _mao == "cavadeira":
 			mi.mesh = Corte.digger_mesh()
+		elif _mao == "pa":
+			mi.mesh = Corte.pa_mesh()
 		elif _mao == "serra":
 			mi.mesh = Corte.saw_mesh()
 		elif _mao == "pedra":
 			mi.mesh = Lascar.cobble_mesh(77, 0.1)      # pedra de bater, na palma da mão
 		else:
 			mi.mesh = Corte.axe_mesh()
+		if _pa_dirt == null:
+			var dm := MeshInstance3D.new()
+			dm.mesh = Corte.pa_dirt_mesh()
+			dm.material_override = Corte.axe_material()
+			mi.add_child(dm)
+			_pa_dirt = dm
+		_pa_dirt.visible = _mao == "pa" and _pa_full
 	_act_check = 0.0
 
 
@@ -1826,6 +1841,9 @@ func _update_chop(delta: float) -> void:
 	if _mao == "cavadeira" and not _digging and not _air and _carry.is_empty() and _crouch_job == "" and _player_depth() < 0.3:
 		_chop_btn.visible = true
 		_chop_btn.text = "Cavar"
+	if _mao == "pa" and not _air and _carry.is_empty() and _crouch_job == "" and _climb.is_empty() and _player_depth() < 0.3:
+		_chop_btn.visible = true
+		_chop_btn.text = "Jogar terra" if _pa_full else "Cavar"
 	if not _work.is_empty() and str(_work.get("stage", "")) == "pronto":
 		var sp: Vector3 = _apoios.slice_point(int(_work.i), int(_work.e)) if int(_work.i) < _apoios.rested.size() else Vector3(1e9, 0, 1e9)
 		if Vector2(sp.x - _player.position.x, sp.z - _player.position.z).length() > 3.0:
@@ -3010,9 +3028,10 @@ func _open_knap_menu() -> void:
 		return
 	var descs := {"pedra_machado": "Pedra com fio, do formato da cabeça do machado.",
 		"pedra_cavadeira": "Pedra larga e chata, como uma pá.",
-		"lamina_serra": "Pedra comprida e fina, com dentes num lado."}
+		"lamina_serra": "Pedra comprida e fina, com dentes num lado.",
+		"pedra_pa": "Pedra larga e fina, arredondada na frente, para a pá."}
 	var opts := []
-	for k in ["pedra_machado", "pedra_cavadeira", "lamina_serra"]:
+	for k in ["pedra_machado", "pedra_cavadeira", "lamina_serra", "pedra_pa"]:
 		var kk: String = k
 		opts.append([Lascar.KINDS[k].nome, descs[k], func(): _knap_go(_pedras.nearest(_player.position, 1.5, true), kk)])
 	_choice_menu("MODELAR PEDRA", "Que ferramenta essa pedra vai virar?", opts)
@@ -3478,9 +3497,65 @@ func _stone_chips(at: Vector3, n: int) -> void:
 	get_tree().create_timer(1.0).timeout.connect(c.queue_free)
 
 
+# ================== PÁ ==================
+
+## A pá chegou no chão: se está vazia, tira uma pá de terra (a cova aprofunda);
+## se está cheia, joga a terra onde o personagem está virado.
+func _pa_hit() -> void:
+	var inside: int = _buracos.pit_at(_player.position.x, _player.position.z)
+	var in_deep: bool = inside >= 0 and float(_buracos.holes[inside].d) > 0.3 and _player.position.y < surface_at(_player.position.x, _player.position.z) - 0.25
+	if not _pa_full:
+		var at := _player.position if in_deep else _front(1.0)
+		var res: Array = _buracos.dig_pa(at, inside if in_deep else -1)
+		if float(res[1]) <= 0.0:
+			_show_toast("Não dá para cavar mais fundo aqui.")
+			return
+		_dirt(at if not in_deep else _player.position + Vector3(-sin(_face), 0, -cos(_face)) * 0.4)
+		Sons.play_at(self, "cavar", at, 0.0, 0.9)
+		_pa_full = true
+		var d: float = float(_buracos.holes[int(res[0])].d)
+		_show_toast("Pá cheia de terra. Cova com %s de fundura: vá jogar a terra fora." % ("%d cm" % int(round(d * 100.0)) if d < 1.0 else ("%.1f m" % d).replace(".", ",")))
+	else:
+		# joga a terra: de dentro da cova, para fora dela (por cima da borda)
+		var fwd := Vector3(-sin(_face), 0, -cos(_face))
+		var to := _front(1.1)
+		if in_deep:
+			var h: Dictionary = _buracos.holes[inside]
+			to = Vector3(float(h.x), 0, float(h.z)) + fwd * (float(h.r) + 0.7)
+		to.y = surface_at(to.x, to.z)
+		var kind: String = _buracos.toss(to, PI * Buracos.PA_R * Buracos.PA_R * Buracos.PA_STEP)
+		_dirt(to)
+		Sons.play_at(self, "cavar", to, -4.0, 1.15)
+		_pa_full = false
+		if kind == "cova":
+			_show_toast("Você jogou a terra de volta na cova.")
+	if _pa_dirt:
+		_pa_dirt.visible = _pa_full
+
+
+## Sair da cova funda: o personagem escala a parede até a borda.
+func _start_climb_out() -> bool:
+	if _buracos == null:
+		return false
+	var i: int = _buracos.pit_at(_player.position.x, _player.position.z)
+	if i < 0:
+		return false
+	var h: Dictionary = _buracos.holes[i]
+	var surf := surface_at(_player.position.x, _player.position.z)
+	if _player.position.y > surf - 0.45:
+		return false            # raso: o pulo normal já sai
+	var fwd := Vector3(-sin(_face), 0, -cos(_face))
+	var to := Vector3(float(h.x), 0, float(h.z)) + fwd * (float(h.r) + 0.35)
+	to.y = surface_at(to.x, to.z)
+	_climb = {"t": 0.0, "dur": 0.6 + float(h.d) * 0.55, "from": _player.position, "to": to}
+	return true
+
+
 ## Pulo: sobe uns 60 cm (dá para passar por cima de uma tora ou subir nela).
 func _jump() -> void:
-	if _air or _chopping or _digging or not _carry.is_empty() or _crouch_job != "":
+	if _air or _chopping or _digging or not _carry.is_empty() or _crouch_job != "" or not _climb.is_empty():
+		return
+	if _start_climb_out():
 		return
 	_air = true
 	_vy = 4.2
@@ -3495,7 +3570,7 @@ func _start_chop() -> void:
 		elif not _work.is_empty() and str(_work.get("stage", "")) == "pronto":
 			_begin_saw()
 		return
-	if (_mao != "machado" and _mao != "cavadeira") or _arvores == null:
+	if (_mao != "machado" and _mao != "cavadeira" and _mao != "pa") or _arvores == null:
 		return
 	if _chopping:
 		if _swing_on:
@@ -3503,7 +3578,7 @@ func _start_chop() -> void:
 		else:
 			_begin_swing()
 		return
-	if _mao == "cavadeira":
+	if _mao == "cavadeira" or _mao == "pa":
 		if _digging:
 			_cancel_dig()
 		_chop_hole = true
@@ -3576,6 +3651,10 @@ func _chop_hit_now() -> void:
 			if _galhos.chop(int(_chop_branch.i)):
 				_show_toast("Galho cortado em 2. Agora dá para pegar.")
 				_cancel_chop()
+		return
+	if _chop_hole and _mao == "pa":
+		_pa_hit()
+		_cancel_chop()
 		return
 	if _chop_hole:
 		var at := _front(0.62)
@@ -3756,7 +3835,7 @@ func _move_player(delta: float) -> void:
 			_stop_saw()
 		else:
 			amount = 0.0
-	if not _knap.is_empty() or not _vine.is_empty():
+	if not _knap.is_empty() or not _vine.is_empty() or not _climb.is_empty():
 		amount = 0.0
 	if _crouch_job != "":
 		amount = 0.0           # abaixado pegando ou largando a tora
@@ -3846,8 +3925,16 @@ func _move_player(delta: float) -> void:
 		p = _buracos.push_out(p)          # nem as toras fincadas
 	if _apoios:
 		p = _apoios.push_out(p)           # nem as forquilhas e a tora em cima delas
+	if _buracos:
+		p = _buracos.pit_walls(p, _player.position, feet)   # dentro da cova: as paredes seguram
 	# chão: o terreno ou o topo de uma tora (dá para subir pulando e andar em cima)
 	var ground := height_at(p.x, p.z) - minf(depth, 0.9) * 0.5
+	if _buracos:
+		var go: float = _buracos.ground_offset(p.x, p.z)
+		if go < 0.0:
+			ground = surface_at(p.x, p.z) + go       # fundo da cova
+		elif go > 0.0:
+			ground += go                             # em cima do monte de terra
 	if _arvores:
 		var sup: float = _arvores.support_y(p.x, p.z)
 		if sup > ground and feet >= sup - 0.2:
@@ -3866,6 +3953,20 @@ func _move_player(delta: float) -> void:
 		p.y = feet
 	else:
 		p.y = ground
+	if not _climb.is_empty():
+		# escalando a parede da cova: sobe, e no fim passa por cima da borda
+		_climb.t = float(_climb.t) + delta
+		var u := clampf(float(_climb.t) / float(_climb.dur), 0.0, 1.0)
+		var a: Vector3 = _climb.from
+		var b: Vector3 = _climb.to
+		var up := smoothstep(0.0, 0.8, u)
+		var out := smoothstep(0.7, 1.0, u)
+		p = Vector3(lerpf(a.x, b.x, out), lerpf(a.y, b.y + 0.05, up), lerpf(a.z, b.z, out))
+		_air = false
+		_vy = 0.0
+		if u >= 1.0:
+			p.y = b.y
+			_climb = {}
 	# passos: um som a cada passada (na água, respingo e onda)
 	var moved := Vector2(p.x - _player.position.x, p.z - _player.position.z).length()
 	var landed := _air == false and _player.position.y > p.y + 0.15

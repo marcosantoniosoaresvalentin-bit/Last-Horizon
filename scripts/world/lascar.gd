@@ -13,6 +13,7 @@ const KINDS := {
 	"pedra_machado": {"spots": 8, "nome": "Pedra de Machado"},
 	"pedra_cavadeira": {"spots": 9, "nome": "Lâmina de Cavadeira"},
 	"lamina_serra": {"spots": 12, "nome": "Lâmina de Serra"},
+	"pedra_pa": {"spots": 10, "nome": "Lâmina de Pá"},
 }
 const N := 48                   # ângulos do contorno
 const R := 5                    # anéis do centro até a beira
@@ -95,6 +96,13 @@ static func _limits(kind: String, x: float, z: float) -> Vector3:
 			var w := lerpf(0.2, 0.36, smoothstep(0.0, 0.45, u))
 			var t := 0.09 * (1.0 - 0.8 * smoothstep(0.5, 1.0, u))
 			return Vector3(a, maxf(t, 0.01), w)
+		"pedra_pa":
+			# pá: larga, arredondada na frente, fina na beira
+			var a := 0.44
+			var u := clampf((x + a) / (2.0 * a), 0.0, 1.0)
+			var w := lerpf(0.16, 0.42, smoothstep(0.0, 0.45, u)) * sqrt(maxf(0.0, 1.0 - pow(maxf(u - 0.7, 0.0) / 0.3, 2.0) * 0.7))
+			var t := 0.075 * (1.0 - 0.8 * smoothstep(0.45, 1.0, u))
+			return Vector3(a, maxf(t, 0.008), maxf(w, 0.02))
 		"lamina_serra":
 			# lâmina comprida e fina; o lado +z afina e tem os dentes
 			var a := 0.5

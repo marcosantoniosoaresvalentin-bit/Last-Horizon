@@ -1,9 +1,9 @@
 {
-  "version": 69,
-  "file": "update_69.zip",
-  "size": 3493339,
-  "sha256": "2b5588957b9731371e9a2eb09da79fd69274d46b50c2479655b3ebb6e813e42e",
+  "version": 70,
+  "file": "update_70.zip",
+  "size": 3496913,
+  "sha256": "e85a7272e6d2208e3b8d7f9d9f775e7885f54e72b63c83aaf4fb7ae5c1ed45cb",
   "min_build": 1,
-  "notes": "Macaco com corpo liso, pés no chão, pulam e fogem quando a árvore cai, e tronco que caiu sozinho dá para cortar",
+  "notes": "Pá de pedra: cova larga onde dá para entrar e cavar a fundura que quiser; a pá enche de terra e você joga onde quiser",
   "date": "2026-11-18"
 }

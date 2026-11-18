@@ -11,9 +11,13 @@ extends Node3D
 const MAX_DEPTH := 1.2
 const STEP := 0.1               # cada golpe aprofunda 10 cm
 const MAX_HOLES := 400
+const PA_R := 0.8               # raio da cova da pá (dá para entrar dentro)
+const PA_STEP := 0.05           # cada pá de terra aprofunda 5 cm
+const PA_MAX := 10.0            # fundura máxima (m)
 
 var holes: Array = []           # {x, z, d (fundura, m), r (raio), tora (índice do esteio ou -1)}
 var posts: Array = []           # toras fincadas: {log (dados da tora), x, z, d (enterrada), yaw}
+var montes: Array = []          # montes de terra jogada: {x, z, v (volume, m³)}
 var _jogo: Node
 var _arv: Node
 var _nodes: Array = []
@@ -112,13 +116,110 @@ func dig_at(pos: Vector3) -> float:
 	return float(holes[best].d)
 
 
+# ================== PÁ: COVAS LARGAS E MONTES DE TERRA ==================
+
+## Cova da pá em que o ponto está (dentro do raio), ou -1.
+func pit_at(x: float, z: float, margin := 0.0) -> int:
+	for i in holes.size():
+		var h: Dictionary = holes[i]
+		if not bool(h.get("pa", false)):
+			continue
+		if Vector2(float(h.x) - x, float(h.z) - z).length() < float(h.r) + margin:
+			return i
+	return -1
+
+
+## Uma pá de terra: aprofunda a cova (ou abre uma nova em pos). Devolve [índice, volume tirado].
+func dig_pa(pos: Vector3, inside := -1) -> Array:
+	var i := inside if inside >= 0 else pit_at(pos.x, pos.z, 0.25)
+	if i < 0:
+		if holes.size() >= MAX_HOLES:
+			return [-1, 0.0]
+		holes.append({"x": pos.x, "z": pos.z, "d": 0.0, "r": PA_R, "tora": -1, "pa": true})
+		i = holes.size() - 1
+	var h: Dictionary = holes[i]
+	if float(h.d) >= PA_MAX:
+		return [i, 0.0]
+	h.d = minf(float(h.d) + PA_STEP, PA_MAX)
+	_rebuild()
+	return [i, PI * PA_R * PA_R * PA_STEP]
+
+
+## Joga a terra da pá em pos: dentro de uma cova, enche ela de volta; fora, faz/aumenta
+## um monte de terra. Devolve "cova" ou "monte".
+func toss(pos: Vector3, vol: float) -> String:
+	var i := pit_at(pos.x, pos.z)
+	if i >= 0:
+		var h: Dictionary = holes[i]
+		h.d = float(h.d) - vol / (PI * float(h.r) * float(h.r))
+		if float(h.d) <= 0.01:
+			holes.remove_at(i)
+		_rebuild()
+		return "cova"
+	for m in montes:
+		if Vector2(float(m.x) - pos.x, float(m.z) - pos.z).length() < 0.4 + _mound_r(float(m.v)) * 0.5:
+			m.v = float(m.v) + vol
+			_rebuild()
+			return "monte"
+	montes.append({"x": pos.x, "z": pos.z, "v": vol})
+	_rebuild()
+	return "monte"
+
+
+static func _mound_r(v: float) -> float:
+	return clampf(0.3 + pow(v, 0.333) * 0.9, 0.3, 3.0)
+
+
+static func _mound_h(v: float) -> float:
+	var r := _mound_r(v)
+	return clampf(3.0 * v / (PI * r * r), 0.05, 2.0)       # um cone com esse volume
+
+
+## Altura do chão no ponto: cova (mais baixo) ou monte de terra (mais alto); 0 se nada.
+## Devolve o quanto sobe (+) ou desce (-) em relação ao chão normal.
+func ground_offset(x: float, z: float) -> float:
+	var i := pit_at(x, z)
+	if i >= 0:
+		var h: Dictionary = holes[i]
+		var d := Vector2(float(h.x) - x, float(h.z) - z).length()
+		if d < float(h.r) - 0.2:
+			return -float(h.d)
+	var up := 0.0
+	for m in montes:
+		var v := float(m.v)
+		var r := _mound_r(v)
+		var d := Vector2(float(m.x) - x, float(m.z) - z).length()
+		if d < r:
+			up = maxf(up, _mound_h(v) * (1.0 - d / r))
+	return up
+
+
+## Dentro de uma cova funda: não atravessa as paredes. old = onde estava antes de andar.
+func pit_walls(p: Vector3, old: Vector3, feet_y: float) -> Vector3:
+	for h in holes:
+		if not bool(h.get("pa", false)) or float(h.d) < 0.3:
+			continue
+		var c := Vector2(float(h.x), float(h.z))
+		if (Vector2(old.x, old.z) - c).length() > float(h.r):
+			continue          # estava fora da cova
+		if feet_y > _jogo.surface_at(c.x, c.y) - 0.25:
+			continue          # estava em cima (pulando): pode sair
+		var v := Vector2(p.x, p.z) - c
+		var lim := float(h.r) - 0.28
+		if v.length() > lim:
+			var n := v.normalized() if v.length() > 0.001 else Vector2(1, 0)
+			p.x = c.x + n.x * lim
+			p.z = c.y + n.y * lim
+	return p
+
+
 ## Buraco aberto (sem tora) mais perto, com fundura mínima (ou -1).
 func hole_near(pos: Vector3, reach: float, min_depth := 0.2) -> int:
 	var best := -1
 	var bd := reach
 	for i in holes.size():
 		var h: Dictionary = holes[i]
-		if int(h.get("tora", -1)) >= 0 or float(h.d) < min_depth:
+		if int(h.get("tora", -1)) >= 0 or float(h.d) < min_depth or bool(h.get("pa", false)):
 			continue
 		var d := Vector2(float(h.x) - pos.x, float(h.z) - pos.z).length()
 		if d < bd:
@@ -157,14 +258,17 @@ func _rebuild() -> void:
 		if is_instance_valid(n):
 			n.free()
 	_nodes.clear()
-	if holes.is_empty() and posts.is_empty():
+	if holes.is_empty() and posts.is_empty() and montes.is_empty():
 		if changed_hook.is_valid():
 			changed_hook.call()
 		return
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for h in holes:
-		_hole_geo(st, h)
+		if float(h.d) > 0.005:
+			_hole_geo(st, h)
+	for m in montes:
+		_mound_geo(st, m)
 	var mi := MeshInstance3D.new()
 	mi.mesh = st.commit()
 	mi.material_override = _soil_mat
@@ -224,8 +328,10 @@ func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 			_tri(st, c, pa, pb, Color(0.3, 0.22, 0.14), Color(0.34, 0.25, 0.16), Color(0.34, 0.25, 0.16))
 		return
 	# paredes: de cima (na borda levantada) até o fundo, afinando um pouco; anéis no meio
+	var is_pa := bool(h.get("pa", false))
 	var lip := 0.03 + minf(d, 0.6) * 0.06
-	var levels := 6
+	var levels := clampi(int(d / 0.25), 6, 40) if is_pa else 6
+	var shrink := 0.96 if is_pa else 0.82
 	for k in seg:
 		var A: Array = rims[k]
 		var B: Array = rims[k + 1]
@@ -237,7 +343,7 @@ func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 				var rim: Array = pair[0]
 				var t: float = pair[1]
 				var a: float = rim[0]
-				var rad: float = float(rim[1]) * lerpf(1.0, 0.82, t)
+				var rad: float = float(rim[1]) * lerpf(1.0, shrink, t)
 				var top: float = rim[2]
 				var bottom := gy - d
 				var y := lerpf(top + lip, bottom, t)
@@ -255,8 +361,8 @@ func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 	for k in seg:
 		var A: Array = rims[k]
 		var B: Array = rims[k + 1]
-		var pa := Vector3(x + cos(float(A[0])) * float(A[1]) * 0.82, gy - d, z + sin(float(A[0])) * float(A[1]) * 0.82)
-		var pb := Vector3(x + cos(float(B[0])) * float(B[1]) * 0.82, gy - d, z + sin(float(B[0])) * float(B[1]) * 0.82)
+		var pa := Vector3(x + cos(float(A[0])) * float(A[1]) * shrink, gy - d, z + sin(float(A[0])) * float(A[1]) * shrink)
+		var pb := Vector3(x + cos(float(B[0])) * float(B[1]) * shrink, gy - d, z + sin(float(B[0])) * float(B[1]) * shrink)
 		_tri(st, bc, pa, pb, dark.darkened(0.15), dark, dark)
 	# borda: terra solta pisada em volta da boca
 	var loose := Color(0.27, 0.2, 0.13)
@@ -272,6 +378,8 @@ func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 		var ob := Vector3(ob2.x, _jogo.surface_at(ob2.x, ob2.y) + 0.015, ob2.y)
 		_tri(st, ia, oa, ob, loose.darkened(0.15), loose, loose)
 		_tri(st, ia, ob, ib, loose.darkened(0.15), loose, loose.darkened(0.15))
+	if is_pa:
+		return            # a terra da pá vai para onde o jogador jogar (montes)
 	# monte da terra tirada, do lado: redondo, com torrões
 	var vol := PI * r * r * d
 	var mh := clampf(vol * 5.0, 0.04, 0.32)
@@ -300,6 +408,35 @@ func _hole_geo(st: SurfaceTool, h: Dictionary) -> void:
 			_tri(st, grid[i][k], grid[i + 1][k + 1], grid[i + 1][k], c_a, soil, soil)
 
 
+## Monte de terra jogada com a pá: redondo, com torrões, do tamanho da terra que tem.
+func _mound_geo(st: SurfaceTool, m: Dictionary) -> void:
+	var v := float(m.v)
+	var mr := _mound_r(v)
+	var mh := _mound_h(v)
+	var hsh := absi(hash(Vector2(float(m.x), float(m.z))))
+	var ms := 18
+	var rings := 6
+	var grid := []
+	for i in rings + 1:
+		var t := float(i) / rings
+		var row := []
+		for k in ms + 1:
+			var a := TAU * k / ms
+			var bump := 1.0 + 0.14 * sin(a * 3.0 + float(hsh % 5)) + 0.08 * sin(a * 7.0)
+			var rad := mr * (1.0 - t) * bump
+			var p := Vector2(float(m.x) + cos(a) * rad, float(m.z) + sin(a) * rad)
+			var hgt := mh * (1.0 - (1.0 - t) * (1.0 - t) * 0.0) * t * (0.92 + 0.16 * float((hsh >> ((i * 3 + k) % 20)) % 5) / 5.0)
+			hgt = mh * sin(t * PI * 0.5) * (0.92 + 0.16 * float((hsh >> ((i * 3 + k) % 20)) % 5) / 5.0)
+			row.append(Vector3(p.x, _jogo.surface_at(p.x, p.y) + 0.01 + hgt, p.y))
+		grid.append(row)
+	var soil := Color(0.31, 0.23, 0.15)
+	for i in rings:
+		for k in ms:
+			var c_a := soil.darkened(0.1 * float((i + k) % 2))
+			_tri(st, grid[i][k], grid[i][k + 1], grid[i + 1][k + 1], c_a, c_a, soil)
+			_tri(st, grid[i][k], grid[i + 1][k + 1], grid[i + 1][k], c_a, soil, soil)
+
+
 ## Triângulo com cor por ponto. inward: a normal aponta para o meio do buraco (paredes).
 static func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, ca: Color, cb: Color, cc: Color, inward := false, center := Vector3.ZERO) -> void:
 	var n := (b - a).cross(c - a).normalized()
@@ -321,7 +458,7 @@ static func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, ca: Color,
 func save(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"versao": 1, "buracos": holes, "toras": posts}))
+		f.store_string(JSON.stringify({"versao": 1, "buracos": holes, "toras": posts, "montes": montes}))
 		f.close()
 
 
@@ -332,3 +469,4 @@ func _load(path: String) -> void:
 	if d is Dictionary:
 		holes = d.get("buracos", [])
 		posts = d.get("toras", [])
+		montes = d.get("montes", [])
