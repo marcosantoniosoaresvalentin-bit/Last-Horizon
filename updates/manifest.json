@@ -1,9 +1,9 @@
 {
-  "version": 110,
-  "file": "update_110.zip",
-  "size": 4586213,
-  "sha256": "ddd321f947a5cd49e71ae1f54d59a727814b50db41ef613ae2550719427ddc05",
+  "version": 111,
+  "file": "update_111.zip",
+  "size": 4602094,
+  "sha256": "b4826d0b392aa3c64784664e7ad8b1c8005d0219c741c7cfd29cc6f1c3377657",
   "min_build": 1,
-  "notes": "Construção: arrastar o dedo para girar, inclinar, virar, mover e subir/descer a peça devagar",
+  "notes": "Novo: Projetos (plantas de construção) e a Serra de Pedal em dupla",
   "date": "2026-11-18"
 }
