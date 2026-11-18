@@ -1,9 +1,9 @@
 {
-  "version": 102,
-  "file": "update_102.zip",
-  "size": 4576214,
-  "sha256": "71cbf795a8e4112091f224c1fc133aa2d2ae16ea8e58f725c25d5c77aeb1aa19",
+  "version": 103,
+  "file": "update_103.zip",
+  "size": 4578238,
+  "sha256": "d7aca61aab12587f2c9545e535d2a1b4fd8783a458bdab3b6af7d41247f44b06",
   "min_build": 1,
-  "notes": "Novo: sistema de construção livre com toras, meias toras e tábuas em cima das estacas fincadas",
+  "notes": "Nivelar estaca com a serra; viga se apoia em estacas de alturas diferentes; colisão nas peças da construção e nos cupinzeiros",
   "date": "2026-11-18"
 }
