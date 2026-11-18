@@ -182,6 +182,11 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null) -> Dictionary:
 	var lo := false
 	var hi := false
 	var n := 13
+	# peça deitada só se apoia por baixo (encostar a ponta no lado da estaca não segura);
+	# em pé ou inclinada pode se encostar de lado
+	var lying := absf(b.x.y) < 0.5
+	var down_k := 1 if absf(b.y.y) >= absf(b.z.y) else 2          # o eixo da peça que aponta para baixo
+	var down_s := -signf((b[down_k] as Vector3).y)
 	var cross := [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1), Vector2(1, 1), Vector2(1, -1), Vector2(-1, 1), Vector2(-1, -1)]
 	for i in n:
 		var u := lerpf(-1.0, 1.0, float(i) / (n - 1))
@@ -193,6 +198,10 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null) -> Dictionary:
 					if _dist(bx, p) < TOUCH:
 						touch = true
 						break
+			if touch and lying:
+				var side_v: float = cs.x if down_k == 1 else cs.y
+				if side_v * down_s <= 0.0:
+					touch = false              # não está na face de baixo
 			if touch:
 				if u <= -0.25:
 					lo = true
@@ -227,6 +236,12 @@ func _find_place_b(fl: Dictionary, b: Basis, hit: Dictionary) -> Dictionary:
 			n = Vector3.UP
 	var ext := h.x * absf(b.x.dot(n)) + h.y * absf(b.y.dot(n)) + h.z * absf(b.z.dot(n))
 	var c: Vector3 = (hit.p as Vector3) + n * (ext - 0.004)
+	if absf(b.x.y) < 0.5 and n.y > 0.7:
+		# deitada (mesmo um pouco inclinada) em cima de algo: a face de baixo passa pelo
+		# ponto onde mirou, assim ao escorregar no comprido ela continua encostada
+		var k := 1 if absf(b.y.y) >= absf(b.z.y) else 2
+		var ax: Vector3 = b[k]
+		c = (hit.p as Vector3) + ax * signf(ax.y) * (h[k] - 0.004)
 	# viga em cima da estaca/peça: centra a largura em cima dela
 	var hb: Dictionary = hit.box
 	if not hb.is_empty() and n.y > 0.7:
@@ -272,14 +287,14 @@ func _find_place_b(fl: Dictionary, b: Basis, hit: Dictionary) -> Dictionary:
 	return {"ok": true, "c": c + b.x * mid, "why": ""}
 
 
-## Como _find_place_b, mas peça deitada pode inclinar um pouco sozinha (até 15 graus)
+## Como _find_place_b, mas peça deitada pode inclinar um pouco sozinha (até 20 graus)
 ## para encostar nos dois apoios quando eles não estão na mesma altura. {ok, c, b, why}
 func find_place(fl: Dictionary, b: Basis, hit: Dictionary) -> Dictionary:
 	var r := _find_place_b(fl, b, hit)
 	r.b = b
 	if bool(r.ok) or absf(b.x.y) > 0.2:
 		return r
-	for deg in [3.0, -3.0, 6.0, -6.0, 9.0, -9.0, 12.0, -12.0, 15.0, -15.0]:
+	for deg in [3.0, -3.0, 6.0, -6.0, 9.0, -9.0, 12.0, -12.0, 16.0, -16.0, 20.0, -20.0]:
 		var bb := Basis(b.z.normalized(), deg_to_rad(deg)) * b
 		var r2 := _find_place_b(fl, bb, hit)
 		if bool(r2.ok):
@@ -359,7 +374,7 @@ func push_out(p: Vector3, feet: float) -> Vector3:
 			continue
 		var b: Basis = bx.b
 		# altura do corpo encostando: dos joelhos (passa por cima do que é baixo) à cabeça
-		for yy in [feet + 0.45, feet + 1.0, feet + 1.6]:
+		for yy in [feet + 0.34, feet + 0.8, feet + 1.25, feet + 1.65]:
 			var q := Vector3(p.x, yy, p.z)
 			var l := _local(bx, q)
 			var R := 0.25

@@ -387,6 +387,7 @@ var _tamanduas: Node3D = null
 var _constr: Node3D = null
 var _bld := {}                     # modo construção: {yaw, tilt, roll, ghost, ok, c, b}
 var _bld_btn: Button
+var _post_cut := {}               # serrando o topo da estaca: {i, t, y}
 var _bld_t := 0.0
 var _bld_btns: Array = []
 var _bld_cross: Label
@@ -2084,6 +2085,7 @@ func _update_chop(delta: float) -> void:
 		return
 	if not _split.is_empty():
 		return          # rachando a tora: os botões normais somem
+	_post_cut_tick(delta)
 	if not _bld.is_empty():
 		_bld_t -= delta
 		if _bld_t <= 0.0:
@@ -2159,6 +2161,11 @@ func _update_ctx_btn() -> void:
 		_ctx_action = "veneno"
 		var pt := _poison_target()
 		_ctx_btn.text = "Envenenar madeira" + (" (com cupim)" if _cupins.dmg_of(pt) > 0.02 else "")
+	elif _mao == "serra" and _buracos and _carry.is_empty() and _crouch_job == "" and not _sawing and not _air and _post_cut.is_empty() and _level_post() >= 0:
+		_ctx_action = "nivelar"
+		var li := _level_post()
+		var dh: float = _buracos.post_top(_buracos.posts[li]) - _buracos.level_target(li)
+		_ctx_btn.text = "Nivelar estaca (-%d cm)" % roundi(dh * 100.0)
 	elif _constr and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _aimed_piece().is_empty():
 		_ctx_action = "peca"
 		_ctx_btn.text = "Pegar peça"
@@ -2195,6 +2202,13 @@ func _ctx_press() -> void:
 				_show_toast("+%d raiz de timbó%s. 3 raízes fazem o veneno (craft)." % [n - left, "" if left == 0 else " (mochila cheia)"])
 				_update_inventory()
 				_act_check = 0.0
+			return
+		"nivelar":
+			var li := _level_post()
+			if li >= 0:
+				_post_cut = {"i": li, "t": 0.0, "y": _buracos.level_target(li), "s": 0.0}
+				_show_toast("Serrando o topo da estaca para ficar na altura da mais baixa...")
+				_ctx_btn.visible = false
 			return
 		"peca":
 			var pc := _aimed_piece()
@@ -4620,8 +4634,22 @@ func _move_player(delta: float) -> void:
 		p = _bacabas.push_out(p)          # nem o tronco das palmeiras
 	if _apoios:
 		p = _apoios.push_out(p)           # nem as forquilhas e a tora em cima delas
-	if _constr:
-		p = _constr.push_out(p, feet)     # nem as paredes e vigas da construção
+	if _constr or _cupins:
+		# nem as paredes e vigas da construção, nem os cupinzeiros; em passinhos, para
+		# não pular a tábua fina num quadro lento
+		var prev := _player.position
+		var mv := Vector2(p.x - prev.x, p.z - prev.z).length()
+		var nsub := clampi(int(ceil(mv / 0.06)), 1, 12)
+		var q := prev
+		for k in nsub:
+			q.x += (p.x - prev.x) / nsub
+			q.z += (p.z - prev.z) / nsub
+			if _constr:
+				q = _constr.push_out(q, feet)
+			if _cupins:
+				q = _cupins.push_out(q, feet)
+		p.x = q.x
+		p.z = q.z
 	if _escav and not _air:
 		# barranco cavado: parede alta não dá para subir andando
 		var gnew: float = ground_at(p.x, p.z)
@@ -4642,7 +4670,7 @@ func _move_player(delta: float) -> void:
 			ground = sup
 	if _constr:
 		var sup2: float = _constr.support_y(p.x, p.z, feet)
-		if sup2 > ground and feet >= sup2 - 0.2:
+		if sup2 > ground and feet >= sup2 - 0.32:
 			ground = sup2                 # andando no assoalho
 	if _air:
 		_vy -= 13.0 * delta
@@ -6217,6 +6245,47 @@ func _poison_target() -> Dictionary:
 # fantasma onde o olho mira (verde: dá para pôr; vermelho: não dá). Girar, Inclinar
 # (deitada, 30, 45, 60 graus, em pé) e Virar (tábua deitada ou de lado).
 
+## Estaca perto (com a serra) que está mais alta que a vizinha mais baixa, ou -1.
+func _level_post() -> int:
+	var i: int = _buracos.post_near(_player.position, 1.3)
+	if i < 0 or _buracos.level_target(i) < -1e8:
+		return -1
+	return i
+
+
+## Serrando o topo da estaca: uns 3 segundos de vai-e-vem; andar cancela.
+func _post_cut_tick(delta: float) -> void:
+	if _post_cut.is_empty():
+		return
+	var i := int(_post_cut.i)
+	if i >= _buracos.posts.size() or _mao != "serra" or _buracos.post_near(_player.position, 1.6) != i:
+		_post_cut = {}
+		return
+	var po: Dictionary = _buracos.posts[i]
+	var top := Vector3(float(po.x), _buracos.post_top(po), float(po.z))
+	_post_cut.t = float(_post_cut.t) + delta
+	_post_cut.s = float(_post_cut.s) - delta
+	var to := Vector2(top.x - _player.position.x, top.z - _player.position.z)
+	_face = lerp_angle(_face, atan2(-to.x, -to.y), minf(1.0, delta * 8.0))
+	if float(_post_cut.s) <= 0.0:
+		_post_cut.s = 0.45
+		Sons.play_at(self, "serra", top, 0.0, 0.95 + randf() * 0.1)
+		_sawdust(top)
+	if float(_post_cut.t) >= 3.0:
+		var cut: float = _buracos.cut_post(i, float(_post_cut.y))
+		_post_cut = {}
+		if cut > 0.0:
+			Sons.play_at(self, "baque", top, -10.0, 1.3)
+			if cut >= 0.12:
+				# o pedaço de cima cai do lado
+				var r: float = _arvores.free_log_radius(po.log)
+				var bit := {"cil": {"L": cut, "ra": r, "rb": r}, "sec": Arvores.circle_sec(), "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0,
+					"bot": {}, "top": {}, "pos": [0, 0, 0], "yaw": 0.0, "dia": _arvores.last_day}
+				_arvores.drop_log(bit, top + Vector3(0.3, 0, 0), randf() * TAU)
+			_show_toast("Estaca nivelada: tirou %d cm do topo." % roundi(cut * 100.0))
+		_act_check = 0.0
+
+
 func _aimed_piece() -> Dictionary:
 	if _constr == null or _cam == null:
 		return {}
@@ -6317,6 +6386,19 @@ func _bld_update() -> void:
 	if (r.c as Vector3).distance_to(_player.position + Vector3.UP * 0.9) > 4.5:
 		r.ok = false
 		r.why = "Longe demais."
+	if not bool(r.ok) and not hb.is_empty() and hb.has("post"):
+		# dica: estacas em alturas diferentes
+		var po: Dictionary = hb.post
+		var my: float = _buracos.post_top(po)
+		var L: float = _arvores.free_log_length(_carry)
+		for op in _buracos.posts:
+			if op == po:
+				continue
+			if Vector2(float(op.x) - float(po.x), float(op.z) - float(po.z)).length() < L:
+				var dh: float = absf(_buracos.post_top(op) - my)
+				if dh > 0.04:
+					r.why = "As estacas estão em alturas diferentes (%d cm). Pegue a serra e use \"Nivelar estaca\" na mais alta." % roundi(dh * 100.0)
+					break
 	ghost.visible = true
 	ghost.transform = Transform3D(b, r.c)
 	_bld.ok = bool(r.ok)

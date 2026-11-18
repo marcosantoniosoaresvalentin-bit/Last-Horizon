@@ -376,6 +376,31 @@ func _attack_trees(c: Dictionary, day: int, wet: float) -> void:
 		break
 
 
+# ================== ESBARRAR ==================
+
+## O jogador não atravessa o cupinzeiro (barro duro): empurra para fora do monte.
+func push_out(p: Vector3, feet: float) -> Vector3:
+	for c in colonies:
+		var cx := float(c.x)
+		var cz := float(c.z)
+		var d := Vector2(p.x - cx, p.z - cz)
+		if d.length() > 3.0:
+			continue
+		var sz := _mound_size(c)
+		var gy := float(c.get("gy", _jogo.height_at(cx, cz)))
+		# raio do monte na altura dos joelhos do jogador (o monte afina para cima)
+		var t := clampf((feet + 0.3 - gy) / sz.x, 0.0, 1.0)
+		if t >= 0.98:
+			continue                 # está em cima do monte
+		var rad := (sz.y * pow(1.0 - t, 0.75) + 0.02) * 0.95 + 0.22
+		var l := d.length()
+		if l < rad:
+			var n := d / l if l > 0.001 else Vector2(1, 0)
+			p.x = cx + n.x * rad
+			p.z = cz + n.y * rad
+	return p
+
+
 # ================== VENENO ==================
 
 ## Madeira infestada (ou não) mais perto do ponto, para tratar com veneno.

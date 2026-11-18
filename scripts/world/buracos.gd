@@ -236,6 +236,56 @@ func plant(i: int, fl: Dictionary, yaw: float) -> void:
 	_rebuild()
 
 
+## Altura do topo da tora fincada.
+func post_top(po: Dictionary) -> float:
+	var L: float = _arv.free_log_length(po.log)
+	return _jogo.surface_at(float(po.x), float(po.z)) - float(po.d) + L
+
+
+## Tora fincada mais perto (ou -1).
+func post_near(pos: Vector3, reach: float) -> int:
+	var best := -1
+	var bd := reach
+	for i in posts.size():
+		var po: Dictionary = posts[i]
+		var d := Vector2(float(po.x) - pos.x, float(po.z) - pos.z).length()
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+## A altura para nivelar a tora fincada i: o topo da mais baixa das vizinhas (até 5 m).
+## -1e9 se ela já é a mais baixa (ou não tem vizinha).
+func level_target(i: int) -> float:
+	var me: Dictionary = posts[i]
+	var my := post_top(me)
+	var low := my
+	for j in posts.size():
+		if j == i:
+			continue
+		var o: Dictionary = posts[j]
+		if Vector2(float(o.x) - float(me.x), float(o.z) - float(me.z)).length() > 5.0:
+			continue
+		low = minf(low, post_top(o))
+	if my - low < 0.02:
+		return -1e9
+	return low
+
+
+## Serra o topo da tora fincada na altura y: devolve o comprimento tirado.
+func cut_post(i: int, y: float) -> float:
+	var po: Dictionary = posts[i]
+	var cut := post_top(po) - y
+	var L: float = _arv.free_log_length(po.log)
+	cut = clampf(cut, 0.0, L - float(po.d) - 0.15)
+	if cut <= 0.005:
+		return 0.0
+	_arv.shorten_free_log(po.log, 1, cut, 0.5)        # a ponta de cima (o +X fica para cima)
+	_rebuild()
+	return cut
+
+
 # ================== COLISÃO ==================
 
 ## O jogador não atravessa as toras fincadas.
