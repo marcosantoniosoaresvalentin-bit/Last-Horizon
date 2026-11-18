@@ -1,9 +1,9 @@
 {
-  "version": 105,
-  "file": "update_105.zip",
-  "size": 4579719,
-  "sha256": "7c2202a5c3f98dba589a5388ef6d65ebde49281477dc2a01f5e5c195d83d4521",
+  "version": 106,
+  "file": "update_106.zip",
+  "size": 4579688,
+  "sha256": "1c0e236cc4872e1f1fdf590b27e595d0312b68c56b2515c9633c4f26b84833cf",
   "min_build": 1,
-  "notes": "Construção: peças amarradas com cipó nas juntas",
+  "notes": "Corrige: peça da construção não podia ser pega de volta (pesada demais)",
   "date": "2026-11-18"
 }
