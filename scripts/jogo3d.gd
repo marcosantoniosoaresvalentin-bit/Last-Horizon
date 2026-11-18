@@ -29,6 +29,7 @@ const Macacos := preload("res://scripts/world/macacos.gd")
 const Bacabas := preload("res://scripts/world/bacabas.gd")
 const Araras := preload("res://scripts/world/araras.gd")
 const Minerios := preload("res://scripts/world/minerios.gd")
+const Cupins := preload("res://scripts/world/cupins.gd")
 const MINERAIS_ITENS := ["hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita", "lasca_silex"]
 const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
@@ -379,6 +380,7 @@ var _macacos: Node3D = null
 var _bacabas: Node3D = null
 var _araras: Node3D = null
 var _minerios: Node = null
+var _cupins: Node3D = null
 var _escav: Node3D = null
 var _escav_steps := 0
 var _escav_timer := 0.0
@@ -923,6 +925,9 @@ func _on_world_ready() -> void:
 	_minerios.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/minerios.json" if _world_id != "" else "")
 	_escav.tint_fn = _minerios.tint_at
 	_convert_bandas()
+	_cupins = Cupins.new()
+	add_child(_cupins)
+	_cupins.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/cupins.json" if _world_id != "" else "")
 	_escav.water_mat = _water_mat
 	_escav.sea_m = MundoSim.SEA * HS
 	_escav_steps = sim.steps
@@ -1264,6 +1269,8 @@ func _process(delta: float) -> void:
 			_bacabas.tick()
 		if _minerios:
 			_minerios.tick()
+		if _cupins:
+			_cupins.tick()
 		if _araras:
 			_araras.tick()
 			_araras.update(delta)
@@ -1343,6 +1350,8 @@ func _save_world() -> void:
 		_araras.save(Mundos.dir(_world_id) + "/araras.json")
 	if _minerios:
 		_minerios.save(Mundos.dir(_world_id) + "/minerios.json")
+	if _cupins:
+		_cupins.save(Mundos.dir(_world_id) + "/cupins.json")
 	if _buracos:
 		_buracos.save(Mundos.dir(_world_id) + "/buracos.json")
 	if _galhos:
@@ -2091,6 +2100,13 @@ func _update_ctx_btn() -> void:
 	if _mao == "balde" and not _balde_carga.is_empty() and _crouch_job == "" and not _air and _pour_t < 0.0:
 		_ctx_action = "despejar"
 		_ctx_btn.text = "Despejar no balde" if _bucket_ahead() >= 0 else "Despejar"
+	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and _cupins.nearest_timbo(_player.position, 1.4) >= 0:
+		_ctx_action = "timbo"
+		_ctx_btn.text = "Colher timbó"
+	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and item_qtd("veneno_timbo") > 0 and _poison_target().size() > 0:
+		_ctx_action = "veneno"
+		var pt := _poison_target()
+		_ctx_btn.text = "Envenenar madeira" + (" (com cupim)" if _cupins.dmg_of(pt) > 0.02 else "")
 	elif _crouch_job == "" and not _chopping and not _air and _galhos != null and _apoios != null:
 		if not _carry.is_empty():
 			if not _apoios.pair_for(_player.position, _arvores.free_log_length(_carry)).is_empty():
@@ -2115,6 +2131,26 @@ func _ctx_press() -> void:
 	if _ctx_action == "" or _crouch_job != "":
 		return
 	match _ctx_action:
+		"timbo":
+			var ti: int = _cupins.nearest_timbo(_player.position, 1.4)
+			if ti >= 0:
+				_cupins.harvest_timbo(ti)
+				var n := randi_range(2, 3)
+				var left := add_item("raiz_timbo", n)
+				_show_toast("+%d raiz de timbó%s. 3 raízes fazem o veneno (craft)." % [n - left, "" if left == 0 else " (mochila cheia)"])
+				_update_inventory()
+				_act_check = 0.0
+			return
+		"veneno":
+			var pt := _poison_target()
+			if not pt.is_empty():
+				var had: float = _cupins.dmg_of(pt)
+				_cupins.treat(pt)
+				remove_item("veneno_timbo", 1)
+				_update_inventory()
+				_show_toast(("Os cupins dessa madeira morreram. " if had > 0.02 else "") + "A madeira está protegida contra cupins por uns 2 anos.")
+				_act_check = 0.0
+			return
 		"despejar":
 			_start_pour()
 			return
@@ -5937,3 +5973,14 @@ func _board_mesh(ripa: bool, cracks: int) -> ArrayMesh:
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mesh.surface_set_material(0, m)
 	return mesh
+
+
+
+## Madeira perto para passar o veneno (a que não está tratada ainda).
+func _poison_target() -> Dictionary:
+	if _cupins == null:
+		return {}
+	var t: Dictionary = _cupins.nearest_wood(_player.position, 1.6)
+	if t.is_empty() or _cupins._treated(t, _cupins.last_day):
+		return {}
+	return t

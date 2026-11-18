@@ -201,6 +201,17 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				var y := -18 + k * 5
 				ci.draw_line(c + Vector2(8 + k * 3, y) * u, c + Vector2(22 + k * 3, y - 12) * u, Color(0.45, 0.4, 0.18), 3.0 * u, true)
 			var _h := hd
+		"raiz_timbo":
+			for k in 4:
+				var a := -0.6 + k * 0.4
+				ci.draw_line(c + Vector2(-30, -10 + k * 7) * u, c + Vector2(cos(a) * 44, sin(a) * 30 + 10) * u, Color(0.42, 0.3, 0.18), 6.0 * u, true)
+			ci.draw_circle(c + Vector2(-30, -2) * u, 12 * u, Color(0.36, 0.26, 0.15))
+		"veneno_timbo":
+			var cup: PackedVector2Array = P.call([[-32, -10], [32, -10], [24, 34], [-24, 34]])
+			ci.draw_colored_polygon(cup, Color(0.5, 0.36, 0.22))
+			ci.draw_colored_polygon(P.call([[-30, -10], [30, -10], [28, 0], [-28, 0]]), Color(0.75, 0.82, 0.55))
+			ci.draw_polyline(cup + PackedVector2Array([cup[0]]), ink, 2.0 * u, true)
+			ci.draw_colored_polygon(P.call([[-4, -40], [10, -30], [2, -16], [-10, -26]]), Color(0.2, 0.4, 0.15))
 		"tabua", "ripa":
 			var w := 26.0 if id == "tabua" else 9.0
 			var pts := PackedVector2Array([c + Vector2(-44, -w) * u, c + Vector2(44, -w - 8) * u, c + Vector2(44, w - 8) * u, c + Vector2(-44, w) * u])

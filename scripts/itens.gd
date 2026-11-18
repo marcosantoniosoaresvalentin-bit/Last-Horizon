@@ -42,6 +42,10 @@ const ITENS := {
 		"desc": "Pedra trabalhada grossa e comprida: a cabeça da marreta. Feita modelando pedra."},
 	"marreta": {"nome": "Marreta de Pedra", "kg": 2.2, "cat": "Ferramentas",
 		"desc": "Pedra pesada amarrada com cipó num cabo de galho. Bate nas cunhas para rachar a tora.", "ferramenta": true, "dur": 250},
+	"raiz_timbo": {"nome": "Raiz de Timbó", "kg": 0.3, "cat": "Recursos",
+		"desc": "Raiz do timbó, cipó da beira da mata. Amassada, solta um veneno forte (o mesmo que os índios usam para pescar) que mata os cupins."},
+	"veneno_timbo": {"nome": "Veneno de Timbó", "kg": 0.5, "cat": "Itens Médicos",
+		"desc": "Raiz de timbó amassada e misturada. Passe na madeira (toras, estacas, forquilhas, construções): mata os cupins dela e protege por uns 2 anos."},
 	"tabua": {"nome": "Tábua Pequena", "kg": 1.2, "cat": "Recursos",
 		"desc": "Pedaço de tábua rachada, serrado na forquilha. COLOCAR no chão e rachar com o machado tira as ripas (mata-juntas) do balde.", "colocar": true},
 	"banda": {"nome": "Banda de Tora", "kg": 0.0, "cat": "Recursos",
@@ -75,6 +79,7 @@ const RECEITAS_MAO := [
 	{"id": "forquilha", "qtd": 1, "ingredientes": [["galho", 2], ["cipo", 2]]},
 	{"id": "cipo_trancado", "qtd": 1, "ingredientes": [["cipo", 3]]},
 	{"id": "marreta", "qtd": 1, "ingredientes": [["pedra_marreta", 1], ["galho", 1], ["cipo", 2]]},
+	{"id": "veneno_timbo", "qtd": 1, "ingredientes": [["raiz_timbo", 3]]},
 	{"id": "lasca_silex", "qtd": 3, "ingredientes": [["silex", 1]]},
 	{"id": "balde", "qtd": 1, "ingredientes": [["ripa", 12], ["rodela", 1], ["cipo", 6], ["cipo_trancado", 1]]},
 ]
