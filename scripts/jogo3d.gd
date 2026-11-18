@@ -394,6 +394,7 @@ var _pa_dirt: Node3D = null       # a terra em cima da pá
 var _pa_tipo := "terra"           # o que está na pá: "terra" ou "argila"
 var _balde_carga := {}            # o que tem no balde da mochila/mão: {tipo, vol (m³)}
 var _balde_fill: MeshInstance3D = null
+var _pour_t := -1.0               # despejando o balde (segundos)
 const BALDE_VOL := 0.024          # cabe uns 24 litros
 const BALDE_KG := 25.0            # mais que isso não dá para carregar pela alça
 const PAZADA := 0.006             # uma pazada: uns 6 litros
@@ -1267,6 +1268,7 @@ func _process(delta: float) -> void:
 		_apply_soil()
 		# a informação do solo não aparece mais na tela
 	_update_dig(delta)
+	_update_pour(delta)
 	_tick_hole_water(delta)
 	_seed_check -= delta
 	if _seed_check <= 0.0 and _arvores:
@@ -2032,7 +2034,10 @@ func _update_chop(delta: float) -> void:
 ## de cima delas ou recolher uma forquilha.
 func _update_ctx_btn() -> void:
 	_ctx_action = ""
-	if _crouch_job == "" and not _chopping and not _air and _galhos != null and _apoios != null:
+	if _mao == "balde" and not _balde_carga.is_empty() and _crouch_job == "" and not _air and _pour_t < 0.0:
+		_ctx_action = "despejar"
+		_ctx_btn.text = "Despejar no balde" if _bucket_ahead() >= 0 else "Despejar"
+	elif _crouch_job == "" and not _chopping and not _air and _galhos != null and _apoios != null:
 		if not _carry.is_empty():
 			if not _apoios.pair_for(_player.position, _arvores.free_log_length(_carry)).is_empty():
 				_ctx_action = "apoiar"
@@ -2056,6 +2061,9 @@ func _ctx_press() -> void:
 	if _ctx_action == "" or _crouch_job != "":
 		return
 	match _ctx_action:
+		"despejar":
+			_start_pour()
+			return
 		"pedra":
 			var i: int = _pedras.nearest(_player.position, 1.1, true)
 			if i < 0:
@@ -3668,6 +3676,7 @@ func _pa_hit() -> void:
 	var at := _front(0.75)
 	if not _pa_full:
 		var y_old: float = _escav.ground_at(at.x, at.z)
+		var was_clay: bool = _escav.is_clay(at.x, at.z)       # monte de argila despejada
 		var v: float = _escav.dig(at)
 		if v <= 0.0001:
 			_show_toast("Não dá para cavar mais fundo aqui.")
@@ -3676,7 +3685,8 @@ func _pa_hit() -> void:
 		var cell := Vector2i(int(at.x / CELL), int(at.z / CELL))
 		var sd: Dictionary = sim.soil_data(cell)
 		var depth_now := surface_at(at.x, at.z) - y_old
-		_pa_tipo = "argila" if (not sd.is_empty() and float(sd.clay) >= 0.35 and depth_now < 1.2) else "terra"
+		var mound_clay: bool = was_clay
+		_pa_tipo = "argila" if (mound_clay or (not sd.is_empty() and float(sd.clay) >= 0.35 and depth_now < 1.2)) else "terra"
 		if _pa_tipo == "argila":
 			sim.dig(cell, PAZADA * DENS.argila * 0.004)     # gasta um pouquinho da argila da beira
 		if _pa_dirt:
@@ -3702,7 +3712,7 @@ func _pa_hit() -> void:
 			_fill_bucket(bi)
 			return
 		var to := _front(1.05)
-		_escav.dump(to, _pa_vol)
+		_escav.dump(to, _pa_vol, _pa_tipo)
 		_dirt(to)
 		Sons.play_at(self, "cavar", to, -4.0, 1.15)
 		_pa_full = false
@@ -3768,36 +3778,118 @@ func _fill_bucket(i: int) -> void:
 	_act_check = 0.0
 
 
-## A terra ou argila dentro do balde (um disco na altura do nível, com uns torrões).
+## A terra ou a argila dentro do balde: superfície de verdade no nível do que tem dentro.
+## Terra: solta, granulada, com torrões e pedrinhas, sem brilho. Argila: bolos
+## arredondados grudados uns nos outros, lisa, avermelhada e úmida (brilha um pouco).
+## Cheio, faz um montinho acima da boca.
+static var _fill_mats := {}
+
 func _update_balde_fill(mi: MeshInstance3D, c: Dictionary) -> void:
 	if mi == null:
 		return
 	if c.is_empty() or float(c.get("vol", 0.0)) <= 0.0:
 		mi.mesh = null
 		return
-	var f := clampf(float(c.vol) / BALDE_VOL, 0.0, 1.0)
-	var y := 0.05 + f * (Balde.H - 0.07)
-	var r := lerpf(Balde.R_BOT, Balde.R_TOP, y / Balde.H) - 0.012
+	var clay := str(c.tipo) == "argila"
+	var f := clampf(float(c.vol) / BALDE_VOL, 0.0, 1.2)
+	var level := 0.05 + minf(f, 1.0) * (Balde.H - 0.06)
+	var dome := 0.015 + maxf(0.0, f - 0.7) * 0.12          # cheio: montinho no meio
+	var nz := FastNoiseLite.new()
+	nz.seed = 77 if clay else 33
+	nz.frequency = 9.0 if not clay else 5.0
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var col := Color(0.55, 0.3, 0.2) if str(c.tipo) == "argila" else Color(0.3, 0.21, 0.13)
+	var rings := 9
+	var secs := 28
+	var pts := []
+	for ri in rings + 1:
+		var row := []
+		var rr := float(ri) / rings
+		for k in secs:
+			var a := TAU * k / secs
+			var y := level + dome * (1.0 - rr * rr)
+			var r_wall := Balde._r_at(y) - 0.012
+			var x := cos(a) * r_wall * rr
+			var z := sin(a) * r_wall * rr
+			var n := nz.get_noise_2d(x * 40.0, z * 40.0)
+			if clay:
+				# bolos de argila: ondulado largo e liso, sobe um pouco na parede (grudada)
+				y += n * 0.018 + maxf(0.0, rr - 0.85) * 0.06
+			else:
+				var n2 := nz.get_noise_2d(x * 140.0 + 9.0, z * 140.0)
+				y += n * 0.012 + n2 * 0.006 + maxf(0.0, rr - 0.9) * 0.02
+			row.append(Vector3(x, y, z))
+		pts.append(row)
+	var base := Color(0.62, 0.3, 0.16) if clay else Color(0.36, 0.25, 0.16)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 91
-	var n := 18
-	var top := y + 0.02 * f
-	for k in n:
-		var a0 := TAU * k / n
-		var a1 := TAU * (k + 1) / n
-		var h0 := y + rng.randf_range(-0.006, 0.006)
-		var p0 := Vector3(cos(a0) * r, h0, sin(a0) * r)
-		var p1 := Vector3(cos(a1) * r, h0, sin(a1) * r)
-		var cc := col.darkened(rng.randf_range(0.0, 0.15))
-		for v in [Vector3(0, top, 0), p1, p0]:
-			st.set_color(cc)
-			st.add_vertex(v)
+	rng.seed = 11 if clay else 5
+	for ri in rings:
+		for k in secs:
+			var k2 := (k + 1) % secs
+			var q := [pts[ri][k], pts[ri][k2], pts[ri + 1][k2], pts[ri + 1][k]]
+			for idx in [0, 2, 1, 0, 3, 2]:
+				var p: Vector3 = q[idx]
+				var tone := nz.get_noise_2d(p.x * 90.0 + 3.0, p.z * 90.0) * (0.12 if clay else 0.22)
+				st.set_color(base.lightened(maxf(tone, 0.0)).darkened(maxf(-tone, 0.0)))
+				st.set_uv(Vector2(p.x, p.z) * 6.0)
+				st.add_vertex(p)
+	# torrões (terra) ou bolos (argila) em cima
+	var lumps := 12 if not clay else 6
+	for l in lumps:
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(0.0, 0.8) * (Balde._r_at(level) - 0.03)
+		var cpos := Vector3(cos(a) * r, level + dome * (1.0 - pow(r / Balde.R_TOP, 2.0)) + 0.004, sin(a) * r)
+		var size := rng.randf_range(0.01, 0.022) if not clay else rng.randf_range(0.022, 0.038)
+		var lc := base.darkened(rng.randf_range(-0.1, 0.2))
+		if not clay and rng.randf() < 0.3:
+			lc = Color(0.3, 0.29, 0.27)           # pedrinha
+			size *= 0.6
+		_lump(st, cpos, size, lc, rng, clay)
 	st.generate_normals()
 	mi.mesh = st.commit()
-	mi.material_override = Balde.material()
+	var key := "argila" if clay else "terra"
+	if not _fill_mats.has(key):
+		var m := StandardMaterial3D.new()
+		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
+		# argila vermelho-alaranjada (terracota úmida); terra marrom-escura
+		m.albedo_color = Color(0.42, 0.3, 0.24) if clay else Color(0.55, 0.5, 0.45)
+		var nt := NoiseTexture2D.new()
+		var tn := FastNoiseLite.new()
+		tn.frequency = 0.08 if not clay else 0.03
+		nt.noise = tn
+		nt.width = 128
+		nt.height = 128
+		nt.seamless = true
+		nt.as_normal_map = true
+		nt.bump_strength = 3.0 if not clay else 1.2
+		m.normal_enabled = true
+		m.normal_texture = nt
+		m.roughness = 0.85 if clay else 1.0
+		m.specular = 0.06 if clay else 0.02
+		_fill_mats[key] = m
+	mi.material_override = _fill_mats[key]
+
+
+## Um torrão (pontudo, de terra) ou um bolo (redondo, de argila).
+static func _lump(st: SurfaceTool, c: Vector3, s: float, col: Color, rng: RandomNumberGenerator, round: bool) -> void:
+	var lat := 4
+	var lon := 6
+	var jit := []
+	for i in (lat + 1) * lon:
+		jit.append(rng.randf_range(0.75, 1.15) if not round else rng.randf_range(0.92, 1.05))
+	for i in lat:
+		for j in lon:
+			var v := []
+			for e in [[i, j], [i, j + 1], [i + 1, j + 1], [i + 1, j]]:
+				var t: float = float(e[0]) / lat * PI
+				var p: float = float(e[1] % lon) / lon * TAU
+				var k: float = jit[int(e[0]) * lon + int(e[1]) % lon]
+				v.append(c + Vector3(sin(t) * cos(p), cos(t) * 0.7, sin(t) * sin(p)) * s * k)
+			for idx in [0, 1, 2, 0, 2, 3]:
+				st.set_color(col)
+				st.set_uv(Vector2(v[idx].x, v[idx].z) * 6.0)
+				st.add_vertex(v[idx])
 
 
 func _clay_mat() -> Material:
@@ -3806,6 +3898,86 @@ func _clay_mat() -> Material:
 	m.albedo_color = Color(1.9, 1.15, 1.0)        # a terra da pá fica avermelhada (argila)
 	m.roughness = 0.6 
 	return m
+
+
+## Despejar: o balde vira para a frente e o que tem dentro cai (no chão, num monte,
+## ou dentro de outro balde que esteja no chão bem na frente).
+func _start_pour() -> void:
+	if _balde_carga.is_empty() or _pour_t >= 0.0:
+		return
+	_pour_t = 0.0
+	_ctx_btn.visible = false
+
+
+func _update_pour(delta: float) -> void:
+	if _pour_t < 0.0:
+		return
+	_pour_t += delta
+	var tilt := smoothstep(0.0, 0.45, _pour_t) * (1.0 - smoothstep(1.1, 1.5, _pour_t))
+	if _chop_pose:
+		_chop_pose.pour = tilt
+	if _pour_t >= 0.55 and not _balde_carga.is_empty():
+		var c := _balde_carga
+		var bi := _bucket_ahead()
+		var to := _front(0.95)
+		if bi >= 0:
+			var g: Dictionary = _chao[bi]
+			var gc := _carga_of(g)
+			if not gc.is_empty() and str(gc.tipo) != str(c.tipo):
+				_show_toast("O outro balde está com %s. Não misture." % gc.tipo)
+				_pour_t = 1.1
+				return
+			var cap := minf(BALDE_VOL, BALDE_KG / float(DENS[c.tipo]))
+			var room := cap - float(gc.get("vol", 0.0))
+			var mv := minf(room, float(c.vol))
+			if mv <= 0.0005:
+				_show_toast("O outro balde está cheio.")
+				_pour_t = 1.1
+				return
+			g.dur = [str(c.tipo), float(gc.get("vol", 0.0)) + mv]
+			var fm: MeshInstance3D = (g.node as Node3D).get_node_or_null("carga")
+			if fm == null:
+				fm = MeshInstance3D.new()
+				fm.name = "carga"
+				(g.node as Node3D).add_child(fm)
+			_update_balde_fill(fm, _carga_of(g))
+			var left := float(c.vol) - mv
+			_balde_carga = {} if left <= 0.0005 else {"tipo": c.tipo, "vol": left}
+		else:
+			_escav.dump(to, float(c.vol), str(c.tipo))
+			_dirt(to)
+			_balde_carga = {}
+		_falling_lumps(_balde_fill.global_position + Vector3.UP * 0.05 if _balde_fill else to + Vector3.UP, to, str(c.tipo))
+		Sons.play_at(self, "cavar", to, -2.0, 0.8)
+		_update_balde_fill(_balde_fill, _balde_carga)
+		_update_inventory()
+	if _pour_t >= 1.5:
+		_pour_t = -1.0
+		if _chop_pose:
+			_chop_pose.pour = 0.0
+		_act_check = 0.0
+
+
+## Torrões caindo da boca do balde até o chão (ou até o outro balde).
+func _falling_lumps(from: Vector3, to: Vector3, tipo: String) -> void:
+	var col := Color(0.55, 0.22, 0.1) if tipo == "argila" else Color(0.3, 0.2, 0.12)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = col
+	mat.roughness = 0.8
+	for k in 9:
+		var mi := MeshInstance3D.new()
+		mi.mesh = Lascar.cobble_mesh(300 + k, randf_range(0.02, 0.045))
+		mi.material_override = mat
+		add_child(mi)
+		var start := from + Vector3(randf_range(-0.08, 0.08), randf_range(-0.05, 0.05), randf_range(-0.08, 0.08))
+		var end := to + Vector3(randf_range(-0.2, 0.2), 0.0, randf_range(-0.2, 0.2))
+		end.y = ground_at(end.x, end.z) + 0.02
+		mi.global_position = start
+		var tw := create_tween()
+		tw.tween_interval(k * 0.035)
+		tw.tween_property(mi, "global_position", end, 0.28 + randf() * 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tw.tween_interval(0.15)
+		tw.tween_callback(mi.queue_free)
 
 
 ## Põe o balde da mão no chão, na frente (com o que tiver dentro).

@@ -1,9 +1,9 @@
 {
-  "version": 83,
-  "file": "update_83.zip",
-  "size": 4289870,
-  "sha256": "56975e3483f1125257398d153946cce60c5f0a186ab116c0f939cf5321e3dc83",
+  "version": 84,
+  "file": "update_84.zip",
+  "size": 4292426,
+  "sha256": "019b8edaa75f88f0a7bde5c687ae08443fc3ba106e5011ae4f419e6d973ec21a",
   "min_build": 1,
-  "notes": "Pegar o balde do chão põe ele direto na mão (com o que tem dentro), para levar terra e argila longe; balde pesado: anda mais devagar e não corre",
+  "notes": "Terra e argila dentro do balde mais realistas; botão Despejar: o balde vira e despeja no chão (monte de argila ou terra, que a pá pega de novo) ou em outro balde",
   "date": "2026-11-18"
 }

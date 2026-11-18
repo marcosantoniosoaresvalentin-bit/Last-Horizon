@@ -16,6 +16,7 @@ const DIG_D := 0.22             # quanto a pá entra na terra (m): fundo quase r
 const REPOSE := 0.75            # terra solta escorre se o desnível passar disso por quadradinho (≈37°)
 
 var tint_fn := Callable()       # (x, y, z) -> Color: minério à vista no buraco (a = quanto)
+var clay := {}                  # Vector2i -> true: monte feito de argila despejada
 var d := {}                     # Vector2i (ponto da grade) -> quanto subiu (+) ou desceu (-) (m)
 var mask_tex: ImageTexture
 var _mask: Image
@@ -98,7 +99,7 @@ func dig(c: Vector3) -> float:
 
 
 ## Joga a terra (vol, m³) em c: o chão sobe ali; terra solta escorre se ficar em pé demais.
-func dump(c: Vector3, vol: float) -> void:
+func dump(c: Vector3, vol: float, tipo := "terra") -> void:
 	var touched := {}
 	var r := int(ceil(DIG_R / RES))
 	var cx := roundi(c.x / RES)
@@ -117,6 +118,12 @@ func dump(c: Vector3, vol: float) -> void:
 		d[k] = _v(k) + vol * float(ws[k]) / wsum / (RES * RES)
 		touched[k] = true
 	_slump(touched)
+	for k in touched:
+		if _v(k) > 0.004:
+			if tipo == "argila":
+				clay[k] = true
+			else:
+				clay.erase(k)        # terra por cima cobre a argila
 	_changed(touched)
 
 
@@ -205,6 +212,9 @@ func _rebuild_chunk(ck: Vector2i) -> void:
 				# (onde não mexeu, bem mais abaixo: nas dobras do terreno a malha fina não pode aparecer por cima)
 				ps.append(Vector3(x, _jogo.surface_at(x, z) + dv - (0.015 if absf(dv) > 0.002 else 0.08), z))
 				var sc := _soil_color(dv, k)
+				if dv > 0.002 and clay.has(k):
+					var cc := Color(0.42, 0.21, 0.13).darkened((absi(hash(k)) % 100) * 0.0015)   # monte de argila
+					sc = sc.lerp(cc, smoothstep(0.004, 0.05, dv))
 				if dv < -0.002 and tint_fn.is_valid():
 					# o que a pá deixou à vista: minério, sílex ou rocha alterada na parede do buraco
 					var tc: Color = tint_fn.call(x, _jogo.surface_at(x, z) + dv, z)
@@ -256,10 +266,13 @@ func save(path: String) -> void:
 		out.append([k.x, k.y, snappedf(float(d[k]), 0.001)])
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
+		var cl := []
+		for k in clay:
+			cl.append([k.x, k.y])
 		var wat := []
 		for key in water:
 			wat.append([key.x, key.y, snappedf(float(water[key]), 0.0001)])
-		f.store_string(JSON.stringify({"versao": 1, "res": RES, "pontos": out, "agua": wat}))
+		f.store_string(JSON.stringify({"versao": 1, "res": RES, "pontos": out, "argila": cl, "agua": wat}))
 		f.close()
 
 
@@ -274,6 +287,8 @@ func _load(path: String) -> void:
 		var k := Vector2i(roundi(float(e[0]) * r0 / RES), roundi(float(e[1]) * r0 / RES))
 		d[k] = minf(float(d.get(k, 0.0)), float(e[2])) if float(e[2]) < 0.0 else maxf(float(d.get(k, 0.0)), float(e[2]))
 	if is_equal_approx(r0, RES):
+		for e in j.get("argila", []):
+			clay[Vector2i(int(e[0]), int(e[1]))] = true
 		for e in j.get("agua", []):
 			_basin_of[Vector2i(int(e[0]), int(e[1]))] = Vector2i(int(e[0]), int(e[1]))
 			water[Vector2i(int(e[0]), int(e[1]))] = float(e[2])
@@ -423,6 +438,17 @@ func water_tick(hours: float, rain_mmh: float, evap_mmh: float) -> void:
 
 
 ## Nível da água no ponto (ou -1e9 se não tem água de buraco ali).
+## O chão aqui é um monte de argila despejada?
+func is_clay(x: float, z: float) -> bool:
+	var k0 := Vector2i(roundi(x / RES), roundi(z / RES))
+	for ox in range(-2, 3):
+		for oz in range(-2, 3):
+			var k := k0 + Vector2i(ox, oz)
+			if clay.has(k) and _v(k) > 0.01:
+				return true
+	return false
+
+
 func water_level_at(x: float, z: float) -> float:
 	var k := Vector2i(roundi(x / RES), roundi(z / RES))
 	var key = _basin_of.get(k)

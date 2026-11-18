@@ -536,6 +536,7 @@ class ChopPose extends SkeletonModifier3D:
 	var reach_target := Vector3.ZERO   # no mundo
 	var reach_grip := false       # mão fechada (segurando)
 	var hide_head := false        # câmera nos olhos: a cabeça some para não tapar a visão
+	var pour := 0.0               # despejando o balde (0 a 1: o quanto ele virou)
 	var fp := false               # primeira pessoa: os braços ficam na frente da câmera
 	var fp_eye := Vector3.ZERO    # onde está a câmera (no mundo)
 	var fp_basis := Basis()       # para onde a câmera olha (no mundo)
@@ -656,7 +657,7 @@ class ChopPose extends SkeletonModifier3D:
 				tgt = eye + cf * 0.26 - cu * 0.66 - cr * 0.24          # a esquerda descansa embaixo
 			elif with_tool and tool == "balde":
 				# balde: braço quase solto, a mão segurando a alça na frente do quadril
-				tgt = eye + fwd * 0.58 - up * 0.22 + cr * 0.26 + bob * 0.5
+				tgt = eye + fwd * (0.58 + 0.08 * pour) - up * (0.22 - 0.1 * pour) + cr * 0.26 + bob * 0.5
 			elif with_tool:
 				tgt = eye + cf * 0.4 - cu * 0.16 + cr * 0.19 + bob
 			else:
@@ -700,7 +701,15 @@ class ChopPose extends SkeletonModifier3D:
 			sk.set_bone_global_pose(hb, hp)
 			var grip: Vector3 = hp.origin + gb.offset
 			var bb := Basis(right, up, -fwd)
-			_set_tool(sk, Transform3D(bb, grip - up * 0.595))
+			var pivot := grip - up * 0.595
+			if pour > 0.0:
+				# despejando: a outra mão pega embaixo e o balde vira para a frente (a boca
+				# aponta para o chão na frente)
+				var tb := Basis(right, -deg_to_rad(125.0) * pour) * bb
+				bb = tb
+				# o fundo vem para perto da mão e a boca aponta para a frente e para baixo
+				pivot = (grip - up * 0.595).lerp(grip + fwd * 0.06 - up * 0.08, pour)
+			_set_tool(sk, Transform3D(bb, pivot))
 			return
 		var want: Vector3
 		if tool in ["pa", "cavadeira"]:
