@@ -396,7 +396,9 @@ var _medida := {}                 # altura medida com o machado na estaca de ref
 var _bld_t := 0.0
 var _bld_btns: Array = []
 var _bld_cross: Label
-const BLD_TILTS := [0.0, 30.0, 45.0, 60.0, 90.0]
+const Arrasto := preload("res://scripts/ui/arrasto.gd")
+var _bld_pad: Control
+const BLD_MODES := ["girar", "inclinar", "virar", "mover", "altura"]
 var _escav: Node3D = null
 var _escav_steps := 0
 var _escav_timer := 0.0
@@ -656,9 +658,19 @@ func _build_hud() -> void:
 
 	# construção
 	_bld_btn = mk.call("Construir", -430, -286, _bld_start)
-	_bld_btns = [mk.call("Colocar", -290, -146, _bld_place), mk.call("Girar", -150, -286, func(): _bld_turn(1)),
-		mk.call("Inclinar", -290, -286, _bld_tilt), mk.call("Virar", -150, -426, _bld_flip),
-		mk.call("Sair", -290, -426, _bld_stop), mk.call("Girar ←", -430, -286, func(): _bld_turn(-1))]
+	_bld_btns = [mk.call("Colocar", -290, -146, _bld_place), mk.call("Girar", -150, -286, func(): _bld_mode("girar")),
+		mk.call("Inclinar", -290, -286, func(): _bld_mode("inclinar")), mk.call("Virar", -430, -286, func(): _bld_mode("virar")),
+		mk.call("Mover", -150, -426, func(): _bld_mode("mover")), mk.call("Altura", -290, -426, func(): _bld_mode("altura")),
+		mk.call("Sair", -430, -426, _bld_stop), mk.call("Mirar", -430, -146, _bld_follow)]
+	_bld_pad = Arrasto.new()
+	_bld_pad.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_bld_pad.offset_left = 30
+	_bld_pad.offset_right = 470
+	_bld_pad.offset_top = -140
+	_bld_pad.offset_bottom = -30
+	_bld_pad.visible = false
+	_bld_pad.arrastou.connect(_bld_drag)
+	_hud.add_child(_bld_pad)
 	_mark_btns = [mk.call("Cortar aqui", -290, -146, _mark_cut), mk.call("Subir", -150, -286, func(): _mark_move(0.05)),
 		mk.call("Descer", -290, -286, func(): _mark_move(-0.05)), mk.call("Medir", -150, -426, _mark_measure),
 		mk.call("Sair", -290, -426, _mark_close)]
@@ -4900,7 +4912,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl]:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn] + _bld_btns + _mark_btns:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -6471,7 +6483,8 @@ func _bld_start() -> void:
 		(mi as MeshInstance3D).material_override = mat
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var yaw := snappedf(_face, PI / 12.0)
-	_bld = {"yaw": yaw, "tilt": 0, "roll": 0, "ghost": ghost, "mat": mat, "ok": false, "c": Vector3.ZERO, "b": Basis()}
+	_bld = {"yaw": yaw, "tilt": 0.0, "roll": 0.0, "ghost": ghost, "mat": mat, "ok": false, "c": Vector3.ZERO, "b": Basis(),
+		"modo": "girar", "fixo": false}
 	if _carry_node:
 		_carry_node.visible = false
 	_bld_btn.visible = false
@@ -6479,8 +6492,10 @@ func _bld_start() -> void:
 		(b as Control).visible = false
 	for b in _bld_btns:
 		(b as Control).visible = true
+	_bld_pad.visible = true
 	_bld_cross.visible = true
-	_show_toast("Mire onde quer pôr a peça. Verde: dá para colocar.")
+	_bld_mode("girar")
+	_show_toast("Mire onde quer pôr a peça. Arraste a faixa de baixo para girar, inclinar, virar ou mover devagar.")
 
 
 func _bld_stop() -> void:
@@ -6492,31 +6507,79 @@ func _bld_stop() -> void:
 		_carry_node.visible = true
 	for b in _bld_btns:
 		(b as Control).visible = false
+	_bld_pad.visible = false
 	_bld_cross.visible = false
 	_bld_why.visible = false
 	_act_check = 0.0
 
 
-func _bld_turn(s: int) -> void:
-	if not _bld.is_empty():
-		_bld.yaw = float(_bld.yaw) + s * PI / 12.0       # 15 graus
+## O que a faixa de arrastar mexe agora.
+func _bld_mode(m: String) -> void:
+	if _bld.is_empty():
+		return
+	_bld.modo = m
+	var idx := {"girar": 1, "inclinar": 2, "virar": 3, "mover": 4, "altura": 5}
+	for k in [1, 2, 3, 4, 5]:
+		(_bld_btns[k] as Control).modulate = Color(1, 0.85, 0.3) if idx[m] == k else Color(1, 1, 1)
+	if m in ["mover", "altura"] and not bool(_bld.fixo) and (_bld.ghost as Node3D).visible:
+		_bld.fixo = true            # para de seguir a mira: fica onde está, e o dedo ajusta
+		_bld.anchor = _bld.c
+	_bld_pad_text()
+	_bld_t = 0.0
 
 
-func _bld_tilt() -> void:
-	if not _bld.is_empty():
-		_bld.tilt = (int(_bld.tilt) + 1) % BLD_TILTS.size()
+## Volta a peça para onde o olho mira.
+func _bld_follow() -> void:
+	if _bld.is_empty():
+		return
+	_bld.fixo = false
+	if str(_bld.modo) in ["mover", "altura"]:
+		_bld_mode("girar")
+	_bld_t = 0.0
 
 
-func _bld_flip() -> void:
-	if not _bld.is_empty():
-		_bld.roll = (int(_bld.roll) + 1) % 2
+func _bld_pad_text() -> void:
+	var t := ""
+	match str(_bld.modo):
+		"girar": t = "Girar  %d°" % roundi(fposmod(rad_to_deg(float(_bld.yaw)), 360.0))
+		"inclinar": t = "Inclinar  %d°" % roundi(rad_to_deg(float(_bld.tilt)))
+		"virar": t = "Virar  %d°" % roundi(rad_to_deg(float(_bld.roll)))
+		"mover": t = "Mover (lados / frente)"
+		"altura": t = "Altura (cima / baixo)"
+	(_bld_pad as Arrasto).set_text(t)
+
+
+## O dedo andou na faixa: gira/inclina/vira (graus por pixel) ou move (cm por pixel).
+func _bld_drag(d: Vector2) -> void:
+	if _bld.is_empty():
+		return
+	var rot := deg_to_rad(0.25)
+	match str(_bld.modo):
+		"girar":
+			_bld.yaw = float(_bld.yaw) - d.x * rot
+		"inclinar":
+			_bld.tilt = clampf(float(_bld.tilt) - d.x * rot, -PI * 0.5, PI * 0.5)
+		"virar":
+			_bld.roll = wrapf(float(_bld.roll) + d.x * rot, -PI, PI)
+		"mover", "altura":
+			if not bool(_bld.fixo):
+				_bld.fixo = true
+				_bld.anchor = _bld.c
+			var cb: Basis = _cam.global_transform.basis
+			var right := Vector3(cb.x.x, 0, cb.x.z).normalized()
+			var fwd := Vector3(-cb.z.x, 0, -cb.z.z).normalized()
+			var a: Vector3 = _bld.anchor
+			if str(_bld.modo) == "mover":
+				a += right * d.x * 0.002 - fwd * d.y * 0.002
+			else:
+				a.y -= d.y * 0.002
+			_bld.anchor = a
+	_bld_pad_text()
+	_bld_t = 0.0                    # mostra na hora
 
 
 func _bld_basis() -> Basis:
-	var yaw := float(_bld.yaw)
-	var tilt := deg_to_rad(float(BLD_TILTS[int(_bld.tilt)]))
-	var roll := PI * 0.5 * int(_bld.roll)
-	return Basis(Vector3.UP, yaw) * Basis(Vector3.BACK, tilt) * Basis(Vector3.RIGHT, roll)
+	return Basis(Vector3.UP, float(_bld.yaw)) * Basis(Vector3.BACK, float(_bld.tilt)) * Basis(Vector3.RIGHT, float(_bld.roll))
 
 
 func _bld_update() -> void:
@@ -6525,31 +6588,33 @@ func _bld_update() -> void:
 		return
 	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
 		(b as Control).visible = false
-	var o: Vector3 = _cam.global_position
-	var d: Vector3 = -_cam.global_transform.basis.z
-	var hit: Dictionary = _constr.raycast(o, d, 6.0)
 	var b := _bld_basis()
 	var ghost: Node3D = _bld.ghost
-	if hit.is_empty():
-		ghost.visible = false
-		_bld.ok = false
-		_bld.juntas = []
-		(_bld_btns[0] as Button).text = "Colocar"
-		_bld_why.visible = true
-		_bld_why.text = "Mire mais perto (até uns 6 m)."
-		return
-	# deitada em cima de outra peça: gira junto dela (reto ou atravessado) se estiver perto
-	var hb: Dictionary = hit.box
-	if not hb.is_empty() and int(_bld.tilt) == 0:
-		var ax: Vector3 = (hb.b as Basis).x
-		var hy := atan2(-ax.z, ax.x)
-		if Vector2(ax.x, ax.z).length() > 0.5:
-			for k in 4:
-				var cand := hy + k * PI * 0.5
-				if absf(angle_difference(float(_bld.yaw), cand)) < deg_to_rad(12.0):
-					b = Basis(Vector3.UP, cand) * Basis(Vector3.RIGHT, PI * 0.5 * int(_bld.roll))
-	var r: Dictionary = _constr.find_place(_carry, b, hit)
-	b = r.b
+	var hb: Dictionary = {}
+	var r: Dictionary
+	if bool(_bld.get("fixo", false)):
+		# parada onde o jogador deixou: só confere se dá para pôr ali
+		var c0: Vector3 = _bld.anchor
+		r = _constr.check(_carry, b, c0)
+		r.c = c0
+		r.b = b
+		if not bool(r.ok):
+			r.juntas = []
+	else:
+		var o: Vector3 = _cam.global_position
+		var d: Vector3 = -_cam.global_transform.basis.z
+		var hit: Dictionary = _constr.raycast(o, d, 6.0)
+		if hit.is_empty():
+			ghost.visible = false
+			_bld.ok = false
+			_bld.juntas = []
+			(_bld_btns[0] as Button).text = "Colocar"
+			_bld_why.visible = true
+			_bld_why.text = "Mire mais perto (até uns 6 m)."
+			return
+		hb = hit.box
+		r = _constr.find_place(_carry, b, hit)
+		b = r.b
 	# longe demais do jogador não
 	if (r.c as Vector3).distance_to(_player.position + Vector3.UP * 0.9) > 4.5:
 		r.ok = false
@@ -6583,6 +6648,7 @@ func _bld_update() -> void:
 	_bld.c = r.c
 	_bld.b = b
 	_bld.why = str(r.why)
+	(_bld_btns[7] as Control).visible = bool(_bld.get("fixo", false))
 	(_bld.mat as StandardMaterial3D).albedo_color = Color(0.2, 1.0, 0.3, 0.45) if bool(r.ok) else Color(1.0, 0.2, 0.15, 0.45)
 	(_bld_btns[0] as Control).modulate = Color(1, 1, 1, 1.0 if bool(r.ok) else 0.45)
 
