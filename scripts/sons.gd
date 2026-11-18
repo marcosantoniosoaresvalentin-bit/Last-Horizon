@@ -28,10 +28,10 @@ const FILES := {
 	"arara_voo": ["arara_voo1", "arara_voo2", "arara_voo3", "arara_voo4"],
 	"arara_alarme": ["arara_alarme1", "arara_alarme2"],
 	"arara_resmungo": ["arara_resmungo1", "arara_resmungo2", "arara_resmungo3"],
-	"macaco_assobio": ["macaco_assobio1", "macaco_assobio2", "macaco_assobio3"],
-	"macaco_trinado": ["macaco_trinado1", "macaco_trinado2"],
-	"macaco_alarme": ["macaco_alarme1", "macaco_alarme2"],
-	"macaco_guincho": ["macaco_guincho1"],
+	"macaco_assobio": ["macaco_assobio1", "macaco_assobio2", "macaco_assobio3", "macaco_assobio4", "macaco_assobio5"],
+	"macaco_trinado": ["macaco_trinado1", "macaco_trinado2", "macaco_trinado3"],
+	"macaco_alarme": ["macaco_alarme1", "macaco_alarme2", "macaco_alarme3"],
+	"macaco_guincho": ["macaco_guincho1", "macaco_guincho2"],
 }
 ## Volume de cada som (dB): passos baixos e a água bem baixinha.
 const VOLUME := {"machado": 0.0, "corrida": -12.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0, "serra": -9.0, "pedra_bate": -4.0, "pedra_lasca": -3.0, "pedra_racha": 0.0,

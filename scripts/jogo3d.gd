@@ -771,7 +771,7 @@ func _build_environment() -> void:
 
 	_cam = Camera3D.new()
 	_cam.fov = 62
-	_cam.near = 0.1
+	_cam.near = 0.04
 	_cam.far = 700
 	add_child(_cam)
 
@@ -1166,6 +1166,18 @@ func _build_player() -> void:
 	_play("Idle")
 	for mi in body.find_children("*", "MeshInstance3D", true, false):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		# primeira pessoa: o que do próprio corpo chega muito perto da câmera (a cabeça, o
+		# pescoço, o ombro) some só para a câmera; as mãos (mais longe) e a sombra ficam
+		var m3: MeshInstance3D = mi
+		if m3.mesh:
+			for si in m3.mesh.get_surface_count():
+				var mat := m3.get_active_material(si)
+				if mat is BaseMaterial3D:
+					var nm: BaseMaterial3D = mat.duplicate()
+					nm.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_DITHER
+					nm.distance_fade_min_distance = 0.2
+					nm.distance_fade_max_distance = 0.3
+					m3.set_surface_override_material(si, nm)
 	# machado na mão e golpe feito em código (por cima da animação)
 	var axe := MeshInstance3D.new()
 	axe.mesh = Corte.axe_mesh()

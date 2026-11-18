@@ -157,16 +157,105 @@ def save(name, s, peak_db=-2.0):
     print(name, os.path.getsize(out), 'bytes')
 
 
+# ---------- macaco-prego, versão mais natural ----------
+
+def walk(n, step, smooth=400):
+    """Variação lenta e aleatória (o tom e a força nunca ficam parados)."""
+    w = np.cumsum(rng.normal(0, step, n))
+    k = np.ones(smooth) / smooth
+    w = np.convolve(w, k, mode='same')
+    return w - w.mean()
+
+
+def forest(x, wet=0.28, decay=0.9):
+    """Eco da mata: reflexões curtas e uma cauda que some, mais abafada no agudo."""
+    n = int(decay * SR)
+    t = np.arange(n) / SR
+    ir = rng.normal(0, 1, n) * np.exp(-t / (decay / 5.0))
+    ir = band(ir, 200, 5000, 1)
+    ir[: int(0.012 * SR)] = 0
+    for d, g in [(0.017, 0.5), (0.031, 0.35), (0.047, 0.25)]:
+        ir[int(d * SR)] += g
+    ir /= np.abs(ir).sum() / 6.0
+    y = np.convolve(x, ir)[: len(x) + n // 2]
+    dry = np.concatenate([x, np.zeros(len(y) - len(x))])
+    return dry * (1 - wet) + y * wet
+
+
+def peep(dur, f_peak, f_end, rise=0.18):
+    """Piado/assobio do macaco-prego: sobe rápido no começo, desce, tom puro com
+    um pouco de 2ª harmônica, tremendo de leve; ar no começo."""
+    n = int(dur * SR)
+    x = np.linspace(0, 1, n)
+    f_start = f_peak * 0.82
+    f = np.where(x < rise, f_start + (f_peak - f_start) * np.sin(x / rise * np.pi / 2),
+                 f_peak + (f_end - f_peak) * np.clip((x - rise) / (1 - rise), 0, 1) ** 0.9)
+    f *= 1 + walk(n, 0.0009, 200) + 0.012 * np.sin(2 * np.pi * rng.uniform(25, 40) * x * dur)
+    ph = 2 * np.pi * np.cumsum(f) / SR
+    amp = np.clip(1 + walk(n, 0.004, 300), 0.6, 1.4)
+    y = (np.sin(ph) + 0.22 * np.sin(2 * ph + 0.4) + 0.06 * np.sin(3 * ph)) * amp
+    air = band(rng.normal(0, 1, n), 2500, 8000) * 0.05 * np.exp(-x * 6)
+    y = (y + air) * env(n, 0.008 + rng.uniform(0, 0.01), 0.035, 1.6)
+    return y / (np.abs(y).max() + 1e-9)
+
+
+def twitter(notes, f0):
+    """Trinado: notinhas rápidas, cada uma com um 'v' de frequência, subindo e descendo."""
+    parts = []
+    shape = np.sin(np.linspace(0, np.pi, notes)) * 0.18
+    for i in range(notes):
+        d = rng.uniform(0.04, 0.07)
+        f = f0 * (1 + shape[i] + rng.normal(0, 0.02))
+        parts.append(peep(d, f * 1.12, f * 0.88, rise=0.35) * rng.uniform(0.7, 1.0))
+        parts.append(np.zeros(int(rng.uniform(0.018, 0.045) * SR)))
+    return np.concatenate(parts)
+
+
+def huh(dur):
+    """'Hã' rouco e curto de alarme (latido), com a voz rasgando."""
+    n = int(dur * SR)
+    x = np.linspace(0, 1, n)
+    f0 = (650 + 380 * np.sin(np.pi * np.minimum(x * 1.4, 1))) * (1 + walk(n, 0.004, 80))
+    src = pulse_train(f0, 0.14, 0.3)
+    y = band(src, 900, 2600) * 1.0 + band(src, 2600, 4800) * 0.55 + band(src, 450, 900) * 0.35
+    y += band(rng.normal(0, 1, n), 1200, 6000) * np.abs(y).mean() * 1.4
+    y *= env(n, 0.004, 0.045, 2.2)
+    return y / (np.abs(y).max() + 1e-9)
+
+
+def shriek(dur):
+    """Guincho: tom agudo e tenso, tremido, com a voz falhando em alguns pontos."""
+    n = int(dur * SR)
+    x = np.linspace(0, 1, n)
+    f0 = (1700 + 650 * np.sin(np.pi * x ** 0.7)) * (1 + 0.05 * np.sin(2 * np.pi * 22 * x * dur) + walk(n, 0.002, 120))
+    src = pulse_train(f0, 0.035, 0.09)
+    y = band(src, 1500, 3500) + 0.55 * band(src, 3500, 7500)
+    y *= 1 - 0.35 * (rng.random(n) < 0.0) + 0.25 * np.sin(2 * np.pi * 9 * x * dur) ** 8
+    y *= env(n, 0.02, 0.12)
+    return y / (np.abs(y).max() + 1e-9)
+
+
+def monkeys():
+    # contato (procurando comida): piados soltos ou em dupla
+    save('macaco_assobio1', forest(peep(0.15, 4200, 3300)), -3)
+    save('macaco_assobio2', forest(seq(peep(0.11, 4500, 3600), peep(0.13, 4100, 3200), gap=(0.09, 0.15))), -3)
+    save('macaco_assobio3', forest(peep(0.2, 3800, 2900)), -3)
+    save('macaco_assobio4', forest(seq(peep(0.09, 4700, 3900), peep(0.09, 4600, 3800), peep(0.12, 4200, 3300), gap=(0.06, 0.1))), -3)
+    save('macaco_assobio5', forest(peep(0.13, 3600, 3100, rise=0.3)), -3)
+    # trinados (comendo junto, animados)
+    save('macaco_trinado1', forest(twitter(7, 3500)), -3)
+    save('macaco_trinado2', forest(twitter(10, 3200)), -3)
+    save('macaco_trinado3', forest(twitter(5, 3900)), -3)
+    # alarme: latidos em série
+    save('macaco_alarme1', forest(seq(huh(0.09), huh(0.1), huh(0.085), huh(0.09), gap=(0.1, 0.17)), 0.32), -1)
+    save('macaco_alarme2', forest(seq(huh(0.11), huh(0.09), huh(0.1), gap=(0.12, 0.2)), 0.32), -1)
+    save('macaco_alarme3', forest(seq(huh(0.08), huh(0.08), gap=(0.08, 0.12)), 0.32), -1)
+    # guincho (susto forte)
+    save('macaco_guincho1', forest(shriek(0.45), 0.3), -2)
+    save('macaco_guincho2', forest(seq(shriek(0.25), shriek(0.32), gap=(0.06, 0.1)), 0.3), -2)
+
+
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     # (os sons da arara agora são gravações reais: ver sons/LEIA.md)
-    # macaco-prego: assobios de contato
-    save('macaco_assobio1', whistle(0.16, 4300, 3300))
-    save('macaco_assobio2', seq(whistle(0.12, 4600, 3700), whistle(0.14, 4200, 3300), gap=(0.08, 0.14)))
-    save('macaco_assobio3', whistle(0.22, 3900, 3000, vib=0.02))
-    save('macaco_trinado1', trill(6, 3600))
-    save('macaco_trinado2', trill(9, 3300))
-    # macaco-prego: alarme (latidos) e guincho
-    save('macaco_alarme1', seq(bark(0.09), bark(0.1), bark(0.085), gap=(0.09, 0.15)), -1)
-    save('macaco_alarme2', seq(bark(0.11), bark(0.09), gap=(0.1, 0.16)), -1)
-    save('macaco_guincho1', scream(0.42), -3)
+    monkeys()

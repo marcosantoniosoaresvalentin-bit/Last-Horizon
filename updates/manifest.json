@@ -1,9 +1,9 @@
 {
-  "version": 77,
-  "file": "update_77.zip",
-  "size": 4199693,
-  "sha256": "032c7613ef23556e22c8018a524fb5cb5db49bf6956e37db9ac6149672d6a5f3",
+  "version": 78,
+  "file": "update_78.zip",
+  "size": 4277414,
+  "sha256": "f80b3dd1ce2f7bb3cebd24c8477fc516890447ab51ac646260bb4ccfcbe7c6f9",
   "min_build": 1,
-  "notes": "Arara refeita pena por pena; gritos de arara com gravações reais de papagaios; tronco da bacaba com textura de casca de verdade em volta (não some mais)",
+  "notes": "Sons dos macacos mais naturais (piados, trinados, latidos de alarme e guinchos com eco da mata); corrige o rosto do personagem passando na frente da câmera ao começar a andar",
   "date": "2026-11-18"
 }
