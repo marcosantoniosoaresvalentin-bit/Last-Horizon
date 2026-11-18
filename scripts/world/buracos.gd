@@ -469,4 +469,6 @@ func _load(path: String) -> void:
 	if d is Dictionary:
 		holes = d.get("buracos", [])
 		posts = d.get("toras", [])
-		montes = d.get("montes", [])
+		# as covas redondas da pá (versão antiga) saem: a pá agora mexe na terra de verdade
+		holes = holes.filter(func(h): return not bool(h.get("pa", false)))
+		montes = []

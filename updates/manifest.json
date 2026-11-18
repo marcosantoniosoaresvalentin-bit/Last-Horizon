@@ -1,9 +1,9 @@
 {
-  "version": 70,
-  "file": "update_70.zip",
-  "size": 3496913,
-  "sha256": "e85a7272e6d2208e3b8d7f9d9f775e7885f54e72b63c83aaf4fb7ae5c1ed45cb",
+  "version": 71,
+  "file": "update_71.zip",
+  "size": 3500386,
+  "sha256": "e9cb090baff60670a791f7489eb78752976ef853d8660ad6d13cb736e59696ca",
   "min_build": 1,
-  "notes": "Pá de pedra: cova larga onde dá para entrar e cavar a fundura que quiser; a pá enche de terra e você joga onde quiser",
+  "notes": "Pá tira a terra do próprio chão onde bate (cava qualquer forma, largura e fundura) e joga onde quiser",
   "date": "2026-11-18"
 }

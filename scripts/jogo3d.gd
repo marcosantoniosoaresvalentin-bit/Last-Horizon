@@ -24,6 +24,7 @@ const GalhoGeo := preload("res://scripts/world/galho_geo.gd")
 const Pedras := preload("res://scripts/world/pedras.gd")
 const Lascar := preload("res://scripts/world/lascar.gd")
 const Macacos := preload("res://scripts/world/macacos.gd")
+const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
 const SAW_SPEED := 2.6            # quão rápido a serra acompanha o dedo (curso inteiro ≈ 0,8 s)
@@ -70,6 +71,8 @@ uniform vec2 world_size = vec2(640.0, 480.0);
 // buracos cavados perto do jogador: (x, z, raio, 0). O chão não é desenhado dentro deles.
 uniform vec4 holes[32];
 uniform int hole_n = 0;
+uniform sampler2D dig_mask : filter_nearest, repeat_disable;   // terra mexida pela pá (o chão normal some ali)
+uniform bool dig_on = false;
 varying vec3 wpos;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 vec2 hash2(vec2 p){ return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
@@ -94,6 +97,7 @@ void fragment(){
 		if (distance(wpos.xz, holes[i].xy) < holes[i].z) { discard; }
 	}
 	vec2 uv = wpos.xz / world_size;
+	if (dig_on && texture(dig_mask, uv).r > 0.5) { discard; }
 	vec4 a = texture(soil_a, uv);
 	vec4 b = texture(soil_b, uv);
 	float rock = COLOR.a;
@@ -146,7 +150,10 @@ render_mode cull_disabled;
 uniform float wind = 0.12;
 uniform float wet = 0.0;
 uniform vec3 player_pos = vec3(0.0);
-uniform vec4 flat_spot = vec4(0.0);   // xyz = lugar, w = raio: capim amassado (modelando pedra)
+uniform vec4 flat_spot = vec4(0.0);
+uniform sampler2D dig_mask : filter_nearest, repeat_disable;
+uniform bool dig_on = false;
+uniform vec2 dig_world = vec2(640.0, 480.0);   // xyz = lugar, w = raio: capim amassado (modelando pedra)
 uniform float fade_start = 26.0;
 uniform float fade_end = 34.0;
 uniform vec4 holes[32];
@@ -160,6 +167,7 @@ void vertex(){
 	// a grama encolhe perto da borda da área desenhada, sem "pular" na tela
 	float shrink = 1.0 - smoothstep(fade_start, fade_end, distance(root.xz, player_pos.xz));
 	VERTEX.y *= shrink;
+	if (dig_on && textureLod(dig_mask, root.xz / dig_world, 0.0).r > 0.5) { VERTEX *= 0.0; }
 	if (flat_spot.w > 0.0) {
 		VERTEX.y *= mix(0.08, 1.0, smoothstep(flat_spot.w * 0.6, flat_spot.w, distance(root.xz, flat_spot.xz)));
 	}
@@ -340,6 +348,8 @@ var _ctx_action := ""
 var _work_btn: Button             # "Trabalhar" na tora apoiada nas forquilhas (ou "Modelar pedra")
 var _pedras: Node3D = null
 var _macacos: Node3D = null
+var _escav: Node3D = null
+var _pa_vol := 0.0                # quanta terra está na pá (m³)
 var _knap := {}                   # modelando pedra no chão: ver _knap_start
 var _knap_ui: Control = null
 var _knap_mi: MeshInstance3D = null
@@ -841,6 +851,13 @@ func _on_world_ready() -> void:
 	_pedras.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/pedras.json" if _world_id != "" else "")
 	_buracos.changed_hook = _update_holes
 	_buracos.build(self, _arvores, Mundos.dir(_world_id) + "/buracos.json" if _world_id != "" else "")
+	_escav = Escavacao.new()
+	add_child(_escav)
+	_escav.build(self, _buracos._soil_mat, Mundos.dir(_world_id) + "/escavacao.json" if _world_id != "" else "")
+	for m in [_terrain_mat, _grass_mat]:
+		m.set_shader_parameter("dig_mask", _escav.mask_tex)
+		m.set_shader_parameter("dig_on", true)
+	_grass_mat.set_shader_parameter("dig_world", Vector2(MundoSim.W * CELL, MundoSim.H * CELL))
 	if not _pending_carry.is_empty():
 		_hold_log(_pending_carry)
 		_pending_carry = {}
@@ -1226,6 +1243,8 @@ func _save_world() -> void:
 		_galhos.save(Mundos.dir(_world_id) + "/galhos.json")
 	if _apoios:
 		_apoios.save(Mundos.dir(_world_id) + "/apoios.json")
+	if _escav:
+		_escav.save(Mundos.dir(_world_id) + "/escavacao.json")
 	if _pedras:
 		_pedras.save(Mundos.dir(_world_id) + "/pedras.json")
 	Mundos.touch(_world_id, _game_date())
@@ -3499,55 +3518,47 @@ func _stone_chips(at: Vector3, n: int) -> void:
 
 # ================== PÁ ==================
 
-## A pá chegou no chão: se está vazia, tira uma pá de terra (a cova aprofunda);
-## se está cheia, joga a terra onde o personagem está virado.
+## A pá chegou no chão: se está vazia, tira uma pá de terra do chão na frente (o chão
+## desce ali); se está cheia, joga a terra na frente (o chão sobe ali).
 func _pa_hit() -> void:
-	var inside: int = _buracos.pit_at(_player.position.x, _player.position.z)
-	var in_deep: bool = inside >= 0 and float(_buracos.holes[inside].d) > 0.3 and _player.position.y < surface_at(_player.position.x, _player.position.z) - 0.25
+	var at := _front(0.75)
 	if not _pa_full:
-		var at := _player.position if in_deep else _front(1.0)
-		var res: Array = _buracos.dig_pa(at, inside if in_deep else -1)
-		if float(res[1]) <= 0.0:
+		var v: float = _escav.dig(at)
+		if v <= 0.0001:
 			_show_toast("Não dá para cavar mais fundo aqui.")
 			return
-		_dirt(at if not in_deep else _player.position + Vector3(-sin(_face), 0, -cos(_face)) * 0.4)
+		_dirt(at)
 		Sons.play_at(self, "cavar", at, 0.0, 0.9)
 		_pa_full = true
-		var d: float = float(_buracos.holes[int(res[0])].d)
-		_show_toast("Pá cheia de terra. Cova com %s de fundura: vá jogar a terra fora." % ("%d cm" % int(round(d * 100.0)) if d < 1.0 else ("%.1f m" % d).replace(".", ",")))
+		_pa_vol = v
 	else:
-		# joga a terra: de dentro da cova, para fora dela (por cima da borda)
-		var fwd := Vector3(-sin(_face), 0, -cos(_face))
-		var to := _front(1.1)
-		if in_deep:
-			var h: Dictionary = _buracos.holes[inside]
-			to = Vector3(float(h.x), 0, float(h.z)) + fwd * (float(h.r) + 0.7)
-		to.y = surface_at(to.x, to.z)
-		var kind: String = _buracos.toss(to, PI * Buracos.PA_R * Buracos.PA_R * Buracos.PA_STEP)
+		var to := _front(1.05)
+		_escav.dump(to, _pa_vol)
 		_dirt(to)
 		Sons.play_at(self, "cavar", to, -4.0, 1.15)
 		_pa_full = false
-		if kind == "cova":
-			_show_toast("Você jogou a terra de volta na cova.")
+		_pa_vol = 0.0
 	if _pa_dirt:
 		_pa_dirt.visible = _pa_full
 
 
-## Sair da cova funda: o personagem escala a parede até a borda.
+## Chão de verdade (com o que a pá cavou ou aterrou).
+func ground_at(x: float, z: float) -> float:
+	return _escav.ground_at(x, z) if _escav else surface_at(x, z)
+
+
+## Barranco na frente (mais alto que o pulo): o personagem se agarra e sobe.
 func _start_climb_out() -> bool:
-	if _buracos == null:
+	if _escav == null:
 		return false
-	var i: int = _buracos.pit_at(_player.position.x, _player.position.z)
-	if i < 0:
+	var feet := _player.position.y
+	var to := _front(0.55)
+	var gh := ground_at(to.x, to.z)
+	if gh - feet < 0.5 or gh - feet > 1.9:
 		return false
-	var h: Dictionary = _buracos.holes[i]
-	var surf := surface_at(_player.position.x, _player.position.z)
-	if _player.position.y > surf - 0.45:
-		return false            # raso: o pulo normal já sai
-	var fwd := Vector3(-sin(_face), 0, -cos(_face))
-	var to := Vector3(float(h.x), 0, float(h.z)) + fwd * (float(h.r) + 0.35)
-	to.y = surface_at(to.x, to.z)
-	_climb = {"t": 0.0, "dur": 0.6 + float(h.d) * 0.55, "from": _player.position, "to": to}
+	to = _front(0.75)
+	to.y = ground_at(to.x, to.z)
+	_climb = {"t": 0.0, "dur": 0.5 + (gh - feet) * 0.6, "from": _player.position, "to": to}
 	return true
 
 
@@ -3925,16 +3936,20 @@ func _move_player(delta: float) -> void:
 		p = _buracos.push_out(p)          # nem as toras fincadas
 	if _apoios:
 		p = _apoios.push_out(p)           # nem as forquilhas e a tora em cima delas
-	if _buracos:
-		p = _buracos.pit_walls(p, _player.position, feet)   # dentro da cova: as paredes seguram
+	if _escav and not _air:
+		# barranco cavado: parede alta não dá para subir andando
+		var gnew: float = ground_at(p.x, p.z)
+		var run := Vector2(p.x - _player.position.x, p.z - _player.position.z).length()
+		var rise := gnew - feet
+		if rise > 0.45 or (rise > 0.1 and rise / maxf(run, 0.001) > 1.2):
+			p.x = _player.position.x
+			p.z = _player.position.z
 	# chão: o terreno ou o topo de uma tora (dá para subir pulando e andar em cima)
 	var ground := height_at(p.x, p.z) - minf(depth, 0.9) * 0.5
-	if _buracos:
-		var go: float = _buracos.ground_offset(p.x, p.z)
-		if go < 0.0:
-			ground = surface_at(p.x, p.z) + go       # fundo da cova
-		elif go > 0.0:
-			ground += go                             # em cima do monte de terra
+	if _escav:
+		var dv: float = _escav.delta_at(p.x, p.z)
+		if absf(dv) > 0.001:
+			ground = surface_at(p.x, p.z) + dv - minf(depth, 0.9) * 0.5    # chão cavado ou aterrado
 	if _arvores:
 		var sup: float = _arvores.support_y(p.x, p.z)
 		if sup > ground and feet >= sup - 0.2:
