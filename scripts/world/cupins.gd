@@ -45,6 +45,7 @@ func build(jogo: Node, arvores: Node, seed_: int, save_path := "") -> void:
 	_soil_mat.vertex_color_use_as_albedo = true
 	_soil_mat.vertex_color_is_srgb = true
 	_soil_mat.roughness = 1.0
+	_soil_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_mud_mat = _soil_mat.duplicate()
 	_mud_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_leaf_mat = StandardMaterial3D.new()
@@ -398,6 +399,7 @@ func _rebuild() -> void:
 	for t in timbos:
 		_timbo(tb, t)
 	_add(tb, _leaf_mat)
+	_bugs_dirty = true
 
 
 func _add(st: SurfaceTool, mat: Material) -> void:
@@ -409,29 +411,57 @@ func _add(st: SurfaceTool, mat: Material) -> void:
 	_nodes.append(mi)
 
 
-## Cupinzeiro: monte de barro avermelhado, cheio de calombos, com torrinhas em cima.
+## Altura e raio da base do cupinzeiro (cresce com a idade e o tamanho da colônia).
+func _mound_size(c: Dictionary) -> Vector2:
+	var age := clampf((last_day - float(c.nasc)) / 1500.0, 0.05, 1.0)
+	var H := lerpf(0.25, 1.7, age * (0.5 + float(c.pop) * 0.5))
+	return Vector2(H, H * 0.55 + 0.15)
+
+
+## Ponto na superfície do cupinzeiro: ângulo a em volta, t de 0 (pé) a 1 (topo).
+func _mound_pt(c: Dictionary, a: float, t: float, out := 0.0) -> Vector3:
+	var x := float(c.x)
+	var z := float(c.z)
+	var sz := _mound_size(c)
+	var ph := fmod(x * 0.37 + z * 0.73, TAU)
+	var bump := 1.0 + 0.16 * sin(a * 3.0 + t * 5.0 + ph) + 0.06 * sin(a * 7.0 + ph * 2.0 + t * 11.0) + 0.035 * sin(a * 13.0 - t * 7.0 + ph)
+	var rad := (sz.y * pow(1.0 - t, 0.75) + 0.02) * bump + out
+	return Vector3(x + cos(a) * rad, float(c.get("gy", _jogo.height_at(x, z))) - 0.08 + t * sz.x, z + sin(a) * rad)
+
+
+## Buracos do cupinzeiro (as entradas): [ângulo, altura t, raio do buraco].
+func _mound_holes(c: Dictionary) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(float(c.x) * 53.0 + float(c.z) * 29.0)
+	var H := _mound_size(c).x
+	var out := []
+	for k in int(3 + H * 5):
+		out.append([rng.randf() * TAU, rng.randf_range(0.06, 0.75), rng.randf_range(0.018, 0.04) * (0.7 + H * 0.4)])
+	return out
+
+
+## Cupinzeiro: monte de barro avermelhado, cheio de calombos, com torrinhas em cima
+## e os buracos por onde os cupins entram e saem.
 func _mound(st: SurfaceTool, c: Dictionary) -> void:
 	var x := float(c.x)
 	var z := float(c.z)
-	var gy: float = _jogo.height_at(x, z)
+	c["gy"] = _jogo.height_at(x, z)
+	var gy := float(c.gy)
 	var pop := float(c.pop)
-	var age := clampf((last_day - float(c.nasc)) / 1500.0, 0.05, 1.0)
-	var H := lerpf(0.25, 1.7, age * (0.5 + pop * 0.5))
-	var R := H * 0.55 + 0.15
+	var sz := _mound_size(c)
+	var H := sz.x
+	var R := sz.y
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(x * 31.0 + z * 17.0)
 	var col := Color(0.2, 0.12, 0.075) if pop > 0.01 else Color(0.19, 0.16, 0.12)
-	var rings := 8
-	var secs := 14
+	var rings := 10
+	var secs := 18
 	var pts := []
 	for r in rings + 1:
 		var t := float(r) / rings
 		var row := []
-		var rad := R * pow(1.0 - t, 0.75) + 0.02
 		for k in secs:
-			var a := TAU * k / secs
-			var bump := 1.0 + 0.18 * sin(a * 3.0 + rng.randf() * 0.3 + t * 5.0) + rng.randf_range(-0.08, 0.08)
-			row.append(Vector3(x + cos(a) * rad * bump, gy - 0.08 + t * H, z + sin(a) * rad * bump))
+			row.append(_mound_pt(c, TAU * k / secs, t))
 		pts.append(row)
 	for r in rings:
 		for k in secs:
@@ -446,9 +476,42 @@ func _mound(st: SurfaceTool, c: Dictionary) -> void:
 	for k in int(3 + H * 4):
 		var a := rng.randf() * TAU
 		var hh := rng.randf_range(0.2, 0.75)
-		var rr := R * (1.0 - hh) * rng.randf_range(0.6, 1.0)
-		var base := Vector3(x + cos(a) * rr, gy + hh * H * 0.9, z + sin(a) * rr)
+		var base := _mound_pt(c, a, hh, -0.03)
 		_cone(st, base, rng.randf_range(0.05, 0.12) * (0.5 + H * 0.4), rng.randf_range(0.12, 0.3) * (0.5 + H * 0.5), col.darkened(rng.randf() * 0.1))
+	# buracos: borda de barro mais clara levantada e o fundo escuro
+	if pop > 0.01:
+		for h in _mound_holes(c):
+			_hole(st, c, float(h[0]), float(h[1]), float(h[2]), col)
+
+
+func _hole(st: SurfaceTool, c: Dictionary, a: float, t: float, hr: float, col: Color) -> void:
+	var P := _mound_pt(c, a, t, 0.004)
+	var Pa := _mound_pt(c, a + 0.02, t)
+	var Pt := _mound_pt(c, a, minf(t + 0.02, 1.0))
+	var n := (Pa - P).cross(Pt - P).normalized()
+	if n.dot(Vector3(cos(a), 0, sin(a))) < 0.0:
+		n = -n
+	var u := (Pt - P).normalized()
+	var v := n.cross(u).normalized()
+	var segs := 10
+	var dark := Color(0.012, 0.008, 0.005)
+	var rim := col.lightened(0.04)
+	for k in segs:
+		var a0 := TAU * k / segs
+		var a1 := TAU * (k + 1) / segs
+		var i0 := P + (u * cos(a0) * 1.15 + v * sin(a0)) * hr
+		var i1 := P + (u * cos(a1) * 1.15 + v * sin(a1)) * hr
+		var o0 := P + (u * cos(a0) * 1.15 + v * sin(a0)) * hr * 1.35 + n * 0.004
+		var o1 := P + (u * cos(a1) * 1.15 + v * sin(a1)) * hr * 1.35 + n * 0.004
+		var deep := P - n * hr * 0.8
+		# fundo (cone para dentro)
+		for w in [i0, i1, deep]:
+			st.set_color(dark)
+			st.add_vertex(w)
+		# beiradinha
+		for w in [o0, o1, i1, o0, i1, i0]:
+			st.set_color(rim)
+			st.add_vertex(w)
 
 
 static func _cone(st: SurfaceTool, base: Vector3, r: float, h: float, col: Color) -> void:
@@ -632,3 +695,316 @@ func _load(path: String) -> bool:
 	stump_dmg = d.get("tocos", {})
 	last_day = mini(int(d.get("dia", last_day)), last_day)
 	return true
+
+
+# ================== OS CUPINS ANDANDO ==================
+# Só perto do jogador: operários (claros, de cabeça redonda), soldados (cabeça
+# alaranjada grande com as pinças pretas) e, na época da revoada, as aleluias (escuras,
+# de asas compridas). Andam em volta do cupinzeiro, entram e saem pelos buracos, vão
+# em fila até a madeira que estão comendo e andam em cima dela.
+
+const BUG_NEAR := 30.0          # só desenha os cupins até essa distância do jogador
+const BUG_MAX := 650
+
+var _bugs: Array = []           # {path: PackedVector3Array, len, s, v, dir, kind, ph}
+var _bug_mm: Array = []         # um MultiMeshInstance3D por tipo
+var _bug_center := Vector3(1e9, 0, 1e9)
+var _bugs_dirty := true
+var _bug_t := 0.0
+var _bug_frame := 0
+
+
+func _process(delta: float) -> void:
+	if _jogo == null or _jogo._player == null:
+		return
+	var pp: Vector3 = _jogo._player.position
+	_bug_t += delta
+	if _bugs_dirty or Vector2(pp.x - _bug_center.x, pp.z - _bug_center.z).length() > 8.0 or _bug_t > 20.0:
+		_bugs_dirty = false
+		_bug_t = 0.0
+		_bug_center = pp
+		_make_bugs(pp)
+	if _bugs.is_empty():
+		return
+	var idx := [0, 0, 0]
+	_bug_frame += 1
+	for b in _bugs:
+		var k := int(b.kind)
+		# os longe do jogador andam de 3 em 3 quadros (economiza no celular)
+		if bool(b.far) and (_bug_frame + int(b.ph * 10.0)) % 3 != 0:
+			idx[k] += 1
+			continue
+		var dt := delta * (3.0 if bool(b.far) else 1.0)
+		var L := float(b.len)
+		# anda, para um pouquinho, anda de novo (como formiga)
+		var go := 0.55 + 0.45 * sin(_bug_t * 2.3 + float(b.ph))
+		b.s = float(b.s) + float(b.v) * float(b.dir) * dt * clampf(go * 1.6, 0.0, 1.0)
+		if bool(b.loop):
+			b.s = fposmod(float(b.s), L)
+		elif float(b.s) > L:
+			b.s = L
+			b.dir = -1
+		elif float(b.s) < 0.0:
+			b.s = 0.0
+			b.dir = 1
+		var tr := _along(b.path, b.cum, float(b.s), int(b.dir))
+		(_bug_mm[k] as MultiMeshInstance3D).multimesh.set_instance_transform(idx[k], tr)
+		idx[k] += 1
+
+
+## Posição e direção no caminho (distância s), com as distâncias acumuladas cum.
+func _along(path: PackedVector3Array, cum: PackedFloat32Array, s: float, dir: int) -> Transform3D:
+	var i := clampi(cum.bsearch(s) - 1, 0, path.size() - 2)
+	var A := path[i]
+	var B := path[i + 1]
+	var l := cum[i + 1] - cum[i]
+	var f := clampf((s - cum[i]) / maxf(l, 0.0001), 0.0, 1.0)
+	var p := A.lerp(B, f)
+	var fwd := (B - A).normalized() * float(dir)
+	if fwd.length() < 0.5:
+		fwd = Vector3.FORWARD
+	var up := Vector3.UP
+	if absf(fwd.dot(up)) > 0.95:
+		up = Vector3.RIGHT
+	var side := fwd.cross(up).normalized()
+	up = side.cross(fwd).normalized()
+	# o bicho olha para +x no modelo
+	return Transform3D(Basis(fwd, up, side), p)
+
+
+func _path_len(path: PackedVector3Array) -> float:
+	var L := 0.0
+	for i in path.size() - 1:
+		L += path[i].distance_to(path[i + 1])
+	return L
+
+
+func _ground(x: float, z: float) -> Vector3:
+	return Vector3(x, _jogo.height_at(x, z) + 0.004, z)
+
+
+func _make_bugs(pp: Vector3) -> void:
+	_bugs.clear()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(pp.x) * 7 + int(pp.z) * 13
+	var month := _month(last_day)
+	var swarm := month >= 9 and month <= 11
+	var woods := _wood_list()
+	for c in colonies:
+		var pop := float(c.pop)
+		if pop <= 0.01:
+			continue
+		var cp := Vector3(float(c.x), 0, float(c.z))
+		if Vector2(cp.x - pp.x, cp.z - pp.z).length() > BUG_NEAR + 3.0:
+			continue
+		if not c.has("gy"):
+			c["gy"] = _jogo.height_at(cp.x, cp.z)
+		var sz := _mound_size(c)
+		var holes := _mound_holes(c)
+		# 1) em volta do pé do cupinzeiro (uma volta inteira, alguns de cada lado)
+		for k in int(20 + pop * 45):
+			var path := PackedVector3Array()
+			var a0 := rng.randf() * TAU
+			var rr := sz.y * rng.randf_range(1.02, 1.25)
+			for q in 25:
+				var a := a0 + TAU * q / 24.0
+				var w := rr + 0.03 * sin(a * 9.0 + k)
+				path.append(_ground(cp.x + cos(a) * w, cp.z + sin(a) * w))
+			_add_bug(path, rng, 1 if rng.randf() < 0.15 else 0, true)
+		# 2) saindo e entrando pelos buracos: descem pelo barro até o chão
+		for h in holes:
+			for k in 5:
+				var path := PackedVector3Array()
+				var a := float(h[0]) + rng.randf_range(-0.05, 0.05)
+				var t := float(h[1])
+				var steps := 8
+				for q in steps + 1:
+					var tt := t * (1.0 - float(q) / steps)
+					path.append(_mound_pt(c, a + sin(q * 1.3 + k) * 0.06, tt, 0.006))
+				var gp := _mound_pt(c, a, 0.0, 0.0)
+				var out := Vector3(cos(a), 0, sin(a))
+				for q in 4:
+					var d := 0.1 * (q + 1)
+					path.append(_ground(gp.x + out.x * d + out.z * sin(q + k) * 0.04, gp.z + out.z * d - out.x * sin(q + k) * 0.04))
+				_add_bug(path, rng, 1 if k == 4 and rng.randf() < 0.5 else 0, false)
+		# 3) em fila até a madeira que estão comendo, e andando em cima dela
+		var R := reach(c)
+		for t in woods:
+			var d := dmg_of(t)
+			if d <= 0.02 or _treated(t, last_day):
+				continue
+			var wp: Vector2 = t.p
+			var dist := Vector2(wp.x - cp.x, wp.y - cp.z).length()
+			if dist > R or Vector2(wp.x - pp.x, wp.y - pp.z).length() > BUG_NEAR:
+				continue
+			var top := _wood_top(t)
+			var trail := PackedVector3Array()
+			var dir2 := (wp - Vector2(cp.x, cp.z)).normalized()
+			var start := Vector2(cp.x, cp.z) + dir2 * sz.y * 1.05
+			var n := clampi(int(dist / 0.25), 4, 80)
+			var side := Vector2(-dir2.y, dir2.x)
+			var ph := rng.randf() * 10.0
+			for q in n + 1:
+				var f := float(q) / n
+				var p2 := start.lerp(wp, f) + side * sin(f * 9.0 + ph) * 0.12 * sin(f * PI)
+				trail.append(_ground(p2.x, p2.y))
+			for k in clampi(int(8 + d * 24 * pop), 8, 40):
+				_add_bug(trail, rng, 1 if rng.randf() < 0.12 else 0, false)
+			# em cima da madeira: vão e voltam no comprido
+			if not top.is_empty():
+				for k in int(6 + d * 18):
+					var path := PackedVector3Array()
+					var A: Vector3 = top.a
+					var B: Vector3 = top.b
+					var off: Vector3 = top.side * rng.randf_range(-1.0, 1.0)
+					for q in 9:
+						var f := float(q) / 8.0
+						path.append(A.lerp(B, f) + off + top.side * sin(f * 7.0 + k) * 0.15)
+					_add_bug(path, rng, 0, false)
+		# 4) revoada: aleluias saindo pelos buracos de cima e andando no barro
+		if swarm and pop > 0.5:
+			for h in holes:
+				if float(h[1]) < 0.35:
+					continue
+				for k in 4:
+					var path := PackedVector3Array()
+					var a := float(h[0])
+					for q in 6:
+						path.append(_mound_pt(c, a + rng.randf_range(-0.3, 0.3), clampf(float(h[1]) + rng.randf_range(-0.15, 0.1), 0.0, 0.95), 0.008))
+					_add_bug(path, rng, 2, false)
+		if _bugs.size() >= BUG_MAX:
+			break
+	_fill_mm()
+
+
+## Linha de cima da madeira (para os cupins andarem nela): {a, b, side}, ou {}.
+func _wood_top(t: Dictionary) -> Dictionary:
+	match str(t.kind):
+		"tora":
+			var fl: Dictionary = t.obj
+			var L: float = _arv.free_log_length(fl)
+			var yaw := float(fl.get("yaw", 0.0))
+			var ax := Vector3(cos(yaw), 0, -sin(yaw))
+			var r: float = _arv.free_log_radius(fl)
+			var c := Vector3(float(fl.pos[0]), float(fl.pos[1]) + r + 0.004, float(fl.pos[2]))
+			var w: float = _arv.free_log_max_radius(fl) * 0.35
+			return {"a": c - ax * L * 0.45, "b": c + ax * L * 0.45, "side": Vector3(-ax.z, 0, ax.x) * w}
+		"estaca", "toco", "forquilha":
+			var p: Vector2 = t.p
+			var g: float = _jogo.height_at(p.x, p.y)
+			var h := 0.9 if t.kind == "estaca" else (0.45 if t.kind == "toco" else 0.5)
+			var rr := 0.07
+			return {"a": Vector3(p.x + rr, g, p.y), "b": Vector3(p.x + rr * 0.6, g + h, p.y + rr * 0.6), "side": Vector3(0, 0, 0.03)}
+	return {}
+
+
+func _add_bug(path: PackedVector3Array, rng: RandomNumberGenerator, kind: int, loop: bool) -> void:
+	if _bugs.size() >= BUG_MAX or path.size() < 2:
+		return
+	var cum := PackedFloat32Array([0.0])
+	for i in path.size() - 1:
+		cum.append(cum[i] + path[i].distance_to(path[i + 1]))
+	var L := cum[cum.size() - 1]
+	var far := Vector2(path[0].x - _bug_center.x, path[0].z - _bug_center.z).length() > 12.0
+	_bugs.append({"path": path, "cum": cum, "far": far, "len": L, "s": rng.randf() * L, "v": rng.randf_range(0.025, 0.05) * (0.7 if kind == 1 else 1.0),
+		"dir": 1 if rng.randf() < 0.5 else -1, "kind": kind, "ph": rng.randf() * TAU, "loop": loop})
+
+
+func _fill_mm() -> void:
+	if _bug_mm.is_empty():
+		var mat := StandardMaterial3D.new()
+		mat.vertex_color_use_as_albedo = true
+		mat.vertex_color_is_srgb = true
+		mat.roughness = 0.5
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		for k in 3:
+			var mi := MultiMeshInstance3D.new()
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.mesh = _bug_mesh(k)
+			mi.multimesh = mm
+			mi.material_override = mat
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(mi)
+			_bug_mm.append(mi)
+	var n := [0, 0, 0]
+	for b in _bugs:
+		n[int(b.kind)] += 1
+	for k in 3:
+		var mm: MultiMesh = (_bug_mm[k] as MultiMeshInstance3D).multimesh
+		mm.instance_count = n[k]
+		# a caixa de visibilidade cobre a área toda dos cupins
+		(_bug_mm[k] as MultiMeshInstance3D).custom_aabb = AABB(_bug_center - Vector3(BUG_NEAR + 30, 30, BUG_NEAR + 30), Vector3(BUG_NEAR + 30, 30, BUG_NEAR + 30) * 2.0)
+		for i in n[k]:
+			mm.set_instance_transform(i, Transform3D(Basis(), Vector3(0, -1000, 0)))
+
+
+## O bicho (olhando para +x, em metros, um pouco maior que o de verdade para dar
+## para ver no celular): 0 operário, 1 soldado, 2 aleluia (com asas).
+static func _bug_mesh(kind: int) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var S := 2.4                 # escala (operário de verdade: uns 5 mm)
+	var body := Color(0.82, 0.72, 0.55) if kind == 0 else (Color(0.8, 0.7, 0.52) if kind == 1 else Color(0.22, 0.14, 0.08))
+	var head := Color(0.72, 0.5, 0.25) if kind == 0 else (Color(0.85, 0.45, 0.12) if kind == 1 else Color(0.16, 0.1, 0.06))
+	# abdômen, tórax, cabeça (bolinhas achatadas)
+	_blob(st, Vector3(-0.0022, 0.0013, 0) * S, Vector3(0.0028, 0.0013, 0.0018) * S, body)
+	_blob(st, Vector3(0.0012, 0.0012, 0) * S, Vector3(0.0012, 0.001, 0.0012) * S, body.darkened(0.08))
+	if kind == 1:
+		_blob(st, Vector3(0.0036, 0.0014, 0) * S, Vector3(0.0019, 0.0013, 0.0014) * S, head)
+		# pinças pretas
+		for sd in [-1.0, 1.0]:
+			_seg(st, Vector3(0.0052, 0.0013, 0.0006 * sd) * S, Vector3(0.0075, 0.0012, 0.0002 * sd) * S, 0.00035 * S, Color(0.05, 0.03, 0.02))
+	else:
+		_blob(st, Vector3(0.0029, 0.0013, 0) * S, Vector3(0.0011, 0.001, 0.0011) * S, head)
+	# antenas
+	for sd in [-1.0, 1.0]:
+		_seg(st, Vector3(0.0036 if kind != 1 else 0.0045, 0.0018, 0.0005 * sd) * S, Vector3(0.0058 if kind != 1 else 0.0064, 0.0024, 0.0018 * sd) * S, 0.00018 * S, head.darkened(0.2))
+	# 6 pernas
+	for i in 3:
+		var x := (0.0006 + 0.0007 * (i - 1)) * S
+		for sd in [-1.0, 1.0]:
+			var knee := Vector3(x + 0.0004 * (i - 1) * S, 0.0018 * S, 0.0019 * sd * S)
+			_seg(st, Vector3(x, 0.0011 * S, 0.0005 * sd * S), knee, 0.00018 * S, body.darkened(0.15))
+			_seg(st, knee, Vector3(x + 0.0012 * (i - 1) * S, 0.0, 0.0032 * sd * S), 0.00016 * S, body.darkened(0.15))
+	if kind == 2:
+		# quatro asas compridas, meio transparentes (cinza claro), deitadas sobre o corpo
+		for sd in [-1.0, 1.0]:
+			for w in 2:
+				var root := Vector3(0.0012, 0.0026 + w * 0.0002, 0.0004 * sd) * S
+				var tip := Vector3(-0.011, 0.0028 + w * 0.0002, (0.0018 + w * 0.0006) * sd) * S
+				var mid1 := root.lerp(tip, 0.5) + Vector3(0, 0, 0.0013 * sd) * S
+				var mid2 := root.lerp(tip, 0.5) - Vector3(0, 0, 0.0002 * sd) * S
+				for v in [root, mid1, tip, root, tip, mid2]:
+					st.set_color(Color(0.78, 0.76, 0.72))
+					st.add_vertex(v)
+	st.generate_normals()
+	return st.commit()
+
+
+static func _blob(st: SurfaceTool, c: Vector3, r: Vector3, col: Color) -> void:
+	var la := 5
+	var lo := 8
+	for i in la:
+		for j in lo:
+			var q := []
+			for d in [[0, 0], [1, 0], [1, 1], [0, 1]]:
+				var th := PI * float(i + d[0]) / la
+				var ph := TAU * float(j + d[1]) / lo
+				q.append(c + Vector3(sin(th) * cos(ph) * r.x, cos(th) * r.y, sin(th) * sin(ph) * r.z))
+			for k in [0, 1, 2, 0, 2, 3]:
+				st.set_color(col)
+				st.add_vertex(q[k])
+
+
+static func _seg(st: SurfaceTool, a: Vector3, b: Vector3, w: float, col: Color) -> void:
+	var d := (b - a).normalized()
+	var s1 := d.cross(Vector3.UP)
+	if s1.length() < 0.1:
+		s1 = d.cross(Vector3.RIGHT)
+	s1 = s1.normalized() * w
+	var s2 := d.cross(s1).normalized() * w
+	for side in [s1, s2]:
+		for v in [a - side, b - side, b + side, a - side, b + side, a + side]:
+			st.set_color(col)
+			st.add_vertex(v)
