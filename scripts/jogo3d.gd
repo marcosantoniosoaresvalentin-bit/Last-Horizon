@@ -32,6 +32,9 @@ const Minerios := preload("res://scripts/world/minerios.gd")
 const Cupins := preload("res://scripts/world/cupins.gd")
 const Tamanduas := preload("res://scripts/world/tamanduas.gd")
 const Construcao := preload("res://scripts/world/construcao.gd")
+const Maquinas := preload("res://scripts/world/maquinas.gd")
+const Projetos := preload("res://scripts/ui/projetos.gd")
+const Amarrar := preload("res://scripts/ui/amarrar.gd")
 const MINERAIS_ITENS := ["hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita", "lasca_silex"]
 const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
@@ -386,6 +389,14 @@ var _cupins: Node3D = null
 var _tamanduas: Node3D = null
 var teste := false                 # modo de teste (Configurações): tudo de graça e rápido
 var _constr: Node3D = null
+var _maq: Node3D = null
+var _proj := {}                    # pondo a planta no chão: {tipo, yaw, ghost, ok, c}
+var _proj_ui: Control = null
+var _proj_btns: Array = []
+var _lash_ui: Control = null
+var _lash_t := []                  # [planta, junta] sendo amarrada
+var _maq_op := {}                  # na serra: {mi, papel, ctrl, last, speed}
+var _maq_stop: Button
 var _bld := {}                     # modo construção: {yaw, tilt, roll, ghost, ok, c, b}
 var _bld_btn: Button
 var _post_cut := {}               # cortando a ponta da estaca: {i, t, y}
@@ -671,6 +682,8 @@ func _build_hud() -> void:
 	_bld_pad.visible = false
 	_bld_pad.arrastou.connect(_bld_drag)
 	_hud.add_child(_bld_pad)
+	_proj_btns = [mk.call("Pôr a planta", -290, -146, _proj_place), mk.call("Sair", -430, -426, _proj_stop)]
+	_maq_stop = mk.call("Parar", -290, -146, _maq_op_stop)
 	_mark_btns = [mk.call("Cortar aqui", -290, -146, _mark_cut), mk.call("Subir", -150, -286, func(): _mark_move(0.05)),
 		mk.call("Descer", -290, -286, func(): _mark_move(-0.05)), mk.call("Medir", -150, -426, _mark_measure),
 		mk.call("Sair", -290, -426, _mark_close)]
@@ -800,6 +813,16 @@ func _build_hud() -> void:
 	craft_btn.offset_right = -290
 	craft_btn.offset_bottom = 72
 	craft_btn.pressed.connect(_open_craft)
+	var proj_btn := Icones.IconButton.new()
+	proj_btn.show_caption = false
+	proj_btn.text = "Projetos"
+	proj_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	proj_btn.offset_left = -460
+	proj_btn.offset_top = 6
+	proj_btn.offset_right = -380
+	proj_btn.offset_bottom = 72
+	proj_btn.pressed.connect(_open_projetos)
+	_hud.add_child(proj_btn)
 	_hud.add_child(craft_btn)
 	_inv_label.visible = false   # o que tem na mochila aparece na tela da mochila
 
@@ -990,6 +1013,9 @@ func _on_world_ready() -> void:
 	_constr = Construcao.new()
 	add_child(_constr)
 	_constr.build(self, _arvores, _buracos, Mundos.dir(_world_id) + "/construcao.json" if _world_id != "" else "")
+	_maq = Maquinas.new()
+	add_child(_maq)
+	_maq.build(self, _arvores, Mundos.dir(_world_id) + "/maquinas.json" if _world_id != "" else "")
 	_cupins = Cupins.new()
 	add_child(_cupins)
 	_cupins.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/cupins.json" if _world_id != "" else "")
@@ -1379,6 +1405,10 @@ func _process(delta: float) -> void:
 	_update_pour(delta)
 	_mp_tick(delta)
 	_sync_tick(delta)
+	if _maq and _ready_world:
+		var auth: bool = _rede == null or not _rede.ativo() or _rede.modo == "dono"
+		var alone: bool = _rede == null or not _rede.ativo() or _rede.jogadores.size() < 2
+		_maq.update(delta, auth, teste and alone)
 	_update_split(delta)
 	_tick_hole_water(delta)
 	_seed_check -= delta
@@ -1438,6 +1468,8 @@ func _save_world() -> void:
 		_tamanduas.save(Mundos.dir(_world_id) + "/tamanduas.json")
 	if _constr:
 		_constr.save(Mundos.dir(_world_id) + "/construcao.json")
+	if _maq:
+		_maq.save(Mundos.dir(_world_id) + "/maquinas.json")
 	if _buracos:
 		_buracos.save(Mundos.dir(_world_id) + "/buracos.json")
 	if _galhos:
@@ -2133,6 +2165,14 @@ func _update_chop(delta: float) -> void:
 	if not _split.is_empty():
 		return          # rachando a tora: os botões normais somem
 	_post_cut_tick(delta)
+	if not _proj.is_empty():
+		_proj_tick()
+		return
+	if not _maq_op.is_empty():
+		_maq_op_tick(delta)
+		return
+	if _lash_ui != null:
+		return
 	if not _post_mark.is_empty():
 		_mark_tick()
 		return
@@ -2219,6 +2259,8 @@ func _update_ctx_btn() -> void:
 		else:
 			_ctx_btn.text = "Cortar estaca"
 		_ctx_action = "estaca"
+	elif _maq and _crouch_job == "" and not _chopping and not _air and _maq_ctx():
+		pass
 	elif _constr and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _aimed_piece().is_empty():
 		_ctx_action = "peca"
 		_ctx_btn.text = "Pegar peça"
@@ -2260,6 +2302,9 @@ func _ctx_press() -> void:
 			var ci: int = _buracos.post_near(_player.position, 1.3)
 			if ci >= 0:
 				_mark_open(ci)
+			return
+		"planta_peca", "planta_lamina", "amarrar", "pedalar", "empurrar", "tora_serra":
+			_maq_ctx_press(_ctx_action)
 			return
 		"peca":
 			var pc := _aimed_piece()
@@ -4690,7 +4735,7 @@ func _move_player(delta: float) -> void:
 		p = _bacabas.push_out(p)          # nem o tronco das palmeiras
 	if _apoios:
 		p = _apoios.push_out(p)           # nem as forquilhas e a tora em cima delas
-	if _constr or _cupins:
+	if _constr or _cupins or _maq:
 		# nem as paredes e vigas da construção, nem os cupinzeiros; em passinhos, para
 		# não pular a tábua fina num quadro lento
 		var prev := _player.position
@@ -4704,6 +4749,8 @@ func _move_player(delta: float) -> void:
 				q = _constr.push_out(q, feet)
 			if _cupins:
 				q = _cupins.push_out(q, feet)
+			if _maq:
+				q = _maq.push_out(q)
 		p.x = q.x
 		p.z = q.z
 	if _escav and not _air:
@@ -4906,6 +4953,8 @@ func _input(e: InputEvent) -> void:
 	if not _vine.is_empty():
 		_vine_input(e)
 		return   # modelando pedra: o personagem não anda nem gira a câmera
+	if _lash_ui != null or _proj_ui != null:
+		return   # amarrando com o dedo ou escolhendo o projeto
 	if _cal != null or _bag_ui != null or _craft_ui != null or _work_menu != null:
 		return   # com o calendário, a mochila ou o craft aberto, o toque não anda nem gira a câmera
 	var half := get_viewport().get_visible_rect().size.x * 0.5
@@ -5992,6 +6041,8 @@ func _mp_tick(delta: float) -> void:
 			crouch = 1.0
 		var est := {"p": [snappedf(p.x, 0.01), snappedf(p.y, 0.01), snappedf(p.z, 0.01)], "y": snappedf(_face, 0.01),
 			"a": _anim_now, "s": _anim.speed_scale if _anim else 1.0, "c": crouch, "m": _mao}
+		if not _maq_op.is_empty():
+			est["maq"] = [int(_maq_op.mi), snappedf(float(_maq_op.pedal), 0.01), snappedf(float(_maq_op.emp), 0.01)]
 		if not _carry.is_empty():
 			est["tora"] = [snappedf(_arvores.free_log_length(_carry), 0.01), snappedf(_arvores.free_log_radius(_carry), 0.01)]
 		_rede.mandar_estado(est)
@@ -6017,6 +6068,9 @@ func _mp_tick(delta: float) -> void:
 			j.visible = false
 			_remotos[pid] = j
 		var e = _rede.estados.get(pid)
+		if e != null and _maq and (e as Dictionary).has("maq"):
+			var mq: Array = e.maq
+			_maq.inputs[pid] = {"mi": int(mq[0]), "pedal": float(mq[1]), "emp": float(mq[2]), "t": Time.get_ticks_msec()}
 		if e != null:
 			var j: Node3D = _remotos[pid]
 			j.visible = true
@@ -6690,7 +6744,7 @@ func _bld_place() -> void:
 var _sync_hash := {}               # parte -> hash do que todos já têm
 var _sync_t := {}                  # parte -> tempo até conferir de novo
 const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
-	"escavacao": 0.5, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "minerios": 3.0}
+	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "minerios": 3.0}
 const SYNC_ONLY_HOST := ["bacabas"]        # só o dono manda (os bichos comem os frutos)
 
 
@@ -6747,6 +6801,7 @@ func _sync_mod(nome: String):
 		"cipos": return _cipos
 		"bacabas": return _bacabas
 		"minerios": return _minerios
+		"maquinas": return _maq
 	return null
 
 
@@ -6844,3 +6899,287 @@ func _sync_tick(delta: float) -> void:
 		if h != int(_sync_hash.get(nome, 0)):
 			_sync_hash[nome] = h
 			_rede.mandar_parte(nome, txt)
+
+
+
+# ================== PROJETOS (MÁQUINAS POR PLANTA) ==================
+
+func _open_projetos() -> void:
+	if _proj_ui != null or _craft_ui != null or _bag_ui != null or _cal != null or not _ready_world:
+		return
+	_joy_id = -1
+	_joy_vec = Vector2.ZERO
+	_look_id = -1
+	_proj_ui = Projetos.new()
+	_hud.add_child(_proj_ui)
+	_proj_ui.abrir(self)
+	_proj_ui.escolheu.connect(_proj_start)
+	_proj_ui.closed.connect(func(): _proj_ui = null)
+
+
+## Começa a pôr a planta no chão: o desenho dela (azul) na frente do jogador.
+func _proj_start(tipo: String) -> void:
+	if not _bld.is_empty():
+		_bld_stop()
+	var ghost := Node3D.new()
+	add_child(ghost)
+	var t: Dictionary = Maquinas.TIPOS[tipo]
+	var gm := StandardMaterial3D.new()
+	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gm.albedo_color = Color(0.35, 0.65, 1.0, 0.4)
+	gm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for pc in t.pecas:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		var r := float(pc[4])
+		bm.size = Vector3(float(pc[1]), r * 2.0, r * 2.0)
+		mi.mesh = bm
+		mi.material_override = gm
+		mi.transform = Transform3D(Maquinas.slot_basis(str(pc[3])), pc[2])
+		ghost.add_child(mi)
+	_proj = {"tipo": tipo, "yaw": _face + PI * 0.5, "ghost": ghost, "mat": gm, "ok": false, "c": Vector3.ZERO}
+	for b in _proj_btns:
+		(b as Control).visible = true
+	_bld_pad.visible = true
+	(_bld_pad as Arrasto).set_text("Girar a planta")
+	_show_toast("Arraste a faixa para girar a planta. Verde: dá para pôr aqui.")
+
+
+func _proj_stop() -> void:
+	if _proj.is_empty():
+		return
+	(_proj.ghost as Node3D).queue_free()
+	_proj = {}
+	for b in _proj_btns:
+		(b as Control).visible = false
+	_bld_pad.visible = false
+	_bld_why.visible = false
+	_act_check = 0.0
+
+
+func _proj_tick() -> void:
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
+		(b as Control).visible = false
+	var fwd := Vector3(-sin(_face), 0, -cos(_face))
+	var c := _player.position + fwd * 3.2
+	c.y = surface_at(c.x, c.z)
+	var t: Dictionary = Maquinas.TIPOS[_proj.tipo]
+	var ar: Rect2 = t.area
+	var b := Basis(Vector3.UP, float(_proj.yaw))
+	# o chão embaixo da planta precisa ser quase reto e seco, e longe de outra planta
+	var why := ""
+	var hs := []
+	for fx in [0.0, 1.0]:
+		for fz in [0.0, 1.0]:
+			var l := Vector3(ar.position.x + ar.size.x * fx, 0, ar.position.y + ar.size.y * fz)
+			var w := c + b * l
+			hs.append(surface_at(w.x, w.z))
+			var cell := Vector2i(int(w.x / CELL), int(w.z / CELL))
+			if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
+				if _water_level[cell.y * MundoSim.W + cell.x] > height_at(w.x, w.z) + 0.02:
+					why = "Tem água embaixo."
+	if hs.max() - hs.min() > 0.45:
+		why = "O chão é torto demais aqui (procure um lugar mais plano)."
+	if _maq.planta_near(c, 4.0) >= 0:
+		why = "Muito perto de outra planta."
+	_proj.ok = why == ""
+	_proj.c = c
+	(_proj.ghost as Node3D).transform = Transform3D(b, c)
+	(_proj.mat as StandardMaterial3D).albedo_color = Color(0.35, 0.65, 1.0, 0.4) if why == "" else Color(1.0, 0.25, 0.2, 0.4)
+	_bld_why.visible = why != ""
+	_bld_why.text = why
+
+
+func _proj_place() -> void:
+	if _proj.is_empty():
+		return
+	if not bool(_proj.ok):
+		_show_toast(str(_bld_why.text))
+		return
+	var c: Vector3 = _proj.c
+	_maq.add_planta(str(_proj.tipo), c.x, c.z, float(_proj.yaw))
+	_proj_stop()
+	_show_toast("Planta no chão! Traga as madeiras e toque em \"Pôr na planta\" perto dela. Depois amarre as juntas (bolinhas amarelas).")
+
+
+## Decide o botão de contexto perto de uma planta/máquina. true se pôs algum.
+func _maq_ctx() -> bool:
+	var mi: int = _maq.planta_near(_player.position, 3.2)
+	if mi < 0:
+		return false
+	var p: Dictionary = _maq.plantas[mi]
+	if _maq.pronta(mi):
+		var role: String = _maq.role_at(mi, _player.position)
+		if role == "pedal" and _carry.is_empty():
+			_ctx_action = "pedalar"
+			_ctx_btn.text = "Pedalar"
+			return true
+		if role == "mesa":
+			if (p.tora as Dictionary).is_empty() and not _carry.is_empty():
+				_ctx_action = "tora_serra"
+				_ctx_btn.text = "Pôr tora na serra"
+				return true
+			if not (p.tora as Dictionary).is_empty() and _carry.is_empty():
+				_ctx_action = "empurrar"
+				_ctx_btn.text = "Empurrar a tora"
+				return true
+		return false
+	if not _carry.is_empty():
+		_ctx_action = "planta_peca"
+		_ctx_btn.text = "Pôr na planta"
+		return true
+	if not bool(p.lamina) and item_qtd("lamina_serra") > 0 and bool(p.pecas[4]) and bool(p.pecas[5]) and bool(p.pecas[6]):
+		_ctx_action = "planta_lamina"
+		_ctx_btn.text = "Pôr a lâmina"
+		return true
+	var jt: Array = _maq.joint_near(_player.position, 1.8)
+	if not jt.is_empty():
+		_ctx_action = "amarrar"
+		_ctx_btn.text = "Amarrar"
+		return true
+	return false
+
+
+func _maq_ctx_press(act: String) -> void:
+	var mi: int = _maq.planta_near(_player.position, 3.2)
+	if mi < 0:
+		return
+	match act:
+		"planta_peca":
+			var r: Dictionary = _maq.slot_for(mi, _carry, _player.position)
+			if int(r.i) < 0:
+				_show_toast(str(r.why))
+				return
+			_carry = {}
+			if _carry_node:
+				_carry_node.queue_free()
+			_carry_node = null
+			if _chop_pose:
+				_chop_pose.log_node = null
+			_maq.fill_slot(mi, int(r.i))
+			var falta: int = (_maq.plantas[mi].pecas as Array).size() - _maq.done_count(mi)
+			Sons.play_at(self, "baque", _player.position, -6.0)
+			_show_toast("Peça no lugar! " + ("Faltam %d peças." % falta if falta > 0 else "Todas as madeiras estão no lugar: agora a lâmina e as amarrações."))
+		"planta_lamina":
+			remove_item("lamina_serra", 1)
+			_update_inventory()
+			_maq.plantas[mi].lamina = true
+			_maq._rebuild()
+			_show_toast("Lâmina presa entre as colunas, com os dentes virados para a mesa.")
+		"amarrar":
+			var jt: Array = _maq.joint_near(_player.position, 1.8)
+			if jt.is_empty():
+				return
+			if item_qtd("cipo") < 1 and not teste:
+				_show_toast("Precisa de 1 cipó para amarrar.")
+				return
+			_lash_t = jt
+			_face_to(_maq.joint_point(int(jt[0]), int(jt[1])))
+			_lash_ui = Amarrar.new()
+			_hud.add_child(_lash_ui)
+			_lash_ui.terminou.connect(func():
+				_lash_ui = null
+				if not teste:
+					remove_item("cipo", 1)
+					_update_inventory()
+				_maq.tie(int(_lash_t[0]), int(_lash_t[1]))
+				var falta2: int = _maq.pending_joints(int(_lash_t[0]))
+				Sons.play_at(self, "baque", _player.position, -14.0, 1.4)
+				_show_toast("Amarrado! " + ("Faltam %d amarrações." % falta2 if falta2 > 0 else "Tudo amarrado.") + (" A serra está pronta!" if _maq.pronta(int(_lash_t[0])) else ""))
+				_act_check = 0.0)
+			_lash_ui.cancelou.connect(func():
+				_lash_ui = null
+				_act_check = 0.0)
+		"tora_serra":
+			var k: String = _maq.kind_of(_carry)
+			if k == "tabua" or _arvores.free_log_length(_carry) < 0.6:
+				_show_toast("Na serra vai tora ou meia tora (de pelo menos 60 cm).")
+				return
+			if _arvores.free_log_max_radius(_carry) > 0.3:
+				_show_toast("Tora grossa demais para essa serra (até uns 60 cm de largura).")
+				return
+			var fl := _carry
+			_carry = {}
+			if _carry_node:
+				_carry_node.queue_free()
+			_carry_node = null
+			if _chop_pose:
+				_chop_pose.log_node = null
+			_maq.load_log(mi, fl)
+			_show_toast("Tora na mesa. Um pedala e o outro empurra a tora contra a serra.")
+		"pedalar", "empurrar":
+			_maq_op_start(mi, "pedal" if act == "pedalar" else "mesa")
+
+
+## Na serra: o controle de pedalar (trilho de subir e descer o pé) ou de empurrar
+## (faixa de arrastar para o lado da lâmina).
+func _maq_op_start(mi: int, role: String) -> void:
+	var ctrl: Control
+	if role == "pedal":
+		ctrl = SerraCtrl.new()
+		ctrl.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+		ctrl.offset_left = -150
+		ctrl.offset_right = -30
+		ctrl.offset_top = -470
+		ctrl.offset_bottom = -20
+	else:
+		ctrl = Arrasto.new()
+		ctrl.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+		ctrl.offset_left = 30
+		ctrl.offset_right = 520
+		ctrl.offset_top = -150
+		ctrl.offset_bottom = -30
+		(ctrl as Arrasto).set_text("◀  Empurre a tora para a serra")
+	_hud.add_child(ctrl)
+	_maq_op = {"mi": mi, "papel": role, "ctrl": ctrl, "last": 0.5, "pedal": 0.0, "emp": 0.0, "acc": 0.0}
+	if role == "mesa":
+		(ctrl as Arrasto).arrastou.connect(func(d: Vector2):
+			if not _maq_op.is_empty():
+				_maq_op.acc = float(_maq_op.acc) + maxf(0.0, -d.x))
+	_maq_stop.visible = true
+	_jump_btn.visible = false
+	for b in [_log_btn, _ctx_btn, _work_btn, _pick_btn, _vine_btn, _plant_btn, _chop_btn, _bld_btn]:
+		(b as Control).visible = false
+	_show_toast("Suba e desça o pedal com o dedo." if role == "pedal" else "Arraste para a esquerda (para a lâmina) para empurrar a tora.")
+
+
+func _maq_op_stop() -> void:
+	if _maq_op.is_empty():
+		return
+	(_maq_op.ctrl as Node).queue_free()
+	_maq.inputs.erase(_my_id())
+	_maq_op = {}
+	_maq_stop.visible = false
+	_bld_why.visible = false
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
+func _my_id() -> int:
+	return multiplayer.get_unique_id() if _rede and _rede.ativo() else 1
+
+
+func _maq_op_tick(delta: float) -> void:
+	var mi := int(_maq_op.mi)
+	if mi >= _maq.plantas.size() or _maq.role_at(mi, _player.position) != str(_maq_op.papel):
+		_maq_op_stop()
+		return
+	# o pé no pedal: a velocidade do pegador subindo e descendo
+	if str(_maq_op.papel) == "pedal":
+		var v := float(_maq_op.ctrl.value)
+		var spd := absf(v - float(_maq_op.last)) / maxf(delta, 0.001)
+		_maq_op.last = v
+		_maq_op.pedal = lerpf(float(_maq_op.pedal), clampf(spd / 2.0, 0.0, 2.0), minf(1.0, delta * 4.0))
+	else:
+		var push := float(_maq_op.acc) / maxf(delta, 0.001) / 300.0
+		_maq_op.acc = 0.0
+		_maq_op.emp = lerpf(float(_maq_op.emp), clampf(push, 0.0, 2.0), minf(1.0, delta * 5.0))
+		var p: Dictionary = _maq.plantas[mi]
+		if (p.tora as Dictionary).is_empty():
+			_maq_op_stop()
+			return
+		var ped := float(p.get("_pedal", 0.0))
+		_bld_why.visible = float(_maq_op.emp) > 0.1 and ped < 0.05
+		_bld_why.text = "Precisa de alguém pisando no pedal (a serra só funciona em dupla)."
+	_maq.inputs[_my_id()] = {"mi": mi, "pedal": float(_maq_op.pedal), "emp": float(_maq_op.emp), "t": Time.get_ticks_msec()}

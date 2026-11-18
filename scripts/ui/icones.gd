@@ -125,6 +125,10 @@ static func kind_for(text: String) -> String:
 		return "pular"
 	if t.begins_with("craft"):
 		return "craft"
+	if t.begins_with("projeto"):
+		return "projetos"
+	if t.begins_with("amarr"):
+		return "cipo"
 	if t.begins_with("calend"):
 		return "calendario"
 	if t.begins_with("menu"):
@@ -145,6 +149,24 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 		return out
 	var ink: Color = col.call(INK)
 	match k:
+		"projetos":
+			# folha de planta azul enrolada com o desenho em linhas brancas
+			var pg: PackedVector2Array = P.call([[-40, -34], [36, -34], [36, 38], [-40, 38]])
+			ci.draw_colored_polygon(pg, col.call(Color(0.16, 0.33, 0.6)))
+			ci.draw_polyline(pg + PackedVector2Array([pg[0]]), ink, 2.5 * u, true)
+			if not shadow:
+				var wl := Color(0.92, 0.95, 1.0)
+				for gx in [-24, -8, 8, 24]:
+					ci.draw_line(c + Vector2(gx, -30) * u, c + Vector2(gx, 34) * u, Color(1, 1, 1, 0.18), 1.0, true)
+				# o desenho: uma armação com a serra no meio
+				ci.draw_line(c + Vector2(-26, 26) * u, c + Vector2(24, 26) * u, wl, 3 * u, true)
+				ci.draw_line(c + Vector2(-6, 26) * u, c + Vector2(-6, -22) * u, wl, 3 * u, true)
+				ci.draw_line(c + Vector2(6, 26) * u, c + Vector2(6, -22) * u, wl, 3 * u, true)
+				ci.draw_line(c + Vector2(-12, -22) * u, c + Vector2(12, -22) * u, wl, 3 * u, true)
+				ci.draw_line(c + Vector2(0, -16) * u, c + Vector2(0, 14) * u, Color(1, 0.8, 0.4), 2.5 * u, true)
+				ci.draw_line(c + Vector2(6, 6) * u, c + Vector2(26, 6) * u, wl, 3 * u, true)
+			ci.draw_circle(c + Vector2(-40, -34) * u, 7 * u, col.call(Color(0.12, 0.25, 0.48)))
+			ci.draw_circle(c + Vector2(-40, 38) * u, 7 * u, col.call(Color(0.12, 0.25, 0.48)))
 		"craft":
 			# martelo de pedra e faca de lasca cruzados
 			ci.draw_line(c + Vector2(-34, 36) * u, c + Vector2(26, -24) * u, col.call(WOOD), 9 * u, true)
