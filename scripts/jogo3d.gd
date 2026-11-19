@@ -32,6 +32,7 @@ const Minerios := preload("res://scripts/world/minerios.gd")
 const Cupins := preload("res://scripts/world/cupins.gd")
 const Tamanduas := preload("res://scripts/world/tamanduas.gd")
 const Construcao := preload("res://scripts/world/construcao.gd")
+const Buritis := preload("res://scripts/world/buritis.gd")
 const Maquinas := preload("res://scripts/world/maquinas.gd")
 const Projetos := preload("res://scripts/ui/projetos.gd")
 const MINERAIS_ITENS := ["hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita", "lasca_silex"]
@@ -382,6 +383,7 @@ var _work_btn: Button             # "Trabalhar" na tora apoiada nas forquilhas (
 var _pedras: Node3D = null
 var _macacos: Node3D = null
 var _bacabas: Node3D = null
+var _buritis: Node3D = null
 var _araras: Node3D = null
 var _minerios: Node = null
 var _cupins: Node3D = null
@@ -982,6 +984,10 @@ func _on_world_ready() -> void:
 	add_child(_bacabas)
 	_bacabas.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/bacabas.json" if _world_id != "" else "")
 	print("bacabas: %d (%d adultas)" % [_bacabas.palms.size(), _bacabas.adult_palms().size()])
+	_buritis = Buritis.new()
+	add_child(_buritis)
+	_buritis.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/buritis.json" if _world_id != "" else "")
+	print("buritis: %d" % _buritis.count())
 	_macacos = Macacos.new()
 	add_child(_macacos)
 	_macacos.build(self, _arvores, _cipos, _bacabas, int(sim.world_seed), Mundos.dir(_world_id) + "/macacos.json" if _world_id != "" else "")
@@ -1375,6 +1381,8 @@ func _process(delta: float) -> void:
 			_cipos.tick()
 		if _bacabas:
 			_bacabas.tick()
+		if _buritis:
+			_buritis.tick()
 		if _minerios:
 			_minerios.tick()
 		if _cupins:
@@ -1463,6 +1471,8 @@ func _save_world() -> void:
 		_macacos.save(Mundos.dir(_world_id) + "/macacos.json")
 	if _bacabas:
 		_bacabas.save(Mundos.dir(_world_id) + "/bacabas.json")
+	if _buritis:
+		_buritis.save(Mundos.dir(_world_id) + "/buritis.json")
 	if _araras:
 		_araras.save(Mundos.dir(_world_id) + "/araras.json")
 	if _minerios:
@@ -4840,6 +4850,8 @@ func _move_player(delta: float) -> void:
 		p = _buracos.push_out(p)          # nem as toras fincadas
 	if _bacabas:
 		p = _bacabas.push_out(p)          # nem o tronco das palmeiras
+	if _buritis:
+		p = _buritis.push_out(p)
 	if _apoios:
 		p = _apoios.push_out(p)           # nem as forquilhas e a tora em cima delas
 	if _constr or _cupins or _maq:
@@ -6862,8 +6874,8 @@ func _bld_place() -> void:
 var _sync_hash := {}               # parte -> hash do que todos já têm
 var _sync_t := {}                  # parte -> tempo até conferir de novo
 const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
-	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "minerios": 3.0}
-const SYNC_ONLY_HOST := ["bacabas"]        # só o dono manda (os bichos comem os frutos)
+	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 5.0, "minerios": 3.0}
+const SYNC_ONLY_HOST := ["bacabas", "buritis"]        # só o dono manda (os bichos comem os frutos)
 
 
 func _mp_client() -> bool:
@@ -6918,6 +6930,7 @@ func _sync_mod(nome: String):
 		"cupins": return _cupins
 		"cipos": return _cipos
 		"bacabas": return _bacabas
+		"buritis": return _buritis
 		"minerios": return _minerios
 		"maquinas": return _maq
 	return null
