@@ -1,9 +1,9 @@
 {
-  "version": 140,
-  "file": "update_140.zip",
-  "size": 4829786,
-  "sha256": "995a0ba8dbc4030a6de05512b081eb9ad1fdde74ece538cf7a49f31549f5ea79",
+  "version": 141,
+  "file": "update_141.zip",
+  "size": 4831430,
+  "sha256": "b451795764887ed5cf1dd526e0ad26213d8c16d40452a8e377a815aef939f055",
   "min_build": 1,
-  "notes": "Cooperativo fincar e construir; mais cunhas em tora grande; serra com giro e tábua lisa",
+  "notes": "Serra: barrinha de força para empurrar e pedalar, mover e girar a tora",
   "date": "2026-11-19"
 }
