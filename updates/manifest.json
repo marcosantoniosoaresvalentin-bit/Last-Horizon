@@ -1,9 +1,9 @@
 {
-  "version": 142,
-  "file": "update_142.zip",
-  "size": 4833448,
-  "sha256": "244267a0ec2b8dfb4810dfb1f79e95809f50617f3916f81f56f116d486598f56",
+  "version": 143,
+  "file": "update_143.zip",
+  "size": 4840729,
+  "sha256": "ded01361c250d32ffb4c6d3e83c732a7704d192a3893470963aa661a6e2351df",
   "min_build": 1,
-  "notes": "Nadar em rios fundos e no mar; pegar água com o balde nas lagoas",
+  "notes": "Barro: enxada, caixa de barro, misturar e rebocar a construção",
   "date": "2026-11-19"
 }
