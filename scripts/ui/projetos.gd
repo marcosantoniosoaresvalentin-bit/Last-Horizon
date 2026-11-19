@@ -157,7 +157,17 @@ func _select(tipo: String) -> void:
 	_name.text = str(t.nome).to_upper()
 	_desc.text = str(t.desc)
 	var n := Maquinas.needs(tipo)
-	_need.text = "MATERIAL:  %d toras redondas finas · %d meias toras · %d tábuas · %d pinos de madeira · 1 lâmina de serra\nFerramentas: marreta (pinos), serra e machado (cortar as pontas que sobrarem)" % [int(n.tora), int(n.meia), int(n.tabua), int(n.pino)]
+	var partes := []
+	if int(n.tora) > 0:
+		partes.append("%d toras redondas finas" % int(n.tora))
+	if int(n.meia) > 0:
+		partes.append("%d meias toras" % int(n.meia))
+	if int(n.tabua) > 0:
+		partes.append("%d tábuas" % int(n.tabua))
+	partes.append("%d pinos de madeira" % int(n.pino))
+	var nl := int(n.lamina)
+	partes.append(("%d lâminas de faca" % nl) if str(n.lamina_item) == "lamina_faca" else ("%d lâmina de serra" % nl))
+	_need.text = "MATERIAL:  " + " · ".join(partes) + "\nFerramentas: furador e marreta (furos e pinos), serra e machado (cortar as pontas que sobrarem)"
 	_draw.queue_redraw()
 
 
@@ -169,9 +179,12 @@ func _draw_plan() -> void:
 	var s := _draw.size
 	var sc := minf(s.x / 5.0, s.y / 3.2)
 	var o := Vector2(s.x * 0.5, s.y - 18)
+	if t.has("laminas"):
+		sc = minf(s.x / 2.8, s.y / 1.25)          # máquina pequena: desenho maior
+		o.x += 0.3 * sc
 	var P := func(x: float, y: float) -> Vector2:
 		return o + Vector2(x * sc, -y * sc)
-	_draw.draw_line(P.call(-2.2, 0), P.call(2.4, 0), C_DIM, 1.5)
+	_draw.draw_line(P.call(-2.2 if not t.has("laminas") else -1.2, 0), P.call(2.4 if not t.has("laminas") else 0.9, 0), C_DIM, 1.5)
 	for pc in t.pecas:
 		var c: Vector3 = pc[2]
 		var L := float(pc[1])
@@ -185,6 +198,18 @@ func _draw_plan() -> void:
 		var a: Vector2 = P.call(rect.position.x, rect.position.y)
 		var b: Vector2 = P.call(rect.end.x, rect.end.y)
 		_draw.draw_rect(Rect2(Vector2(a.x, b.y), Vector2(b.x - a.x, a.y - b.y)), C_INK, false, 2.0)
+	var font := get_theme_default_font()
+	if t.has("laminas"):
+		# desfibradeira: as lâminas em pé em cima da bancada e os nomes
+		for lp in t.laminas:
+			var q: Vector3 = lp
+			_draw.draw_line(P.call(q.x - 0.08, q.y - 0.02), P.call(q.x + 0.08, q.y - 0.02), C_HI, 3.0)
+			_draw.draw_line(P.call(q.x - 0.08, q.y - 0.02), P.call(q.x, q.y + 0.03), C_HI, 2.0)
+			_draw.draw_line(P.call(q.x + 0.08, q.y - 0.02), P.call(q.x, q.y + 0.03), C_HI, 2.0)
+		_draw.draw_string(font, P.call(0.15, 1.05), "LÂMINAS DE FACA", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
+		_draw.draw_string(font, P.call(0.15, 0.6), "BANCADA", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
+		_draw.draw_string(font, P.call(-1.25, 0.65), "BANCO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
+		return
 	# a lâmina com os dentes para a mesa
 	var lc: Vector3 = t.lamina
 	_draw.draw_line(P.call(lc.x, lc.y - 0.55), P.call(lc.x, lc.y + 0.55), C_HI, 3.0)
@@ -195,7 +220,6 @@ func _draw_plan() -> void:
 	_draw.draw_line(P.call(2.3, 1.45), P.call(1.4, 1.45), C_DIM, 2.0)
 	_draw.draw_line(P.call(1.4, 1.45), P.call(1.55, 1.52), C_DIM, 2.0)
 	_draw.draw_line(P.call(1.4, 1.45), P.call(1.55, 1.38), C_DIM, 2.0)
-	var font := get_theme_default_font()
 	_draw.draw_string(font, P.call(1.5, 1.6), "TORA ENTRA", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
 	_draw.draw_string(font, P.call(-1.9, 0.75), "PEDAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
 	_draw.draw_string(font, P.call(-2.0, 2.95), "VARA DE MOLA", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)

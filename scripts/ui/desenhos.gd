@@ -243,6 +243,30 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for e in [a0, a1]:
 				ci.draw_circle(e, 5.5 * u, Color(0.86, 0.8, 0.58))
 				ci.draw_arc(e, 5.5 * u, 0, TAU, 12, Color(0.3, 0.36, 0.16), 1.5 * u, true)
+		"fibra_buriti":
+			# um feixe de fibras claras, amarrado no meio, com as pontas abertas
+			for k in 14:
+				var o := (k - 6.5) * 2.2
+				var pts := PackedVector2Array()
+				for i in 9:
+					var t := i / 8.0
+					var spread := absf(t - 0.5) * 2.0
+					pts.append(c + Vector2(lerpf(-44, 44, t), o * (0.35 + spread * 0.9) + sin(t * 9.0 + k) * 1.5) * u)
+				ci.draw_polyline(pts, Color(0.86, 0.78, 0.55).darkened(0.12 * (k % 3)), 2.2 * u, true)
+			ci.draw_rect(Rect2(c + Vector2(-5, -9) * u, Vector2(10, 18) * u), Color(0.42, 0.33, 0.17))
+			ci.draw_rect(Rect2(c + Vector2(-5, -9) * u, Vector2(10, 18) * u), Color(0.15, 0.1, 0.05), false, 1.5 * u)
+		"acao_trabalhar":
+			# a bancada com as lâminas em pé e o talo sendo puxado em cima delas
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-46, 10) * u, c + Vector2(46, 4) * u, c + Vector2(46, 14) * u, c + Vector2(-46, 20) * u]), Color(0.58, 0.42, 0.26))
+			ci.draw_rect(Rect2(c + Vector2(-38, 18) * u, Vector2(9, 28) * u), Color(0.38, 0.28, 0.17))
+			ci.draw_rect(Rect2(c + Vector2(28, 13) * u, Vector2(9, 32) * u), Color(0.38, 0.28, 0.17))
+			for k in 3:
+				var bx := -18 + k * 16
+				ci.draw_colored_polygon(PackedVector2Array([c + Vector2(bx - 7, 10 - k * 0.6) * u, c + Vector2(bx + 7, 9 - k * 0.6) * u, c + Vector2(bx + 1, -2 - k * 0.6) * u]), Color(0.45, 0.45, 0.43))
+			ci.draw_line(c + Vector2(-46, -14) * u, c + Vector2(40, -6) * u, Color(0.2, 0.32, 0.12), 8 * u, true)
+			ci.draw_line(c + Vector2(-46, -14) * u, c + Vector2(40, -6) * u, Color(0.45, 0.6, 0.28), 5 * u, true)
+			for k in 5:
+				ci.draw_line(c + Vector2(-46, -14) * u, c + Vector2(-56, -22 + k * 5) * u, Color(0.86, 0.78, 0.55), 1.6 * u, true)
 		"folha_buriti_seca":
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95, true)
 		"acao_derrubar":

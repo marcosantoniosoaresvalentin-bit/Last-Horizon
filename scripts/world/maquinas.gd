@@ -54,6 +54,34 @@ const TIPOS := {
 			[[2, 14], Vector3(-1.2, 0.36, 0.0)],
 		],
 		"area": Rect2(-1.6, -0.6, 3.7, 1.2),     # no chão (x, z)
+		"lamina_item": "lamina_serra",
+		"lamina_pecas": [4, 5, 6],               # a lâmina vai entre as colunas e a travessa
+	},
+	# Desfibradeira de talo: duas toras em pé cortadas na mesma altura com uma tábua
+	# comprida em cima (a bancada), e na frente uma tora mais baixa com uma tábua (o
+	# banco). Em cima da bancada, as lâminas de faca em pé, com o fio para cima e ao
+	# comprido (na direção de quem puxa). Sentado no banco, o jogador bate o talo de
+	# buriti nas lâminas e puxa: o talo se abre em fibras.
+	# Medidas: x = da bancada (0) para o banco (-x), z = de lado, y = para cima.
+	"desfibradeira": {
+		"nome": "Desfibradeira de Talo",
+		"desc": "Bancada para tirar a fibra do talo de buriti. Sentado no banco, bata o talo em cima das lâminas de faca e puxe: o talo vai se abrindo em fibras.",
+		"pecas": [
+			["tora", 0.85, Vector3(0.0, 0.425, 0.32), "y", 0.08],     # 0 pé da bancada
+			["tora", 0.85, Vector3(0.0, 0.425, -0.32), "y", 0.08],    # 1 pé da bancada
+			["tabua", 1.0, Vector3(0.0, 0.885, 0.0), "z", 0.17],      # 2 tábua da bancada
+			["tora", 0.45, Vector3(-0.72, 0.225, 0.0), "y", 0.09],    # 3 pé do banco (mais baixo)
+			["tabua", 0.5, Vector3(-0.72, 0.485, 0.0), "z", 0.15],    # 4 tábua do banco
+		],
+		"pinos": [
+			[[0, 2], Vector3(0.0, 0.86, 0.32)], [[1, 2], Vector3(0.0, 0.86, -0.32)],
+			[[3, 4], Vector3(-0.72, 0.46, 0.0)],
+		],
+		"area": Rect2(-0.95, -0.55, 1.15, 1.1),
+		"lamina_item": "lamina_faca",
+		"lamina_pecas": [0, 1, 2],
+		# as lâminas de faca em pé em cima da bancada (fio para cima, ao comprido em x)
+		"laminas": [Vector3(0.0, 0.94, -0.045), Vector3(0.0, 0.94, 0.0), Vector3(0.0, 0.94, 0.045)],
 	},
 }
 
@@ -103,15 +131,57 @@ static func info(tipo: String) -> Dictionary:
 	return TIPOS.get(tipo, {})
 
 
-## Quanto de cada coisa o projeto pede: {tora: n, meia: n, tabua: n, pino: n, lamina: 1}
+## Quanto de cada coisa o projeto pede: {tora: n, meia: n, tabua: n, pino: n, lamina: n}
 static func needs(tipo: String) -> Dictionary:
 	var t: Dictionary = TIPOS[tipo]
 	var out := {"tora": 0, "meia": 0, "tabua": 0}
 	for pc in t.pecas:
 		out[pc[0]] = int(out[pc[0]]) + 1
 	out["pino"] = (t.pinos as Array).size()
-	out["lamina"] = 1
+	out["lamina"] = lamina_need(tipo)
+	out["lamina_item"] = str(t.get("lamina_item", "lamina_serra"))
 	return out
+
+
+## Quantas lâminas o projeto leva.
+static func lamina_need(tipo: String) -> int:
+	return (TIPOS[tipo].laminas as Array).size() if TIPOS[tipo].has("laminas") else 1
+
+
+## Quantas lâminas já estão postas (antes era só sim/não).
+func lamina_count(mi: int) -> int:
+	var v = plantas[mi].get("lamina", false)
+	if v is bool:
+		return lamina_need(str(plantas[mi].tipo)) if v else 0
+	return int(v)
+
+
+## Já dá para pôr lâmina (as peças em que ela vai estão no lugar) e ainda falta alguma?
+func lamina_open(mi: int) -> bool:
+	var p: Dictionary = plantas[mi]
+	if lamina_count(mi) >= lamina_need(str(p.tipo)):
+		return false
+	for si in TIPOS[p.tipo].get("lamina_pecas", []):
+		if not bool(p.pecas[int(si)]):
+			return false
+	return true
+
+
+func add_lamina(mi: int) -> void:
+	plantas[mi].lamina = lamina_count(mi) + 1
+	_rebuild()
+
+
+## Modo de teste: a planta já sai montada (madeiras, furos, pinos, lâminas, pontas).
+func complete(mi: int) -> void:
+	var p: Dictionary = plantas[mi]
+	for i in (p.pecas as Array).size():
+		p.pecas[i] = true
+		p.sobra[i] = 0.0
+	for j in (p.pinos as Array).size():
+		p.pinos[j] = 2
+	p.lamina = lamina_need(str(p.tipo))
+	_rebuild()
 
 
 func add_planta(tipo: String, x: float, z: float, yaw: float) -> void:
@@ -191,7 +261,7 @@ func done_count(mi: int) -> int:
 
 func pronta(mi: int) -> bool:
 	var p: Dictionary = plantas[mi]
-	if not bool(p.lamina):
+	if lamina_count(mi) < lamina_need(str(p.tipo)):
 		return false
 	for b in p.pecas:
 		if not bool(b):
@@ -418,6 +488,8 @@ func pending_joints(mi: int) -> int:
 ## Lugar de cada um na serra: "pedal" (atrás, do lado do pedal), "mesa" (na ponta da
 ## mesa, empurrando) ou "".
 func role_at(mi: int, pos: Vector3) -> String:
+	if str(plantas[mi].tipo) != "serra_pedal":
+		return ""
 	var l := xform(mi).affine_inverse() * pos
 	if l.x < -1.0 and l.x > -2.6 and absf(l.z) < 1.2:
 		return "pedal"
@@ -661,6 +733,23 @@ func _rebuild() -> void:
 				mk.material_override = _mark_mat
 				mk.position = sg2[1]
 				root.add_child(mk)
+		if t.has("laminas"):
+			# lâminas de faca em pé na bancada (as que já estão; as outras em azul)
+			var nl := lamina_count(mi)
+			for li in (t.laminas as Array).size():
+				var lm := MeshInstance3D.new()
+				if li < nl:
+					lm.mesh = _faca_blade_mesh()
+					lm.material_override = _lascar_mat()
+				else:
+					var gb2 := BoxMesh.new()
+					gb2.size = Vector3(0.16, 0.06, 0.01)
+					lm.mesh = gb2
+					lm.material_override = _ghost_mat
+				lm.position = t.laminas[li]
+				root.add_child(lm)
+			_nodes[mi] = nd
+			continue
 		# a lâmina (dentes virados para a mesa, +x)
 		if bool(p.lamina):
 			var lam := MeshInstance3D.new()
@@ -688,6 +777,38 @@ func _rebuild() -> void:
 			tn.position = _log_pos(mi)
 			nd["tora"] = tn
 		_nodes[mi] = nd
+
+
+static var _fbm: ArrayMesh
+
+
+## A lâmina de faca lascada deitada de lado (comprido em x, fio para cima), com a
+## espiga enfiada na tábua.
+static func _faca_blade_mesh() -> ArrayMesh:
+	if _fbm == null:
+		var Lascar = load("res://scripts/world/lascar.gd")
+		var bl: ArrayMesh = Lascar.mesh(Lascar.target("lamina_faca"), Lascar.rock(31), 31)
+		var bs := SurfaceTool.new()
+		bs.create_from(bl, 0)
+		bs.deindex()
+		var m := bs.commit()
+		var out := SurfaceTool.new()
+		out.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var k := 0.24
+		# pedra: X (comprimento) -> x, Y (grossura) -> z, Z (largura) -> y (o fio para cima)
+		out.append_from(m, 0, Transform3D(Basis(Vector3(k, 0, 0), Vector3(0, 0, k * 1.1), Vector3(0, k * 1.15, 0)), Vector3.ZERO))
+		out.generate_normals()
+		_fbm = out.commit()
+	return _fbm
+
+
+static var _lmat: Material
+
+
+static func _lascar_mat() -> Material:
+	if _lmat == null:
+		_lmat = load("res://scripts/world/lascar.gd").material()
+	return _lmat
 
 
 static var _pmat: StandardMaterial3D

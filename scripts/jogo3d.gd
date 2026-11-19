@@ -400,6 +400,8 @@ var _buck_btns: Array = []
 var _olho := {}                   # o olho no tronco do buriti perto: {p, open}
 var _bur := {}                    # o que escolheu no menu do olho: {p, acao}
 var _chop_bur := {}               # derrubando um buriti
+var _desf := {}                   # sentado na desfibradeira: {mi, fase, n, anim, node, ...}
+var _desf_btns: Array = []
 var _sub_btns: Array = []
 var _sub_ui: Control
 var _trim := {}                    # cortando a ponta que sobrou: {mi, si, t, s, tool}
@@ -695,6 +697,7 @@ func _build_hud() -> void:
 	_proj_btns = [mk.call("Pôr a planta", -290, -146, _proj_place), mk.call("Sair", -430, -426, _proj_stop)]
 	_buck_btns = [mk.call("Cortar aqui", -290, -146, _buck_go), mk.call("Sair", -430, -426, _buck_stop)]
 	_sub_btns = [mk.call("Sair", -430, -146, _bur_sair)]
+	_desf_btns = [mk.call("Puxar", -290, -146, _desf_puxar), mk.call("Levantar", -430, -146, _desf_end)]
 	_sub_ui = Control.new()
 	_sub_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_sub_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2227,6 +2230,9 @@ func _update_chop(delta: float) -> void:
 		return
 	if not _maq_op.is_empty():
 		_maq_op_tick(delta)
+		return
+	if not _desf.is_empty():
+		_desf_tick(delta)
 		return
 	_bur_tick()
 	if not _pin.is_empty():
@@ -4828,6 +4834,9 @@ func _move_player(delta: float) -> void:
 		_chop_pose.moving = amount > 0.12 or _walking
 		_chop_pose.in_air = _air
 	var p := _player.position
+	if not _desf.is_empty():
+		_desf_move(delta)
+		return
 	if not _coop.is_empty() and not bool(_coop.lider) and float(_coop.anim) <= 0.0:
 		var e = _rede.estados.get(int(_coop.pid)) if _rede else null
 		if e != null:
@@ -5086,7 +5095,7 @@ func _fp_camera(delta: float, moved: float) -> void:
 	if _chop_pose:
 		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
 		# com ferramenta na mão os braços não aparecem (só a ferramenta, segura por baixo da tela)
-		_chop_pose.hide_arms = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca"] and _vine.is_empty()
+		_chop_pose.hide_arms = not _desf.is_empty() or _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca"] and _vine.is_empty()
 	for m in _body_mats:
 		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, maxf(_busy_f, down))
 		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, maxf(_busy_f, down))
@@ -5153,6 +5162,8 @@ func _open_calendar() -> void:
 
 
 func _input(e: InputEvent) -> void:
+	if not _desf.is_empty() and _desf_input(e):
+		return
 	if not _split.is_empty() and _split_input(e):
 		return
 	if not _knap.is_empty():
@@ -7254,6 +7265,10 @@ func _proj_place() -> void:
 	var c: Vector3 = _proj.c
 	_maq.add_planta(str(_proj.tipo), c.x, c.z, float(_proj.yaw))
 	_proj_stop()
+	if teste:
+		_maq.complete(_maq.plantas.size() - 1)        # modo de teste: já sai montada
+		_show_toast("Modo de teste: a %s já ficou pronta." % str(Maquinas.TIPOS[_maq.plantas[-1].tipo].nome).to_lower())
+		return
 	_show_toast("Planta no chão! Traga as madeiras e toque em \"Pôr na planta\" perto dela. Depois amarre as juntas (bolinhas amarelas).")
 
 
@@ -7283,9 +7298,11 @@ func _maq_ctx() -> bool:
 		_ctx_action = "planta_peca"
 		_ctx_btn.text = "Pôr na planta"
 		return true
-	if not bool(p.lamina) and item_qtd("lamina_serra") > 0 and bool(p.pecas[4]) and bool(p.pecas[5]) and bool(p.pecas[6]):
+	var lit := str(Maquinas.TIPOS[p.tipo].get("lamina_item", "lamina_serra"))
+	if _maq.lamina_open(mi) and (item_qtd(lit) > 0 or teste) and _carry.is_empty():
 		_ctx_action = "planta_lamina"
-		_ctx_btn.text = "Pôr a lâmina"
+		var nl: int = Maquinas.lamina_need(str(p.tipo))
+		_ctx_btn.text = "Pôr a lâmina" if nl == 1 else "Pôr lâmina de faca (%d/%d)" % [_maq.lamina_count(mi) + 1, nl]
 		return true
 	var sb: Array = _maq.sobra_near(_player.position, 1.8)
 	if not sb.is_empty() and _carry.is_empty():
@@ -7330,11 +7347,18 @@ func _maq_ctx_press(act: String) -> void:
 			var pw2: Dictionary = _maq.pending_work(mi)
 			_show_toast("Peça no lugar! " + ("Sobrou %d cm para fora: corte a ponta. " % roundi(sob * 100.0) if sob > 0.015 else "") + ("Agora fure e ponha %d pino%s nas juntas dela. " % [pw2.furos, "" if int(pw2.furos) == 1 else "s"] if int(pw2.furos) > 0 else "") + ("Faltam %d peças." % falta if falta > 0 else "Todas as madeiras estão no lugar."))
 		"planta_lamina":
-			remove_item("lamina_serra", 1)
-			_update_inventory()
-			_maq.plantas[mi].lamina = true
-			_maq._rebuild()
-			_show_toast("Lâmina presa entre as colunas, com os dentes virados para a mesa.")
+			var lit2 := str(Maquinas.TIPOS[_maq.plantas[mi].tipo].get("lamina_item", "lamina_serra"))
+			if not teste:
+				remove_item(lit2, 1)
+				_update_inventory()
+			_maq.add_lamina(mi)
+			Sons.play_at(self, "pedra_bate", _maq.xform(mi).origin + Vector3.UP, -8.0, 1.3)
+			if lit2 == "lamina_faca":
+				var nl2: int = Maquinas.lamina_need(str(_maq.plantas[mi].tipo))
+				var tem: int = _maq.lamina_count(mi)
+				_show_toast(("Lâmina de faca encaixada em pé na bancada (%d de %d)." % [tem, nl2]) + (" A desfibradeira está pronta!" if _maq.pronta(mi) else ""))
+			else:
+				_show_toast("Lâmina presa entre as colunas, com os dentes virados para a mesa.")
 		"sobra":
 			var sb: Array = _maq.sobra_near(_player.position, 1.8)
 			if sb.is_empty():
@@ -8403,6 +8427,274 @@ func _coop_end(drop: bool) -> void:
 	_act_check = 0.0
 
 
+# ================== DESFIBRADEIRA: TIRAR A FIBRA DO TALO DE BURITI ==================
+# Pelo olho da desfibradeira pronta, "Trabalhar": o jogador senta no banco (só se tiver
+# talo de buriti na mochila) e já pega um talo. Passando o dedo PARA BAIXO na tela, bate
+# o talo em cima das lâminas de faca; tocando em "Puxar", puxa o talo por cima delas
+# (o talo vai se abrindo em fibras). Umas vezes assim e sai a fibra para a mochila; se
+# tiver outro talo, pega sozinho; se não, levanta.
+const DESF_PUXADAS := 4
+
+func _desf_start(mi: int) -> void:
+	if item_qtd("talo_buriti") <= 0:
+		_show_toast("Precisa de talo de buriti na mochila para trabalhar na desfibradeira.")
+		return
+	if _mao != "":
+		equip("")
+	_desf = {"mi": mi, "fase": "bater", "n": 0, "anim": -1.0, "acao": "", "node": null, "drag": -9, "dy": 0.0}
+	_olho = {}
+	_bur = {}
+	_jump_btn.visible = false
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
+		(b as Control).visible = false
+	(_desf_btns[1] as Control).visible = true
+	if _chop_pose:
+		_chop_pose.crouch = 1.0          # sentado no banco
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false     # primeira pessoa sentado: o próprio corpo não tapa a bancada
+	_pitch = 0.62
+	_desf_take()
+	Sons.play_at(self, "baque", _player.position + Vector3.UP * 0.4, -14.0, 1.4)
+
+
+## Pega o próximo talo da mochila (na mão, em cima das lâminas).
+func _desf_take() -> void:
+	remove_item("talo_buriti", 1)
+	_update_inventory()
+	_desf.n = 0
+	_desf.fase = "bater"
+	_desf.anim = -1.0
+	if _desf.node != null and is_instance_valid(_desf.node):
+		(_desf.node as Node).queue_free()
+	var root := Node3D.new()
+	add_child(root)
+	var mi := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.02
+	cm.bottom_radius = 0.026
+	cm.height = 1.1
+	cm.radial_segments = 8
+	mi.mesh = cm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.36, 0.5, 0.2)
+	m.roughness = 0.8
+	mi.material_override = m
+	mi.rotation = Vector3(0, 0, PI * 0.5)          # deitado ao comprido (x)
+	root.add_child(mi)
+	_desf.node = root
+	_desf.mat = m
+	_desf.fios = []
+	_desf_place(0.0, 0.0)
+	(_desf_btns[0] as Control).visible = false
+	_show_toast("Passe o dedo PARA BAIXO na tela para bater o talo nas lâminas.")
+
+
+## O talo no espaço da máquina: desce (0 em cima, 1 nas lâminas) e é puxado (0 a 1).
+func _desf_place(down: float, pull: float) -> void:
+	var mi := int(_desf.mi)
+	var xf: Transform3D = _maq.xform(mi)
+	var l := Vector3(0.32 - pull * 0.3, lerpf(1.1, 0.99, down), 0.0)
+	(_desf.node as Node3D).global_transform = Transform3D(xf.basis, xf * l)
+
+
+## Sentado no banco, de frente para a bancada.
+func _desf_move(delta: float) -> void:
+	var mi := int(_desf.mi)
+	if mi >= _maq.plantas.size():
+		_desf_end()
+		return
+	var xf: Transform3D = _maq.xform(mi)
+	var at: Vector3 = xf * Vector3(-0.6, 0.0, 0.0)
+	_player.position = at
+	_air = false
+	_vy = 0.0
+	var fx: Vector3 = xf.basis.x
+	_face = atan2(-fx.x, -fx.z)
+	_yaw = _face
+	_player.rotation.y = _face
+	if _chop_pose:
+		_chop_pose.crouch = 1.0
+		_chop_pose.moving = false
+	_play("Idle")
+	_fp_camera(delta, 0.0)
+	# sentado: os olhos na altura de quem está no banco, olhando as lâminas na bancada
+	var eye: Vector3 = xf * Vector3(-0.7, 1.24, 0.0)
+	_cam.global_transform = Transform3D(Basis.from_euler(Vector3(-_pitch, _yaw, 0.0)), eye)
+
+
+func _desf_input(e: InputEvent) -> bool:
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var pos := Vector2.INF
+	var idx := -9
+	var pressed := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		idx = e.index
+		pressed = e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		idx = -1
+		pressed = e.pressed
+	if pos != Vector2.INF:
+		for b in _desf_btns:
+			if (b as Control).visible and (b as Control).get_global_rect().has_point(pos):
+				return false
+		if pressed:
+			_desf.drag = idx
+			_desf.dy = 0.0
+		elif int(_desf.drag) == idx:
+			_desf.drag = -9
+		return true
+	var d := Vector2.ZERO
+	if e is InputEventScreenDrag and e.index == int(_desf.drag):
+		d = e.relative
+	elif e is InputEventMouseMotion and int(_desf.drag) == -1:
+		d = e.relative
+	else:
+		return e is InputEventScreenDrag or e is InputEventMouseMotion
+	_desf.dy = float(_desf.dy) + d.y
+	if float(_desf.dy) > 70.0:
+		_desf.dy = -1e9                  # uma batida por passada de dedo
+		_desf_bater()
+	return true
+
+
+func _desf_bater() -> void:
+	if str(_desf.fase) != "bater" or float(_desf.anim) >= 0.0:
+		if str(_desf.fase) == "puxar":
+			_show_toast("Agora toque em \"Puxar\".")
+		return
+	_desf.acao = "bater"
+	_desf.anim = 0.0
+
+
+func _desf_puxar() -> void:
+	if _desf.is_empty() or str(_desf.fase) != "puxar" or float(_desf.anim) >= 0.0:
+		return
+	_desf.acao = "puxar"
+	_desf.anim = 0.0
+	(_desf_btns[0] as Control).visible = false
+
+
+func _desf_tick(delta: float) -> void:
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn, _jump_btn]:
+		(b as Control).visible = false
+	if _desf.node == null or not is_instance_valid(_desf.node):
+		return
+	var mi := int(_desf.mi)
+	var xf: Transform3D = _maq.xform(mi)
+	if float(_desf.anim) < 0.0:
+		_desf_place(0.0 if str(_desf.fase) == "bater" else 1.0, 0.0)
+		return
+	_desf.anim = float(_desf.anim) + delta
+	var t := float(_desf.anim)
+	if str(_desf.acao) == "bater":
+		# levanta um pouco e desce batendo nas lâminas
+		var T := 0.32
+		var k := clampf(t / T, 0.0, 1.0)
+		var down := -0.6 * sin(k * PI) * (1.0 - k) + k * k
+		_desf_place(clampf(down, -0.8, 1.0), 0.0)
+		if k >= 1.0:
+			var at: Vector3 = xf * Vector3(0.0, 0.97, 0.0)
+			Sons.play_at(self, "talo_corte", at, -2.0, 0.9)
+			_fiber_chips(at)
+			_desf.anim = -1.0
+			_desf.fase = "puxar"
+			(_desf_btns[0] as Control).visible = true
+	else:
+		# puxa por cima das lâminas (vem para o banco) e volta para a frente
+		var T1 := 0.5
+		var T2 := 0.3
+		if t < T1:
+			var k := smoothstep(0.0, 1.0, t / T1)
+			_desf_place(1.0, k)
+			if int(_desf.get("som", 0)) == 0:
+				_desf.som = 1
+				Sons.play_at(self, "talo_corte", xf * Vector3(0.0, 0.97, 0.0), -6.0, 0.6)
+			if randf() < delta * 14.0:
+				_fiber_chips(xf * Vector3(0.0, 0.97, 0.0))
+		elif t < T1 + T2:
+			var k := (t - T1) / T2
+			_desf_place(1.0 - k, 1.0 - k)
+		else:
+			_desf.som = 0
+			_desf.n = int(_desf.n) + 1
+			_desf_fibers()
+			_desf.anim = -1.0
+			_desf.fase = "bater"
+			if int(_desf.n) >= DESF_PUXADAS:
+				_desf_done()
+			else:
+				_show_toast("Puxada %d de %d. Bata de novo (dedo para baixo)." % [int(_desf.n), DESF_PUXADAS])
+
+
+## O talo vai se abrindo: clareia e as fibras soltas aparecem penduradas na ponta.
+func _desf_fibers() -> void:
+	var f := float(_desf.n) / DESF_PUXADAS
+	(_desf.mat as StandardMaterial3D).albedo_color = Color(0.36, 0.5, 0.2).lerp(Color(0.8, 0.74, 0.52), f)
+	var root: Node3D = _desf.node
+	var fm := StandardMaterial3D.new()
+	fm.albedo_color = Color(0.66, 0.6, 0.4)
+	fm.roughness = 1.0
+	for k in 3:
+		var fi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		var L := randf_range(0.12, 0.26)
+		bm.size = Vector3(L, 0.002, 0.003)
+		fi.mesh = bm
+		fi.material_override = fm
+		root.add_child(fi)
+		# soltas na ponta de lá do talo, caindo um pouco
+		fi.position = Vector3(-0.5 - L * 0.4, -0.015 - L * 0.15, randf_range(-0.03, 0.03))
+		fi.rotation = Vector3(randf_range(-0.2, 0.2), randf_range(-0.25, 0.25), -0.25 - randf() * 0.3)
+
+
+func _desf_done() -> void:
+	var left := add_item("fibra_buriti", 2)
+	_update_inventory()
+	_show_toast("O talo virou fibra! +%d fibra de buriti%s" % [2 - left, "" if left == 0 else " (mochila cheia)"])
+	Sons.play_at(self, "folha_cai", _player.position + Vector3.UP, -10.0, 1.6)
+	if _desf.node != null and is_instance_valid(_desf.node):
+		(_desf.node as Node).queue_free()
+	_desf.node = null
+	(_desf_btns[0] as Control).visible = false
+	if item_qtd("talo_buriti") > 0:
+		get_tree().create_timer(0.7).timeout.connect(func():
+			if not _desf.is_empty():
+				_desf_take())
+	else:
+		get_tree().create_timer(0.9).timeout.connect(func():
+			if not _desf.is_empty():
+				_show_toast("Acabaram os talos. Você se levantou da desfibradeira.")
+				_desf_end())
+
+
+func _desf_end() -> void:
+	if _desf.is_empty():
+		return
+	if _desf.node != null and is_instance_valid(_desf.node):
+		# o talo que estava na mão (pela metade) volta para a mochila
+		if int(_desf.n) < DESF_PUXADAS:
+			add_item("talo_buriti", 1)
+			_update_inventory()
+		(_desf.node as Node).queue_free()
+	var mi := int(_desf.mi)
+	_desf = {}
+	for b in _desf_btns:
+		(b as Control).visible = false
+	if _chop_pose:
+		_chop_pose.crouch = 0.0
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	if mi < _maq.plantas.size():
+		var xf: Transform3D = _maq.xform(mi)
+		var out: Vector3 = xf * Vector3(-1.25, 0.0, 0.0)
+		_player.position = _ground_pos(Vector2(out.x, out.z))
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
 # ================== BURITI: O OLHO, CORTAR FOLHA E DERRUBAR ==================
 # Perto do pé do buriti aparece um olho no tronco. Tocando nele abre o menu (embaixo
 # do olho, com a setinha do lado para fechar). Buriti pequeno (as folhas ao alcance):
@@ -8414,7 +8706,7 @@ func _coop_end(drop: bool) -> void:
 # As folhas secas (a "saia" da copa) caem sozinhas de vez em quando: dá para pegar.
 
 func _olho_free() -> bool:
-	return _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
+	return _desf.is_empty() and _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
 		and not _air and _bld.is_empty() and _proj.is_empty() and _buck_sel.is_empty() and _maq_op.is_empty() \
 		and _trim.is_empty() and _post_mark.is_empty() and _knap.is_empty() and _vine.is_empty() and not _walking \
 		and _coop.is_empty() and _bag_ui == null and _craft_ui == null
@@ -8435,16 +8727,22 @@ func _olho_tick() -> void:
 	var p: Dictionary = _buritis.palm_near(_player.position, 2.2)
 	if p.is_empty():
 		p = _buritis.caido_near(_player.position, 2.6)      # a copa do buriti derrubado
+	if p.is_empty() and _maq:
+		var mi: int = _maq.planta_near(_player.position, 2.2)
+		if mi >= 0 and str(_maq.plantas[mi].tipo) == "desfibradeira" and _maq.pronta(mi):
+			p = {"maq": mi}
 	if p.is_empty() or _olho_opts(p).is_empty():
 		_olho = {}
 		return
-	if _olho.is_empty() or not (_olho.p as Dictionary) == p or not _buritis.has_palm(_olho.p):
+	if _olho.is_empty() or not (_olho.p as Dictionary) == p or (not p.has("maq") and not _buritis.has_palm(_olho.p)):
 		_olho = {"p": p, "open": false}
 
 
 ## O que dá para fazer nesse buriti: [[ação, nome]]
 func _olho_opts(p: Dictionary) -> Array:
 	var out := []
+	if p.has("maq"):
+		return [["trabalhar", "Trabalhar"]]
 	if p.has("caido"):
 		return [["cortar", "Cortar"]] if not _buritis.leaves_of(p).is_empty() else []
 	if _buritis.is_small(p):
@@ -8456,6 +8754,8 @@ func _olho_opts(p: Dictionary) -> Array:
 
 ## Onde o olho fica: no tronco (na altura do peito), do lado de quem está olhando.
 func _olho_world(p: Dictionary) -> Vector3:
+	if p.has("maq"):
+		return _maq.xform(int(p.maq)) * Vector3(0.05, 1.2, 0.0)
 	if p.has("caido"):
 		var o: Vector3 = _buritis.crown_xf(p).origin
 		return Vector3(o.x, maxf(o.y, height_at(o.x, o.z) + 0.3) + 0.45, o.z)
@@ -8635,6 +8935,9 @@ func _olho_pick(acao: String) -> void:
 	var p: Dictionary = _olho.p
 	_olho.open = false
 	match acao:
+		"trabalhar":
+			_desf_start(int(p.maq))
+			return
 		"cortar":
 			_bur = {"p": p, "acao": "cortar"}
 			if item_qtd("faca") <= 0:
