@@ -8618,7 +8618,7 @@ func _esc_start(p: Dictionary) -> void:
 	_esc_pad.visible = true
 	_esc_pad.text = "Passe o dedo\npara cima"
 	_jump_btn.visible = false
-	_esc_rope()
+	_pitch = -0.75                # subindo: a câmera olha para cima (para o tronco e as folhas)
 	_show_toast("Os pés estão na peconha. Passe o dedo para cima na faixa para subir.")
 	_act_check = 0.0
 
@@ -8706,8 +8706,8 @@ func _esc_move(delta: float, dir: Vector2) -> void:
 		_chop_pose.climb_feet = hv.y
 		_chop_pose.climb_hands = 1.32 + 0.18 * hv.y / ESC_STEP
 	_play("Idle")
+	_pitch = minf(_pitch, -0.15)  # na peconha não olha para baixo (os pés e o laço não aparecem)
 	_fp_camera(delta, 0.0)
-	_esc_rope_update()
 	if _esc_pad.visible:
 		var txt := "Passe o dedo\npara cima" if not at_top else "No alto!\nControle: rodar"
 		if _esc_pad.text != txt:
