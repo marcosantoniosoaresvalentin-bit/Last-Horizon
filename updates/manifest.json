@@ -1,9 +1,9 @@
 {
-  "version": 116,
-  "file": "update_116.zip",
-  "size": 4618011,
-  "sha256": "bc1ef83f56562cbf25bb5ba94d28794f060ac9d32323cceffcaa3c919070d4e9",
+  "version": 117,
+  "file": "update_117.zip",
+  "size": 4625010,
+  "sha256": "e825e486015aadbbeab688c22dec971d537998764283a6ce9a543b26de07e7ad",
   "min_build": 1,
-  "notes": "Novo: carregar tora pesada em dupla (botão Cooperativo, até 120 kg)",
+  "notes": "Novo: palmeira de buriti nos brejos e beira de rios",
   "date": "2026-11-19"
 }
