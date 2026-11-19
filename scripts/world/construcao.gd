@@ -529,6 +529,135 @@ func _rebuild() -> void:
 			var pm := Furo.pin_node(sg[0], (sg[1] as Vector3) - up * 0.012)     # batido até o fim: rente à madeira
 			add_child(pm)
 			_nodes.append(pm)
+	# o barro já passado nas peças
+	for pc in pieces:
+		for e in pc.get("barro", []):
+			var mp := _mud_patch(pc, e)
+			add_child(mp)
+			_nodes.append(mp)
+
+
+# ================== REBOCO DE BARRO ==================
+# Em cada peça, a face virada para o jogador é dividida em pedaços (~35 cm) no
+# comprido; cada pedaço recebe uma camada de barro (com fibra) por vez.
+
+const REBOCO_PASSO := 0.35
+
+func _reboco_n(h: Vector3) -> int:
+	return maxi(1, int(round(h.x * 2.0 / REBOCO_PASSO)))
+
+
+## Pedaços de face que ainda não têm barro, virados para "from": [{pc, u, k, s, pos, n}]
+func reboco_spots(from: Vector3, reach := 3.2) -> Array:
+	var out := []
+	for pc in pieces:
+		var bx := piece_box(pc)
+		var c: Vector3 = bx.c
+		if Vector2(c.x - from.x, c.z - from.z).length() > reach + (bx.h as Vector3).x:
+			continue
+		var b: Basis = bx.b
+		var h: Vector3 = bx.h
+		var to := (from + Vector3.UP * 1.0) - c
+		# a face (lado ou cima) mais virada para o jogador; a de baixo não
+		var best_k := -1
+		var best_s := 1.0
+		var bd := 0.15
+		for k in [1, 2]:
+			for sg in [-1.0, 1.0]:
+				var nrm: Vector3 = (b[k] as Vector3) * sg
+				if nrm.y < -0.6:
+					continue
+				var d := nrm.dot(to.normalized())
+				if d > bd:
+					bd = d
+					best_k = k
+					best_s = sg
+		if best_k < 0:
+			continue
+		var nrm2: Vector3 = (b[best_k] as Vector3) * best_s
+		var done: Array = pc.get("barro", [])
+		var n := _reboco_n(h)
+		for i in n:
+			var u := -1.0 + (2.0 * i + 1.0) / n
+			var has := false
+			for e in done:
+				if absf(float(e[0]) - u) < 0.01 and int(e[1]) == best_k and float(e[2]) == best_s:
+					has = true
+					break
+			if has:
+				continue
+			var pos := c + b.x * (u * h.x) + nrm2 * h[best_k]
+			if Vector2(pos.x - from.x, pos.z - from.z).length() > reach:
+				continue
+			out.append({"pc": pc, "u": u, "k": best_k, "s": best_s, "pos": pos, "n": nrm2})
+	return out
+
+
+func add_barro(pc: Dictionary, u: float, k: int, sg: float) -> void:
+	if not pc.has("barro"):
+		pc["barro"] = []
+	pc.barro.append([u, k, sg])
+	_rebuild()
+
+
+static var _mud_mat: StandardMaterial3D
+
+
+## A placa de barro grudada na face: um pouco abaulada e irregular, cor de barro.
+func _mud_patch(pc: Dictionary, e: Array) -> Node3D:
+	var bx := piece_box(pc)
+	var b: Basis = bx.b
+	var h: Vector3 = bx.h
+	var c: Vector3 = bx.c
+	var k := int(e[1])
+	var sg := float(e[2])
+	var u := float(e[0])
+	var n := _reboco_n(h)
+	var other := 2 if k == 1 else 1
+	var nrm: Vector3 = (b[k] as Vector3) * sg
+	var along: Vector3 = b.x
+	var side: Vector3 = b[other]
+	var la := h.x * 2.0 / n * 0.54
+	var ls: float = h[other] * 0.98
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var nz := FastNoiseLite.new()
+	nz.seed = int(u * 100.0) + k * 7
+	nz.frequency = 9.0
+	var NA := 6
+	var NS := 4
+	var base := c + along * (u * h.x) + nrm * h[k]
+	var grid := []
+	for i in NA + 1:
+		var row := []
+		for j in NS + 1:
+			var a := lerpf(-1.0, 1.0, float(i) / NA)
+			var bb := lerpf(-1.0, 1.0, float(j) / NS)
+			var bulge := (1.0 - a * a * 0.6) * (1.0 - bb * bb * 0.7) * 0.022 + nz.get_noise_2d(a * 3.0, bb * 3.0) * 0.006 + 0.004
+			row.append(base + along * (a * la) + side * (bb * ls) + nrm * bulge)
+		grid.append(row)
+	for i in NA:
+		for j in NS:
+			var q := [grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]]
+			for tri in [[0, 1, 2], [0, 2, 3]]:
+				var A: Vector3 = q[tri[0]]
+				var B: Vector3 = q[tri[1]]
+				var C: Vector3 = q[tri[2]]
+				var ord: Array = tri
+				if (B - A).cross(C - A).dot(nrm) < 0.0:
+					ord = [tri[0], tri[2], tri[1]]
+				for idx in ord:
+					st.add_vertex(q[idx])
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	if _mud_mat == null:
+		_mud_mat = StandardMaterial3D.new()
+		_mud_mat.albedo_color = Color(0.3, 0.24, 0.18)
+		_mud_mat.roughness = 1.0
+		_mud_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = _mud_mat
+	return mi
 
 
 ## O furo do pino: do topo da peça (no ponto u) atravessando ela e entrando uns 12 cm

@@ -337,6 +337,33 @@ static func digger_mesh() -> ArrayMesh:
 ## Pá de pedra: o mesmo cabo comprido de galho, com uma lâmina de pedra bem mais larga
 ## e côncava (para levar terra), amarrada com cipó, e um pegador em T em cima.
 ## Cabo de y = 0 (em cima) até 1,22; a lâmina vai até ~1,5 m.
+## Enxada: cabo comprido de galho e, na ponta, a lâmina de pedra atravessada (o fio
+## virado para baixo e para a frente), amarrada com cipó.
+static func enxada_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7373
+	_digger_haft(st, rng)
+	_helix(st, 1.14, 1.24, 0.024, 4.0, 0.0045, Color(0.17, 0.19, 0.08), rng)
+	st.generate_normals()
+	var m := st.commit()
+	var bl: ArrayMesh = Lascar.mesh(Lascar.target("pedra_enxada"), Lascar.rock(73), 73)
+	var bs := SurfaceTool.new()
+	bs.create_from(bl, 0)
+	bs.deindex()
+	var blade := bs.commit()
+	var out := SurfaceTool.new()
+	out.begin(Mesh.PRIMITIVE_TRIANGLES)
+	out.append_from(m, 0, Transform3D.IDENTITY)
+	var k := 0.3
+	# pedra: X (comprimento) -> para a frente (+Z, saindo do cabo), Y (grossura) -> ao
+	# longo do cabo, Z (largura) -> de lado
+	out.append_from(blade, 0, Transform3D(Basis(Vector3(0, -0.15 * k, k), Vector3(0, k, 0.0), Vector3(k, 0, 0)), Vector3(0, 1.2, 0.11)))
+	out.generate_normals()
+	return out.commit()
+
+
 static func pa_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -861,7 +888,7 @@ class ChopPose extends SkeletonModifier3D:
 			_set_tool(sk, Transform3D(bb, pivot))
 			return
 		var want: Vector3
-		if tool in ["pa", "cavadeira"]:
+		if tool in ["pa", "cavadeira", "enxada"]:
 			want = cf * 0.55 - cu * 0.8 - cr * 0.1
 		elif tool == "marreta":
 			want = cu * 0.85 + cf * 0.4 - cr * 0.12       # em pé, com a mão baixa: a cabeça fica longe e abaixo dos olhos
@@ -894,7 +921,7 @@ class ChopPose extends SkeletonModifier3D:
 		var reach := func(sh: Vector3, p: Vector3) -> Vector3:
 			var v := p - sh
 			return sh + v.limit_length(0.5)
-		if tool in ["pa", "cavadeira"]:
+		if tool in ["pa", "cavadeira", "enxada"]:
 			# cabo: do lado direito do quadril, cruzando para a frente e para a esquerda, descendo
 			var d := (cf * 0.85 - cu * 0.18 - cr * 0.42).normalized()
 			var R: Vector3 = eye + cf * 0.4 - cu * 0.26 + cr * 0.2 + bob      # a pega fica logo abaixo da tela
@@ -1551,7 +1578,7 @@ class ChopPose extends SkeletonModifier3D:
 			var b := _bone(pr[1])
 			if a >= 0 and b >= 0:
 				caps.append([sk.get_bone_global_pose(a).origin, sk.get_bone_global_pose(b).origin, float(pr[2])])
-		var length := 0.62 if tool == "machado" else (1.5 if tool == "pa" else 1.45)
+		var length := 0.62 if tool == "machado" else (1.5 if tool in ["pa", "enxada"] else 1.45)
 		var t := txf
 		for it in 10:
 			var worst := 0.0

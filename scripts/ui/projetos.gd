@@ -166,7 +166,8 @@ func _select(tipo: String) -> void:
 		partes.append("%d tábuas" % int(n.tabua))
 	partes.append("%d pinos de madeira" % int(n.pino))
 	var nl := int(n.lamina)
-	partes.append(("%d lâminas de faca" % nl) if str(n.lamina_item) == "lamina_faca" else ("%d lâmina de serra" % nl))
+	if nl > 0:
+		partes.append(("%d lâminas de faca" % nl) if str(n.lamina_item) == "lamina_faca" else ("%d lâmina de serra" % nl))
 	_need.text = "MATERIAL:  " + " · ".join(partes) + "\nFerramentas: furador e marreta (furos e pinos), serra e machado (cortar as pontas que sobrarem)"
 	_draw.queue_redraw()
 
@@ -181,6 +182,8 @@ func _draw_plan() -> void:
 	var o := Vector2(s.x * 0.5, s.y - 18)
 	if t.has("laminas"):
 		sc = minf(s.x / 2.8, s.y / 1.25)          # máquina pequena: desenho maior
+	if bool(t.get("caixa", false)):
+		sc = minf(s.x / 2.4, s.y / 0.9)
 		o.x += 0.3 * sc
 	var P := func(x: float, y: float) -> Vector2:
 		return o + Vector2(x * sc, -y * sc)
@@ -191,14 +194,20 @@ func _draw_plan() -> void:
 		var r := float(pc[4])
 		var hh := r * (1.0 if str(pc[0]) == "tora" else (0.5 if str(pc[0]) == "meia" else 0.25))
 		var rect: Rect2
+		if str(pc[3]).ends_with("_lado"):
+			hh = r * 0.9                              # tábua em pé de lado: a largura é a altura
 		match str(pc[3]):
-			"x": rect = Rect2(c.x - L * 0.5, c.y - hh, L, hh * 2.0)
+			"x", "x_lado": rect = Rect2(c.x - L * 0.5, c.y - hh, L, hh * 2.0)
 			"y": rect = Rect2(c.x - r, c.y - L * 0.5, r * 2.0, L)
 			_: rect = Rect2(c.x - r, c.y - hh, r * 2.0, hh * 2.0)
 		var a: Vector2 = P.call(rect.position.x, rect.position.y)
 		var b: Vector2 = P.call(rect.end.x, rect.end.y)
 		_draw.draw_rect(Rect2(Vector2(a.x, b.y), Vector2(b.x - a.x, a.y - b.y)), C_INK, false, 2.0)
 	var font := get_theme_default_font()
+	if bool(t.get("caixa", false)):
+		_draw.draw_string(font, P.call(-0.6, 0.45), "CAIXA DE BARRO (4 TÁBUAS EM PÉ)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
+		_draw.draw_string(font, P.call(-0.6, 0.36), "4 baldes de terra + 1 de água + 5 fibras", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, C_DIM)
+		return
 	if t.has("laminas"):
 		# desfibradeira: as lâminas em pé em cima da bancada e os nomes
 		for lp in t.laminas:

@@ -177,6 +177,16 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for k in 3:
 				var pa := c + Vector2(-8, 10).lerp(Vector2(40, -44), 0.05 + k * 0.07) * u
 				ci.draw_line(pa + Vector2(-6, -6) * u, pa + Vector2(6, 6) * u, Color(0.45, 0.4, 0.18), 3.0 * u, true)
+		"enxada":
+			# cabo comprido e a lâmina larga atravessada na ponta (como enxada)
+			ci.draw_line(c + Vector2(-42, 42) * u, c + Vector2(22, -30) * u, Color(0.4, 0.26, 0.14), 7.0 * u, true)
+			flint(ci, P.call([[10, -44], [44, -26], [46, -12], [30, -4], [20, -22], [6, -32]]), Color(0.47, 0.43, 0.35), 37, u, [1, 2])
+			for k in 3:
+				var pe := c + Vector2(-42, 42).lerp(Vector2(22, -30), 0.82 + k * 0.05) * u
+				ci.draw_line(pe + Vector2(-6, -5) * u, pe + Vector2(6, 5) * u, Color(0.45, 0.4, 0.18), 3.0 * u, true)
+		"pedra_enxada":
+			flint(ci, P.call([[-22, -34], [22, -34], [36, -10], [42, 26], [0, 34], [-42, 26], [-36, -10]]),
+				Color(0.47, 0.43, 0.35), 13, u, [3, 4, 5])
 		"pedra_pa":
 			flint(ci, P.call([[-16, -40], [16, -40], [30, -14], [38, 14], [30, 36], [0, 44], [-30, 36], [-38, 14], [-30, -14]]),
 				Color(0.47, 0.43, 0.35), 9, u, [4, 5, 6])

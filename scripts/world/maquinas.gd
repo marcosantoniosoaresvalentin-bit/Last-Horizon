@@ -64,6 +64,26 @@ const TIPOS := {
 		"lamina_item": "lamina_serra",
 		"lamina_pecas": [2, 3, 4],               # a lâmina vai entre as colunas e a travessa
 	},
+	# Caixa de barro: quatro tábuas em pé de lado formando um quadrado (presas com um
+	# pino em cada canto). Dentro: 4 baldes de terra, 1 de água e 5 fibras de buriti;
+	# mexendo com a enxada vira barro (dá 4 baldes de barro para rebocar a construção).
+	"caixa_barro": {
+		"nome": "Caixa de Barro",
+		"desc": "Quadrado de tábuas para fazer barro: 4 baldes de terra, 1 balde de água e 5 fibras de buriti, mexidos com a enxada. O barro com fibra reboca a construção de madeira.",
+		"pecas": [
+			["tabua", 1.4, Vector3(0.0, 0.13, 0.62), "x_lado", 0.14],   # 0 lado da frente
+			["tabua", 1.4, Vector3(0.0, 0.13, -0.62), "x_lado", 0.14],  # 1 lado de trás
+			["tabua", 1.1, Vector3(0.62, 0.13, 0.0), "z_lado", 0.14],   # 2 lado direito
+			["tabua", 1.1, Vector3(-0.62, 0.13, 0.0), "z_lado", 0.14],  # 3 lado esquerdo
+		],
+		"pinos": [
+			[[0, 2], Vector3(0.62, 0.26, 0.62)], [[0, 3], Vector3(-0.62, 0.26, 0.62)],
+			[[1, 2], Vector3(0.62, 0.26, -0.62)], [[1, 3], Vector3(-0.62, 0.26, -0.62)],
+		],
+		"area": Rect2(-0.72, -0.72, 1.44, 1.44),
+		"laminas": [],
+		"caixa": true,
+	},
 	# Desfibradeira de talo: duas toras em pé cortadas na mesma altura com uma tábua
 	# comprida em cima (a bancada), e na frente uma tora mais baixa com uma tábua (o
 	# banco). Em cima da bancada, as lâminas de faca em pé, com o fio para cima e ao
@@ -223,6 +243,8 @@ static func slot_basis(dir: String) -> Basis:
 	match dir:
 		"z": return Basis(Vector3.UP, PI * 0.5)
 		"y": return Basis(Vector3.BACK, PI * 0.5)
+		"x_lado": return Basis(Vector3.RIGHT, PI * 0.5)                       # tábua em pé de lado
+		"z_lado": return Basis(Vector3.UP, PI * 0.5) * Basis(Vector3.RIGHT, PI * 0.5)
 	return Basis()
 
 
@@ -481,6 +503,8 @@ func _slot_half(pc: Array, extra := 0.0) -> Vector3:
 	var fl := slot_log(pc)
 	var e: Vector2 = _arv._sec_ext(fl)
 	var r := float(pc[4])
+	if str(pc[3]).ends_with("_lado"):
+		return Vector3((float(pc[1]) + extra) * 0.5, e.y * r, e.x * r)       # em pé de lado: a largura vira altura
 	return Vector3((float(pc[1]) + extra) * 0.5, e.x * r, e.y * r)
 
 
@@ -901,6 +925,8 @@ func _rebuild() -> void:
 				mk.material_override = _mark_mat
 				mk.position = sg2[1]
 				root.add_child(mk)
+		if bool(t.get("caixa", false)):
+			_draw_caixa(mi, root)
 		if t.has("laminas"):
 			# lâminas de faca em pé na bancada (as que já estão; as outras em azul)
 			var nl := lamina_count(mi)
@@ -999,6 +1025,145 @@ func _animate(mi: int, dy: float) -> void:
 		var butt := Vector3(-2.0, 2.66, 0.0)
 		var ph := asin(clampf(dy / 2.0, -0.9, 0.9))
 		(nd.p_5 as Node3D).transform = Transform3D(Basis(Vector3.BACK, ph), butt) * Transform3D(Basis(), -butt) * (nd.t_5 as Transform3D)
+
+
+# ---------- caixa de barro ----------
+const CAIXA_TERRA := 4
+const CAIXA_FIBRA := 5
+const MIX_SPOTS := 6
+const MIX_HITS := 3              # puxadas da enxada em cada lugar
+
+func barro_of(mi: int) -> Dictionary:
+	var p: Dictionary = plantas[mi]
+	if not p.has("barro"):
+		var mx := []
+		for _k in MIX_SPOTS:
+			mx.append(0)
+		p["barro"] = {"terra": 0, "agua": 0, "fibra": 0, "mix": mx, "pronto": false, "baldes": 0}
+	return p.barro
+
+
+func caixa_add(mi: int, what: String) -> void:
+	var b := barro_of(mi)
+	match what:
+		"terra": b.terra = mini(CAIXA_TERRA, int(b.terra) + 1)
+		"agua": b.agua = 1
+		"fibra": b.fibra = CAIXA_FIBRA
+	_rebuild()
+
+
+## Os lugares de mexer (2 x 3 dentro da caixa), no mundo.
+func mix_spots(mi: int) -> Array:
+	var xf := xform(mi)
+	var out := []
+	var y := _caixa_top(mi)
+	for k in MIX_SPOTS:
+		var cx := -0.32 + 0.32 * (k % 3)
+		var cz := -0.22 + 0.44 * (k / 3)
+		out.append(xf * Vector3(cx, y, cz))
+	return out
+
+
+func mix_hit(mi: int, k: int) -> bool:
+	var b := barro_of(mi)
+	b.mix[k] = mini(MIX_HITS, int(b.mix[k]) + 1)
+	var all := true
+	for v in b.mix:
+		if int(v) < MIX_HITS:
+			all = false
+	if all and not bool(b.pronto):
+		b.pronto = true
+		b.baldes = CAIXA_TERRA
+	_rebuild()
+	return all
+
+
+func mix_progress(mi: int) -> float:
+	var b := barro_of(mi)
+	var t := 0
+	for v in b.mix:
+		t += int(v)
+	return float(t) / float(MIX_SPOTS * MIX_HITS)
+
+
+## Tira um balde de barro; acabou, a caixa fica vazia de novo.
+func take_barro(mi: int) -> bool:
+	var b := barro_of(mi)
+	if not bool(b.pronto) or int(b.baldes) <= 0:
+		return false
+	b.baldes = int(b.baldes) - 1
+	if int(b.baldes) <= 0:
+		plantas[mi].erase("barro")
+	_rebuild()
+	return true
+
+
+func _caixa_top(mi: int) -> float:
+	var b := barro_of(mi)
+	var n := float(b.terra) if not bool(b.pronto) else float(b.baldes)
+	return 0.02 + 0.045 * n
+
+
+## O que tem dentro: terra (torrões), molhada (escura e brilhando), com as fibras, e o
+## barro (mais liso, cinza-marrom) conforme vai sendo mexido.
+func _draw_caixa(mi: int, root: Node3D) -> void:
+	var b := barro_of(mi)
+	var n := float(b.terra) if not bool(b.pronto) else float(b.baldes)
+	if n <= 0.0:
+		return
+	var h := 0.045 * n
+	var mix := mix_progress(mi)
+	var dry := Color(0.27, 0.19, 0.12)
+	var wet := Color(0.17, 0.12, 0.08)
+	var mud := Color(0.26, 0.21, 0.16)
+	var col := dry
+	if int(b.agua) > 0:
+		col = wet.lerp(mud, mix)
+	if bool(b.pronto):
+		col = mud
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var nz := FastNoiseLite.new()
+	nz.seed = mi * 31 + 7
+	nz.frequency = 6.0
+	var N := 14
+	var half := 0.56
+	var lump := (0.03 if int(b.agua) == 0 else 0.012) * (1.0 - mix)
+	for i in N:
+		for j in N:
+			var q := []
+			for e in [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]]:
+				var x := lerpf(-half, half, float(e[0]) / N)
+				var z := lerpf(-half, half, float(e[1]) / N)
+				q.append(Vector3(x, 0.02 + h + nz.get_noise_2d(x * 3.0, z * 3.0) * lump, z))
+			for idx in [0, 1, 2, 0, 2, 3]:
+				st.set_color(col.darkened(0.08 * absf(nz.get_noise_2d((q[idx] as Vector3).x * 9.0, (q[idx] as Vector3).z * 9.0))))
+				st.add_vertex(q[idx])
+	st.generate_normals()
+	var mi2 := MeshInstance3D.new()
+	mi2.mesh = st.commit()
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
+	m.roughness = 1.0 if int(b.agua) == 0 else lerpf(0.35, 0.85, mix)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi2.material_override = m
+	root.add_child(mi2)
+	# as fibras de buriti espalhadas por cima (somem no barro quando mexe)
+	if int(b.fibra) > 0 and mix < 0.95:
+		var fm := StandardMaterial3D.new()
+		fm.albedo_color = Color(0.82, 0.74, 0.5)
+		var rng := RandomNumberGenerator.new()
+		rng.seed = mi * 7 + 3
+		for k in int(24 * (1.0 - mix)):
+			var fi := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Vector3(rng.randf_range(0.15, 0.4), 0.004, 0.006)
+			fi.mesh = bm
+			fi.material_override = fm
+			fi.position = Vector3(rng.randf_range(-0.45, 0.45), 0.025 + h, rng.randf_range(-0.45, 0.45))
+			fi.rotation.y = rng.randf() * TAU
+			root.add_child(fi)
 
 
 static var _fbm: ArrayMesh
