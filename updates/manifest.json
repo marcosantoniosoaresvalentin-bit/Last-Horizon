@@ -1,9 +1,9 @@
 {
-  "version": 137,
-  "file": "update_137.zip",
-  "size": 4785607,
-  "sha256": "b4da85319773118dc4c64d4f32c91850b801e0df6227ae8fe8f4c36770ee9bcf",
+  "version": 138,
+  "file": "update_138.zip",
+  "size": 4828102,
+  "sha256": "3d091597850142b54f85ab496e9e489f67742b1b4be2e483f30436421ca14ad8",
   "min_build": 1,
-  "notes": "Sozinho pega tora de até 1 m; dois juntos até 2 m",
+  "notes": "Serra de pedal nova: pedal do lado, mecanismo de madeira, uma fatia por vez, sons",
   "date": "2026-11-19"
 }
