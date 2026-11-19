@@ -1,9 +1,9 @@
 {
-  "version": 136,
-  "file": "update_136.zip",
-  "size": 4785431,
-  "sha256": "4c91d0e9aa4c8088e6219cabfcfa1d61d12a6d4c484e4602c3668193f2d3ec67",
+  "version": 137,
+  "file": "update_137.zip",
+  "size": 4785607,
+  "sha256": "b4da85319773118dc4c64d4f32c91850b801e0df6227ae8fe8f4c36770ee9bcf",
   "min_build": 1,
-  "notes": "Arrastar tora pesada sozinho (até 250 kg)",
+  "notes": "Sozinho pega tora de até 1 m; dois juntos até 2 m",
   "date": "2026-11-19"
 }
