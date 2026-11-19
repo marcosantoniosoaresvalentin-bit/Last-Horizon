@@ -1,9 +1,9 @@
 {
-  "version": 114,
-  "file": "update_114.zip",
-  "size": 4613264,
-  "sha256": "7bbaa331e4ed0428ad4950bb7817d2648d3c38a5a2c4c10b6a09ee93cb1da27f",
+  "version": 115,
+  "file": "update_115.zip",
+  "size": 4614605,
+  "sha256": "c901f1693a62db7d79da555576ab8920514423ed3667a73e6a27f031d3e07af8",
   "min_build": 1,
-  "notes": "Escolher onde cortar a tora (anel e medida da ponta); faixa de arrastar com rolo girando",
+  "notes": "Limite de peso (60 kg) para carregar madeira; cortar de novo qualquer tora no chão com o machado",
   "date": "2026-11-19"
 }
