@@ -31,7 +31,7 @@ const CRUISE := 16.0              # quanto voam acima das copas (m)
 
 ## Ave: {id, nasc (dia), sexo ("f"/"m"), par (id do par ou -1)}
 var birds: Array = []
-## Ninho: {x, z (árvore ou palmeira), tipo ("arv"/"bac"), h (altura do oco), ang,
+## Ninho: {x, z (árvore ou palmeira), tipo ("bur": buriti seco), h (altura do oco), ang,
 ##   f (fêmea), m (macho), ovos, posto (dia), eclode (dia), filhotes, voa (dia)}
 var nests: Array = []
 ## Ocos já usados (ficam marcados no tronco): [x, z, tipo, h, ang]
@@ -264,26 +264,15 @@ func _nest_of(fid: int):
 	return null
 
 
-## Oco bom: no alto de palmeira morta, de árvore morrendo ou de árvore grande e velha;
-## perto de comida e longe de outro ninho.
+## Oco bom: perto do topo de um buriti seco (só nele), perto de comida e longe de
+## outro ninho.
 func _find_cavity() -> Dictionary:
 	var food := _food_points()
 	var cands := []
-	# buriti seco: o lugar preferido da arara-canindé (conta 3 vezes na escolha)
+	# só no buriti seco (tronco morto de pé), como a arara-canindé de verdade
 	if _bur:
 		for p in _bur.snags():
-			for k in 3:
-				cands.append({"x": float(p.x), "z": float(p.z), "tipo": "bur", "h": _bur.trunk_h(p) - _rng.randf_range(0.5, 1.2)})
-	for p in _bac.palms:
-		if int(p.morta) >= 0 and _bac.trunk_h(p) > 6.0 and last_day - int(p.morta) < 200:
-			cands.append({"x": float(p.x), "z": float(p.z), "tipo": "bac", "h": _bac.trunk_h(p) - 0.8})
-	for p in _arv.plants:
-		var st := int(p[5])
-		var h: float = _arv.height_of(p, last_day)
-		if st == 2 or h < 15.0:
-			continue
-		if st == 1 or h > 21.0:
-			cands.append({"x": float(p[0]), "z": float(p[1]), "tipo": "arv", "h": h * _rng.randf_range(0.55, 0.7)})
+			cands.append({"x": float(p.x), "z": float(p.z), "tipo": "bur", "h": _bur.trunk_h(p) - _rng.randf_range(0.5, 1.2)})
 	cands.shuffle()
 	for c in cands:
 		var near := false
@@ -740,7 +729,10 @@ func _load(path: String) -> bool:
 		return false
 	birds = d.get("aves", [])
 	nests = d.get("ninhos", [])
+	# versão nova: ninho só em buriti seco (os das outras árvores saem)
+	nests = nests.filter(func(n): return str(n.get("tipo", "")) == "bur")
 	holes = d.get("ocos", [])
+	holes = holes.filter(func(hk): return str(hk[2]) == "bur")
 	var r = d.get("dormitorio", [-1, -1])
 	roost = Vector2(float(r[0]), float(r[1]))
 	fome = int(d.get("fome", 0))
