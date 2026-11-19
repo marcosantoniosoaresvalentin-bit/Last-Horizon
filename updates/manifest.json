@@ -1,9 +1,9 @@
 {
-  "version": 125,
-  "file": "update_125.zip",
-  "size": 4724815,
-  "sha256": "c0d24a4368a0a595b8f3be9642c3f4b9fa90e1a32b413630aa9b9e469ee90e45",
+  "version": 126,
+  "file": "update_126.zip",
+  "size": 4725775,
+  "sha256": "d75a21bfd9250d9ca38fc7743c44f7ea739880cb1fc6dcae06a5fb4663d62350",
   "min_build": 1,
-  "notes": "Anel de corte centrado na tora; topo do toco do buriti com rachaduras",
+  "notes": "Toco do buriti com cara de corte de machado",
   "date": "2026-11-19"
 }
