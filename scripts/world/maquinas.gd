@@ -542,7 +542,7 @@ func role_at(mi: int, pos: Vector3) -> String:
 
 ## Como a tora vai ser cortada: a lâmina tira uma fatia de BOARD_T de um lado.
 ## {a (onde corta, na seção), mn, mx, r, ok}
-func cut_plan(fl: Dictionary, giro := 0.0) -> Dictionary:
+func cut_plan(fl: Dictionary, giro := 0.0, desl := 0.0) -> Dictionary:
 	var sec: Dictionary = fl.sec if fl.has("sec") else Arvores.circle_sec()
 	var mn := 1e9
 	var mx := -1e9
@@ -552,8 +552,11 @@ func cut_plan(fl: Dictionary, giro := 0.0) -> Dictionary:
 		mx = maxf(mx, float(q[0]))
 		ymn = minf(ymn, float(q[1]))
 	var r: float = _arv.free_log_max_radius(fl)
-	var t := BOARD_T / maxf(r, 0.01)
-	return {"a": mx - t, "mn": mn, "mx": mx, "ymn": ymn, "r": r, "ok": mx - mn > t * 1.6}
+	# desl: quanto quem empurra moveu a tora de lado (a fatia fica mais grossa ou fina)
+	var t := (BOARD_T + desl) / maxf(r, 0.01)
+	var tmin := 0.02 / maxf(r, 0.01)
+	t = clampf(t, tmin, maxf(tmin, mx - mn - tmin))
+	return {"a": mx - t, "mn": mn, "mx": mx, "ymn": ymn, "r": r, "ok": mx - mn > (BOARD_T / maxf(r, 0.01)) * 1.6, "esp": t * r}
 
 
 ## A seção girada (quem empurra gira a tora na mesa para escolher onde a lâmina corta).
@@ -573,7 +576,37 @@ func load_log(mi: int, fl: Dictionary) -> void:
 	plantas[mi].tora = fl
 	plantas[mi].prog = 0.0
 	plantas[mi].giro = 0.0
+	plantas[mi].desl = 0.0
 	_rebuild()
+
+
+## Move a tora de lado na mesa (só antes da lâmina pegar): a lâmina tira a tábua mais
+## para dentro ou mais na beirada.
+func slide(mi: int, d: float) -> bool:
+	var p: Dictionary = plantas[mi]
+	if (p.tora as Dictionary).is_empty() or cutting(mi) or float(p.prog) > 0.0:
+		return false
+	var cp := cut_plan(p.tora, float(p.get("giro", 0.0)), 0.0)
+	var span: float = (float(cp.mx) - float(cp.mn)) * float(cp.r)
+	p.desl = clampf(float(p.get("desl", 0.0)) + d, -BOARD_T + 0.02, span - BOARD_T - 0.02)
+	_place_tora(mi)
+	return true
+
+
+func _place_tora(mi: int) -> void:
+	var p: Dictionary = plantas[mi]
+	var nd: Dictionary = _nodes.get(mi, {})
+	if nd.has("tora") and is_instance_valid(nd.tora):
+		(nd.tora as Node3D).basis = Basis(Vector3.RIGHT, -float(p.get("giro", 0.0)))
+		(nd.tora as Node3D).position = _log_pos(mi)
+
+
+## Espessura da tábua que vai sair com a tora como está agora (m).
+func slice_thickness(mi: int) -> float:
+	var p: Dictionary = plantas[mi]
+	if (p.tora as Dictionary).is_empty():
+		return 0.0
+	return float(cut_plan(p.tora, float(p.get("giro", 0.0)), float(p.get("desl", 0.0))).esp)
 
 
 ## Gira a tora na mesa (só antes da lâmina pegar nela).
@@ -582,10 +615,7 @@ func spin(mi: int, d: float) -> bool:
 	if (p.tora as Dictionary).is_empty() or cutting(mi) or float(p.prog) > 0.0:
 		return false
 	p.giro = wrapf(float(p.get("giro", 0.0)) + d, -PI, PI)
-	var nd: Dictionary = _nodes.get(mi, {})
-	if nd.has("tora") and is_instance_valid(nd.tora):
-		(nd.tora as Node3D).basis = Basis(Vector3.RIGHT, -float(p.giro))
-		(nd.tora as Node3D).position = _log_pos(mi)
+	_place_tora(mi)
 	return true
 
 
@@ -670,7 +700,7 @@ func update(delta: float, authority: bool, solo_ok: bool) -> void:
 func _log_pos(mi: int) -> Vector3:
 	var p: Dictionary = plantas[mi]
 	var L: float = _arv.free_log_length(p.tora)
-	var cp := cut_plan(p.tora, float(p.get("giro", 0.0)))
+	var cp := cut_plan(p.tora, float(p.get("giro", 0.0)), float(p.get("desl", 0.0)))
 	var x := L * 0.5 + 0.05 - float(p.prog) * (L + 0.1)
 	return Vector3(x, 1.09 - float(cp.ymn) * float(cp.r), -float(cp.a) * float(cp.r))
 
@@ -682,7 +712,7 @@ func _finish_cut(mi: int) -> void:
 	p.tora = {}
 	p.prog = 0.0
 	var g := float(p.get("giro", 0.0))
-	var cp := cut_plan(fl, g)
+	var cp := cut_plan(fl, g, float(p.get("desl", 0.0)))
 	var sec: Dictionary = fl.sec if fl.has("sec") else Arvores.circle_sec()
 	var rpts := _rot_pts(sec.pts, g)
 	var cil: Dictionary

@@ -401,6 +401,7 @@ var _olho := {}                   # o olho no tronco do buriti perto: {p, open}
 var _bur := {}                    # o que escolheu no menu do olho: {p, acao}
 var _chop_bur := {}               # derrubando um buriti
 var _drag := false                # arrastando a tora pesada (sozinho)
+var _maq_pend := {}               # indo até o lugar na serra: {mi, papel}
 var _bld_coop := false            # construindo com a tora que os dois carregam juntos
 var _drag_b := Vector3.ZERO       # a ponta que vai no chão
 var _desf := {}                   # sentado na desfibradeira: {mi, fase, n, anim, node, ...}
@@ -3310,6 +3311,12 @@ func _walk_to(target: Vector3, next: String) -> void:
 
 
 func _walk_arrived() -> void:
+	if _walk_next == "serra_op":
+		_walk_next = ""
+		if not _maq_pend.is_empty():
+			_maq_op_start(int(_maq_pend.mi), str(_maq_pend.papel))
+			_maq_pend = {}
+		return
 	if _walk_next == "pino":
 		_walk_next = ""
 		_pin_ready()
@@ -4855,6 +4862,8 @@ func _move_player(delta: float) -> void:
 	var dir := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	if _joy_id >= 0:
 		dir = _joy_vec
+	if not _maq_op.is_empty():
+		dir = Vector2.ZERO               # na serra (empurrando ou pedalando): fica parado
 	var amount := minf(dir.length(), 1.0)
 	if _digging:
 		if amount > 0.12:
@@ -5232,6 +5241,8 @@ func _input(e: InputEvent) -> void:
 		return
 	if _bag_ui == null and _craft_ui == null and _cal == null and _work_menu == null and _bur_input(e):
 		return
+	if not _maq_op.is_empty():
+		return   # na serra: nem anda nem gira a câmera (só os botões; Sair para sair)
 	if _cal != null or _bag_ui != null or _craft_ui != null or _work_menu != null:
 		return   # com o calendário, a mochila ou o craft aberto, o toque não anda nem gira a câmera
 	var half := get_viewport().get_visible_rect().size.x * 0.5
@@ -7365,7 +7376,7 @@ func _maq_ctx() -> bool:
 				_ctx_action = "tora_serra"
 				_ctx_btn.text = "Pôr tora na serra"
 				return true
-			if not (p.tora as Dictionary).is_empty() and _carry.is_empty():
+			if not (p.tora as Dictionary).is_empty() and _carry.is_empty() and _serra_view_ok(mi):
 				_ctx_action = "empurrar"
 				_ctx_btn.text = "Empurrar a tora"
 				return true
@@ -7482,57 +7493,169 @@ func _maq_ctx_press(act: String) -> void:
 			_maq.load_log(mi, fl)
 			_show_toast("Tora na mesa. Um pedala e o outro empurra a tora contra a serra.")
 		"pedalar", "empurrar":
-			_maq_op_start(mi, "pedal" if act == "pedalar" else "mesa")
+			_maq_op_go(mi, "pedal" if act == "pedalar" else "mesa")
 
 
-## Na serra: o controle de pedalar (trilho de subir e descer o pé) ou de empurrar
-## (faixa de arrastar para o lado da lâmina).
-func _maq_op_start(mi: int, role: String) -> void:
-	var ctrl: Control
+## Na serra: quem empurra fica na ponta da mesa de entrada, de frente para a lâmina;
+## quem pedala, do lado, de frente para a máquina. Ao tocar no botão o personagem anda
+## até o lugar e fica ali (não anda nem gira a câmera) até tocar em Sair.
+## Empurrar: primeiro posiciona a tora (faixa de mover de lado e faixa de girar) e
+## depois vai tocando em "Empurrar": cada toque enche a barrinha de força (ela vai
+## baixando sozinha); mais força = a tora anda (e é cortada) mais rápido. No primeiro
+## toque as faixas de posicionar somem. Pedalar: o mesmo, com a barrinha do pedal.
+
+## Onde fica cada um: {pos, olha}
+func _serra_spot(mi: int, role: String) -> Dictionary:
+	var xf: Transform3D = _maq.xform(mi)
 	if role == "pedal":
-		ctrl = SerraCtrl.new()
-		ctrl.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-		ctrl.offset_left = -150
-		ctrl.offset_right = -30
-		ctrl.offset_top = -470
-		ctrl.offset_bottom = -20
-	else:
-		ctrl = Arrasto.new()
-		ctrl.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-		ctrl.offset_left = 30
-		ctrl.offset_right = 520
-		ctrl.offset_top = -150
-		ctrl.offset_bottom = -30
-		(ctrl as Arrasto).set_text("◀  Empurre a tora para a serra")
-	_hud.add_child(ctrl)
-	_maq_op = {"mi": mi, "papel": role, "ctrl": ctrl, "last": 0.5, "pedal": 0.0, "emp": 0.0, "acc": 0.0}
+		return {"pos": xf * Vector3(0.0, 0.0, -1.7), "olha": xf * Vector3(0.0, 0.9, 0.0)}
+	return {"pos": xf * Vector3(3.35, 0.0, 0.0), "olha": xf * Vector3(0.6, 1.1, 0.0)}
+
+
+## Quem vai empurrar está perto da ponta da mesa de entrada e olhando para a serra?
+func _serra_view_ok(mi: int) -> bool:
+	var xf: Transform3D = _maq.xform(mi)
+	var l: Vector3 = xf.affine_inverse() * _player.position
+	if l.x < 2.6 or l.x > 4.6 or absf(l.z) > 1.2:
+		return false
+	var fwd := Vector3(-sin(_yaw), 0, -cos(_yaw))
+	var to: Vector3 = xf * Vector3(0, 0, 0) - _player.position
+	to.y = 0.0
+	return fwd.dot(to.normalized()) > 0.55
+
+
+func _maq_op_go(mi: int, role: String) -> void:
+	var sp := _serra_spot(mi, role)
+	_maq_pend = {"mi": mi, "papel": role}
+	_walk_to(_ground_pos(Vector2((sp.pos as Vector3).x, (sp.pos as Vector3).z)), "serra_op")
+
+
+func _maq_op_start(mi: int, role: String) -> void:
+	var sp := _serra_spot(mi, role)
+	_player.position = _ground_pos(Vector2((sp.pos as Vector3).x, (sp.pos as Vector3).z))
+	var to: Vector3 = (sp.olha as Vector3) - (_player.position + Vector3.UP * 1.6)
+	_yaw = atan2(-to.x, -to.z)
+	_face = _yaw
+	_player.rotation.y = _face
+	_pitch = clampf(asin(-to.normalized().y), -0.3, 0.9)
+	_joy_id = -1
+	_joy_vec = Vector2.ZERO
+	_look_id = -1
+	var ui := Control.new()
+	ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(ui)
+	_maq_op = {"mi": mi, "papel": role, "ui": ui, "barra": 0.0, "pedal": 0.0, "emp": 0.0, "fase": "pos" if role == "mesa" else "pedal"}
+	# o botão de força (tocar várias vezes) e a barrinha do lado
+	var btn := Icones.IconButton.new()
+	btn.text = "Empurrar" if role == "mesa" else "Pedalar"
+	btn.add_theme_font_size_override("font_size", 22)
+	btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	btn.offset_left = -170
+	btn.offset_top = -170
+	btn.offset_right = -30
+	btn.offset_bottom = -30
+	btn.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+	btn.pressed.connect(_maq_op_tap)
+	ui.add_child(btn)
+	var bar := Control.new()
+	bar.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	bar.offset_left = -212
+	bar.offset_right = -184
+	bar.offset_top = -170
+	bar.offset_bottom = -30
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.draw.connect(func(): _draw_forca(bar))
+	ui.add_child(bar)
+	_maq_op.bar = bar
+	var sair := Icones.IconButton.new()
+	sair.text = "Sair"
+	sair.add_theme_font_size_override("font_size", 20)
+	sair.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	sair.offset_left = -360
+	sair.offset_top = -160
+	sair.offset_right = -230
+	sair.offset_bottom = -30
+	sair.pressed.connect(_maq_op_stop)
+	ui.add_child(sair)
 	if role == "mesa":
-		(ctrl as Arrasto).arrastou.connect(func(d: Vector2):
-			if not _maq_op.is_empty():
-				_maq_op.acc = float(_maq_op.acc) + maxf(0.0, -d.x))
-		# a faixa em pé de girar a tora: escolhe onde a lâmina vai tirar a tábua
+		# posicionar a tora: mover de lado (faixa de baixo) e girar (faixa em pé)
+		var mv := Arrasto.new()
+		mv.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+		mv.offset_left = 30
+		mv.offset_right = 480
+		mv.offset_top = -140
+		mv.offset_bottom = -30
+		ui.add_child(mv)
+		mv.arrastou.connect(func(d: Vector2):
+			if not _maq_op.is_empty() and str(_maq_op.fase) == "pos":
+				_maq.slide(int(_maq_op.mi), d.x * 0.0008)
+				_maq_op_info())
 		var gp := Arrasto.new()
 		gp.vertical = true
 		gp.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
 		gp.offset_left = -150
 		gp.offset_right = -40
-		gp.offset_top = -260
-		gp.offset_bottom = 120
+		gp.offset_top = -280
+		gp.offset_bottom = 60
 		gp.set_text("Girar\na tora")
-		_hud.add_child(gp)
-		_maq_op.giro_pad = gp
+		ui.add_child(gp)
 		gp.arrastou.connect(func(d: Vector2):
-			if _maq_op.is_empty():
-				return
-			if not _maq.spin(int(_maq_op.mi), d.y * 0.012):
-				if not bool(_maq_op.get("avisou", false)):
-					_maq_op.avisou = true
-					_show_toast("A lâmina já pegou na tora: agora só dá para girar na próxima passada."))
-	_maq_stop.visible = true
+			if not _maq_op.is_empty() and str(_maq_op.fase) == "pos":
+				_maq.spin(int(_maq_op.mi), d.y * 0.012)
+				_maq_op_info())
+		_maq_op.pads = [mv, gp]
+		_maq_op_info()
+	_maq_stop.visible = false
 	_jump_btn.visible = false
 	for b in [_log_btn, _ctx_btn, _work_btn, _pick_btn, _vine_btn, _plant_btn, _chop_btn, _bld_btn]:
 		(b as Control).visible = false
-	_show_toast("Suba e desça o pedal com o dedo." if role == "pedal" else "Gire a tora na faixa da direita para escolher onde cortar; arraste a faixa de baixo para a esquerda para empurrar.")
+	_show_toast("Toque em \"Pedalar\" várias vezes: quanto mais rápido, mais a serra anda." if role == "pedal" else "Mova a tora de lado e gire para escolher onde cortar. Depois vá tocando em \"Empurrar\".")
+
+
+## O texto da faixa de mover: a grossura da tábua que vai sair.
+func _maq_op_info() -> void:
+	if _maq_op.is_empty() or not _maq_op.has("pads"):
+		return
+	var esp: float = _maq.slice_thickness(int(_maq_op.mi))
+	(_maq_op.pads[0] as Arrasto).set_text(("◀ ▶  Mover a tora  ·  tábua de %.1f cm" % (esp * 100.0)).replace(".", ","))
+
+
+## Um toque no botão de força: a barrinha sobe (o personagem faz mais força).
+func _maq_op_tap() -> void:
+	if _maq_op.is_empty():
+		return
+	if str(_maq_op.fase) == "pos":
+		# escolheu onde cortar: as faixas de posicionar somem e começa a empurrar
+		_maq_op.fase = "empurrar"
+		for pd in _maq_op.get("pads", []):
+			if is_instance_valid(pd):
+				(pd as Node).queue_free()
+		_maq_op.erase("pads")
+		_show_toast("Vá tocando em \"Empurrar\": quanto mais toques, mais força e mais rápido corta.")
+	_maq_op.barra = minf(1.0, float(_maq_op.barra) + 0.11)
+	if _chop_pose:
+		_chop_pose.phase = 0.0
+
+
+## A barrinha de força: pequena, enchendo de baixo para cima e mudando de cor
+## (azul fraco, verde, amarelo, laranja, vermelho no máximo).
+func _draw_forca(bar: Control) -> void:
+	if _maq_op.is_empty():
+		return
+	var v := float(_maq_op.barra)
+	var r := Rect2(Vector2.ZERO, bar.size)
+	bar.draw_rect(r.grow(3), Color(0.04, 0.04, 0.03, 0.85))
+	var cols := [Color(0.25, 0.55, 0.95), Color(0.25, 0.85, 0.3), Color(0.95, 0.88, 0.2), Color(1.0, 0.55, 0.12), Color(0.95, 0.18, 0.12)]
+	var f := v * (cols.size() - 1)
+	var i := mini(int(f), cols.size() - 2)
+	var col: Color = (cols[i] as Color).lerp(cols[i + 1], f - i)
+	var h := r.size.y * v
+	bar.draw_rect(Rect2(Vector2(0, r.size.y - h), Vector2(r.size.x, h)), col)
+	for k in range(1, 5):
+		var y := r.size.y * k / 5.0
+		bar.draw_line(Vector2(0, y), Vector2(r.size.x, y), Color(0, 0, 0, 0.35), 1.0)
+	bar.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
 
 
 func _maq_op_stop() -> void:
@@ -7541,9 +7664,8 @@ func _maq_op_stop() -> void:
 		return
 	if _maq_op.is_empty():
 		return
-	(_maq_op.ctrl as Node).queue_free()
-	if _maq_op.has("giro_pad") and is_instance_valid(_maq_op.giro_pad):
-		(_maq_op.giro_pad as Node).queue_free()
+	if is_instance_valid(_maq_op.ui):
+		(_maq_op.ui as Node).queue_free()
 	_maq.inputs.erase(_my_id())
 	_maq_op = {}
 	_maq_stop.visible = false
@@ -7558,28 +7680,26 @@ func _my_id() -> int:
 
 func _maq_op_tick(delta: float) -> void:
 	var mi := int(_maq_op.mi)
-	if mi >= _maq.plantas.size() or _maq.role_at(mi, _player.position) != str(_maq_op.papel):
+	if mi >= _maq.plantas.size():
 		_maq_op_stop()
 		return
-	# o pé no pedal: a velocidade do pegador subindo e descendo
+	# a força vai baixando sozinha: tem que continuar tocando
+	_maq_op.barra = maxf(0.0, float(_maq_op.barra) - delta * 0.32)
+	(_maq_op.bar as Control).queue_redraw()
+	var forca := float(_maq_op.barra) * 2.0
 	if str(_maq_op.papel) == "pedal":
-		var v := float(_maq_op.ctrl.value)
-		var spd := absf(v - float(_maq_op.last)) / maxf(delta, 0.001)
-		_maq_op.last = v
-		_maq_op.pedal = lerpf(float(_maq_op.pedal), clampf(spd / 2.0, 0.0, 2.0), minf(1.0, delta * 4.0))
+		_maq_op.pedal = forca
+		_maq_op.emp = 0.0
 	else:
-		var push := float(_maq_op.acc) / maxf(delta, 0.001) / 300.0
-		_maq_op.acc = 0.0
-		_maq_op.emp = lerpf(float(_maq_op.emp), clampf(push, 0.0, 2.0), minf(1.0, delta * 5.0))
 		var p: Dictionary = _maq.plantas[mi]
 		if (p.tora as Dictionary).is_empty():
 			_maq_op_stop()
 			return
+		_maq_op.emp = forca if str(_maq_op.fase) == "empurrar" else 0.0
 		var ped := float(p.get("_pedal", 0.0))
-		_bld_why.visible = float(_maq_op.emp) > 0.1 and ped < 0.05
-		_bld_why.text = "Precisa de alguém pisando no pedal (a serra só funciona em dupla)."
+		_bld_why.visible = float(_maq_op.emp) > 0.1 and ped < 0.05 and _maq.cutting(mi)
+		_bld_why.text = "Precisa de alguém pedalando (a serra só funciona em dupla)."
 	_maq.inputs[_my_id()] = {"mi": mi, "pedal": float(_maq_op.pedal), "emp": float(_maq_op.emp), "t": Time.get_ticks_msec()}
-
 
 
 # ================== PINOS DE MADEIRA ==================
