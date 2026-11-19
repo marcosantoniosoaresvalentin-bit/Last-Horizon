@@ -532,7 +532,7 @@ func _rebuild() -> void:
 		var r := float(p.get("toco_r", 0.2)) if p.has("toco") else TRUNK_R * lerpf(0.7, 1.0, clampf(h / 8.0, 0.0, 1.0))
 		if p.has("toco"):
 			ch.tr.append([x, gy, z, h, r, rot])
-			_toco_cap(Vector3(x, gy + h + 0.1, z), r * 0.9, last_day - int(p.toco))
+			_toco_cap(Vector3(x, gy + h + 0.1 + 0.002, z), r * 0.9, last_day - int(p.toco))
 			continue
 		if int(p.get("golpes", 0)) > 0:
 			_notch(p, Vector3(x, gy, z), r)
@@ -586,21 +586,53 @@ func _rebuild() -> void:
 		_add_mm(_cacho_mesh, _leaf_mat, ch.fr, 110.0, false)
 
 
-## O topo cortado do toco: madeira clara e fibrosa (escurece com os dias).
+## O topo cortado do toco: a madeira fibrosa do buriti com os anéis e as rachaduras
+## (como o toco das outras árvores), escurecendo com os dias.
 func _toco_cap(c: Vector3, r: float, age: int) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(c.x * 31.0 + c.z * 17.0)
+	var old := clampf(age / 300.0, 0.0, 1.0)
+	var base := Color(0.66, 0.53, 0.36).lerp(Color(0.36, 0.3, 0.23), old)
+	var cracks := []
+	for k in rng.randi_range(4, 7):
+		cracks.append([rng.randf() * TAU, rng.randf_range(0.45, 0.95)])     # ângulo, até onde vai
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var na := 32
+	var nr := 7
+	var col := func(rr: float, a: float) -> Color:
+		var cc: Color = base.darkened(0.12 * absf(sin(rr * 46.0)) + 0.18 * (1.0 - rr))   # anéis e o miolo mais escuro
+		for cr in cracks:
+			var da := absf(wrapf(a - float(cr[0]), -PI, PI))
+			if rr > 1.0 - float(cr[1]) and da < 0.05 + 0.03 * rr:
+				cc = cc.darkened(0.55)                                             # rachadura
+		if rr > 0.93:
+			cc = cc.darkened(0.25)                                                 # a beirada (perto da casca)
+		return cc
+	for i in nr:
+		var r0 := float(i) / nr
+		var r1 := float(i + 1) / nr
+		for k in na:
+			var a0 := TAU * k / na
+			var a1 := TAU * (k + 1) / na
+			var q := [Vector3(cos(a0) * r0 * r, 0, sin(a0) * r0 * r), Vector3(cos(a1) * r0 * r, 0, sin(a1) * r0 * r),
+				Vector3(cos(a1) * r1 * r, 0, sin(a1) * r1 * r), Vector3(cos(a0) * r1 * r, 0, sin(a0) * r1 * r)]
+			var cs := [col.call(r0, a0), col.call(r0, a1), col.call(r1, a1), col.call(r1, a0)]
+			for idx in [0, 2, 1, 0, 3, 2]:
+				st.set_normal(Vector3.UP)
+				st.set_color(cs[idx])
+				st.add_vertex(c + (q[idx] as Vector3))
 	var mi := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = r
-	cm.bottom_radius = r
-	cm.height = 0.03
-	cm.radial_segments = 14
-	mi.mesh = cm
+	mi.mesh = st.commit()
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.86, 0.76, 0.58).lerp(Color(0.4, 0.33, 0.25), clampf(age / 300.0, 0.0, 1.0))
+	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = 1.0
+	m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mi.material_override = m
+	mi.visibility_range_end = VIEW
 	add_child(mi)
-	mi.position = c - Vector3.UP * 0.1
 	_nodes.append(mi)
 
 

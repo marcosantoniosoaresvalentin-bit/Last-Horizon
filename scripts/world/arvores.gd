@@ -2092,6 +2092,20 @@ func free_log_kg(fl: Dictionary) -> float:
 
 
 ## Põe a tora deitada no chão: centro em pos, virada para yaw, acompanhando o morro.
+## As pontas da tora solta como ela fica deitada (acompanhando o chão): [A, B] no eixo.
+func free_axis(fl: Dictionary) -> Array:
+	var x := float(fl.pos[0])
+	var z := float(fl.pos[2])
+	var L := free_log_length(fl)
+	var r := free_log_radius(fl)
+	var dir := Vector3(cos(float(fl.yaw)), 0, -sin(float(fl.yaw)))
+	var e1 := Vector3(x, 0, z) - dir * L * 0.5
+	var e2 := Vector3(x, 0, z) + dir * L * 0.5
+	e1.y = _jogo.height_at(e1.x, e1.z) + r * 0.9
+	e2.y = _jogo.height_at(e2.x, e2.z) + r * 0.9
+	return [e1, e2]
+
+
 func _place_free_node(fl: Dictionary) -> void:
 	var n := free_log_node(fl)
 	add_child(n)

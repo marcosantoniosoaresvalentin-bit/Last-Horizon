@@ -8107,10 +8107,11 @@ func _buck_cut() -> Dictionary:
 	var u := _buck_h()                    # na tora solta h0=0, h1=1: o h já é a fração
 	var A: Vector3 = info.A
 	var B: Vector3 = info.B
-	var P := A.lerp(B, u)
+	# a tora deitada acompanha o chão (uma ponta pode estar mais alta que a outra)
+	var ax: Array = _arvores.free_axis(fl)
+	var P: Vector3 = (ax[0] as Vector3).lerp(ax[1], u)
 	var r: float = _arvores.free_log_radius_at(fl, u)
-	P.y = float(fl.pos[1])
-	return {"solta": fl, "u": u, "point": P + Vector3.UP * r, "axis": P, "along": (B - A).normalized(), "r": r, "galho": false}
+	return {"solta": fl, "u": u, "point": P + Vector3.UP * r, "axis": P, "along": ((ax[1] as Vector3) - (ax[0] as Vector3)).normalized(), "r": r, "galho": false}
 
 
 func _buck_go() -> void:
