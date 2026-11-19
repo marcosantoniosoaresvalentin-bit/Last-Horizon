@@ -8855,12 +8855,12 @@ func _knife_pose(ph: float) -> void:
 	var up_y := (cu * 0.75 - cf * 0.25 + cr * 0.35).normalized()
 	# na batida: o meio da lâmina no talo (a mão fica antes, do lado direito)
 	var hit_y := (cf * 0.55 + cu * 0.35 - cr * 0.45).normalized()
-	var hit_p := w - hit_y * 0.25
+	var hit_p := w - hit_y * 0.22
 	var hp: Vector3 = hit_p - eye
 	if hp.length() > 0.75:
 		hit_p = eye + hp.normalized() * 0.75        # o braço não estica mais que isso
 		hit_y = (w - hit_p).normalized()
-		hit_p = w - hit_y * 0.25
+		hit_p = w - hit_y * 0.22
 	var p := rest_p
 	var y := rest_y
 	if ph >= 0.0:

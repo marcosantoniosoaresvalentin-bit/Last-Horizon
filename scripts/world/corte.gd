@@ -48,41 +48,85 @@ static func marreta_mesh() -> ArrayMesh:
 	return out.commit()
 
 
-## Faca de pedra: cabo curto de galho, a lâmina lascada amarrada com cipó na ponta.
+## Faca de pedra: a lâmina lascada de verdade (a mesma da lascagem), com a espiga
+## enfiada no cabo de galho torto com casca e amarrada com voltas de cipó.
 static func faca_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 3131
-	var path := []
-	for k in 5:
-		var t := float(k) / 4.0
-		path.append(Vector3(sin(t * 2.0) * 0.003, t * 0.17, 0.0))
-	_tube(st, path, 0.016, Color(0.45, 0.31, 0.18), rng)
-	for k in 4:
-		var y := 0.15 + k * 0.01
+	# cabo: galho curto, levemente torto, com casca escura, fissuras e um nó
+	var rings := 10
+	var sides := 9
+	var top_y := 0.16
+	var pts := []
+	for i in rings + 1:
+		var t := float(i) / rings
+		var c := Vector3(sin(t * 2.2) * 0.005 - 0.002, t * top_y, cos(t * 1.7) * 0.003)
+		var r := lerpf(0.0175, 0.0155, t)
+		if absf(t - 0.4) < 0.07:
+			r += 0.0025          # o nó do galho
 		var ring := []
-		for q in 9:
-			var a := TAU * q / 8.0
-			ring.append(Vector3(cos(a) * 0.02, y + sin(a * 2.0) * 0.003, sin(a) * 0.014))
-		_tube(st, ring, 0.0035, Color(0.42, 0.33, 0.17), rng)
-	# a lâmina: pedra cinza fina, gume para a frente (-Z... no plano XY), ponta para cima
-	var g := Color(0.47, 0.47, 0.45)
-	var b0 := Vector3(-0.012, 0.15, 0)
-	var b1 := Vector3(0.03, 0.15, 0)
-	var tip := Vector3(0.018, 0.34, 0)
-	var mid := Vector3(0.042, 0.24, 0)
-	for tri in [[b0, b1, mid], [b0, mid, tip]]:
-		for side in [-1.0, 1.0]:
-			var off := Vector3(0, 0, 0.006 * side)
-			var pts: Array = tri
-			if side < 0.0:
-				pts = [tri[0], tri[2], tri[1]]
-			for v in pts:
-				st.set_color(g.darkened(0.08 if side < 0.0 else 0.0))
-				st.add_vertex((v as Vector3) + off)
+		for k in sides:
+			var a := TAU * k / sides
+			ring.append(c + Vector3(cos(a), 0, sin(a)) * (r + rng.randf_range(-0.0012, 0.0012)))
+		pts.append(ring)
+	# casca: estrias compridas ao longo do galho (algumas fissuras escuras que somem)
+	var streak := []
+	for k in sides:
+		streak.append(rng.randf_range(0.85, 1.12))
+	for i in rings:
+		for k in sides:
+			var k2 := (k + 1) % sides
+			var bark := Color(0.24, 0.155, 0.09) * float(streak[k]) * rng.randf_range(0.96, 1.04)
+			if k % 3 == 1 and rng.randf() < 0.6:
+				bark = bark.darkened(0.35)          # fissura comprida da casca
+			bark.a = 1.0
+			_quad(st, pts[i][k], pts[i][k2], pts[i + 1][k2], pts[i + 1][k], bark)
+	# a ponta de baixo cortada (madeira clara)
+	var c0 := Vector3.ZERO
+	for p in pts[0]:
+		c0 += p
+	c0 /= sides
+	for k in sides:
+		st.set_color(Color(0.62, 0.48, 0.3))
+		st.add_vertex(c0); st.add_vertex(pts[0][k]); st.add_vertex(pts[0][(k + 1) % sides])
+	# amarração: voltas de cipó em espiral em cima do cabo, prendendo a espiga
+	var vine := Color(0.21, 0.22, 0.1)
+	var path := []
+	var turns := 9.0
+	for q in 110:
+		var t := float(q) / 109.0
+		var a := t * TAU * turns
+		var y := lerpf(top_y - 0.05, top_y + 0.01, t) + sin(a * 3.0) * 0.0008
+		var rr := 0.0175 + 0.0012 * sin(t * PI) + rng.randf_range(-0.0004, 0.0004)
+		path.append(Vector3(cos(a) * rr, y, sin(a) * rr * 0.75))   # aperta a espiga (achatada)
+	_tube(st, path, 0.0024, vine, rng)
+	# duas voltas cruzadas em X por cima da amarração (prendem a lâmina)
+	for sg in [-1.0, 1.0]:
+		var xp := []
+		for q in 12:
+			var t := float(q) / 11.0
+			var a: float = PI * 0.5 + sg * (t - 0.5) * 2.2
+			xp.append(Vector3(cos(a) * 0.0195 * sg, lerpf(top_y - 0.045, top_y + 0.008, t), sin(a) * 0.0155))
+		_tube(st, xp, 0.0021, vine.darkened(0.12), rng)
+	# o nó e a pontinha solta do cipó
+	_tube(st, [path[-1], path[-1] + Vector3(0.006, -0.004, 0.006), path[-1] + Vector3(0.01, -0.014, 0.009)], 0.002, vine.darkened(0.15), rng)
 	st.generate_normals()
-	return st.commit()
+	var m := st.commit()
+	# a lâmina: pedra lascada (comprimento X -> para cima, grossura Y -> Z, largura Z -> X)
+	var bl_ix: ArrayMesh = Lascar.mesh(Lascar.target("lamina_faca"), Lascar.rock(31), 31)
+	var bs := SurfaceTool.new()
+	bs.create_from(bl_ix, 0)
+	bs.deindex()
+	var blade := bs.commit()
+	var out := SurfaceTool.new()
+	out.begin(Mesh.PRIMITIVE_TRIANGLES)
+	out.append_from(m, 0, Transform3D.IDENTITY)
+	var k := 0.17
+	out.append_from(blade, 0, Transform3D(Basis(Vector3(0, k, 0), Vector3(0, 0, k * 1.1), Vector3(k * 1.15, 0, 0)), Vector3(0, top_y - 0.03 + k * 0.5, 0)))
+	out.generate_normals()
+	return out.commit()
 
 
 static func axe_mesh() -> ArrayMesh:
