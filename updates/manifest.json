@@ -1,9 +1,9 @@
 {
-  "version": 118,
-  "file": "update_118.zip",
-  "size": 4626300,
-  "sha256": "3df82cde3d3786ca1f5e7955c7ebbd1d116d22b6a72f116d0ebadd184655103b",
+  "version": 119,
+  "file": "update_119.zip",
+  "size": 4626265,
+  "sha256": "ebd04bd8e087fb60f6c4949e7e6aa682b1c3d7d9d42a2938dec4d79000e44399",
   "min_build": 1,
-  "notes": "Buriti seco (morto) vira o ninho preferido das araras",
+  "notes": "Araras fazem ninho só no buriti seco",
   "date": "2026-11-19"
 }
