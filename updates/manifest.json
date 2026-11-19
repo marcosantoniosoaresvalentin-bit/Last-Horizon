@@ -1,9 +1,9 @@
 {
-  "version": 111,
-  "file": "update_111.zip",
-  "size": 4602094,
-  "sha256": "b4826d0b392aa3c64784664e7ad8b1c8005d0219c741c7cfd29cc6f1c3377657",
+  "version": 112,
+  "file": "update_112.zip",
+  "size": 4610581,
+  "sha256": "b8c57e73b420e3f6fb7d852c5aa4207185faa545cc012bc60a933a637c4141ef",
   "min_build": 1,
-  "notes": "Novo: Projetos (plantas de construção) e a Serra de Pedal em dupla",
-  "date": "2026-11-18"
+  "notes": "Construção com furador de pedra e pinos de madeira (furo de verdade); cortar a sobra das peças; sem amarração de cipó",
+  "date": "2026-11-19"
 }
