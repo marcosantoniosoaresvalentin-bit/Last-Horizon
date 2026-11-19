@@ -1,9 +1,9 @@
 {
-  "version": 128,
-  "file": "update_128.zip",
-  "size": 4730287,
-  "sha256": "48d8889de0f395f1eb2b0936ffaa88186096800c052e1503646460c4314e647f",
+  "version": 129,
+  "file": "update_129.zip",
+  "size": 4730717,
+  "sha256": "e461bdd13979958454ccc0571a291f19c76866eda26a380bf00262e031008b1f",
   "min_build": 1,
-  "notes": "Buriti: dois cortes por folha, faca na mão, talo vai para a mochila",
+  "notes": "Faca de pedra com lâmina lascada, cabo de galho e amarração de cipó",
   "date": "2026-11-19"
 }
