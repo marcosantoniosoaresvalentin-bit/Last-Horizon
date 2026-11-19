@@ -1,9 +1,9 @@
 {
-  "version": 141,
-  "file": "update_141.zip",
-  "size": 4831430,
-  "sha256": "b451795764887ed5cf1dd526e0ad26213d8c16d40452a8e377a815aef939f055",
+  "version": 142,
+  "file": "update_142.zip",
+  "size": 4833448,
+  "sha256": "244267a0ec2b8dfb4810dfb1f79e95809f50617f3916f81f56f116d486598f56",
   "min_build": 1,
-  "notes": "Serra: barrinha de força para empurrar e pedalar, mover e girar a tora",
+  "notes": "Nadar em rios fundos e no mar; pegar água com o balde nas lagoas",
   "date": "2026-11-19"
 }
