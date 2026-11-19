@@ -2996,15 +2996,17 @@ func _piece_node(fl: Dictionary) -> Node3D:
 					_tri_out(bark, q[tri[0]], q[tri[1]], q[tri[2]], out3, Color.WHITE, Color.WHITE, Color.WHITE, uv[tri[0]], uv[tri[1]], uv[tri[2]], true, false)
 			arc += a.distance_to(b) * 0.3
 		else:
-			# face rachada: subdivide e desloca para fora/dentro (não fica plana)
-			var across := 30
+			# face rachada: subdivide e desloca para fora/dentro (não fica plana).
+			# Tipo 2 = face serrada (serra de pedal): a mesma madeira, mas lisa e reta
+			var sawn := typ == 2
+			var across := 6 if sawn else 30
 			var nn3 := Vector3(0, en.y, en.x)
-			for i in stations * 3:
+			for i in stations * (1 if sawn else 3):
 				for j in across:
 					var q := []
 					var cs := []
 					for e in [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]]:
-						var u := float(e[0]) / (stations * 3)
+						var u := float(e[0]) / (stations * (1 if sawn else 3))
 						var w := float(e[1]) / across
 						var v := a.lerp(b, w)
 						var x := (u - 0.5) * L
@@ -3020,6 +3022,9 @@ func _piece_node(fl: Dictionary) -> Node3D:
 								crack = true
 						if crack:
 							h -= 0.01
+						if sawn:
+							h = 0.0
+							crack = false
 						var r := _cil_r(fl, u)
 						var pw: Vector3 = P.call(v, u) + nn3 * h * edge
 						q.append(pw)
@@ -3034,7 +3039,7 @@ func _piece_node(fl: Dictionary) -> Node3D:
 						_tri_out(wood, q[tri[0]], q[tri[1]], q[tri[2]], nn3, cs[tri[0]], cs[tri[1]], cs[tri[2]])
 			# farpas levantadas da face, no sentido das fibras
 			var fl_len := a.distance_to(b) * _cil_r(fl, 0.5)
-			for f in int(clampf(fl_len * 60.0, 3.0, 24.0)):
+			for f in (0 if sawn else int(clampf(fl_len * 60.0, 3.0, 24.0))):
 				var u := rng.randf_range(0.03, 0.97)
 				var v := a.lerp(b, rng.randf_range(0.05, 0.95))
 				var base: Vector3 = P.call(v, u)

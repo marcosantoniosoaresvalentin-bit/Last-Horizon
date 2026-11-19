@@ -542,12 +542,12 @@ func role_at(mi: int, pos: Vector3) -> String:
 
 ## Como a tora vai ser cortada: a lâmina tira uma fatia de BOARD_T de um lado.
 ## {a (onde corta, na seção), mn, mx, r, ok}
-func cut_plan(fl: Dictionary) -> Dictionary:
+func cut_plan(fl: Dictionary, giro := 0.0) -> Dictionary:
 	var sec: Dictionary = fl.sec if fl.has("sec") else Arvores.circle_sec()
 	var mn := 1e9
 	var mx := -1e9
 	var ymn := 1e9
-	for q in sec.pts:
+	for q in _rot_pts(sec.pts, giro):
 		mn = minf(mn, float(q[0]))
 		mx = maxf(mx, float(q[0]))
 		ymn = minf(ymn, float(q[1]))
@@ -556,11 +556,37 @@ func cut_plan(fl: Dictionary) -> Dictionary:
 	return {"a": mx - t, "mn": mn, "mx": mx, "ymn": ymn, "r": r, "ok": mx - mn > t * 1.6}
 
 
+## A seção girada (quem empurra gira a tora na mesa para escolher onde a lâmina corta).
+static func _rot_pts(pts: Array, g: float) -> Array:
+	if absf(g) < 0.0001:
+		return pts
+	var out := []
+	var c := cos(g)
+	var sn := sin(g)
+	for q in pts:
+		out.append([float(q[0]) * c - float(q[1]) * sn, float(q[0]) * sn + float(q[1]) * c, int(q[2])])
+	return out
+
+
 ## Põe a tora na mesa de entrada (a ponta encostando nos dentes).
 func load_log(mi: int, fl: Dictionary) -> void:
 	plantas[mi].tora = fl
 	plantas[mi].prog = 0.0
+	plantas[mi].giro = 0.0
 	_rebuild()
+
+
+## Gira a tora na mesa (só antes da lâmina pegar nela).
+func spin(mi: int, d: float) -> bool:
+	var p: Dictionary = plantas[mi]
+	if (p.tora as Dictionary).is_empty() or cutting(mi) or float(p.prog) > 0.0:
+		return false
+	p.giro = wrapf(float(p.get("giro", 0.0)) + d, -PI, PI)
+	var nd: Dictionary = _nodes.get(mi, {})
+	if nd.has("tora") and is_instance_valid(nd.tora):
+		(nd.tora as Node3D).basis = Basis(Vector3.RIGHT, -float(p.giro))
+		(nd.tora as Node3D).position = _log_pos(mi)
+	return true
 
 
 func take_saida(mi: int) -> Dictionary:
@@ -644,7 +670,7 @@ func update(delta: float, authority: bool, solo_ok: bool) -> void:
 func _log_pos(mi: int) -> Vector3:
 	var p: Dictionary = plantas[mi]
 	var L: float = _arv.free_log_length(p.tora)
-	var cp := cut_plan(p.tora)
+	var cp := cut_plan(p.tora, float(p.get("giro", 0.0)))
 	var x := L * 0.5 + 0.05 - float(p.prog) * (L + 0.1)
 	return Vector3(x, 1.09 - float(cp.ymn) * float(cp.r), -float(cp.a) * float(cp.r))
 
@@ -655,8 +681,10 @@ func _finish_cut(mi: int) -> void:
 	var fl: Dictionary = p.tora
 	p.tora = {}
 	p.prog = 0.0
-	var cp := cut_plan(fl)
+	var g := float(p.get("giro", 0.0))
+	var cp := cut_plan(fl, g)
 	var sec: Dictionary = fl.sec if fl.has("sec") else Arvores.circle_sec()
+	var rpts := _rot_pts(sec.pts, g)
 	var cil: Dictionary
 	if fl.has("cil"):
 		cil = (fl.cil as Dictionary).duplicate()
@@ -664,7 +692,7 @@ func _finish_cut(mi: int) -> void:
 		cil = {"L": _arv.free_log_length(fl), "ra": _arv.free_log_radius_at(fl, 0.02), "rb": _arv.free_log_radius_at(fl, 0.98)}
 	var out := []
 	for band in [[float(cp.a), float(cp.mx)], [float(cp.mn), float(cp.a)]]:
-		var poly := _band(sec.pts, band[0], band[1])
+		var poly := _band(rpts, band[0], band[1], 2)       # face da serra: lisa (tipo 2)
 		if poly.size() < 3:
 			continue
 		var pc := {"cil": cil.duplicate(), "sec": Arvores._lay_flat(poly, sec.ax), "v": int(fl.get("v", 0)), "s": 1.0,
@@ -701,7 +729,7 @@ func rip(fl: Dictionary) -> Array:
 		var b := minf(a + t, mx)
 		if mx - b < t * 0.35:
 			b = mx                      # a última lasca fina vai junto
-		var poly := _band(sec.pts, a, b)
+		var poly := _band(sec.pts, a, b, 2)
 		if poly.size() >= 3:
 			out.append({"cil": cil.duplicate(), "sec": Arvores._lay_flat(poly, sec.ax), "v": int(fl.get("v", 0)), "s": 1.0,
 				"h0": 0.0, "h1": 1.0, "bot": {}, "top": {}, "pos": [0, 0, 0], "yaw": 0.0, "dia": int(fl.get("dia", 0))})
@@ -710,18 +738,18 @@ func rip(fl: Dictionary) -> Array:
 
 
 ## Pedaço da seção entre z = a e z = b (cortes da serra: arestas novas são face serrada).
-static func _band(pts_in: Array, a: float, b: float) -> Array:
+static func _band(pts_in: Array, a: float, b: float, ctype := 1) -> Array:
 	var poly := []
 	for q in pts_in:
 		poly.append([float(q[0]), float(q[1]), int(q[2])])
-	poly = _clip(poly, a, 1.0)
-	poly = _clip(poly, b, -1.0)
+	poly = _clip(poly, a, 1.0, ctype)
+	poly = _clip(poly, b, -1.0, ctype)
 	return poly
 
 
 ## Corta o polígono [z, y, tipo da aresta que sai] pela reta z = v, ficando do lado
 ## s*(z - v) >= 0. A aresta nova (o corte) é do tipo 1 (madeira).
-static func _clip(poly: Array, v: float, s: float) -> Array:
+static func _clip(poly: Array, v: float, s: float, ctype := 1) -> Array:
 	var out := []
 	var n := poly.size()
 	if n < 3:
@@ -738,7 +766,7 @@ static func _clip(poly: Array, v: float, s: float) -> Array:
 			var I := [v, lerpf(float(P[1]), float(Q[1]), f)]
 			if inP:
 				# saindo: do ponto de corte segue pelo corte (madeira)
-				out.append([I[0], I[1], 1])
+				out.append([I[0], I[1], ctype])
 			else:
 				# entrando: do ponto de corte segue a aresta original
 				out.append([I[0], I[1], P[2]])
@@ -901,6 +929,7 @@ func _rebuild() -> void:
 		if not (p.tora as Dictionary).is_empty():
 			var tn: Node3D = _arv.free_log_node(p.tora)
 			root.add_child(tn)
+			tn.basis = Basis(Vector3.RIGHT, -float(p.get("giro", 0.0)))
 			tn.position = _log_pos(mi)
 			nd["tora"] = tn
 		_nodes[mi] = nd

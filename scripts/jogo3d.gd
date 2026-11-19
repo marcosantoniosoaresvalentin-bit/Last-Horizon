@@ -401,6 +401,7 @@ var _olho := {}                   # o olho no tronco do buriti perto: {p, open}
 var _bur := {}                    # o que escolheu no menu do olho: {p, acao}
 var _chop_bur := {}               # derrubando um buriti
 var _drag := false                # arrastando a tora pesada (sozinho)
+var _bld_coop := false            # construindo com a tora que os dois carregam juntos
 var _drag_b := Vector3.ZERO       # a ponta que vai no chão
 var _desf := {}                   # sentado na desfibradeira: {mi, fase, n, anim, node, ...}
 var _desf_btns: Array = []
@@ -2531,8 +2532,9 @@ func _update_log_btn() -> void:
 		return
 	(_log_btn as Icones.IconButton).kind = ""
 	if not _coop.is_empty():
-		# carregando junto: o botão Cooperativo com o ícone de onde vai pôr
-		_bld_btn.visible = false
+		# carregando junto: o botão Cooperativo com o ícone de onde vai pôr; quem vai
+		# na frente também pode construir com ela
+		_bld_btn.visible = bool(_coop.lider)
 		_plant_btn.visible = false
 		var pl: Dictionary = _coop_place()
 		_log_btn.visible = true
@@ -5518,12 +5520,23 @@ func _split_thickness(fl: Dictionary) -> float:
 	return th
 
 
+## Quantas cunhas a tora pede: as compridas (as que só dois carregam) pedem mais.
+func _split_n(fl: Dictionary) -> int:
+	var L: float = _arvores.free_log_length(fl)
+	if L <= 1.05:
+		return 3
+	if L <= 2.05:
+		return 4
+	return 5
+
+
 func _split_begin() -> void:
 	var i: int = _apoios.nearest_rested(_player.position, 1.8)
 	if i < 0:
 		return
-	if item_qtd("cunha") < 3 and not teste:
-		_show_toast("Precisa de 3 cunhas de pedra (tem %d). Faça modelando pedra." % item_qtd("cunha"))
+	var ncu := _split_n(_apoios.rested[i].log)
+	if item_qtd("cunha") < ncu and not teste:
+		_show_toast("Essa tora precisa de %d cunhas de pedra (tem %d). Faça modelando pedra." % [ncu, item_qtd("cunha")])
 		return
 	if item_qtd("marreta") < 1 and not teste:
 		_show_toast("Precisa de uma marreta (pedra de marreta + galho + 2 cipós).")
@@ -5535,8 +5548,8 @@ func _split_begin() -> void:
 		return
 	equip("")                      # as mãos livres para pôr as cunhas
 	var spots := []
-	for u in SPLIT_U:
-		spots.append({"u": u, "placed": false, "depth": 0.0, "node": null})
+	for k in ncu:
+		spots.append({"u": lerpf(0.13, 0.87, float(k) / (ncu - 1)), "placed": false, "depth": 0.0, "node": null})
 	_split = {"i": i, "stage": "cunhas", "spots": spots, "sel": -1, "go": -1, "anim": -1.0, "kind": "", "ok": false,
 		"crack": null, "t": 0.0, "speed": 0.4, "gw": 0.3, "gc": 0.5, "fired": false}
 	_split_rng.randomize()
@@ -5545,7 +5558,7 @@ func _split_begin() -> void:
 	if teste:
 		_split_finish()          # modo de teste: racha na hora
 		return
-	_show_toast("Toque nos 3 lugares marcados na tora para pôr as cunhas.")
+	_show_toast("Toque nos %d lugares marcados na tora para pôr as cunhas." % ncu)
 
 
 func _split_geo(u: float) -> Dictionary:
@@ -5731,7 +5744,7 @@ func _update_split(delta: float) -> void:
 		var il := _split_ui.find_child("il", true, false) as Label
 		if il:
 			if str(_split.stage) == "cunhas":
-				il.text = "RACHAR A TORA\nToque nos 3 lugares marcados para pôr as cunhas (o fio vai virado para a madeira)."
+				il.text = "RACHAR A TORA\nToque nos %d lugares marcados para pôr as cunhas (o fio vai virado para a madeira)." % (_split.spots as Array).size()
 			else:
 				il.text = "RACHAR A TORA\nToque numa cunha e em BATER com o marcador no VERDE. Bata um pouco em cada. Vermelho: a cunha quebra!"
 		var pl := _split_ui.find_child("pl", true, false) as Label
@@ -5774,7 +5787,7 @@ func _split_place_done() -> void:
 	if str(_split.stage) == "cunhas":
 		if all:
 			_split.stage = "bater"
-			_show_toast("As 3 cunhas estão no lugar. Pegue a marreta: toque numa cunha e bata.")
+			_show_toast("As %d cunhas estão no lugar. Pegue a marreta: toque numa cunha e bata." % (_split.spots as Array).size())
 			_split.go = -1
 	else:
 		_split.sel = k
@@ -6811,6 +6824,11 @@ func _aimed_piece() -> Dictionary:
 
 
 func _bld_start() -> void:
+	if not _coop.is_empty() and bool(_coop.lider) and _carry.is_empty():
+		# carregando junto: quem vai na frente mira onde pôr a peça (o outro continua segurando)
+		_carry = _coop.fl
+		_carry_kg = float(_coop.kg)
+		_bld_coop = true
 	if _carry.is_empty() or _constr == null:
 		return
 	var ghost: Node3D = _arvores.free_log_node(_carry)
@@ -6844,6 +6862,9 @@ func _bld_stop() -> void:
 		return
 	(_bld.ghost as Node3D).queue_free()
 	_bld = {}
+	if _bld_coop:
+		_bld_coop = false
+		_carry = {}            # desistiu: a tora continua com os dois
 	if _carry_node:
 		_carry_node.visible = true
 	for b in _bld_btns:
@@ -7013,6 +7034,9 @@ func _bld_place() -> void:
 	var juntas: Array = _bld.get("juntas", [])
 	_constr.add(fl, b, c, juntas)
 	Sons.play_at(self, "baque", c, -4.0)
+	if _bld_coop:
+		_bld_coop = false
+		_coop_end(false)        # os dois soltam: a peça ficou na construção
 	if juntas.size() > 0:
 		_show_toast("Peça no lugar. Agora prenda com %d pino%s de madeira: pegue a marreta e toque em \"Fixar pinos\"." % [juntas.size(), "s" if juntas.size() > 1 else ""])
 	_bld_stop()
@@ -7486,11 +7510,29 @@ func _maq_op_start(mi: int, role: String) -> void:
 		(ctrl as Arrasto).arrastou.connect(func(d: Vector2):
 			if not _maq_op.is_empty():
 				_maq_op.acc = float(_maq_op.acc) + maxf(0.0, -d.x))
+		# a faixa em pé de girar a tora: escolhe onde a lâmina vai tirar a tábua
+		var gp := Arrasto.new()
+		gp.vertical = true
+		gp.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+		gp.offset_left = -150
+		gp.offset_right = -40
+		gp.offset_top = -260
+		gp.offset_bottom = 120
+		gp.set_text("Girar\na tora")
+		_hud.add_child(gp)
+		_maq_op.giro_pad = gp
+		gp.arrastou.connect(func(d: Vector2):
+			if _maq_op.is_empty():
+				return
+			if not _maq.spin(int(_maq_op.mi), d.y * 0.012):
+				if not bool(_maq_op.get("avisou", false)):
+					_maq_op.avisou = true
+					_show_toast("A lâmina já pegou na tora: agora só dá para girar na próxima passada."))
 	_maq_stop.visible = true
 	_jump_btn.visible = false
 	for b in [_log_btn, _ctx_btn, _work_btn, _pick_btn, _vine_btn, _plant_btn, _chop_btn, _bld_btn]:
 		(b as Control).visible = false
-	_show_toast("Suba e desça o pedal com o dedo." if role == "pedal" else "Arraste para a esquerda (para a lâmina) para empurrar a tora.")
+	_show_toast("Suba e desça o pedal com o dedo." if role == "pedal" else "Gire a tora na faixa da direita para escolher onde cortar; arraste a faixa de baixo para a esquerda para empurrar.")
 
 
 func _maq_op_stop() -> void:
@@ -7500,6 +7542,8 @@ func _maq_op_stop() -> void:
 	if _maq_op.is_empty():
 		return
 	(_maq_op.ctrl as Node).queue_free()
+	if _maq_op.has("giro_pad") and is_instance_valid(_maq_op.giro_pad):
+		(_maq_op.giro_pad as Node).queue_free()
 	_maq.inputs.erase(_my_id())
 	_maq_op = {}
 	_maq_stop.visible = false
@@ -8341,7 +8385,20 @@ func _coop_place() -> Dictionary:
 				return {"a": "planta", "icone": "projetos"}
 	if _apoios and not _apoios.pair_for(mid, L).is_empty():
 		return {"a": "forquilha", "icone": "apoiar"}
+	if _buracos and _coop_hole() >= 0:
+		return {"a": "buraco", "icone": "fincar"}
 	return {"a": "chao", "icone": "largar_tora"}
+
+
+## Buraco perto de um dos dois (quem vai na frente ou quem vai atrás) para fincar a tora.
+func _coop_hole() -> int:
+	var i: int = _buracos.hole_near(_front(0.6), 1.1)
+	if i >= 0:
+		return i
+	var o := _coop_partner_node()
+	if o:
+		return _buracos.hole_near(o.global_position, 1.1)
+	return -1
 
 
 func _coop_partner_node() -> Node3D:
@@ -8388,6 +8445,17 @@ func _coop_tick(delta: float) -> void:
 			_coop_end(true)
 			_show_toast("O outro jogador saiu: a tora caiu.")
 			return
+		if not bool(_coop.lider):
+			# quem vai na frente pôs a peça (construção): solta também
+			var el = _rede.estados.get(int(_coop.pid))
+			if el != null and not (el as Dictionary).has("coopl") and float(_coop.anim) <= 0.0:
+				_coop["solto"] = float(_coop.get("solto", 0.0)) + delta
+				if float(_coop.solto) > 0.8:
+					_coop_end(false)
+					_show_toast("Pronto! A peça ficou no lugar.")
+					return
+			else:
+				_coop["solto"] = 0.0
 		_coop.anim = maxf(0.0, float(_coop.anim) - delta)
 		if _chop_pose:
 			_chop_pose.crouch = clampf(float(_coop.anim) / 0.6, 0.0, 1.0) if float(_coop.anim) > 0.0 else 0.0
@@ -8492,6 +8560,13 @@ func _coop_match(pid: int, lider: bool) -> void:
 					_maq.fill_slot(mi, int(r.i), float(r.get("sobra", 0.0)), fl)
 					done = true
 					_show_toast("Peça no lugar da planta! Agora fure e ponha os pinos.")
+		elif a == "buraco" and _buracos:
+			var hi := _coop_hole()
+			if hi >= 0:
+				fl.erase("em_pe")
+				_buracos.plant(hi, fl, _face)
+				done = true
+				_show_toast("Tora fincada no buraco!")
 		elif a == "forquilha" and _apoios:
 			var pr: Array = _apoios.pair_for(mid, float(_coop.L))
 			if not pr.is_empty():
