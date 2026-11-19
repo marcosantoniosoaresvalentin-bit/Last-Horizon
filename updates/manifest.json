@@ -1,9 +1,9 @@
 {
-  "version": 132,
-  "file": "update_132.zip",
-  "size": 4737473,
-  "sha256": "9b23f1a4b92a0fbb342e8fce0df769940f67add4c0c676f781e1ba490f783c41",
+  "version": 133,
+  "file": "update_133.zip",
+  "size": 4737644,
+  "sha256": "8edec1d4ba7d10d378fde0b3314e058cb384c2a6e1e65d436715909a3222a76b",
   "min_build": 1,
-  "notes": "Desfibradeira: fibras compridas, talo todo cortado, cor da madeira serrada",
+  "notes": "Plantas usam a madeira de verdade do jogo (cor e formato)",
   "date": "2026-11-19"
 }
