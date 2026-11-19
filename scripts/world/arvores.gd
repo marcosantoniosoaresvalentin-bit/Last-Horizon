@@ -2952,6 +2952,7 @@ static func _lay_flat(poly: Array, ax: Array) -> Dictionary:
 ## Malha do pedaço rachado: casca nas arestas de casca; madeira rachada nas outras
 ## (ondulada nas fibras, com degraus, rachaduras, o miolo escuro e farpas); pontas com anéis.
 func _piece_node(fl: Dictionary) -> Node3D:
+	var sawn := bool(fl.get("serrada", false))      # tábua serrada: faces lisas e claras
 	var L := float(fl.cil.L)
 	var pts: Array = fl.sec.pts
 	var ax := Vector2(float(fl.sec.ax[0]), float(fl.sec.ax[1]))
@@ -3020,12 +3021,18 @@ func _piece_node(fl: Dictionary) -> Node3D:
 								crack = true
 						if crack:
 							h -= 0.01
+						if sawn:
+							h = nz.get_noise_2d(x * 3.0, w * 9.0) * 0.0015    # serrada: lisa
+							crack = false
 						var r := _cil_r(fl, u)
 						var pw: Vector3 = P.call(v, u) + nn3 * h * edge
 						q.append(pw)
 						var core := 1.0 - smoothstep(0.0, 0.12, v.distance_to(ax))
 						var grain := 0.07 * nz.get_noise_2d(x * 2.0, w * 30.0 + k)
 						var col := Color(0.36, 0.27, 0.18).darkened(core * 0.35 + grain)
+						if sawn:
+							# madeira serrada: clara, com os veios compridos
+							col = Color(0.52, 0.44, 0.34).darkened(clampf(grain * 1.4 + 0.07 * absf(sin(w * 23.0 + x * 0.7)), 0.0, 0.3))
 						if crack:
 							col = Color(0.1, 0.07, 0.04)
 						cs.append(col)
@@ -3034,7 +3041,7 @@ func _piece_node(fl: Dictionary) -> Node3D:
 						_tri_out(wood, q[tri[0]], q[tri[1]], q[tri[2]], nn3, cs[tri[0]], cs[tri[1]], cs[tri[2]])
 			# farpas levantadas da face, no sentido das fibras
 			var fl_len := a.distance_to(b) * _cil_r(fl, 0.5)
-			for f in int(clampf(fl_len * 60.0, 3.0, 24.0)):
+			for f in (0 if sawn else int(clampf(fl_len * 60.0, 3.0, 24.0))):
 				var u := rng.randf_range(0.03, 0.97)
 				var v := a.lerp(b, rng.randf_range(0.05, 0.95))
 				var base: Vector3 = P.call(v, u)

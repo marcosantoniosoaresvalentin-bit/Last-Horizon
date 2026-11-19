@@ -223,7 +223,10 @@ static func slot_log(pc: Array) -> Dictionary:
 	elif kind == "tabua":
 		# tábua de verdade: retangular, as faces serradas retas (dá para sentar e apoiar)
 		sec = {"pts": [[-1.0, -0.22, 1], [1.0, -0.22, 1], [1.0, 0.22, 1], [-1.0, 0.22, 1]], "ax": [0.0, 0.0]}
-	return {"cil": {"L": L, "ra": r, "rb": r}, "sec": sec, "pos": [0, 0, 0], "yaw": 0.0, "dia": 0, "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0, "bot": {}, "top": {}}
+	var out := {"cil": {"L": L, "ra": r, "rb": r}, "sec": sec, "pos": [0, 0, 0], "yaw": 0.0, "dia": 0, "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0, "bot": {}, "top": {}}
+	if kind == "tabua":
+		out["serrada"] = true
+	return out
 
 
 ## Que tipo de madeira é essa: "tora" (redonda), "meia" (rachada grossa) ou "tabua".
@@ -601,7 +604,7 @@ func rip(fl: Dictionary) -> Array:
 		var poly := _band(sec.pts, a, b)
 		if poly.size() >= 3:
 			out.append({"cil": cil.duplicate(), "sec": Arvores._lay_flat(poly, sec.ax), "v": int(fl.get("v", 0)), "s": 1.0,
-				"h0": 0.0, "h1": 1.0, "bot": {}, "top": {}, "pos": [0, 0, 0], "yaw": 0.0, "dia": int(fl.get("dia", 0))})
+				"h0": 0.0, "h1": 1.0, "bot": {}, "top": {}, "pos": [0, 0, 0], "yaw": 0.0, "dia": int(fl.get("dia", 0)), "serrada": true})
 		a = b
 	return out
 

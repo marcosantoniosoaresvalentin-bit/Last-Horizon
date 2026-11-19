@@ -8493,61 +8493,91 @@ func _desf_take() -> void:
 ## nas lâminas (down) e girado no comprido (rot).
 func _desf_place() -> void:
 	var xf: Transform3D = _maq.xform(int(_desf.mi))
-	var l := Vector3(-0.55 * float(_desf.pull), lerpf(1.1, 0.95 + DESF_R, float(_desf.down)), 0.0)
+	# começa com quase todo o talo além das lâminas e vem até a pontinha da mão
+	var l := Vector3(0.5 - 1.0 * float(_desf.pull), lerpf(1.1, 0.95 + DESF_R, float(_desf.down)), 0.0)
 	(_desf.node as Node3D).global_transform = Transform3D(xf.basis * Basis(Vector3.RIGHT, float(_desf.rot)), xf * l)
 
 
-## Monta o talo: a parte da mão inteira; da lâmina para a frente, cortado em tiras (4),
-## depois em palitos (4x4), depois em fibras (6x6), abrindo para a ponta.
+## Monta o talo: só a pontinha da mão fica inteira; o resto, por onde as lâminas já
+## passaram, fica cortado no comprido: em 4 tiras, depois em palitos (4x4), depois em
+## fibras finas (6x6), cada uma inteira de ponta a ponta.
 func _desf_build() -> void:
 	var im := (_desf.node as MeshInstance3D).mesh as ImmediateMesh
 	im.clear_surfaces()
 	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
 	var green := Color(0.34, 0.48, 0.19)
-	var fiber := Color(0.82, 0.76, 0.52)
 	var R := DESF_R
 	var half := DESF_L * 0.5
+	var start := -half + 0.06                   # a pontinha da mão (não passa nas lâminas)
 	var passe := int(_desf.passe)
-	var uc := half * float(_desf.pull) if str(_desf.fase) == "puxar" else -1.0
-	# a parte da mão (inteira): prisma de 8 lados
-	_desf_prism(im, -half, 0.0, R, green)
-	var nseg := 11
-	for sgi in nseg:
-		var u0 := half * sgi / nseg
-		var u1 := half * (sgi + 1) / nseg
-		var um := (u0 + u1) * 0.5
-		var lev := passe + (1 if um < uc else 0)
-		if lev <= 0:
-			_desf_prism(im, u0, u1, R, green)
-			continue
-		var nz := 4 if lev <= 2 else 6
-		var ny := 1 if lev == 1 else (4 if lev == 2 else 6)
-		var col := green.lerp(fiber, 0.25 + 0.22 * lev)
-		var open := um * 0.06 * lev             # as tiras se abrem para a ponta
-		for iz in nz:
-			for iy in ny:
-				var z0 := -R + 2.0 * R * iz / nz
-				var z1 := -R + 2.0 * R * (iz + 1) / nz
-				var zc := (z0 + z1) * 0.5
-				var y0: float
-				var y1: float
-				if ny == 1:
-					var hh := sqrt(maxf(R * R - zc * zc, 0.0001))
-					y0 = -hh
-					y1 = hh
-				else:
-					y0 = -R + 2.0 * R * iy / ny
-					y1 = -R + 2.0 * R * (iy + 1) / ny
-					var yc0 := (y0 + y1) * 0.5
-					if zc * zc + yc0 * yc0 > R * R * 1.05:
-						continue
-				var yc := (y0 + y1) * 0.5
-				var g := 0.0012
-				var off := Vector2(zc, yc).normalized() * open if Vector2(zc, yc).length() > 0.001 else Vector2.ZERO
-				var droop := -um * um * 0.04 * lev
-				var c2 := col.darkened(0.08 * float((iz + iy) % 2))
-				_desf_box(im, u0, u1, z0 + g + off.x, z1 - g + off.x, y0 + g + off.y + droop, y1 - g + off.y + droop, c2)
+	var uc := start - 0.01
+	if str(_desf.fase) == "puxar":
+		uc = -0.5 + float(_desf.pull)            # onde a lâmina está no talo agora
+	_desf_prism(im, -half, start, R, green)
+	# a parte já passada nesta passada (um nível a mais) e a que ainda não passou
+	var mid := clampf(uc, start, half)
+	if mid > start:
+		_desf_strands(im, start, mid, passe + 1)
+	if mid < half:
+		if passe <= 0:
+			_desf_prism(im, mid, half, R, green)
+		else:
+			_desf_strands(im, mid, half, passe)
 	im.surface_end()
+
+
+## Tiras/fibras contínuas de u0 até u1 (cada uma uma peça só, abrindo um pouco para a ponta).
+func _desf_strands(im: ImmediateMesh, u0: float, u1: float, lev: int) -> void:
+	var R := DESF_R
+	var green := Color(0.34, 0.48, 0.19)
+	var fiber := Color(0.84, 0.78, 0.55)
+	var nz := 4 if lev <= 2 else 6
+	var ny := 1 if lev == 1 else (4 if lev == 2 else 6)
+	var nsamp := maxi(2, int(ceil((u1 - u0) / 0.08)) + 1)
+	var g := 0.0011
+	for iz in nz:
+		for iy in ny:
+			var z0 := -R + 2.0 * R * iz / nz
+			var z1 := -R + 2.0 * R * (iz + 1) / nz
+			var zc := (z0 + z1) * 0.5
+			var y0: float
+			var y1: float
+			if ny == 1:
+				var hh := sqrt(maxf(R * R - zc * zc, 0.0001))
+				y0 = -hh
+				y1 = hh
+			else:
+				y0 = -R + 2.0 * R * iy / ny
+				y1 = -R + 2.0 * R * (iy + 1) / ny
+				if zc * zc + pow((y0 + y1) * 0.5, 2.0) > R * R * 1.05:
+					continue
+			var yc := (y0 + y1) * 0.5
+			var dirc := Vector2(zc, yc).normalized() if Vector2(zc, yc).length() > 0.0005 else Vector2.ZERO
+			# a casca verde de fora some a cada passada (a fibra de dentro é clara)
+			var outer := Vector2(zc, yc).length() > R * 0.7
+			var col := fiber.lerp(green, (0.55 if outer else 0.2) / float(lev))
+			col = col.darkened(0.06 * float((iz + iy) % 2))
+			var phase := float(iz * 7 + iy * 3)
+			var rings := []
+			for k in nsamp:
+				var u := lerpf(u0, u1, float(k) / (nsamp - 1))
+				var t := clampf((u - u0) / maxf(DESF_L * 0.5, 0.01), 0.0, 1.5)
+				var off := dirc * (0.0015 * lev + 0.006 * lev * t * t)          # abrindo devagar para a ponta
+				var wav := sin(u * 9.0 + phase) * 0.0012 * (lev - 1)            # a fibra ondula um pouco
+				var droop := -t * t * 0.01 * lev
+				var oz := off.x + wav
+				var oy := off.y + droop
+				rings.append([Vector3(u, y1 - g + oy, z0 + g + oz), Vector3(u, y1 - g + oy, z1 - g + oz),
+					Vector3(u, y0 + g + oy, z1 - g + oz), Vector3(u, y0 + g + oy, z0 + g + oz)])
+			for k in nsamp - 1:
+				var A: Array = rings[k]
+				var B: Array = rings[k + 1]
+				for f in 4:
+					var f2 := (f + 1) % 4
+					_desf_quad(im, A[f], B[f], B[f2], A[f2], col.darkened(0.1 if f == 2 else 0.0))
+			# a ponta da tira (fechada)
+			var E: Array = rings[nsamp - 1]
+			_desf_quad(im, E[0], E[1], E[2], E[3], col.lightened(0.1))
 
 
 func _desf_quad(im: ImmediateMesh, a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Color) -> void:
@@ -8565,13 +8595,6 @@ func _desf_prism(im: ImmediateMesh, u0: float, u1: float, R: float, col: Color) 
 		var p0 := Vector2(cos(a0), sin(a0)) * R
 		var p1 := Vector2(cos(a1), sin(a1)) * R
 		_desf_quad(im, Vector3(u0, p0.y, p0.x), Vector3(u1, p0.y, p0.x), Vector3(u1, p1.y, p1.x), Vector3(u0, p1.y, p1.x), col.darkened(0.06 * (k % 2)))
-
-
-func _desf_box(im: ImmediateMesh, u0: float, u1: float, z0: float, z1: float, y0: float, y1: float, col: Color) -> void:
-	_desf_quad(im, Vector3(u0, y1, z0), Vector3(u1, y1, z0), Vector3(u1, y1, z1), Vector3(u0, y1, z1), col)
-	_desf_quad(im, Vector3(u0, y0, z0), Vector3(u0, y0, z1), Vector3(u1, y0, z1), Vector3(u1, y0, z0), col.darkened(0.15))
-	_desf_quad(im, Vector3(u0, y0, z0), Vector3(u1, y0, z0), Vector3(u1, y1, z0), Vector3(u0, y1, z0), col.darkened(0.08))
-	_desf_quad(im, Vector3(u0, y0, z1), Vector3(u0, y1, z1), Vector3(u1, y1, z1), Vector3(u1, y0, z1), col.darkened(0.08))
 
 
 ## Sentado no banco, de frente para a bancada.
