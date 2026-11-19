@@ -221,12 +221,9 @@ static func slot_log(pc: Array) -> Dictionary:
 	if kind == "meia":
 		sec = Arvores.split_sec(sec, false)[0]
 	elif kind == "tabua":
-		# tábua de verdade: retangular, as faces serradas retas (dá para sentar e apoiar)
-		sec = {"pts": [[-1.0, -0.22, 1], [1.0, -0.22, 1], [1.0, 0.22, 1], [-1.0, 0.22, 1]], "ax": [0.0, 0.0]}
-	var out := {"cil": {"L": L, "ra": r, "rb": r}, "sec": sec, "pos": [0, 0, 0], "yaw": 0.0, "dia": 0, "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0, "bot": {}, "top": {}}
-	if kind == "tabua":
-		out["serrada"] = true
-	return out
+		var h: Array = Arvores.split_sec(sec, false)
+		sec = Arvores.split_sec(h[0], true)[0]
+	return {"cil": {"L": L, "ra": r, "rb": r}, "sec": sec, "pos": [0, 0, 0], "yaw": 0.0, "dia": 0, "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0, "bot": {}, "top": {}}
 
 
 ## Que tipo de madeira é essa: "tora" (redonda), "meia" (rachada grossa) ou "tabua".
@@ -316,14 +313,40 @@ func slot_for(mi: int, fl: Dictionary, pos: Vector3) -> Dictionary:
 	return {"i": -1, "why": "Essa tora é grossa demais para as peças que faltam (precisa ser fina)."}
 
 
-func fill_slot(mi: int, si: int, sobra := 0.0) -> void:
+func fill_slot(mi: int, si: int, sobra := 0.0, fl := {}) -> void:
 	plantas[mi].pecas[si] = true
+	if not fl.is_empty():
+		# a madeira de verdade que o jogador trouxe (a mesma cor, casca e formato)
+		if not plantas[mi].has("madeiras"):
+			plantas[mi]["madeiras"] = {}
+		var c: Dictionary = fl.duplicate(true)
+		for k in ["pos", "yaw", "em_pe", "corte_m", "entalhe", "racha"]:
+			c.erase(k)
+		plantas[mi].madeiras[str(si)] = c
 	if not plantas[mi].has("sobra"):
 		plantas[mi]["sobra"] = []
 		for _p in plantas[mi].pecas:
 			plantas[mi].sobra.append(0.0)
 	plantas[mi].sobra[si] = snappedf(sobra, 0.005) if sobra > 0.015 else 0.0
 	_rebuild()
+
+
+## A madeira da peça (a de verdade, se tiver), no comprimento Lw.
+func piece_log(mi: int, si: int, Lw: float) -> Dictionary:
+	var md: Dictionary = plantas[mi].get("madeiras", {})
+	var pc: Array = TIPOS[plantas[mi].tipo].pecas[si]
+	if not md.has(str(si)):
+		var p2: Array = pc.duplicate()
+		p2[1] = Lw
+		return slot_log(p2)
+	var fl: Dictionary = (md[str(si)] as Dictionary).duplicate(true)
+	if fl.has("cil"):
+		fl.cil.L = Lw
+	else:
+		var L0: float = _arv.free_log_length(fl)
+		if L0 > 0.01:
+			fl.h1 = float(fl.h0) + (float(fl.h1) - float(fl.h0)) * Lw / L0
+	return fl
 
 
 ## A ponta que passou do tamanho: no espaço da máquina, onde cortar e para que lado
@@ -362,10 +385,10 @@ func trim(mi: int, si: int) -> Dictionary:
 	var t: Dictionary = TIPOS[plantas[mi].tipo]
 	var pc: Array = t.pecas[si].duplicate()
 	var e := float(plantas[mi].sobra[si])
+	var bit := piece_log(mi, si, e)
 	plantas[mi].sobra[si] = 0.0
 	_rebuild()
-	pc[1] = e
-	return slot_log(pc)
+	return bit
 
 
 ## Juntas que já dá para pôr o pino (as peças delas estão no lugar) e ainda não têm.
@@ -604,7 +627,7 @@ func rip(fl: Dictionary) -> Array:
 		var poly := _band(sec.pts, a, b)
 		if poly.size() >= 3:
 			out.append({"cil": cil.duplicate(), "sec": Arvores._lay_flat(poly, sec.ax), "v": int(fl.get("v", 0)), "s": 1.0,
-				"h0": 0.0, "h1": 1.0, "bot": {}, "top": {}, "pos": [0, 0, 0], "yaw": 0.0, "dia": int(fl.get("dia", 0)), "serrada": true})
+				"h0": 0.0, "h1": 1.0, "bot": {}, "top": {}, "pos": [0, 0, 0], "yaw": 0.0, "dia": int(fl.get("dia", 0))})
 		a = b
 	return out
 
@@ -694,12 +717,14 @@ func _rebuild() -> void:
 			if bool(p.pecas[si]):
 				var sob: Array = p.get("sobra", [])
 				var e: float = float(sob[si]) if si < sob.size() else 0.0
-				var pc2: Array = pc.duplicate()
-				pc2[1] = float(pc[1]) + e
-				var n: Node3D = _arv.free_log_node(slot_log(pc2))
+				var wfl := piece_log(mi, si, float(pc[1]) + e)
+				var n: Node3D = _arv.free_log_node(wfl)
 				root.add_child(n)
 				# a sobra fica para fora numa ponta
-				n.transform = Transform3D(b, (pc[2] as Vector3) + b.x * e * 0.5)
+				var bb := b
+				if str(pc[0]) == "tabua":
+					bb = b * Basis(Vector3.RIGHT, PI)      # a tábua virada: a face rachada (reta) para cima
+				n.transform = Transform3D(bb, (pc[2] as Vector3) + b.x * e * 0.5)
 				# os furos das juntas dessa peça
 				var holes := []
 				var inv := n.transform.affine_inverse()
@@ -708,7 +733,9 @@ func _rebuild() -> void:
 						continue
 					var sg := _joint_seg(str(p.tipo), ji)
 					holes.append([inv * (sg[0] as Vector3), inv * (sg[1] as Vector3), 0.022])
-				Furo.apply(n, holes, _slot_half(pc, e))
+				var ex: Vector2 = _arv._sec_ext(wfl)
+				var rr: float = _arv.free_log_max_radius(wfl)
+				Furo.apply(n, holes, Vector3((float(pc[1]) + e) * 0.5, ex.x * rr, ex.y * rr))
 			else:
 				var mi2 := MeshInstance3D.new()
 				var bm := BoxMesh.new()

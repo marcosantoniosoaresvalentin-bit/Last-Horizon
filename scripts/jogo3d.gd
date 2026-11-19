@@ -7334,13 +7334,14 @@ func _maq_ctx_press(act: String) -> void:
 			if int(r.i) < 0:
 				_show_toast(str(r.why))
 				return
+			var placed: Dictionary = _carry
 			_carry = {}
 			if _carry_node:
 				_carry_node.queue_free()
 			_carry_node = null
 			if _chop_pose:
 				_chop_pose.log_node = null
-			_maq.fill_slot(mi, int(r.i), float(r.get("sobra", 0.0)))
+			_maq.fill_slot(mi, int(r.i), float(r.get("sobra", 0.0)), placed)
 			var falta: int = (_maq.plantas[mi].pecas as Array).size() - _maq.done_count(mi)
 			Sons.play_at(self, "baque", _player.position, -6.0)
 			var sob := float(r.get("sobra", 0.0))
@@ -8394,7 +8395,7 @@ func _coop_match(pid: int, lider: bool) -> void:
 			if mi >= 0:
 				var r: Dictionary = _maq.slot_for(mi, fl, mid)
 				if int(r.i) >= 0:
-					_maq.fill_slot(mi, int(r.i), float(r.get("sobra", 0.0)))
+					_maq.fill_slot(mi, int(r.i), float(r.get("sobra", 0.0)), fl)
 					done = true
 					_show_toast("Peça no lugar da planta! Agora fure e ponha os pinos.")
 		elif a == "forquilha" and _apoios:
