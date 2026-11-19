@@ -1141,6 +1141,52 @@ func log_target(pos: Vector3, reach: float) -> Dictionary:
 	return best
 
 
+## Pedaço de tronco caído mais perto para escolher onde cortar (qualquer pedaço com
+## mais de 80 cm): {p, h0, h1, s, A (ponta de baixo), B (ponta de cima), along, cut_h}.
+func log_piece_near(pos: Vector3, reach: float) -> Dictionary:
+	var best := {}
+	var bd := reach
+	for p in plants:
+		if int(p[5]) != FALLEN or p.size() < 10 or not p[9] is Array or _falling.has(p):
+			continue
+		var m: Dictionary = _models[int(p[4]) % VARIANTS]
+		var h := height_of(p, last_day)
+		var s: float = h / float(m.height)
+		var cut := _cut_from(p, p[9], s)
+		var xf := _log_xf(p, h, s, cut)
+		var along := (xf * _axis_of(m, float(m.H)) - xf * _axis_of(m, float(cut.h))).normalized()
+		for pc in log_pieces(p):
+			var h0 := float(pc[0])
+			var h1 := float(pc[1])
+			if (h1 - h0) * s < 0.8:
+				continue
+			var off: Vector3 = along * float(pc[2])
+			var A: Vector3 = xf * _axis_of(m, h0) + off
+			var B: Vector3 = xf * _axis_of(m, h1) + off
+			var ab := Vector2(B.x - A.x, B.z - A.z)
+			var t := clampf(Vector2(pos.x - A.x, pos.z - A.z).dot(ab) / ab.length_squared(), 0.0, 1.0)
+			var P := A.lerp(B, t)
+			var d := Vector2(pos.x - P.x, pos.z - P.z).length()
+			if d < bd:
+				bd = d
+				best = {"p": p, "h0": h0, "h1": h1, "s": s, "A": A, "B": B, "off": off, "along": along}
+	return best
+
+
+## O corte no ponto h (no modelo) do pedaço: {p, h, point, axis, along, r, galho}
+func log_cut_at(info: Dictionary, h_at: float) -> Dictionary:
+	var p: Array = info.p
+	var m: Dictionary = _models[int(p[4]) % VARIANTS]
+	var s := float(info.s)
+	var h := height_of(p, last_day)
+	var cut := _cut_from(p, p[9], s)
+	var xf := _log_xf(p, h, s, cut)
+	var P: Vector3 = xf * _axis_of(m, h_at) + (info.off as Vector3)
+	var r := _radius_of(m, h_at, 0.0) * s
+	var galho := absf(float(info.h1) - float(m.H)) < 0.0001 and _branch_below(p, m, h_at + 0.3 / s)
+	return {"p": p, "h": h_at, "point": P + Vector3.UP * r, "axis": P, "along": info.along, "r": r, "galho": galho}
+
+
 ## Ainda tem galho (mais que o toquinho) preso no tronco abaixo da altura h (no modelo)?
 func _branch_below(p: Array, m: Dictionary, h: float) -> bool:
 	for bi in m.binfo.size():

@@ -392,6 +392,9 @@ var _maq: Node3D = null
 var _proj := {}                    # pondo a planta no chão: {tipo, yaw, ghost, ok, c}
 var _proj_ui: Control = null
 var _proj_btns: Array = []
+var _buck_sel := {}               # escolhendo onde cortar a tora caída: {info, ponta, d, L, ring}
+var _buck_go_cut := {}             # o corte escolhido, para o machado começar
+var _buck_btns: Array = []
 var _trim := {}                    # cortando a ponta que sobrou: {mi, si, t, s, tool}
 var _pin := {}                     # pondo pinos: {alvos, sel, depth, t, speed, gw, gc, anim, ok}
 var _pin_ui: Control = null
@@ -683,6 +686,7 @@ func _build_hud() -> void:
 	_bld_pad.arrastou.connect(_bld_drag)
 	_hud.add_child(_bld_pad)
 	_proj_btns = [mk.call("Pôr a planta", -290, -146, _proj_place), mk.call("Sair", -430, -426, _proj_stop)]
+	_buck_btns = [mk.call("Cortar aqui", -290, -146, _buck_go), mk.call("Sair", -430, -426, _buck_stop)]
 	_maq_stop = mk.call("Parar", -290, -146, _maq_op_stop)
 	_mark_btns = [mk.call("Cortar aqui", -290, -146, _mark_cut), mk.call("Subir", -150, -286, func(): _mark_move(0.05)),
 		mk.call("Descer", -290, -286, func(): _mark_move(-0.05)), mk.call("Medir", -150, -426, _mark_measure),
@@ -2168,6 +2172,9 @@ func _update_chop(delta: float) -> void:
 	if not _proj.is_empty():
 		_proj_tick()
 		return
+	if not _buck_sel.is_empty():
+		_buck_tick()
+		return
 	if not _maq_op.is_empty():
 		_maq_op_tick(delta)
 		return
@@ -2228,7 +2235,7 @@ func _update_chop(delta: float) -> void:
 		elif not _branch_target().is_empty():
 			_chop_btn.visible = true
 			_chop_btn.text = "Cortar galho"
-		elif not _arvores.log_target(_player.position, 1.6).is_empty():
+		elif not _arvores.log_piece_near(_player.position, 1.6).is_empty():
 			_chop_btn.visible = true
 			_chop_btn.text = "Cortar tora"
 
@@ -4417,10 +4424,12 @@ func _start_chop() -> void:
 			_chop_branch = br
 			_branch_hits = 0
 		else:
-			var lg: Dictionary = _arvores.log_target(_player.position, 1.6)
-			if lg.is_empty():
+			if _buck_go_cut.is_empty():
+				# primeiro escolhe onde cortar (o anel na tora)
+				_buck_open()
 				return
-			_chop_log = lg
+			_chop_log = _buck_go_cut
+			_buck_go_cut = {}
 	if _digging:
 		_cancel_dig()
 	_chop_tree = t
@@ -6623,6 +6632,12 @@ func _bld_pad_text() -> void:
 
 ## O dedo andou na faixa: gira/inclina/vira (graus por pixel) ou move (cm por pixel).
 func _bld_drag(d: Vector2) -> void:
+	if not _buck_sel.is_empty():
+		_buck_drag(d)
+		return
+	if not _proj.is_empty():
+		_proj.yaw = float(_proj.yaw) - d.x * deg_to_rad(0.25)      # girando a planta
+		return
 	if _bld.is_empty():
 		return
 	var rot := deg_to_rad(0.25)
@@ -7745,3 +7760,103 @@ func _trim_end() -> void:
 	_bld_why.visible = false
 	_jump_btn.visible = true
 	_act_check = 0.0
+
+
+# ================== ESCOLHER ONDE CORTAR A TORA ==================
+# Machado na tora caída: aparece um anel em volta dela, começando perto da ponta mais
+# perto do jogador. A faixa de arrastar leva o anel pela tora e mostra quanto fica da
+# ponta até o corte; "Cortar aqui" começa as machadadas nesse lugar.
+
+func _buck_open() -> void:
+	var info: Dictionary = _arvores.log_piece_near(_player.position, 1.6)
+	if info.is_empty():
+		return
+	var s := float(info.s)
+	var L := (float(info.h1) - float(info.h0)) * s
+	var A: Vector3 = info.A
+	var B: Vector3 = info.B
+	# a ponta: a mais perto do jogador
+	var ponta := -1 if Vector2(A.x - _player.position.x, A.z - _player.position.z).length() < Vector2(B.x - _player.position.x, B.z - _player.position.z).length() else 1
+	var d := minf(0.5, L * 0.5)
+	# já tinha começado um corte nessa tora: o anel começa nele
+	var p: Array = info.p
+	var buck = p[11] if p.size() > 11 else null
+	if buck is Array and float(buck[0]) > float(info.h0) and float(buck[0]) < float(info.h1):
+		var hm := float(buck[0])
+		d = ((hm - float(info.h0)) if ponta < 0 else (float(info.h1) - hm)) * s
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	ring.mesh = tm
+	var rm := StandardMaterial3D.new()
+	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rm.albedo_color = Color(1.0, 0.82, 0.2)
+	ring.material_override = rm
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(ring)
+	_buck_sel = {"info": info, "ponta": ponta, "d": d, "L": L, "ring": ring}
+	for b in _buck_btns:
+		(b as Control).visible = true
+	_bld_pad.visible = true
+	_buck_tick()
+	_show_toast("Arraste a faixa para levar o anel até onde quer cortar. Depois toque em \"Cortar aqui\".")
+
+
+func _buck_h() -> float:
+	var info: Dictionary = _buck_sel.info
+	var dh := float(_buck_sel.d) / float(info.s)
+	return float(info.h0) + dh if int(_buck_sel.ponta) < 0 else float(info.h1) - dh
+
+
+func _buck_drag(d: Vector2) -> void:
+	var L := float(_buck_sel.L)
+	# arrastar para a direita leva o anel para longe da ponta
+	_buck_sel.d = clampf(float(_buck_sel.d) + (d.x - d.y) * 0.004, 0.25, L - 0.25)
+	_buck_tick()
+
+
+func _buck_tick() -> void:
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
+		(b as Control).visible = false
+	var info: Dictionary = _buck_sel.info
+	if not _arvores.plants.has(info.p) or Vector2(float((info.A as Vector3).x) - _player.position.x, float((info.A as Vector3).z) - _player.position.z).length() > 12.0:
+		_buck_stop()
+		return
+	var c: Dictionary = _arvores.log_cut_at(info, _buck_h())
+	var r := float(c.r)
+	var tm: TorusMesh = (_buck_sel.ring as MeshInstance3D).mesh
+	tm.inner_radius = r + 0.012
+	tm.outer_radius = r + 0.04
+	var up: Vector3 = (c.along as Vector3).normalized()
+	var sd := up.cross(Vector3.UP)
+	if sd.length() < 0.1:
+		sd = up.cross(Vector3.RIGHT)
+	sd = sd.normalized()
+	(_buck_sel.ring as Node3D).global_transform = Transform3D(Basis(sd, up, sd.cross(up)), c.axis)
+	var dd := float(_buck_sel.d)
+	(_bld_pad as Arrasto).set_text(("Tora: %.2f m  (sobra %.2f m)" % [dd, float(_buck_sel.L) - dd]).replace(".", ","))
+	_bld_why.visible = bool(c.galho)
+	_bld_why.text = "Tem galho preso nessa parte do tronco: corte os galhos primeiro."
+
+
+func _buck_stop() -> void:
+	if _buck_sel.is_empty():
+		return
+	(_buck_sel.ring as Node).queue_free()
+	_buck_sel = {}
+	for b in _buck_btns:
+		(b as Control).visible = false
+	_bld_pad.visible = false
+	_bld_why.visible = false
+	_act_check = 0.0
+
+
+func _buck_go() -> void:
+	if _buck_sel.is_empty():
+		return
+	var c: Dictionary = _arvores.log_cut_at(_buck_sel.info, _buck_h())
+	if bool(c.galho):
+		_show_toast("Tem galho preso nessa parte do tronco: corte os galhos primeiro.")
+		return
+	_buck_stop()
+	_buck_go_cut = c
+	_start_chop()
