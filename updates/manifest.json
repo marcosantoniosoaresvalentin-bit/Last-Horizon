@@ -1,9 +1,9 @@
 {
-  "version": 113,
-  "file": "update_113.zip",
-  "size": 4611274,
-  "sha256": "0e97fe0a53ac61944a0ab79d4cf06a3a1eb067ca71b0ae15dc1e46ea9fa6d570",
+  "version": 114,
+  "file": "update_114.zip",
+  "size": 4613264,
+  "sha256": "7bbaa331e4ed0428ad4950bb7817d2648d3c38a5a2c4c10b6a09ee93cb1da27f",
   "min_build": 1,
-  "notes": "Cortar a ponta da peça: serra com o trilho de arrastar para frente e para trás; machado com Bater",
+  "notes": "Escolher onde cortar a tora (anel e medida da ponta); faixa de arrastar com rolo girando",
   "date": "2026-11-19"
 }
