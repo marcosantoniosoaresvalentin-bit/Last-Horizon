@@ -1,9 +1,9 @@
 {
-  "version": 135,
-  "file": "update_135.zip",
-  "size": 4784801,
-  "sha256": "6321229a77625e543a59e4890d15eba54bc763f2f7d8bc98a3934b13cc5f01b2",
+  "version": 136,
+  "file": "update_136.zip",
+  "size": 4785431,
+  "sha256": "4c91d0e9aa4c8088e6219cabfcfa1d61d12a6d4c484e4602c3668193f2d3ec67",
   "min_build": 1,
-  "notes": "Topo do buriti realista; um pino por tronco na construção",
+  "notes": "Arrastar tora pesada sozinho (até 250 kg)",
   "date": "2026-11-19"
 }
