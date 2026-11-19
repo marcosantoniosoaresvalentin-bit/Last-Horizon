@@ -1,9 +1,9 @@
 {
-  "version": 143,
-  "file": "update_143.zip",
-  "size": 4840729,
-  "sha256": "ded01361c250d32ffb4c6d3e83c732a7704d192a3893470963aa661a6e2351df",
+  "version": 144,
+  "file": "update_144.zip",
+  "size": 4844215,
+  "sha256": "ac5c86624d14c1acff38876936869d239e74b711ce6312c2c6bf3fbfc5fd4c53",
   "min_build": 1,
-  "notes": "Barro: enxada, caixa de barro, misturar e rebocar a construção",
+  "notes": "Caixa de barro nova, terra/água/fibra realistas, enxada, barro que seca e racha",
   "date": "2026-11-19"
 }
