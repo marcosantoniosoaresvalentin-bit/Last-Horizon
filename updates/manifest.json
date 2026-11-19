@@ -1,9 +1,9 @@
 {
-  "version": 112,
-  "file": "update_112.zip",
-  "size": 4610581,
-  "sha256": "b8c57e73b420e3f6fb7d852c5aa4207185faa545cc012bc60a933a637c4141ef",
+  "version": 113,
+  "file": "update_113.zip",
+  "size": 4611274,
+  "sha256": "0e97fe0a53ac61944a0ab79d4cf06a3a1eb067ca71b0ae15dc1e46ea9fa6d570",
   "min_build": 1,
-  "notes": "Construção com furador de pedra e pinos de madeira (furo de verdade); cortar a sobra das peças; sem amarração de cipó",
+  "notes": "Cortar a ponta da peça: serra com o trilho de arrastar para frente e para trás; machado com Bater",
   "date": "2026-11-19"
 }
