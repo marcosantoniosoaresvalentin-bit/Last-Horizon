@@ -66,6 +66,58 @@ func _gui_input(_e: InputEvent) -> void:
 	accept_event()
 
 
+# ---------- rolar a lista passando o dedo em cima dos itens ----------
+var _scrolls: Array = []          # listas que rolam com o dedo (sem a barra do lado)
+var _drag := {}                   # {sc, idx, start, moved}
+var _just_dragged := false        # o dedo arrastou: o toque não escolhe o item
+
+
+func _input(e: InputEvent) -> void:
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return              # o mouse "de mentira" que o celular cria a partir do toque
+	var pos := Vector2.INF
+	var idx := -2
+	if e is InputEventScreenTouch:
+		pos = e.position
+		idx = e.index
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		idx = -1
+	if pos != Vector2.INF:
+		if e.pressed:
+			_just_dragged = false
+			for sc in _scrolls:
+				if (sc as Control).is_visible_in_tree() and (sc as Control).get_global_rect().has_point(pos):
+					_drag = {"sc": sc, "idx": idx, "start": pos, "last": pos, "moved": false}
+					break
+		elif not _drag.is_empty() and int(_drag.idx) == idx:
+			if bool(_drag.moved):
+				get_tree().create_timer(0.15).timeout.connect(func(): _just_dragged = false)
+			_drag = {}
+		return
+	if _drag.is_empty():
+		return
+	var p := Vector2.INF
+	if e is InputEventScreenDrag and e.index == int(_drag.idx):
+		p = e.position
+	elif e is InputEventMouseMotion and int(_drag.idx) == -1:
+		p = e.position
+	if p == Vector2.INF:
+		return
+	if not bool(_drag.moved) and absf(p.y - (_drag.start as Vector2).y) > 14.0:
+		_drag.moved = true
+		_just_dragged = true       # já arrastou: soltar o dedo não escolhe o item
+	if bool(_drag.moved):
+		var sc: ScrollContainer = _drag.sc
+		sc.scroll_vertical = int(sc.scroll_vertical - (p.y - (_drag.last as Vector2).y))
+	_drag.last = p
+
+
+func _drag_list(sc: ScrollContainer) -> void:
+	sc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER    # rola com o dedo em cima dos itens
+	_scrolls.append(sc)
+
+
 # ================== MONTAGEM ==================
 
 func _label(text: String, size_px: int, color := C_TEXT, bold := true) -> Label:
@@ -178,6 +230,7 @@ func _build() -> void:
 	var cscroll := ScrollContainer.new()
 	cscroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	cscroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_drag_list(cscroll)
 	cp[1].add_child(cscroll)
 	var cl := VBoxContainer.new()
 	cl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -206,7 +259,11 @@ func _build() -> void:
 		ic.size = Vector2(36, 36)
 		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		b.add_child(ic)
-		b.pressed.connect(_pick_cat.bind(str(c)))
+		b.pressed.connect(func():
+			if _just_dragged:
+				b.set_pressed_no_signal(str(c) == _cat)
+				return
+			_pick_cat(str(c)))
 		cl.add_child(b)
 		_cat_btns[c] = b
 
@@ -218,6 +275,7 @@ func _build() -> void:
 	var rscroll := ScrollContainer.new()
 	rscroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	rscroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_drag_list(rscroll)
 	rp[1].add_child(rscroll)
 	_list = VBoxContainer.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -457,6 +515,9 @@ func _fill_list() -> void:
 		d.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		tv.add_child(d)
 		b.pressed.connect(func():
+			if _just_dragged:
+				b.set_pressed_no_signal(i == _sel)
+				return
 			_sel = i
 			_qtd = 1
 			_refresh())
