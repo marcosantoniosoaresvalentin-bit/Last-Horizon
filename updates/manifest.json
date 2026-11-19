@@ -1,9 +1,9 @@
 {
-  "version": 129,
-  "file": "update_129.zip",
-  "size": 4730717,
-  "sha256": "e461bdd13979958454ccc0571a291f19c76866eda26a380bf00262e031008b1f",
+  "version": 130,
+  "file": "update_130.zip",
+  "size": 4735515,
+  "sha256": "54db297f537c530edb603da5ca0ef6cd771ef8bab5ef0547b55af9bf476375d0",
   "min_build": 1,
-  "notes": "Faca de pedra com lâmina lascada, cabo de galho e amarração de cipó",
+  "notes": "Nova máquina: Desfibradeira de Talo (fibra de buriti)",
   "date": "2026-11-19"
 }
