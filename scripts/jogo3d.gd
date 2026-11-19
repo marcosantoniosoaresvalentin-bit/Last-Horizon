@@ -993,6 +993,7 @@ func _on_world_ready() -> void:
 	_macacos.build(self, _arvores, _cipos, _bacabas, int(sim.world_seed), Mundos.dir(_world_id) + "/macacos.json" if _world_id != "" else "")
 	print("macacos: %d em %d bandos" % [_macacos.count(), _macacos.troops.size()])
 	_araras = Araras.new()
+	_araras._bur = _buritis
 	add_child(_araras)
 	_araras.build(self, _arvores, _bacabas, _cipos, int(sim.world_seed), Mundos.dir(_world_id) + "/araras.json" if _world_id != "" else "")
 	print("araras: %d, %d ninhos" % [_araras.count(), _araras.nests.size()])

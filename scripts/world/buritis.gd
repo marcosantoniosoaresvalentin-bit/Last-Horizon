@@ -7,6 +7,10 @@ extends Node3D
 ## Os adultos dão cachos compridos de frutos marrom-avermelhados (cobertos de
 ## escamas), que amadurecem nas chuvas (dezembro a junho).
 ##
+## Quando morre (velho), a copa cai e o topo do tronco quebra: fica o tronco seco de pé
+## por anos, escuro e com a ponta lascada — e é nele que a arara-canindé faz o ninho,
+## num oco perto do topo (ver araras.gd).
+##
 ## Planta: {x, z, nasc (dia), hmax (m), var, rot, morta (dia ou -1)}
 
 const MundoSim := preload("res://scripts/mundo_sim.gd")
@@ -22,6 +26,8 @@ const BARK_ALB := "res://texturas/bacaba_casca.imagem"
 const BARK_NRM := "res://texturas/bacaba_casca_n.imagem"
 const BARK_W := 0.9
 const BARK_H := 1.2
+const OLD_DAYS := 365 * 60       # depois disso pode morrer de velho
+const SNAG_DAYS := 365 * 12      # o tronco seco fica de pé uns 12 anos e cai
 
 var palms: Array = []
 var last_day := 0
@@ -32,6 +38,7 @@ var _crowns: Array = []
 var _cacho_mesh: ArrayMesh
 var _leaf_mat: StandardMaterial3D
 var _trunk_mat: StandardMaterial3D
+var _dead_mat: StandardMaterial3D
 var _nodes: Array = []
 var _grid := {}
 var _last_month := -1
@@ -129,14 +136,26 @@ func _generate() -> void:
 				age = _rng.randi_range(ROSETTE_DAYS, ADULT_DAYS)
 			else:
 				age = _rng.randi_range(ADULT_DAYS, 365 * 80)
-			palms.append(_new_palm(x, z, last_day - age))
+			var np := _new_palm(x, z, last_day - age)
+			# em todo buritizal tem algum tronco seco de pé (onde as araras fazem ninho)
+			if age > ADULT_DAYS * 2 and _rng.randf() < 0.12:
+				np.morta = last_day - _rng.randi_range(60, SNAG_DAYS - 400)
+				if int(np.morta) == -1:
+					np.morta = -2
+			palms.append(np)
 			n -= 1
 
 
 # ================== CRESCER ==================
 
 func trunk_h(p: Dictionary, day := -1) -> float:
-	var d := (last_day if day < 0 else day) - int(p.nasc)
+	if dead(p):
+		return _alive_h(p, int(p.morta)) * 0.86       # morto: o topo quebrou
+	return _alive_h(p, last_day if day < 0 else day)
+
+
+func _alive_h(p: Dictionary, day: int) -> float:
+	var d := day - int(p.nasc)
 	if d < ROSETTE_DAYS:
 		return 0.0
 	# uns 40 cm por ano até a altura dela
@@ -149,12 +168,29 @@ func crown_scale(p: Dictionary) -> float:
 
 
 func is_adult(p: Dictionary) -> bool:
-	return last_day - int(p.nasc) >= ADULT_DAYS and int(p.morta) < 0
+	return last_day - int(p.nasc) >= ADULT_DAYS and not dead(p)
 
 
 static func month_of(day: int) -> int:
 	var d := Time.get_datetime_dict_from_unix_time(MundoSim.start_unix() + day * 86400)
 	return int(d.month)
+
+
+func dead(p: Dictionary) -> bool:
+	return int(p.get("morta", -1)) != -1           # (o dia pode ser negativo: morreu antes do começo)
+
+
+## Ponto na casca do tronco na altura y (para o oco do ninho e o pouso das araras).
+func trunk_point(p: Dictionary, y: float, ang: float, out := 0.0) -> Vector3:
+	var x := float(p.x)
+	var z := float(p.z)
+	var r := TRUNK_R * 0.95 + out
+	return Vector3(x + cos(ang) * r, _jogo.height_at(x, z) + y, z + sin(ang) * r)
+
+
+## Troncos secos de pé (para as araras): os que ainda têm uns 6 m ou mais.
+func snags() -> Array:
+	return palms.filter(func(p): return dead(p) and trunk_h(p) > 6.0)
 
 
 ## Frutos maduros nas chuvas (dezembro a junho).
@@ -171,6 +207,19 @@ func tick() -> void:
 	while last_day < day and n < 120:
 		last_day += 1
 		n += 1
+		# morre de velho (raramente antes); o tronco seco cai depois de anos
+		var keep := []
+		for p in palms:
+			if dead(p):
+				if last_day - int(p.morta) > SNAG_DAYS:
+					continue
+			else:
+				var ag := last_day - int(p.nasc)
+				var risk := 1.0 / (365.0 * 400.0) + (1.0 / (365.0 * 25.0) if ag > OLD_DAYS else 0.0)
+				if ag > ADULT_DAYS and _rng.randf() < risk:
+					p.morta = last_day
+			keep.append(p)
+		palms = keep
 		# os frutos caem perto (e a água leva): de vez em quando nasce buriti novo
 		if palms.size() < MAX_PALMS and _rng.randf() < 0.02 and fruit_season(last_day):
 			var adults := palms.filter(func(p): return is_adult(p))
@@ -220,18 +269,20 @@ func _rebuild() -> void:
 		var z := float(p.z)
 		var c := Vector2i(floori(x / CHUNK), floori(z / CHUNK))
 		if not chunks.has(c):
-			chunks[c] = {"tr": [], "cr": {}, "fr": []}
+			chunks[c] = {"tr": [], "dt": [], "cr": {}, "fr": []}
 		var ch: Dictionary = chunks[c]
 		var gy: float = _jogo.height_at(x, z)
 		var h := trunk_h(p)
 		var rot := float(p.get("rot", 0.0))
 		var r := TRUNK_R * lerpf(0.7, 1.0, clampf(h / 8.0, 0.0, 1.0))
 		if h > 0.05:
-			ch.tr.append([x, gy, z, h, r, rot])
+			(ch.dt if dead(p) else ch.tr).append([x, gy, z, h, r, rot])
 			var gk := Vector2i(floori(x / 8.0), floori(z / 8.0))
 			if not _grid.has(gk):
 				_grid[gk] = []
 			_grid[gk].append(Vector3(x, z, r + 0.28))
+		if dead(p):
+			continue                 # tronco seco: sem copa
 		var s := crown_scale(p)
 		var top := Vector3(x, gy + h - 0.1, z)
 		var v := int(p.get("var", 0)) % CROWN_VARIANTS
@@ -246,10 +297,12 @@ func _rebuild() -> void:
 				ch.fr.append(Transform3D(b, top + b * Vector3(0.35, -0.25, 0)))
 	for c in chunks:
 		var ch: Dictionary = chunks[c]
-		if not (ch.tr as Array).is_empty():
+		for kind in ["tr", "dt"]:
+			if (ch[kind] as Array).is_empty():
+				continue
 			var mi := MeshInstance3D.new()
-			mi.mesh = _trunks_mesh(ch.tr)
-			mi.material_override = _trunk_mat
+			mi.mesh = _trunks_mesh(ch[kind], kind == "dt")
+			mi.material_override = _trunk_mat if kind == "tr" else _dead_mat
 			mi.visibility_range_end = VIEW
 			add_child(mi)
 			_nodes.append(mi)
@@ -293,6 +346,8 @@ func _make_assets(seed_: int) -> void:
 	_trunk_mat.normal_scale = 0.9
 	_trunk_mat.roughness = 0.9
 	_trunk_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	_dead_mat = _trunk_mat.duplicate()
+	_dead_mat.albedo_color = Color(0.4, 0.36, 0.31)        # seco: cinza-pardo, mais escuro
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_ + 9911
 	for v in CROWN_VARIANTS:
@@ -311,7 +366,7 @@ static func _load_tex(path: String, fallback: Color) -> Texture2D:
 
 
 ## Troncos (retos, grossos, base um pouco mais larga) de um pedaço do mapa.
-func _trunks_mesh(list: Array) -> ArrayMesh:
+func _trunks_mesh(list: Array, broken := false) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var sides := 14
@@ -350,6 +405,36 @@ func _trunks_mesh(list: Array) -> ArrayMesh:
 						st.set_normal(nn[idx])
 						st.set_uv(uv[idx])
 						st.add_vertex(q[idx])
+	if broken:
+		# o topo quebrado: lascas de fibra em pé, irregulares, em volta da boca do tronco
+		for t in list:
+			var x2: float = t[0]
+			var gy2: float = t[1]
+			var z2: float = t[2]
+			var top: float = gy2 + float(t[3]) + 0.1
+			var r2: float = float(t[4]) * 0.9
+			var rng := RandomNumberGenerator.new()
+			rng.seed = int(x2 * 13.0 + z2 * 7.0)
+			for k in 16:
+				var a0 := TAU * k / 16.0
+				var a1 := TAU * (k + 1) / 16.0
+				var hh := rng.randf_range(0.03, 0.35)
+				var p0 := Vector3(x2 + cos(a0) * r2, top, z2 + sin(a0) * r2)
+				var p1 := Vector3(x2 + cos(a1) * r2, top, z2 + sin(a1) * r2)
+				var pt := Vector3(x2 + cos((a0 + a1) * 0.5) * r2 * 0.92, top + hh, z2 + sin((a0 + a1) * 0.5) * r2 * 0.92)
+				var nn := Vector3(cos((a0 + a1) * 0.5), 0.2, sin((a0 + a1) * 0.5)).normalized()
+				for v in [p0, p1, pt]:
+					st.set_normal(nn)
+					st.set_uv(Vector2(0.5, 0.5))
+					st.add_vertex(v)
+			# a boca escura (o miolo apodrecido, oco)
+			for k in 12:
+				var a0 := TAU * k / 12.0
+				var a1 := TAU * (k + 1) / 12.0
+				for v in [Vector3(x2, top - 0.25, z2), Vector3(x2 + cos(a1) * r2 * 0.85, top, z2 + sin(a1) * r2 * 0.85), Vector3(x2 + cos(a0) * r2 * 0.85, top, z2 + sin(a0) * r2 * 0.85)]:
+					st.set_normal(Vector3.UP)
+					st.set_uv(Vector2(0.02, 0.02))
+					st.add_vertex(v)
 	st.generate_tangents()
 	return st.commit()
 

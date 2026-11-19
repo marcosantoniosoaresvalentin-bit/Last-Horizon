@@ -42,6 +42,7 @@ var last_day := 0
 var _jogo: Node
 var _arv: Node
 var _bac: Node
+var _bur: Node = null                # buritis (o tronco seco é o ninho preferido da arara)
 var _cip: Node
 var _rng := RandomNumberGenerator.new()
 var _next_id := 1
@@ -268,6 +269,11 @@ func _nest_of(fid: int):
 func _find_cavity() -> Dictionary:
 	var food := _food_points()
 	var cands := []
+	# buriti seco: o lugar preferido da arara-canindé (conta 3 vezes na escolha)
+	if _bur:
+		for p in _bur.snags():
+			for k in 3:
+				cands.append({"x": float(p.x), "z": float(p.z), "tipo": "bur", "h": _bur.trunk_h(p) - _rng.randf_range(0.5, 1.2)})
 	for p in _bac.palms:
 		if int(p.morta) >= 0 and _bac.trunk_h(p) > 6.0 and last_day - int(p.morta) < 200:
 			cands.append({"x": float(p.x), "z": float(p.z), "tipo": "bac", "h": _bac.trunk_h(p) - 0.8})
@@ -299,6 +305,13 @@ func _find_cavity() -> Dictionary:
 
 
 func _host(n):
+	if str(n.tipo) == "bur":
+		if _bur == null:
+			return null
+		for p in _bur.palms:
+			if absf(float(p.x) - float(n.x)) < 0.05 and absf(float(p.z) - float(n.z)) < 0.05:
+				return p
+		return null
 	if str(n.tipo) == "bac":
 		for p in _bac.palms:
 			if absf(float(p.x) - float(n.x)) < 0.05 and absf(float(p.z) - float(n.z)) < 0.05:
@@ -443,6 +456,9 @@ func _nest_perch(n: Dictionary, inside: bool) -> Dictionary:
 	elif str(n.tipo) == "bac":
 		p = _bac.trunk_point(host, h, ang, 0.0 if inside else 0.12)
 		c = _bac.trunk_point(host, h, ang, -1.0)
+	elif str(n.tipo) == "bur":
+		p = _bur.trunk_point(host, h, ang, 0.0 if inside else 0.12)
+		c = _bur.trunk_point(host, h, ang, -1.0)
 	else:
 		p = _arv.trunk_point(host, h, ang, 0.0 if inside else 0.14)
 		c = _arv.trunk_point(host, h, ang, -1.0)
