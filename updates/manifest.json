@@ -1,9 +1,9 @@
 {
-  "version": 127,
-  "file": "update_127.zip",
-  "size": 4726498,
-  "sha256": "1bff6122ae274b0fd20b5717e269a91432b8165505ce2d56b2915ab7c01466db",
+  "version": 128,
+  "file": "update_128.zip",
+  "size": 4730287,
+  "sha256": "48d8889de0f395f1eb2b0936ffaa88186096800c052e1503646460c4314e647f",
   "min_build": 1,
-  "notes": "Buriti derrubado: folhas ficam na copa, cortar uma por uma com a faca",
+  "notes": "Buriti: dois cortes por folha, faca na mão, talo vai para a mochila",
   "date": "2026-11-19"
 }
