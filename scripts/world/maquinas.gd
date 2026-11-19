@@ -69,18 +69,27 @@ const TIPOS := {
 	# mexendo com a enxada vira barro (dá 4 baldes de barro para rebocar a construção).
 	"caixa_barro": {
 		"nome": "Caixa de Barro",
-		"desc": "Quadrado de tábuas para fazer barro: 4 baldes de terra, 1 balde de água e 5 fibras de buriti, mexidos com a enxada. O barro com fibra reboca a construção de madeira.",
+		"desc": "Caixote de tábuas (fundo e lados) para fazer barro: 4 baldes de terra, 1 balde de água e 5 fibras de buriti, mexidos com a enxada. O barro com fibra reboca a construção de madeira.",
+		"versao": 2,
 		"pecas": [
-			["tabua", 1.4, Vector3(0.0, 0.13, 0.62), "x_lado", 0.14],   # 0 lado da frente
-			["tabua", 1.4, Vector3(0.0, 0.13, -0.62), "x_lado", 0.14],  # 1 lado de trás
-			["tabua", 1.1, Vector3(0.62, 0.13, 0.0), "z_lado", 0.14],   # 2 lado direito
-			["tabua", 1.1, Vector3(-0.62, 0.13, 0.0), "z_lado", 0.14],  # 3 lado esquerdo
+			["tabua", 1.3, Vector3(-0.31, 0.035, 0.0), "z", 0.15],   # 0 fundo
+			["tabua", 1.3, Vector3(0.0, 0.035, 0.0), "z", 0.15],     # 1 fundo
+			["tabua", 1.3, Vector3(0.31, 0.035, 0.0), "z", 0.15],    # 2 fundo
+			["tabua", 1.4, Vector3(0.0, 0.2, 0.62), "x_lado", 0.14],  # 3 lado da frente
+			["tabua", 1.4, Vector3(0.0, 0.2, -0.62), "x_lado", 0.14], # 4 lado de trás
+			["tabua", 1.12, Vector3(0.6, 0.2, 0.0), "z_lado", 0.14],  # 5 lado direito
+			["tabua", 1.12, Vector3(-0.6, 0.2, 0.0), "z_lado", 0.14], # 6 lado esquerdo
 		],
+		# cantos: pino deitado, batido de fora pela tábua da frente/de trás entrando na
+		# ponta da tábua do lado ([peças, ponto de fora, direção para fora]); o fundo:
+		# pino em pé pela tábua do lado entrando na ponta da tábua do fundo
 		"pinos": [
-			[[0, 2], Vector3(0.62, 0.26, 0.62)], [[0, 3], Vector3(-0.62, 0.26, 0.62)],
-			[[1, 2], Vector3(0.62, 0.26, -0.62)], [[1, 3], Vector3(-0.62, 0.26, -0.62)],
+			[[3, 5], Vector3(0.6, 0.2, 0.665), Vector3(0, 0, 1)], [[3, 6], Vector3(-0.6, 0.2, 0.665), Vector3(0, 0, 1)],
+			[[4, 5], Vector3(0.6, 0.2, -0.665), Vector3(0, 0, -1)], [[4, 6], Vector3(-0.6, 0.2, -0.665), Vector3(0, 0, -1)],
+			[[3, 0], Vector3(-0.31, 0.3, 0.62)], [[3, 1], Vector3(0.0, 0.3, 0.62)], [[3, 2], Vector3(0.31, 0.3, 0.62)],
+			[[4, 0], Vector3(-0.31, 0.3, -0.62)], [[4, 1], Vector3(0.0, 0.3, -0.62)], [[4, 2], Vector3(0.31, 0.3, -0.62)],
 		],
-		"area": Rect2(-0.72, -0.72, 1.44, 1.44),
+		"area": Rect2(-0.74, -0.74, 1.48, 1.48),
 		"laminas": [],
 		"caixa": true,
 	},
@@ -471,7 +480,9 @@ func pin_targets(pos: Vector3, reach := 2.6) -> Array:
 				continue
 			var w := joint_point(mi, ji)
 			if Vector2(w.x - pos.x, w.z - pos.z).length() < reach:
-				out.append({"mi": mi, "ji": ji, "pos": w, "stage": int(p.pinos[ji])})
+				var sg := _joint_seg(str(p.tipo), ji)
+				var dw: Vector3 = (xform(mi).basis * ((sg[1] as Vector3) - (sg[0] as Vector3))).normalized()
+				out.append({"mi": mi, "ji": ji, "pos": w, "stage": int(p.pinos[ji]), "dir": dw})
 	return out
 
 
@@ -513,6 +524,11 @@ func _slot_half(pc: Array, extra := 0.0) -> Vector3:
 func _joint_seg(tipo: String, ji: int) -> Array:
 	var t: Dictionary = TIPOS[tipo]
 	var jp: Vector3 = t.pinos[ji][1]
+	if (t.pinos[ji] as Array).size() > 2:
+		# pino deitado: entra de fora (jp) para dentro, atravessando a tábua e entrando
+		# na ponta da outra
+		var d: Vector3 = (t.pinos[ji][2] as Vector3).normalized()
+		return [jp - d * 0.2, jp + d * 0.002]
 	var top := -1e9
 	var bot := 1e9
 	var verts := []
@@ -914,7 +930,8 @@ func _rebuild() -> void:
 			if int(p.pinos[ji]) >= 2:
 				# o pino batido passando pelo furo (as pontas aparecem dos dois lados)
 				# o pino batido até o fim: a cabeça fica rente à madeira (só aparece a cor dele)
-				root.add_child(Furo.pin_node((sg2[0] as Vector3) - Vector3.UP * 0.012, (sg2[1] as Vector3) - Vector3.UP * 0.008))
+				var pdir := ((sg2[1] as Vector3) - (sg2[0] as Vector3)).normalized()
+				root.add_child(Furo.pin_node((sg2[0] as Vector3) - pdir * 0.012, (sg2[1] as Vector3) - pdir * 0.008))
 			elif _joint_open(mi, ji) and int(p.pinos[ji]) == 0:
 				# onde tem que furar: um pontinho amarelo em cima
 				var mk := MeshInstance3D.new()
@@ -1032,6 +1049,7 @@ const CAIXA_TERRA := 4
 const CAIXA_FIBRA := 5
 const MIX_SPOTS := 6
 const MIX_HITS := 3              # puxadas da enxada em cada lugar
+const CAIXA_FUNDO := 0.075       # em cima das tábuas do fundo
 
 func barro_of(mi: int) -> Dictionary:
 	var p: Dictionary = plantas[mi]
@@ -1101,69 +1119,165 @@ func take_barro(mi: int) -> bool:
 func _caixa_top(mi: int) -> float:
 	var b := barro_of(mi)
 	var n := float(b.terra) if not bool(b.pronto) else float(b.baldes)
-	return 0.02 + 0.045 * n
+	return CAIXA_FUNDO + 0.045 * n
 
 
-## O que tem dentro: terra (torrões), molhada (escura e brilhando), com as fibras, e o
-## barro (mais liso, cinza-marrom) conforme vai sendo mexido.
+static var _soil_mat: StandardMaterial3D
+static var _water_mat: StandardMaterial3D
+
+
+static func _soil_material() -> StandardMaterial3D:
+	if _soil_mat == null:
+		_soil_mat = StandardMaterial3D.new()
+		_soil_mat.vertex_color_use_as_albedo = true
+		_soil_mat.vertex_color_is_srgb = true
+		_soil_mat.roughness = 1.0
+		var nt := NoiseTexture2D.new()
+		var tn := FastNoiseLite.new()
+		tn.frequency = 0.08
+		nt.noise = tn
+		nt.width = 128
+		nt.height = 128
+		nt.seamless = true
+		nt.as_normal_map = true
+		nt.bump_strength = 4.0
+		_soil_mat.normal_enabled = true
+		_soil_mat.normal_texture = nt
+		_soil_mat.uv1_scale = Vector3(5, 5, 5)
+		_soil_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return _soil_mat
+
+
+## O que tem dentro, como a terra despejada no chão: montinhos e torrões soltos;
+## com a água, escura e com poças brilhando nos buracos; as fibras finas e compridas,
+## enroladas por cima; mexendo, a terra vai ficando lisa (barro) e as fibras afundam.
 func _draw_caixa(mi: int, root: Node3D) -> void:
 	var b := barro_of(mi)
 	var n := float(b.terra) if not bool(b.pronto) else float(b.baldes)
 	if n <= 0.0:
 		return
 	var h := 0.045 * n
-	var mix := mix_progress(mi)
-	var dry := Color(0.27, 0.19, 0.12)
-	var wet := Color(0.17, 0.12, 0.08)
-	var mud := Color(0.26, 0.21, 0.16)
-	var col := dry
-	if int(b.agua) > 0:
-		col = wet.lerp(mud, mix)
-	if bool(b.pronto):
-		col = mud
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var mix := 1.0 if bool(b.pronto) else mix_progress(mi)
+	var wet := int(b.agua) > 0 or bool(b.pronto)
+	var dry := Color(0.25, 0.17, 0.1)
+	var wetc := Color(0.13, 0.09, 0.06)
+	var mud := Color(0.17, 0.13, 0.1)
+	var col: Color = dry if not wet else wetc.lerp(mud, mix)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = mi * 131 + int(b.terra) * 7 + int(mix * 10.0)
 	var nz := FastNoiseLite.new()
 	nz.seed = mi * 31 + 7
-	nz.frequency = 6.0
-	var N := 14
-	var half := 0.56
-	var lump := (0.03 if int(b.agua) == 0 else 0.012) * (1.0 - mix)
+	nz.frequency = 4.0
+	var nz2 := FastNoiseLite.new()
+	nz2.seed = mi * 17 + 3
+	nz2.frequency = 14.0
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var N := 20
+	var half := 0.555
+	# montinhos (onde cada balde caiu) e o irregular da terra solta; mexido = liso
+	var amp := (0.035 if not wet else 0.022) * (1.0 - 0.85 * mix)
+	var mounds := []
+	for k in int(b.terra):
+		mounds.append(Vector2(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3)))
+	var hf := func(x: float, z: float) -> float:
+		var y := nz.get_noise_2d(x * 3.0, z * 3.0) * amp + nz2.get_noise_2d(x * 9.0, z * 9.0) * amp * 0.45
+		for m in mounds:
+			var d := Vector2(x, z).distance_to(m)
+			y += maxf(0.0, 1.0 - d / 0.35) * 0.03 * (1.0 - mix)
+		return y
 	for i in N:
 		for j in N:
 			var q := []
+			var uv := []
 			for e in [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]]:
 				var x := lerpf(-half, half, float(e[0]) / N)
 				var z := lerpf(-half, half, float(e[1]) / N)
-				q.append(Vector3(x, 0.02 + h + nz.get_noise_2d(x * 3.0, z * 3.0) * lump, z))
+				q.append(Vector3(x, CAIXA_FUNDO + h + float(hf.call(x, z)), z))
+				uv.append(Vector2(x, z))
 			for idx in [0, 1, 2, 0, 2, 3]:
-				st.set_color(col.darkened(0.08 * absf(nz.get_noise_2d((q[idx] as Vector3).x * 9.0, (q[idx] as Vector3).z * 9.0))))
-				st.add_vertex(q[idx])
+				var v: Vector3 = q[idx]
+				var tone := nz2.get_noise_2d(v.x * 20.0, v.z * 20.0)
+				st.set_color(col.lightened(maxf(tone, 0.0) * 0.18).darkened(maxf(-tone, 0.0) * 0.25))
+				st.set_uv(uv[idx])
+				st.add_vertex(v)
+	# torrões soltos por cima (somem quando molha e mexe)
+	var nclod := int((40 if not wet else 22) * (1.0 - mix))
+	for k in nclod:
+		var cx := rng.randf_range(-0.5, 0.5)
+		var cz := rng.randf_range(-0.5, 0.5)
+		var cy := CAIXA_FUNDO + h + float(hf.call(cx, cz))
+		var sz := rng.randf_range(0.012, 0.03)
+		var cc := col.darkened(rng.randf_range(-0.1, 0.15))
+		var verts := []
+		for a in 6:
+			var ang := TAU * a / 6.0 + rng.randf() * 0.4
+			verts.append(Vector3(cx + cos(ang) * sz * rng.randf_range(0.7, 1.2), cy + sz * 0.15, cz + sin(ang) * sz * rng.randf_range(0.7, 1.2)))
+		var top := Vector3(cx, cy + sz * rng.randf_range(0.7, 1.1), cz)
+		for a in 6:
+			for v in [top, verts[a], verts[(a + 1) % 6]]:
+				st.set_color(cc)
+				st.set_uv(Vector2((v as Vector3).x, (v as Vector3).z))
+				st.add_vertex(v)
 	st.generate_normals()
 	var mi2 := MeshInstance3D.new()
 	mi2.mesh = st.commit()
-	var m := StandardMaterial3D.new()
-	m.vertex_color_use_as_albedo = true
-	m.vertex_color_is_srgb = true
-	m.roughness = 1.0 if int(b.agua) == 0 else lerpf(0.35, 0.85, mix)
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var m := _soil_material().duplicate() as StandardMaterial3D
+	m.roughness = 1.0 if not wet else lerpf(0.6, 0.92, mix)
+	m.metallic_specular = 0.15 if wet else 0.05
 	mi2.material_override = m
 	root.add_child(mi2)
-	# as fibras de buriti espalhadas por cima (somem no barro quando mexe)
-	if int(b.fibra) > 0 and mix < 0.95:
+	# a água por cima, brilhando nas partes baixas (vai sendo absorvida ao mexer)
+	if int(b.agua) > 0 and mix < 0.6:
+		var wm := MeshInstance3D.new()
+		var pm := PlaneMesh.new()
+		pm.size = Vector2(1.11, 1.11)
+		wm.mesh = pm
+		if _water_mat == null:
+			_water_mat = StandardMaterial3D.new()
+			_water_mat.albedo_color = Color(0.09, 0.07, 0.05, 0.8)       # água barrenta
+			_water_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			_water_mat.roughness = 0.18
+			_water_mat.metallic_specular = 0.35
+		wm.material_override = _water_mat
+		wm.position = Vector3(0, CAIXA_FUNDO + h + 0.004 - mix * 0.03, 0)
+		root.add_child(wm)
+	# as fibras: fios finos e compridos, ondulados e embaraçados (afundam ao mexer)
+	if int(b.fibra) > 0 and mix < 0.97:
+		var fs := SurfaceTool.new()
+		fs.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var nf := int(70 * (1.0 - mix * 0.85))
+		for k in nf:
+			var p0 := Vector2(rng.randf_range(-0.45, 0.45), rng.randf_range(-0.45, 0.45))
+			var ang := rng.randf() * TAU
+			var L := rng.randf_range(0.18, 0.5)
+			var seg := 10
+			var prev := Vector3.INF
+			var fc := Color(0.8, 0.72, 0.5).darkened(rng.randf() * 0.2 + mix * 0.4)
+			for i in seg + 1:
+				var t := float(i) / seg
+				ang += rng.randf_range(-0.35, 0.35)
+				var pxz := p0 + Vector2(cos(ang), sin(ang)) * L * t
+				pxz = pxz.clamp(Vector2(-0.53, -0.53), Vector2(0.53, 0.53))
+				var y := CAIXA_FUNDO + h + float(hf.call(pxz.x, pxz.y)) + 0.004 + sin(t * 9.0 + k) * 0.003 - mix * 0.01
+				var pt := Vector3(pxz.x, y, pxz.y)
+				if prev != Vector3.INF:
+					var d := (pt - prev)
+					var sd := Vector3(-d.z, 0, d.x).normalized() * 0.0015
+					for v in [prev - sd, pt - sd, pt + sd, prev - sd, pt + sd, prev + sd]:
+						fs.set_color(fc)
+						fs.set_normal(Vector3.UP)
+						fs.add_vertex(v)
+				prev = pt
+		var fi := MeshInstance3D.new()
+		fi.mesh = fs.commit()
 		var fm := StandardMaterial3D.new()
-		fm.albedo_color = Color(0.82, 0.74, 0.5)
-		var rng := RandomNumberGenerator.new()
-		rng.seed = mi * 7 + 3
-		for k in int(24 * (1.0 - mix)):
-			var fi := MeshInstance3D.new()
-			var bm := BoxMesh.new()
-			bm.size = Vector3(rng.randf_range(0.15, 0.4), 0.004, 0.006)
-			fi.mesh = bm
-			fi.material_override = fm
-			fi.position = Vector3(rng.randf_range(-0.45, 0.45), 0.025 + h, rng.randf_range(-0.45, 0.45))
-			fi.rotation.y = rng.randf() * TAU
-			root.add_child(fi)
+		fm.vertex_color_use_as_albedo = true
+		fm.vertex_color_is_srgb = true
+		fm.roughness = 0.8
+		fm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		fi.material_override = fm
+		root.add_child(fi)
 
 
 static var _fbm: ArrayMesh
@@ -1313,6 +1427,24 @@ func _load(path: String) -> bool:
 			for _q in p.pecas:
 				sb.append(0.0)
 			p["sobra"] = sb
+	# caixa de barro da versão antiga (sem fundo): vira a nova, montada se estava montada
+	for p in plantas:
+		if str(p.tipo) == "caixa_barro" and int(p.get("versao", 1)) < 2:
+			var tc: Dictionary = TIPOS.caixa_barro
+			var feita2 := true
+			for bb in p.pecas:
+				if not bool(bb):
+					feita2 = false
+			p.pecas = []
+			p.sobra = []
+			p.pinos = []
+			for _i in (tc.pecas as Array).size():
+				p.pecas.append(feita2)
+				p.sobra.append(0.0)
+			for _j in (tc.pinos as Array).size():
+				p.pinos.append(2 if feita2 else 0)
+			p.erase("madeiras")
+			p["versao"] = 2
 	# serra da versão antiga (pedal atrás, cordas): vira a serra nova no mesmo lugar;
 	# se já estava pronta, fica pronta
 	for p in plantas:

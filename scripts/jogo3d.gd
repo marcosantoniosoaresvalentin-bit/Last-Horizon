@@ -1394,6 +1394,8 @@ func _process(delta: float) -> void:
 			_update_water(w)
 			_water_timer = 3.0
 	_move_player(delta)
+	if _constr and Engine.get_process_frames() % 120 == 0:
+		_constr.dia(int(sim.elapsed_days()))      # o barro das paredes vai secando (em todos)
 	if _drag:
 		_drag_update()
 	_update_grass()
@@ -2393,10 +2395,10 @@ func _update_ctx_btn() -> void:
 	if _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _reb.is_empty() and _constr and _maq.planta_near(_player.position, 2.0) < 0 and not _constr.reboco_spots(_player.position, 2.6).is_empty():
 		_ctx_action = "rebocar"
 		_ctx_btn.text = "Rebocar com barro"
-	elif _mao == "balde" and not _balde_carga.is_empty() and _crouch_job == "" and not _air and _pour_t < 0.0 and not (_maq and _maq.planta_near(_player.position, 2.2) >= 0 and str(_maq.plantas[_maq.planta_near(_player.position, 2.2)].tipo) == "caixa_barro"):
+	elif _mao == "balde" and not _balde_carga.is_empty() and _crouch_job == "" and not _air and _pour_t < 0.0 and not _near_caixa():
 		_ctx_action = "despejar"
 		_ctx_btn.text = "Despejar no balde" if _bucket_ahead() >= 0 else "Despejar"
-	elif _mao == "balde" and _balde_carga.is_empty() and _crouch_job == "" and not _air and not _swim and _water_spot() != Vector3.INF:
+	elif _mao == "balde" and _balde_carga.is_empty() and _crouch_job == "" and not _air and not _swim and not _near_caixa() and _water_spot() != Vector3.INF:
 		_ctx_action = "pegar_agua"
 		_ctx_btn.text = "Pegar água"
 	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and _cupins.nearest_timbo(_player.position, 1.4) >= 0:
@@ -4472,7 +4474,7 @@ func _update_balde_fill(mi: MeshInstance3D, c: Dictionary) -> void:
 		pts.append(row)
 	var base := Color(0.62, 0.3, 0.16) if clay else Color(0.36, 0.25, 0.16)
 	if mud:
-		base = Color(0.3, 0.24, 0.18)             # barro com fibra: cinza-marrom
+		base = Color(0.2, 0.15, 0.11)             # barro com fibra (molhado)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 11 if clay else 5
 	for ri in rings:
@@ -7893,7 +7895,7 @@ func _pin_targets() -> Array:
 			out.append({"kind": "c", "pc": t.pc, "k": t.k, "pos": t.pos, "stage": t.stage})
 	if _maq:
 		for t in _maq.pin_targets(_player.position):
-			out.append({"kind": "m", "mi": t.mi, "ji": t.ji, "pos": t.pos, "stage": t.stage})
+			out.append({"kind": "m", "mi": t.mi, "ji": t.ji, "pos": t.pos, "stage": t.stage, "dir": t.get("dir", Vector3.UP)})
 	return out
 
 
@@ -8084,12 +8086,17 @@ func _pin_place_node() -> void:
 		cm.bottom_radius = rr * (0.8 - 0.25 * dpt)
 		band.visible = dpt > 0.01
 		(_pin.node as Node3D).position = w
-	elif int(_pin.stage) == 0:
-		# a ponteira em pé com a ponta na madeira; vai entrando a cada batida boa
-		(_pin.node as Node3D).position = w - Vector3.UP * 0.07 * float(_pin.depth)
 	else:
-		# a parte de fora do pino vai sumindo a cada batida boa
-		(_pin.node as Node3D).position = w + Vector3.UP * (0.08 - 0.075 * float(_pin.depth))
+		# o furo pode ser em pé ou deitado (de lado): a ponteira e o pino seguem ele
+		var pd: Vector3 = (_pin.alvos[k] as Dictionary).get("dir", Vector3.UP)
+		pd = pd.normalized()
+		(_pin.node as Node3D).basis = Basis(Quaternion(Vector3.UP, pd)) if pd.dot(Vector3.UP) > -0.999 else Basis(Vector3.RIGHT, PI)
+		if int(_pin.stage) == 0:
+			# a ponteira com a ponta na madeira; vai entrando a cada batida boa
+			(_pin.node as Node3D).position = w - pd * 0.07 * float(_pin.depth)
+		else:
+			# a parte de fora do pino vai sumindo a cada batida boa
+			(_pin.node as Node3D).position = w + pd * (0.08 - 0.075 * float(_pin.depth))
 
 
 ## A ponteira (furador): cabo de galho com a ponta de pedra amarrada, ponta para baixo.
@@ -8914,6 +8921,14 @@ func _coop_end(drop: bool) -> void:
 # losangos nas tábuas; tocando num, o personagem vai lá e passa o barro, e continua
 # sozinho nos pedaços seguintes enquanto tiver barro no balde.
 
+## Bem do lado de uma caixa de barro (as ações dela têm preferência).
+func _near_caixa() -> bool:
+	if _maq == null:
+		return false
+	var mi: int = _maq.planta_near(_player.position, 2.0)
+	return mi >= 0 and str(_maq.plantas[mi].tipo) == "caixa_barro" and _maq.pronta(mi)
+
+
 func _caixa_ctx(mi: int) -> bool:
 	var cc: Vector3 = _maq.xform(mi).origin
 	if Vector2(cc.x - _player.position.x, cc.z - _player.position.z).length() > 1.9:
@@ -9005,6 +9020,15 @@ func _mix_start(mi: int) -> void:
 	sair.pressed.connect(_mix_end)
 	ui.add_child(sair)
 	_mix = {"mi": mi, "sel": -1, "drag": -1.0, "tid": -9, "anim": -1.0, "ui": ui, "sair": sair}
+	# a enxada nas mãos (desenhada aqui, para bater longe e puxar até perto)
+	var hoe := MeshInstance3D.new()
+	hoe.mesh = Corte.enxada_mesh()
+	hoe.material_override = Corte.axe_material()
+	hoe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(hoe)
+	_mix.hoe = hoe
+	if _chop_pose:
+		_chop_pose.holding = false
 	# de frente para a caixa, olhando para dentro
 	var c: Vector3 = _maq.xform(mi).origin
 	var to := c - (_player.position + Vector3.UP * 1.6)
@@ -9032,11 +9056,14 @@ func _mix_end() -> void:
 		return
 	if is_instance_valid(_mix.ui):
 		(_mix.ui as Node).queue_free()
+	if _mix.has("hoe") and is_instance_valid(_mix.hoe):
+		(_mix.hoe as Node).queue_free()
 	_mix = {}
 	if _chop_pose:
 		_chop_pose.swinging = false
 		_chop_pose.digging = false
 		_chop_pose.ready_pose = false
+		_chop_pose.holding = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada"]
 	_jump_btn.visible = true
 	_act_check = 0.0
 
@@ -9090,45 +9117,79 @@ func _mix_input(e: InputEvent) -> bool:
 	if tid == int(_mix.tid) and float(_mix.drag) >= 0.0 and int(_mix.sel) >= 0 and float(_mix.anim) < 0.0:
 		if pos.y - float(_mix.drag) > 70.0:
 			_mix.drag = -1.0
-			_mix.anim = 0.0             # a enxada bate e puxa
-			if _chop_pose:
-				_chop_pose.digging = true
-				_chop_pose.swinging = true
-				_chop_pose.phase = 0.0
+			_mix.anim = 0.0             # a enxada bate lá na frente e puxa
 	return true
 
 
 func _mix_tick(delta: float) -> void:
 	(_mix.ui as Control).queue_redraw()
-	if float(_mix.anim) < 0.0:
+	var mi := int(_mix.mi)
+	var ph := -1.0
+	if float(_mix.anim) >= 0.0:
+		_mix.anim = float(_mix.anim) + delta
+		ph = clampf(float(_mix.anim) / 1.15, 0.0, 1.0)
+	_hoe_pose(ph)
+	if ph < 0.0:
 		return
-	_mix.anim = float(_mix.anim) + delta
-	var ph := clampf(float(_mix.anim) / 0.7, 0.0, 1.0)
-	if _chop_pose:
-		_chop_pose.phase = ph
-	if ph >= 0.5 and not bool(_mix.get("hit", false)):
-		_mix.hit = true
-		var mi := int(_mix.mi)
-		var k := int(_mix.sel)
-		var w: Vector3 = _maq.mix_spots(mi)[k]
-		Sons.play_at(self, "cavar", w, -2.0, 0.9)
-		Sons.play_at(self, "agua", w, -8.0, 1.3)
+	var k := int(_mix.sel)
+	var w: Vector3 = _maq.mix_spots(mi)[maxi(k, 0)]
+	if ph >= 0.36 and not bool(_mix.get("bateu", false)):
+		_mix.bateu = true
+		Sons.play_at(self, "cavar", w, -2.0, 0.85)
+		Sons.play_at(self, "agua", w, -10.0, 1.4)
 		_dirt(w)
+	if ph >= 0.86 and not bool(_mix.get("hit", false)):
+		_mix.hit = true
 		wear("enxada")
 		var done: bool = _maq.mix_hit(mi, k)
 		if int(_maq.barro_of(mi).mix[k]) >= Maquinas.MIX_HITS:
 			_mix.sel = -1
 		if done:
 			_show_toast("Barro pronto! Dá 4 baldes. Pegue com o balde vazio.")
-			_mix.anim = -1.0
 			_mix_end()
 			return
 		_show_toast("Misturando: %d%%" % int(_maq.mix_progress(mi) * 100.0))
 	if ph >= 1.0:
 		_mix.anim = -1.0
 		_mix.hit = false
-		if _chop_pose:
-			_chop_pose.swinging = false
+		_mix.bateu = false
+
+
+## A enxada em primeira pessoa: parada na frente; no golpe sobe, bate LÁ NA FRENTE
+## do lugar escolhido e vem puxando a terra pela caixa até perto de quem mexe.
+func _hoe_pose(ph: float) -> void:
+	if not _mix.has("hoe") or not is_instance_valid(_mix.hoe):
+		return
+	var cam := _cam.global_transform
+	var cr := cam.basis.x.normalized()
+	var cu := cam.basis.y.normalized()
+	var cf := -cam.basis.z.normalized()
+	var eye := cam.origin
+	var hand := eye + cf * 0.3 - cu * 0.38 + cr * 0.12
+	var rest := eye + cf * 0.95 - cu * 0.75 + cr * 0.05
+	var up := eye + cf * 0.85 + cu * 0.35
+	var mi := int(_mix.mi)
+	var k := int(_mix.sel)
+	var p := rest
+	if ph >= 0.0 and k >= 0:
+		var w: Vector3 = _maq.mix_spots(mi)[k]
+		var away := Vector3(w.x - _player.position.x, 0, w.z - _player.position.z).normalized()
+		var far := w + away * 0.18
+		var near := w - away * 0.32
+		if ph < 0.25:
+			p = rest.lerp(up, smoothstep(0.0, 1.0, ph / 0.25))
+		elif ph < 0.36:
+			var t := (ph - 0.25) / 0.11
+			p = up.lerp(far, t * t)
+		elif ph < 0.86:
+			p = far.lerp(near, smoothstep(0.0, 1.0, (ph - 0.36) / 0.5))      # puxando a terra
+		else:
+			p = near.lerp(rest, smoothstep(0.0, 1.0, (ph - 0.86) / 0.14))
+	var y := (p - hand).normalized()
+	var z := (Vector3.UP - y * Vector3.UP.dot(y)).normalized()
+	var x := y.cross(z).normalized()
+	# o fio da lâmina (que fica embaixo da ponta do cabo) é que encosta no ponto p
+	(_mix.hoe as Node3D).global_transform = Transform3D(Basis(x, y, z), p - y * 1.2 + z * 0.3)
 
 
 ## Losangos na tela (os quadradinhos de sempre): pts = [[pos, feito]], sel = o escolhido.

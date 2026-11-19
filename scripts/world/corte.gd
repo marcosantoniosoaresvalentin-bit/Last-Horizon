@@ -359,7 +359,8 @@ static func enxada_mesh() -> ArrayMesh:
 	var k := 0.3
 	# pedra: X (comprimento) -> para a frente (+Z, saindo do cabo), Y (grossura) -> ao
 	# longo do cabo, Z (largura) -> de lado
-	out.append_from(blade, 0, Transform3D(Basis(Vector3(0, -0.15 * k, k), Vector3(0, k, 0.0), Vector3(k, 0, 0)), Vector3(0, 1.2, 0.11)))
+	# a lâmina sai para trás (-Z): segurando, ela fica virada para baixo, como enxada
+	out.append_from(blade, 0, Transform3D(Basis(Vector3(0, -0.15 * k, -k), Vector3(0, k, 0.0), Vector3(k, 0, 0)), Vector3(0, 1.2, -0.11)))
 	out.generate_normals()
 	return out.commit()
 

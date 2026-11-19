@@ -596,11 +596,81 @@ func reboco_spots(from: Vector3, reach := 3.2) -> Array:
 func add_barro(pc: Dictionary, u: float, k: int, sg: float) -> void:
 	if not pc.has("barro"):
 		pc["barro"] = []
-	pc.barro.append([u, k, sg])
+	pc.barro.append([u, k, sg, int(_jogo.sim.elapsed_days())])
 	_rebuild()
 
 
-static var _mud_mat: StandardMaterial3D
+var _dia_barro := -1
+
+
+## Uma vez por dia: o barro vai secando (redesenha se tiver barro).
+func dia(day: int) -> void:
+	if day == _dia_barro:
+		return
+	_dia_barro = day
+	for pc in pieces:
+		if not (pc.get("barro", []) as Array).is_empty():
+			_rebuild()
+			return
+
+
+const SECA_DIAS := 6             # o barro leva uns 6 dias para secar de todo
+
+static var _mud_mats := {}
+
+
+## O barro em cada estágio: molhado (escuro, brilhando, liso), secando (mais claro,
+## fosco) e seco (claro, áspero, todo rachado).
+static func _mud_material(stage: int) -> StandardMaterial3D:
+	if _mud_mats.has(stage):
+		return _mud_mats[stage]
+	var m := StandardMaterial3D.new()
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var nt := NoiseTexture2D.new()
+	var tn := FastNoiseLite.new()
+	tn.frequency = 0.06
+	nt.noise = tn
+	nt.width = 128
+	nt.height = 128
+	nt.seamless = true
+	nt.as_normal_map = true
+	nt.bump_strength = 2.0 + stage * 2.0
+	m.normal_enabled = true
+	m.normal_texture = nt
+	match stage:
+		0:
+			m.albedo_color = Color(0.15, 0.11, 0.08)
+			m.roughness = 0.45
+			m.metallic_specular = 0.3
+		1:
+			m.albedo_color = Color(0.24, 0.19, 0.14)
+			m.roughness = 0.85
+			m.metallic_specular = 0.15
+		2:
+			m.albedo_color = Color(0.25, 0.21, 0.16)
+			m.roughness = 1.0
+			m.metallic_specular = 0.05
+		_:
+			# seco: as rachaduras (manchas de células com a borda escura)
+			var ct := NoiseTexture2D.new()
+			var cn := FastNoiseLite.new()
+			cn.noise_type = FastNoiseLite.TYPE_CELLULAR
+			cn.cellular_return_type = FastNoiseLite.RETURN_DISTANCE2_SUB
+			cn.cellular_jitter = 1.0
+			cn.frequency = 0.05
+			ct.noise = cn
+			ct.width = 256
+			ct.height = 256
+			ct.seamless = true
+			var g := Gradient.new()
+			g.offsets = PackedFloat32Array([0.0, 0.09, 0.16, 0.5, 1.0])
+			g.colors = PackedColorArray([Color(0.04, 0.03, 0.02), Color(0.07, 0.05, 0.04), Color(0.3, 0.25, 0.19), Color(0.33, 0.28, 0.21), Color(0.36, 0.3, 0.23)])
+			ct.color_ramp = g
+			m.albedo_texture = ct
+			m.roughness = 1.0
+			m.metallic_specular = 0.05
+	_mud_mats[stage] = m
+	return m
 
 
 ## A placa de barro grudada na face: um pouco abaulada e irregular, cor de barro.
@@ -639,6 +709,7 @@ func _mud_patch(pc: Dictionary, e: Array) -> Node3D:
 	for i in NA:
 		for j in NS:
 			var q := [grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]]
+			var uvq := [Vector2(i, j), Vector2(i + 1, j), Vector2(i + 1, j + 1), Vector2(i, j + 1)]
 			for tri in [[0, 1, 2], [0, 2, 3]]:
 				var A: Vector3 = q[tri[0]]
 				var B: Vector3 = q[tri[1]]
@@ -647,16 +718,21 @@ func _mud_patch(pc: Dictionary, e: Array) -> Node3D:
 				if (B - A).cross(C - A).dot(nrm) < 0.0:
 					ord = [tri[0], tri[2], tri[1]]
 				for idx in ord:
+					var uvv: Vector2 = uvq[idx]
+					st.set_uv(Vector2(uvv.x * la * 2.0 / NA, uvv.y * ls * 2.0 / NS) * 0.9 + Vector2(u * 0.7, k * 0.3))
 					st.add_vertex(q[idx])
 	st.generate_normals()
+	st.generate_tangents()
 	var mi := MeshInstance3D.new()
 	mi.mesh = st.commit()
-	if _mud_mat == null:
-		_mud_mat = StandardMaterial3D.new()
-		_mud_mat.albedo_color = Color(0.3, 0.24, 0.18)
-		_mud_mat.roughness = 1.0
-		_mud_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mi.material_override = _mud_mat
+	# o estágio da cura: molhado, secando, quase seco, seco e rachado
+	var age := 0
+	if e.size() > 3:
+		age = int(_jogo.sim.elapsed_days()) - int(e[3])
+	else:
+		age = SECA_DIAS                 # barro de antes desta versão: já seco
+	var stage := 0 if age < 1 else (1 if age < 3 else (2 if age < SECA_DIAS else 3))
+	mi.material_override = _mud_material(stage)
 	return mi
 
 
