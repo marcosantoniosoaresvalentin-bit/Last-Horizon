@@ -1,9 +1,9 @@
 {
-  "version": 120,
-  "file": "update_120.zip",
-  "size": 4717318,
-  "sha256": "34cb836b34afa4ee71287e4846815d8d8af7142ff0f0e54875cc7a8191959984",
+  "version": 121,
+  "file": "update_121.zip",
+  "size": 4725921,
+  "sha256": "447969a081bbaee7d1096080b4aa8e3cdbfbc9dbdf543dc51a59ee7c3e4f8144",
   "min_build": 1,
-  "notes": "Buriti: subir com degraus furados e pinos, faca de pedra, cortar folhas do buriti",
+  "notes": "Buriti: olho no tronco, peconha para subir, cortar folhas do chão e derrubar",
   "date": "2026-11-19"
 }
