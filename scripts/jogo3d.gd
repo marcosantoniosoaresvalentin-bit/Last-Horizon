@@ -401,6 +401,8 @@ var _olho := {}                   # o olho no tronco do buriti perto: {p, open}
 var _bur := {}                    # o que escolheu no menu do olho: {p, acao}
 var _chop_bur := {}               # derrubando um buriti
 var _drag := false                # arrastando a tora pesada (sozinho)
+var _swim := false                # nadando (rio fundo, lagoa funda ou mar)
+var _swim_t := 0.0
 var _maq_pend := {}               # indo até o lugar na serra: {mi, papel}
 var _bld_coop := false            # construindo com a tora que os dois carregam juntos
 var _drag_b := Vector3.ZERO       # a ponta que vai no chão
@@ -460,7 +462,11 @@ var _split_rng := RandomNumberGenerator.new()
 const BALDE_VOL := 0.024          # cabe uns 24 litros
 const BALDE_KG := 25.0            # mais que isso não dá para carregar pela alça
 const PAZADA := 0.006             # uma pazada: uns 6 litros
-const DENS := {"terra": 1500.0, "argila": 1800.0}
+const DENS := {"terra": 1500.0, "argila": 1800.0, "agua": 1000.0}
+const SWIM_DEPTH := 1.25          # água mais funda que isso: nada (os pés não acham o fundo)
+const SWIM_SINK := 1.32           # nadando: os pés ficam isso abaixo da superfície (cabeça para fora)
+const SWIM_SPEED := 1.5
+const BALDE_AGUA_MIN := 0.4       # só enche o balde onde a lagoa tem pelo menos isso de fundura
 var _climb := {}                  # saindo da cova funda: {t, dur, from, to}
 var _sawing := false              # serrando a rodela (vai e vem sozinho até terminar ou parar)
 var _saw_t := 0.0
@@ -2089,6 +2095,67 @@ func _player_depth() -> float:
 	return maxf(hd, _water_level[cell.y * MundoSim.W + cell.x] - height_at(p.x, p.z))
 
 
+## Onde dá para encher o balde: na frente do jogador (ou onde ele está), com a água
+## funda o bastante (pelo menos BALDE_AGUA_MIN). Vector3.INF se não tem.
+func _water_spot() -> Vector3:
+	for d in [0.7, 1.1, 1.5, 1.9, 0.35]:
+		var w := _front(d)
+		var lv := _water_surface(w.x, w.z)
+		if lv > -1e8 and lv - height_at(w.x, w.z) >= BALDE_AGUA_MIN:
+			return Vector3(w.x, lv, w.z)
+	return Vector3.INF
+
+
+## O jogador mexeu no controle neste quadro?
+func moved_now(p: Vector3) -> bool:
+	return Vector2(p.x - _player.position.x, p.z - _player.position.z).length() > 0.002
+
+
+## Entrou ou saiu da água funda: a pose de nadar; a tora não vai junto (fica na água).
+func _swim_update(was: bool) -> void:
+	if _chop_pose:
+		_chop_pose.swimming = _swim
+		_chop_pose.swim_phase = _swim_t
+	if _swim and not was:
+		if not _carry.is_empty():
+			var fwd := Vector3(-sin(_face), 0, -cos(_face))
+			_arvores.drop_log(_carry, _player.position + fwd * 0.8, _face)
+			_carry = {}
+			if _carry_node:
+				_carry_node.queue_free()
+			_carry_node = null
+			_drag = false
+			if _chop_pose:
+				_chop_pose.log_node = null
+			_show_toast("Água funda: você soltou a tora para nadar.")
+		elif not _coop.is_empty():
+			_coop_end(true)
+			_show_toast("Água funda: vocês soltaram a tora para nadar.")
+		else:
+			_show_toast("Nadando!")
+		Sons.play_at(self, "agua", _player.position + Vector3.UP * SWIM_SINK, 2.0, 0.8)
+	_jump_btn.visible = _jump_btn.visible and not _swim
+
+
+## Altura da superfície da água em (x, z): rio, lagoa ou o mar (-1e9 se não tem água).
+func _water_surface(x: float, z: float) -> float:
+	var cell := Vector2i(int(x / CELL), int(z / CELL))
+	var lv := -1e9
+	if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
+		lv = _water_level[cell.y * MundoSim.W + cell.x]
+		if float(sim.ter[cell.y * MundoSim.W + cell.x]) < MundoSim.SEA:
+			lv = maxf(lv, MundoSim.SEA * HS)      # no mar
+	return lv
+
+
+## É água do mar (salgada)?
+func _is_sea(x: float, z: float) -> bool:
+	var cell := Vector2i(int(x / CELL), int(z / CELL))
+	if cell.x < 0 or cell.y < 0 or cell.x >= MundoSim.W or cell.y >= MundoSim.H:
+		return true
+	return float(sim.ter[cell.y * MundoSim.W + cell.x]) < MundoSim.SEA + 0.05 and absf(_water_surface(x, z) - MundoSim.SEA * HS) < 0.08
+
+
 ## Pega a semente mais perto do chão e põe na mochila.
 func _pick_seed() -> void:
 	if _arvores == null:
@@ -2315,6 +2382,9 @@ func _update_ctx_btn() -> void:
 	if _mao == "balde" and not _balde_carga.is_empty() and _crouch_job == "" and not _air and _pour_t < 0.0:
 		_ctx_action = "despejar"
 		_ctx_btn.text = "Despejar no balde" if _bucket_ahead() >= 0 else "Despejar"
+	elif _mao == "balde" and _balde_carga.is_empty() and _crouch_job == "" and not _air and not _swim and _water_spot() != Vector3.INF:
+		_ctx_action = "pegar_agua"
+		_ctx_btn.text = "Pegar água"
 	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and _cupins.nearest_timbo(_player.position, 1.4) >= 0:
 		_ctx_action = "timbo"
 		_ctx_btn.text = "Colher timbó"
@@ -2456,6 +2526,16 @@ func _ctx_press() -> void:
 		"despejar":
 			_start_pour()
 			return
+		"pegar_agua":
+			var ws := _water_spot()
+			if ws == Vector3.INF:
+				return
+			if _is_sea(ws.x, ws.z):
+				_show_toast("Essa é água do mar (salgada). Pegue água numa lagoa ou num rio.")
+				return
+			_face_to(ws)
+			_crouch_target = {"agua": ws}
+			_crouch_job = "agua"
 		"pedra":
 			var i: int = _pedras.nearest(_player.position, 1.1, true)
 			if i < 0:
@@ -2929,6 +3009,12 @@ func _update_crouch(delta: float) -> void:
 	if before < mid and _crouch_t >= mid:
 		if _crouch_job == "puxar":
 			pass
+		elif _crouch_job == "agua":
+			_balde_carga = {"tipo": "agua", "vol": BALDE_VOL * 0.92}
+			_update_balde_fill(_balde_fill, _balde_carga)
+			Sons.play_at(self, "agua", _crouch_target.agua, 0.0, 1.2)
+			_update_inventory()
+			_show_toast("Balde cheio de água (uns %d litros, %d kg)." % [roundi(BALDE_VOL * 0.92 * 1000.0), roundi(BALDE_VOL * 0.92 * 1000.0)])
 		elif _crouch_job == "galho":
 			_galhos.take(int(_crouch_target.galho))
 			var dropped := add_item("galho", 1)
@@ -4296,11 +4382,40 @@ func _fill_bucket(i: int) -> void:
 ## Cheio, faz um montinho acima da boca.
 static var _fill_mats := {}
 
+## A água dentro do balde: a superfície lisa e brilhante no nível dela.
+func _water_fill(mi: MeshInstance3D, c: Dictionary) -> void:
+	var f := clampf(float(c.vol) / BALDE_VOL, 0.0, 1.0)
+	var level := 0.05 + f * (Balde.H - 0.06)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var secs := 28
+	var r := Balde._r_at(level) - 0.01
+	for k in secs:
+		var a0 := TAU * k / secs
+		var a1 := TAU * (k + 1) / secs
+		for v in [Vector3(0, level, 0), Vector3(cos(a1) * r, level, sin(a1) * r), Vector3(cos(a0) * r, level, sin(a0) * r)]:
+			st.set_normal(Vector3.UP)
+			st.add_vertex(v)
+	mi.mesh = st.commit()
+	if not _fill_mats.has("agua"):
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.2, 0.32, 0.34, 0.82)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.roughness = 0.05
+		m.metallic_specular = 0.9
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_fill_mats["agua"] = m
+	mi.material_override = _fill_mats["agua"]
+
+
 func _update_balde_fill(mi: MeshInstance3D, c: Dictionary) -> void:
 	if mi == null:
 		return
 	if c.is_empty() or float(c.get("vol", 0.0)) <= 0.0:
 		mi.mesh = null
+		return
+	if str(c.tipo) == "agua":
+		_water_fill(mi, c)
 		return
 	var clay := str(c.tipo) == "argila"
 	var f := clampf(float(c.vol) / BALDE_VOL, 0.0, 1.2)
@@ -4465,12 +4580,17 @@ func _update_pour(delta: float) -> void:
 			_update_balde_fill(fm, _carga_of(g))
 			var left := float(c.vol) - mv
 			_balde_carga = {} if left <= 0.0005 else {"tipo": c.tipo, "vol": left}
+		elif str(c.tipo) == "agua":
+			_balde_carga = {}           # a água escorre no chão
 		else:
 			_escav.dump(to, float(c.vol), str(c.tipo))
 			_dirt(to)
 			_balde_carga = {}
-		_falling_lumps(_balde_fill.global_position + Vector3.UP * 0.05 if _balde_fill else to + Vector3.UP, to, str(c.tipo))
-		Sons.play_at(self, "cavar", to, -2.0, 0.8)
+		if str(c.tipo) == "agua":
+			Sons.play_at(self, "agua", to, 2.0, 1.1)
+		else:
+			_falling_lumps(_balde_fill.global_position + Vector3.UP * 0.05 if _balde_fill else to + Vector3.UP, to, str(c.tipo))
+			Sons.play_at(self, "cavar", to, -2.0, 0.8)
 		_update_balde_fill(_balde_fill, _balde_carga)
 		_update_inventory()
 	if _pour_t >= 1.5:
@@ -4928,6 +5048,8 @@ func _move_player(delta: float) -> void:
 		if _mao == "balde" and not _balde_carga.is_empty() and float(_balde_carga.vol) * float(DENS.get(_balde_carga.tipo, 1500.0)) >= 8.0:
 			running = false      # com balde pesado não dá para correr
 		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow
+		if _swim:
+			sp = SWIM_SPEED          # nadando: braçada (sem correr)
 		if not _carry.is_empty():
 			sp *= lerpf(0.9, 0.4, clampf(_carry_kg / 300.0, 0.0, 1.0))   # tora pesada: anda devagar
 			if _drag:
@@ -5053,7 +5175,18 @@ func _move_player(delta: float) -> void:
 		var sup2: float = _constr.support_y(p.x, p.z, feet)
 		if sup2 > ground and feet >= sup2 - 0.32:
 			ground = sup2                 # andando no assoalho
-	if _air:
+	# água funda (rio, lagoa ou mar): os pés não acham o fundo e o personagem nada, com
+	# a cabeça para fora, subindo e descendo um pouco com as braçadas
+	var surf := _water_surface(p.x, p.z)
+	var was_swim := _swim
+	_swim = surf - height_at(p.x, p.z) > SWIM_DEPTH and surf - SWIM_SINK > ground and _climb.is_empty()
+	if _swim:
+		_swim_t += delta * (1.0 if moved_now(p) else 0.45)
+		var sy := surf - SWIM_SINK + sin(_swim_t * 4.2) * 0.035
+		p.y = lerpf(feet, sy, minf(1.0, delta * 5.0)) if not was_swim else lerpf(feet, sy, minf(1.0, delta * 8.0))
+		_air = false
+		_vy = 0.0
+	elif _air:
 		_vy -= 13.0 * delta
 		p.y = feet + _vy * delta
 		if p.y <= ground:
@@ -5089,10 +5222,16 @@ func _move_player(delta: float) -> void:
 		# andando ~1,9 passos por segundo; correndo ~3 (passada mais longa)
 		var running := moved / maxf(delta, 0.001) > 3.0
 		var stride := 0.66 if not running else 1.7
+		if _swim:
+			stride = 1.1              # a cada braçada, o barulho da água
 		if _step_dist >= stride or landed:
 			_step_dist = 0.0
-			_footstep(p, depth, landed, running)
+			if _swim:
+				Sons.play_at(self, "agua", p + Vector3.UP * SWIM_SINK, -2.0, randf_range(0.85, 1.1))
+			else:
+				_footstep(p, depth, landed, running)
 	_player.position = p
+	_swim_update(was_swim)
 	# primeira pessoa: livre, o corpo vira para onde a câmera olha; trabalhando (cortar,
 	# serrar, ir até o lugar...) é o corpo que manda e a câmera vai junto
 	if _chopping or _sawing or _walking or _digging or _crouch_job != "" or not _climb.is_empty():
@@ -5158,7 +5297,7 @@ func _fp_camera(delta: float, moved: float) -> void:
 	if _chop_pose:
 		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
 		# com ferramenta na mão os braços não aparecem (só a ferramenta, segura por baixo da tela)
-		_chop_pose.hide_arms = not _desf.is_empty() or _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca"] and _vine.is_empty()
+		_chop_pose.hide_arms = not _desf.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca"]) and _vine.is_empty()
 	for m in _body_mats:
 		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, maxf(_busy_f, down))
 		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, maxf(_busy_f, down))

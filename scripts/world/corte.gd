@@ -672,6 +672,8 @@ class ChopPose extends SkeletonModifier3D:
 	var grip_high := GRIP_HIGH
 	var carry_grip := GRIP_HIGH
 	var _carry_cal := {}          # ferramenta -> pegada gravada parado (mão no antebraço, ferramenta na mão)
+	var swimming := false         # nadando (braçada de peito)
+	var swim_phase := 0.0
 	var log_node: Node3D = null   # tora no ombro
 	var log_r := 0.2
 	var _b := {}
@@ -717,6 +719,13 @@ class ChopPose extends SkeletonModifier3D:
 		var up: Vector3 = (tb * Vector3.UP).normalized()
 		var fwd: Vector3 = (tb * -player.global_transform.basis.z).normalized()
 		var right: Vector3 = (tb * player.global_transform.basis.x).normalized()
+		if swimming:
+			if axe:
+				axe.visible = false
+			_swim(sk, up, fwd, right)
+			if hide_head:
+				_hide_head(sk)
+			return
 		if reach_on:
 			if axe:
 				axe.visible = false
@@ -949,6 +958,44 @@ class ChopPose extends SkeletonModifier3D:
 			var hp := sk.get_bone_global_pose(b)
 			hp.basis = hp.basis.orthonormalized().scaled(Vector3(0.001, 0.001, 0.001))
 			sk.set_bone_global_pose(b, hp)
+
+	# ---------- nadando: braçada de peito ----------
+	# As mãos saem juntas na frente do peito, esticam para a frente, abrem para os lados
+	# puxando a água e voltam para o peito. As pernas ficam soltas, meio dobradas.
+	func _swim(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
+		var to_skel := sk.global_transform.affine_inverse()
+		var eye: Vector3 = to_skel * fp_eye if fp else sk.get_bone_global_pose(_bone("Head")).origin
+		var cb: Basis = to_skel.basis * fp_basis if fp else Basis(right, up, -fwd)
+		var cf := (-cb.z).normalized()
+		cf = (cf - up * cf.dot(up)).normalized() if absf(cf.dot(up)) < 0.95 else fwd
+		var cr := cf.cross(up).normalized()
+		var ph := fposmod(swim_phase * 0.62, 1.0)
+		# 0-0.35 esticando para a frente, 0.35-0.7 abrindo e puxando, 0.7-1 voltando ao peito
+		var reach: float
+		var spread: float
+		if ph < 0.35:
+			var t := smoothstep(0.0, 1.0, ph / 0.35)
+			reach = lerpf(0.22, 0.6, t)
+			spread = lerpf(0.08, 0.06, t)
+		elif ph < 0.7:
+			var t := smoothstep(0.0, 1.0, (ph - 0.35) / 0.35)
+			reach = lerpf(0.6, 0.32, t)
+			spread = lerpf(0.06, 0.42, t)
+		else:
+			var t := smoothstep(0.0, 1.0, (ph - 0.7) / 0.3)
+			reach = lerpf(0.32, 0.22, t)
+			spread = lerpf(0.42, 0.08, t)
+		for side in ["Right", "Left"]:
+			var sg := 1.0 if side == "Right" else -1.0
+			var sb := _bone(side + "Arm")
+			if sb < 0:
+				continue
+			var sh := sk.get_bone_global_pose(sb).origin
+			var tgt := eye + cf * reach + cr * sg * spread - up * 0.3
+			_ik(sk, side + "Arm", side + "ForeArm", side + "Hand", tgt, sh - up * 0.4 + cr * sg * 0.6)
+			_curl_fingers(sk, side, 0.15)
+		# o tronco deita um pouco para a frente (na água)
+		_rot_global(sk, "Spine", right, -0.25)
 
 	# ---------- esticar o braço direito até um ponto (pegar e puxar o cipó) ----------
 	func _reach(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
