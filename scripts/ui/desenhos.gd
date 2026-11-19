@@ -223,6 +223,22 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_colored_polygon(P.call([[-28, 2], [28, 2], [28, 36], [-28, 36]]), Color(0.86, 0.68, 0.22))
 			ci.draw_polyline(gar + PackedVector2Array([gar[0]]), ink, 2.0 * u, true)
 			ci.draw_colored_polygon(P.call([[-10, -48], [10, -48], [10, -40], [-10, -40]]), Color(0.4, 0.28, 0.16))
+		"ponta_pedra", "furador":
+			if id == "furador":
+				ci.draw_line(c + Vector2(-44, 30) * u, c + Vector2(4, -4) * u, Color(0.55, 0.36, 0.2), 13 * u, true)
+				for k in 4:
+					ci.draw_line(c + Vector2(-6 + k * 4, -8 + k * 3) * u, c + Vector2(4 + k * 4, 6 + k * 3) * u, Color(0.7, 0.58, 0.32), 3 * u, true)
+			var tip: PackedVector2Array = P.call([[-2, -2], [10, -18], [46, -40], [22, 6], [8, 10]]) if id == "furador" else P.call([[-34, 20], [-30, -6], [40, -34], [10, 22]])
+			ci.draw_colored_polygon(tip, Color(0.42, 0.42, 0.4))
+			ci.draw_polyline(tip + PackedVector2Array([tip[0]]), ink, 2.0 * u, true)
+		"pino":
+			for k in 2:
+				var o := Vector2(-14 + k * 26, 0)
+				var body: PackedVector2Array = P.call([[o.x - 7, -40], [o.x + 7, -40], [o.x + 7, 26], [o.x, 44], [o.x - 7, 26]])
+				ci.draw_colored_polygon(body, Color(0.66, 0.5, 0.32))
+				ci.draw_line(c + Vector2(o.x - 2, -36) * u, c + Vector2(o.x - 2, 24) * u, Color(0.5, 0.36, 0.2), 2.0 * u, true)
+				ci.draw_polyline(body + PackedVector2Array([body[0]]), ink, 2.0 * u, true)
+				ci.draw_colored_polygon(P.call([[o.x - 7, -40], [o.x + 7, -40], [o.x + 7, -34], [o.x - 7, -34]]), Color(0.78, 0.62, 0.42))
 		"tabua", "ripa":
 			var w := 26.0 if id == "tabua" else 9.0
 			var pts := PackedVector2Array([c + Vector2(-44, -w) * u, c + Vector2(44, -w - 8) * u, c + Vector2(44, w - 8) * u, c + Vector2(-44, w) * u])

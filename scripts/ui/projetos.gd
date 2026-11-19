@@ -157,7 +157,7 @@ func _select(tipo: String) -> void:
 	_name.text = str(t.nome).to_upper()
 	_desc.text = str(t.desc)
 	var n := Maquinas.needs(tipo)
-	_need.text = "MATERIAL:  %d toras redondas finas · %d meias toras · %d tábuas · %d cipós (amarrações) · 1 lâmina de serra" % [int(n.tora), int(n.meia), int(n.tabua), int(n.cipo)]
+	_need.text = "MATERIAL:  %d toras redondas finas · %d meias toras · %d tábuas · %d pinos de madeira · 1 lâmina de serra\nFerramentas: marreta (pinos), serra e machado (cortar as pontas que sobrarem)" % [int(n.tora), int(n.meia), int(n.tabua), int(n.pino)]
 	_draw.queue_redraw()
 
 

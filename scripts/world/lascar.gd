@@ -16,6 +16,7 @@ const KINDS := {
 	"pedra_pa": {"spots": 10, "nome": "Lâmina de Pá"},
 	"cunha": {"spots": 9, "nome": "Cunha de Pedra"},
 	"pedra_marreta": {"spots": 7, "nome": "Pedra de Marreta"},
+	"ponta_pedra": {"spots": 8, "nome": "Ponta de Pedra"},
 }
 const N := 48                   # ângulos do contorno
 const R := 5                    # anéis do centro até a beira
@@ -127,6 +128,14 @@ static func _limits(kind: String, x: float, z: float) -> Vector3:
 			var e := clampf(absf(x) / a, 0.0, 1.0)
 			var w := 0.24 * (1.0 - 0.15 * pow(e, 4.0))
 			var t := 0.2 * (1.0 - 0.2 * pow(e, 4.0))
+			return Vector3(a, t, w)
+		"ponta_pedra":
+			# ponta de furar: grossa atrás (onde amarra no cabo) e afinando até a ponta
+			# aguda na frente (+x), com as faces facetadas
+			var a := 0.44
+			var u := clampf((x + a) / (2.0 * a), 0.0, 1.0)
+			var w := lerpf(0.17, 0.015, pow(u, 1.15))
+			var t := lerpf(0.12, 0.012, pow(u, 1.3))
 			return Vector3(a, t, w)
 	return Vector3(0.5, 0.3, 0.4)
 

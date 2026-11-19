@@ -34,7 +34,6 @@ const Tamanduas := preload("res://scripts/world/tamanduas.gd")
 const Construcao := preload("res://scripts/world/construcao.gd")
 const Maquinas := preload("res://scripts/world/maquinas.gd")
 const Projetos := preload("res://scripts/ui/projetos.gd")
-const Amarrar := preload("res://scripts/ui/amarrar.gd")
 const MINERAIS_ITENS := ["hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita", "lasca_silex"]
 const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
@@ -393,8 +392,9 @@ var _maq: Node3D = null
 var _proj := {}                    # pondo a planta no chão: {tipo, yaw, ghost, ok, c}
 var _proj_ui: Control = null
 var _proj_btns: Array = []
-var _lash_ui: Control = null
-var _lash_t := []                  # [planta, junta] sendo amarrada
+var _trim := {}                    # cortando a ponta que sobrou: {mi, si, t, s, tool}
+var _pin := {}                     # pondo pinos: {alvos, sel, depth, t, speed, gw, gc, anim, ok}
+var _pin_ui: Control = null
 var _maq_op := {}                  # na serra: {mi, papel, ctrl, last, speed}
 var _maq_stop: Button
 var _bld := {}                     # modo construção: {yaw, tilt, roll, ghost, ok, c, b}
@@ -2171,8 +2171,10 @@ func _update_chop(delta: float) -> void:
 	if not _maq_op.is_empty():
 		_maq_op_tick(delta)
 		return
-	if _lash_ui != null:
+	if not _pin.is_empty():
+		_pin_tick(delta)
 		return
+	_trim_tick(delta)
 	if not _post_mark.is_empty():
 		_mark_tick()
 		return
@@ -2259,7 +2261,10 @@ func _update_ctx_btn() -> void:
 		else:
 			_ctx_btn.text = "Cortar estaca"
 		_ctx_action = "estaca"
-	elif _maq and _crouch_job == "" and not _chopping and not _air and _maq_ctx():
+	elif _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _trim.is_empty() and item_qtd("marreta") > 0 and not _pin_targets().is_empty():
+		_ctx_action = "pinos"
+		_ctx_btn.text = "Furar e pinos (%d)" % _pin_targets().size()
+	elif _maq and _crouch_job == "" and not _chopping and not _air and _trim.is_empty() and _maq_ctx():
 		pass
 	elif _constr and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _aimed_piece().is_empty():
 		_ctx_action = "peca"
@@ -2303,7 +2308,10 @@ func _ctx_press() -> void:
 			if ci >= 0:
 				_mark_open(ci)
 			return
-		"planta_peca", "planta_lamina", "amarrar", "pedalar", "empurrar", "tora_serra":
+		"pinos":
+			_pin_start()
+			return
+		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra":
 			_maq_ctx_press(_ctx_action)
 			return
 		"peca":
@@ -2312,12 +2320,13 @@ func _ctx_press() -> void:
 				if _constr.carrying_others(pc):
 					_show_toast("Tem outra peça apoiada em cima dessa. Tire ela antes.")
 				else:
-					var nam: int = (pc.get("amarras", []) as Array).size()
+					var npin := 0
+					for pn in pc.get("pinos", []):
+						if bool(pn[1]):
+							npin += 1
 					_hold_log(_constr.remove_piece(pc))
-					if nam > 0:
-						var left := add_item("cipo", nam)
-						_update_inventory()
-						_show_toast("Desamarrou: +%d cipó%s" % [nam - left, "s" if nam - left != 1 else ""] + (" (mochila cheia)" if left > 0 else ""))
+					if npin > 0:
+						_show_toast("Arrancou a peça: %d pino%s quebrou (não dá para usar de novo)." % [npin, "" if npin == 1 else "s"])
 				_act_check = 0.0
 			return
 		"andiroba":
@@ -3126,6 +3135,10 @@ func _walk_to(target: Vector3, next: String) -> void:
 
 
 func _walk_arrived() -> void:
+	if _walk_next == "pino":
+		_walk_next = ""
+		_pin_ready()
+		return
 	if _walk_next == "rachar":
 		_walk_next = ""
 		_split_arrived()
@@ -3522,9 +3535,10 @@ func _open_knap_menu() -> void:
 		"lamina_serra": "Pedra comprida e fina, com dentes num lado.",
 		"pedra_pa": "Pedra larga e fina, arredondada na frente, para a pá.",
 		"cunha": "Grossa atrás e com fio reto: abre a tora.",
-		"pedra_marreta": "Bloco grosso e comprido: cabeça da marreta."}
+		"pedra_marreta": "Bloco grosso e comprido: cabeça da marreta.",
+		"ponta_pedra": "Grossa atrás e bem aguda na frente: ponta do furador."}
 	var opts := []
-	for k in ["pedra_machado", "pedra_cavadeira", "lamina_serra", "pedra_pa", "cunha", "pedra_marreta"]:
+	for k in ["pedra_machado", "pedra_cavadeira", "lamina_serra", "pedra_pa", "cunha", "pedra_marreta", "ponta_pedra"]:
 		var kk: String = k
 		opts.append([Lascar.KINDS[k].nome, descs[k], func(): _knap_go(_pedras.nearest(_player.position, 1.5, true), kk)])
 	_choice_menu("MODELAR PEDRA", "Que ferramenta essa pedra vai virar?", opts)
@@ -4953,8 +4967,10 @@ func _input(e: InputEvent) -> void:
 	if not _vine.is_empty():
 		_vine_input(e)
 		return   # modelando pedra: o personagem não anda nem gira a câmera
-	if _lash_ui != null or _proj_ui != null:
-		return   # amarrando com o dedo ou escolhendo o projeto
+	if _proj_ui != null:
+		return   # escolhendo o projeto
+	if not _pin.is_empty() and _pin_input(e):
+		return
 	if _cal != null or _bag_ui != null or _craft_ui != null or _work_menu != null:
 		return   # com o calendário, a mochila ou o craft aberto, o toque não anda nem gira a câmera
 	var half := get_viewport().get_visible_rect().size.x * 0.5
@@ -6686,13 +6702,7 @@ func _bld_update() -> void:
 				if dh > 0.04:
 					r.why = "As estacas estão em alturas diferentes (%d cm). Com o machado: \"Cortar estaca\" na mais alta (ou \"Medir\" na mais baixa primeiro)." % roundi(dh * 100.0)
 					break
-	# cada encosto em madeira é uma amarração de cipó
-	var need: int = (r.get("juntas", []) as Array).size()
-	var have := item_qtd("cipo")
-	if bool(r.ok) and need > have:
-		r.ok = false
-		r.why = "Precisa de %d cipó%s para amarrar (tem %d)." % [need, "s" if need > 1 else "", have]
-	(_bld_btns[0] as Button).text = "Colocar" if need == 0 else "Colocar (%d cipó%s)" % [need, "s" if need > 1 else ""]
+	(_bld_btns[0] as Button).text = "Colocar"
 	_bld_why.visible = not bool(r.ok) and str(r.get("why", "")) != ""
 	_bld_why.text = str(r.get("why", ""))
 	_bld.juntas = r.get("juntas", [])
@@ -6724,13 +6734,10 @@ func _bld_place() -> void:
 	if _chop_pose:
 		_chop_pose.log_node = null
 	var juntas: Array = _bld.get("juntas", [])
-	if juntas.size() > 0:
-		remove_item("cipo", juntas.size())
-		_update_inventory()
 	_constr.add(fl, b, c, juntas)
 	Sons.play_at(self, "baque", c, -4.0)
 	if juntas.size() > 0:
-		_show_toast("Peça amarrada com %d cipó%s." % [juntas.size(), "s" if juntas.size() > 1 else ""])
+		_show_toast("Peça no lugar. Agora prenda com %d pino%s de madeira: pegue a marreta e toque em \"Fixar pinos\"." % [juntas.size(), "s" if juntas.size() > 1 else ""])
 	_bld_stop()
 
 
@@ -7033,10 +7040,11 @@ func _maq_ctx() -> bool:
 		_ctx_action = "planta_lamina"
 		_ctx_btn.text = "Pôr a lâmina"
 		return true
-	var jt: Array = _maq.joint_near(_player.position, 1.8)
-	if not jt.is_empty():
-		_ctx_action = "amarrar"
-		_ctx_btn.text = "Amarrar"
+	var sb: Array = _maq.sobra_near(_player.position, 1.8)
+	if not sb.is_empty() and _carry.is_empty():
+		var inf: Dictionary = _maq.sobra_info(int(sb[0]), int(sb[1]))
+		_ctx_action = "sobra"
+		_ctx_btn.text = ("Serrar a ponta (%d cm)" if bool(inf.deitada) else "Cortar a ponta (%d cm)") % roundi(float(inf.len) * 100.0)
 		return true
 	return false
 
@@ -7047,6 +7055,17 @@ func _maq_ctx_press(act: String) -> void:
 		return
 	match act:
 		"planta_peca":
+			var pw: Dictionary = _maq.pending_work(mi)
+			if int(pw.furos) + int(pw.pinos) + int(pw.pontas) > 0:
+				var falta := []
+				if int(pw.furos) > 0:
+					falta.append("%d furo%s" % [pw.furos, "" if int(pw.furos) == 1 else "s"])
+				if int(pw.pinos) > 0:
+					falta.append("%d pino%s" % [pw.pinos, "" if int(pw.pinos) == 1 else "s"])
+				if int(pw.pontas) > 0:
+					falta.append("%d ponta%s para cortar" % [pw.pontas, "" if int(pw.pontas) == 1 else "s"])
+				_show_toast("Termine a madeira que já está na planta antes de pôr outra: falta%s %s." % ["m" if falta.size() > 1 or int(pw.furos) + int(pw.pinos) + int(pw.pontas) > 1 else "", ", ".join(falta)])
+				return
 			var r: Dictionary = _maq.slot_for(mi, _carry, _player.position)
 			if int(r.i) < 0:
 				_show_toast(str(r.why))
@@ -7057,40 +7076,30 @@ func _maq_ctx_press(act: String) -> void:
 			_carry_node = null
 			if _chop_pose:
 				_chop_pose.log_node = null
-			_maq.fill_slot(mi, int(r.i))
+			_maq.fill_slot(mi, int(r.i), float(r.get("sobra", 0.0)))
 			var falta: int = (_maq.plantas[mi].pecas as Array).size() - _maq.done_count(mi)
 			Sons.play_at(self, "baque", _player.position, -6.0)
-			_show_toast("Peça no lugar! " + ("Faltam %d peças." % falta if falta > 0 else "Todas as madeiras estão no lugar: agora a lâmina e as amarrações."))
+			var sob := float(r.get("sobra", 0.0))
+			var pw2: Dictionary = _maq.pending_work(mi)
+			_show_toast("Peça no lugar! " + ("Sobrou %d cm para fora: corte a ponta. " % roundi(sob * 100.0) if sob > 0.015 else "") + ("Agora fure e ponha %d pino%s nas juntas dela. " % [pw2.furos, "" if int(pw2.furos) == 1 else "s"] if int(pw2.furos) > 0 else "") + ("Faltam %d peças." % falta if falta > 0 else "Todas as madeiras estão no lugar."))
 		"planta_lamina":
 			remove_item("lamina_serra", 1)
 			_update_inventory()
 			_maq.plantas[mi].lamina = true
 			_maq._rebuild()
 			_show_toast("Lâmina presa entre as colunas, com os dentes virados para a mesa.")
-		"amarrar":
-			var jt: Array = _maq.joint_near(_player.position, 1.8)
-			if jt.is_empty():
+		"sobra":
+			var sb: Array = _maq.sobra_near(_player.position, 1.8)
+			if sb.is_empty():
 				return
-			if item_qtd("cipo") < 1 and not teste:
-				_show_toast("Precisa de 1 cipó para amarrar.")
+			var inf: Dictionary = _maq.sobra_info(int(sb[0]), int(sb[1]))
+			var tool := "serra" if bool(inf.deitada) else "machado"
+			if item_qtd(tool) <= 0 and not teste:
+				_show_toast("Precisa de %s para cortar essa ponta." % ("uma serra (a peça está deitada)" if tool == "serra" else "um machado (a peça está em pé)"))
 				return
-			_lash_t = jt
-			_face_to(_maq.joint_point(int(jt[0]), int(jt[1])))
-			_lash_ui = Amarrar.new()
-			_hud.add_child(_lash_ui)
-			_lash_ui.terminou.connect(func():
-				_lash_ui = null
-				if not teste:
-					remove_item("cipo", 1)
-					_update_inventory()
-				_maq.tie(int(_lash_t[0]), int(_lash_t[1]))
-				var falta2: int = _maq.pending_joints(int(_lash_t[0]))
-				Sons.play_at(self, "baque", _player.position, -14.0, 1.4)
-				_show_toast("Amarrado! " + ("Faltam %d amarrações." % falta2 if falta2 > 0 else "Tudo amarrado.") + (" A serra está pronta!" if _maq.pronta(int(_lash_t[0])) else ""))
-				_act_check = 0.0)
-			_lash_ui.cancelou.connect(func():
-				_lash_ui = null
-				_act_check = 0.0)
+			equip(tool)
+			_trim = {"mi": int(sb[0]), "si": int(sb[1]), "t": 0.0, "s": 0.0, "tool": tool}
+			_show_toast("Serrando a ponta..." if tool == "serra" else "Cortando a ponta com o machado...")
 		"tora_serra":
 			var k: String = _maq.kind_of(_carry)
 			if k == "tabua" or _arvores.free_log_length(_carry) < 0.6:
@@ -7183,3 +7192,472 @@ func _maq_op_tick(delta: float) -> void:
 		_bld_why.visible = float(_maq_op.emp) > 0.1 and ped < 0.05
 		_bld_why.text = "Precisa de alguém pisando no pedal (a serra só funciona em dupla)."
 	_maq.inputs[_my_id()] = {"mi": mi, "pedal": float(_maq_op.pedal), "emp": float(_maq_op.emp), "t": Time.get_ticks_msec()}
+
+
+
+# ================== PINOS DE MADEIRA ==================
+# Toda madeira posta (construção ou planta) fica com lugares de pino. Com a marreta:
+# "Fixar pinos" mostra um losango em cada lugar; toca num, o personagem chega perto,
+# põe o pino no furo e bate com a marreta na barrinha de acerto (a mesma da cunha):
+# verde afunda, laranja quase, vermelho quebra o pino (perde ele). 3 batidas boas
+# e o pino fica rente à madeira.
+
+const PIN_HITS := 3
+
+
+func _pin_targets() -> Array:
+	var out := []
+	if _constr:
+		for t in _constr.pin_targets(_player.position):
+			out.append({"kind": "c", "pc": t.pc, "k": t.k, "pos": t.pos, "stage": t.stage})
+	if _maq:
+		for t in _maq.pin_targets(_player.position):
+			out.append({"kind": "m", "mi": t.mi, "ji": t.ji, "pos": t.pos, "stage": t.stage})
+	return out
+
+
+func _pin_start() -> void:
+	_pin = {"alvos": _pin_targets(), "sel": -1, "depth": 0.0, "t": 0.0, "speed": 0.4, "gw": 0.3, "gc": 0.5,
+		"anim": -1.0, "ok": false, "node": null, "refresh": 0.5}
+	_pin_new_timing()
+	_build_pin_ui()
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
+		(b as Control).visible = false
+	_show_toast("Toque num losango: \"Furar\" põe a ponteira de pedra, \"Pino\" põe o pino no furo. Bata com a marreta quando o marcador estiver no verde.")
+
+
+func _pin_end() -> void:
+	if _pin.is_empty():
+		return
+	if _pin.node and is_instance_valid(_pin.node):
+		(_pin.node as Node).queue_free()
+	_pin = {}
+	if _pin_ui:
+		_pin_ui.queue_free()
+		_pin_ui = null
+	if _chop_pose:
+		_chop_pose.ready_pose = false
+		_chop_pose.swinging = false
+	_act_check = 0.0
+
+
+func _pin_new_timing() -> void:
+	_pin.speed = randf_range(0.3, 0.55)
+	_pin.gw = randf_range(0.2, 0.32)
+	_pin.gc = randf_range(0.25, 0.75)
+	_pin.t = randf() * 4.0
+
+
+func _pin_marker() -> float:
+	var x := fmod(float(_pin.t) * float(_pin.speed), 2.0)
+	return x if x <= 1.0 else 2.0 - x
+
+
+## Toque: escolhe o losango (true = usou o toque; senão anda/gira a câmera normal).
+func _pin_input(e: InputEvent) -> bool:
+	var pos := Vector2.INF
+	if e is InputEventScreenTouch and e.pressed:
+		pos = e.position
+	elif e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+	if pos == Vector2.INF or float(_pin.anim) >= 0.0:
+		return false
+	if _pin_ui:
+		for c in _pin_ui.get_children():
+			if c is Button and (c as Button).visible and (c as Button).get_global_rect().has_point(pos):
+				return true          # é botão (Bater/Sair): deixa o botão tratar
+	var alvos: Array = _pin.alvos
+	for k in alvos.size():
+		var w: Vector3 = alvos[k].pos
+		if _cam.is_position_behind(w):
+			continue
+		if pos.distance_to(_cam.unproject_position(w)) < 80.0:
+			_pin_pick(k)
+			return true
+	return false
+
+
+func _pin_pick(k: int) -> void:
+	if int(_pin.sel) >= 0:
+		_show_toast("Termine esse pino primeiro (ou ele quebra se você sair).")
+		return
+	var stg := int(_pin.alvos[k].get("stage", 0))
+	if stg == 0 and item_qtd("furador") <= 0 and not teste:
+		_show_toast("Precisa de um furador para abrir o furo (ponta de pedra + galho + cipó, no craft).")
+		return
+	if stg == 1 and item_qtd("pino") <= 0 and not teste:
+		_show_toast("Acabaram os pinos. Faça mais no craft com mata-juntas.")
+		return
+	_pin.go = k
+	var w: Vector3 = _pin.alvos[k].pos
+	var d := Vector2(w.x - _player.position.x, w.z - _player.position.z)
+	if d.length() > 1.1:
+		var spot := Vector3(w.x, 0, w.z) - Vector3(d.x, 0, d.y).normalized() * 0.8
+		_walk_to(_ground_pos(Vector2(spot.x, spot.z)), "pino")
+	else:
+		_pin_ready()
+
+
+## Chegou: põe o pino no furo (em pé, metade para fora) e prepara a marreta.
+func _pin_ready() -> void:
+	if _pin.is_empty():
+		return
+	var k := int(_pin.get("go", -1))
+	if k < 0 or k >= (_pin.alvos as Array).size():
+		return
+	var w: Vector3 = _pin.alvos[k].pos
+	_pin.sel = k
+	_pin.depth = 0.0
+	_pin.stage = int(_pin.alvos[k].get("stage", 0))
+	var mi: Node3D
+	if int(_pin.stage) == 0:
+		mi = _ponteira_node()
+	else:
+		var pm := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.018
+		cm.bottom_radius = 0.012
+		cm.height = 0.16
+		pm.mesh = cm
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.62, 0.47, 0.3)
+		pm.material_override = m
+		mi = pm
+	add_child(mi)
+	_pin.node = mi
+	_pin_place_node()
+	_face_to(w)
+	_yaw = _face
+	var eye := _player.global_position + Vector3.UP * 1.6
+	var hd := Vector2(w.x - eye.x, w.z - eye.z).length()
+	_pitch = clampf(atan2(eye.y - w.y, maxf(hd, 0.1)) - 0.05, -0.4, 1.2)
+	if _mao != "marreta":
+		equip("marreta")
+	if _chop_pose:
+		var top_h: float = w.y - _player.global_position.y
+		_chop_pose.vertical = true
+		_chop_pose.down_hit = lerpf(-42.0, -14.0, clampf(top_h / 0.95, 0.0, 1.0))
+		_chop_pose.ready_pose = true
+		_chop_pose.swinging = false
+	_pin_new_timing()
+
+
+func _pin_place_node() -> void:
+	var k := int(_pin.sel)
+	if k < 0 or _pin.node == null:
+		return
+	var w: Vector3 = _pin.alvos[k].pos
+	if int(_pin.stage) == 0:
+		# a ponteira em pé com a ponta na madeira; vai entrando a cada batida boa
+		(_pin.node as Node3D).position = w - Vector3.UP * 0.07 * float(_pin.depth)
+	else:
+		# a parte de fora do pino vai sumindo a cada batida boa
+		(_pin.node as Node3D).position = w + Vector3.UP * (0.08 - 0.075 * float(_pin.depth))
+
+
+## A ponteira (furador): cabo de galho com a ponta de pedra amarrada, ponta para baixo.
+func _ponteira_node() -> Node3D:
+	var root := Node3D.new()
+	var cabo := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.022
+	cm.bottom_radius = 0.02
+	cm.height = 0.24
+	cabo.mesh = cm
+	var wm := StandardMaterial3D.new()
+	wm.albedo_color = Color(0.45, 0.3, 0.17)
+	cabo.material_override = wm
+	cabo.position = Vector3(0, 0.17, 0)
+	root.add_child(cabo)
+	var tip := MeshInstance3D.new()
+	var tc := CylinderMesh.new()
+	tc.top_radius = 0.024
+	tc.bottom_radius = 0.002
+	tc.height = 0.07
+	tc.radial_segments = 6
+	tip.mesh = tc
+	var sm := StandardMaterial3D.new()
+	sm.albedo_color = Color(0.4, 0.4, 0.38)
+	sm.roughness = 0.8
+	tip.material_override = sm
+	tip.position = Vector3(0, 0.035, 0)
+	root.add_child(tip)
+	var amarra := MeshInstance3D.new()
+	var am := CylinderMesh.new()
+	am.top_radius = 0.027
+	am.bottom_radius = 0.027
+	am.height = 0.045
+	amarra.mesh = am
+	var cmat := StandardMaterial3D.new()
+	cmat.albedo_color = Color(0.5, 0.42, 0.22)
+	amarra.material_override = cmat
+	amarra.position = Vector3(0, 0.075, 0)
+	root.add_child(amarra)
+	return root
+
+
+func _pin_hit() -> void:
+	if _pin.is_empty() or int(_pin.sel) < 0 or float(_pin.anim) >= 0.0 or _walking:
+		return
+	if item_qtd("marreta") <= 0 and not teste:
+		_show_toast("Precisa da marreta.")
+		return
+	_pin.t = float(_pin.t) - 0.06
+	var m := _pin_marker()
+	_pin.frozen = m
+	var d := absf(m - float(_pin.gc)) - float(_pin.gw) * 0.5
+	if d > 0.01 and d <= KNAP_EDGE:
+		_show_toast("Quase! Bata no verde.")
+		return
+	_pin.ok = d <= 0.01
+	_pin.anim = 0.0
+	_pin.fired = false
+	if _chop_pose:
+		_chop_pose.swinging = true
+		_chop_pose.phase = 0.0
+
+
+func _pin_tick(delta: float) -> void:
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
+		(b as Control).visible = false
+	_pin.t = float(_pin.t) + delta
+	_pin.refresh = float(_pin.refresh) - delta
+	if float(_pin.refresh) <= 0.0 and int(_pin.sel) < 0:
+		_pin.refresh = 0.5
+		_pin.alvos = _pin_targets()
+	if float(_pin.anim) >= 0.0:
+		_pin.anim = float(_pin.anim) + delta
+		var ph := clampf(float(_pin.anim) / 0.45, 0.0, 1.0)
+		if _chop_pose:
+			_chop_pose.phase = ph
+		if ph >= 0.55 and not bool(_pin.fired):
+			_pin.fired = true
+			_pin_strike()
+		if ph >= 1.0:
+			_pin.anim = -1.0
+			if _chop_pose:
+				_chop_pose.swinging = false
+			_pin_new_timing()
+	if _pin_ui:
+		var hit: Control = _pin_ui.get_node("hit")
+		hit.visible = int(_pin.sel) >= 0 and not _walking
+		var il: Label = _pin_ui.get_node("info/il")
+		var nf := 0
+		for a in _pin.alvos:
+			if int(a.get("stage", 0)) == 0:
+				nf += 1
+		il.text = "Pinos na mochila: %s\nFaltam %d furos e %d pinos aqui perto" % ["∞ (teste)" if teste else str(item_qtd("pino")), nf, (_pin.alvos as Array).size() - nf]
+		(_pin_ui.get_node("mk") as Control).queue_redraw()
+		(_pin_ui.get_node("tb") as Control).queue_redraw()
+
+
+## A marreta bateu no pino.
+func _pin_strike() -> void:
+	var k := int(_pin.sel)
+	if k < 0:
+		return
+	var al: Dictionary = _pin.alvos[k]
+	var w: Vector3 = al.pos
+	if int(_pin.stage) == 0:
+		# furando: a ponteira entra; 4 batidas boas atravessam a madeira
+		wear("furador")
+		if bool(_pin.ok):
+			_pin.depth = float(_pin.depth) + 0.25
+			Sons.play_at(self, "machado", w, -6.0, 1.5)
+			_chips(w)
+			wear("marreta")
+			if float(_pin.depth) >= 0.99:
+				if str(al.kind) == "c":
+					_constr.set_stage(al.pc, int(al.k), 1)
+				else:
+					_maq.set_stage(int(al.mi), int(al.ji), 1)
+				(_pin.node as Node).queue_free()
+				_pin.node = null
+				_pin.sel = -1
+				_pin.alvos = _pin_targets()
+				_show_toast("Furou! Agora o losango vira \"Pino\": ponha o pino no furo e bata.")
+			else:
+				_pin_place_node()
+		else:
+			Sons.play_at(self, "estalo", w, -8.0, 1.6)
+			_show_toast("A ponteira escorregou. Bata no verde.")
+		return
+	if bool(_pin.ok):
+		_pin.depth = float(_pin.depth) + 1.0 / PIN_HITS
+		Sons.play_at(self, "machado", w, -4.0, 1.35)
+		_chips(w)
+		wear("marreta")
+		if float(_pin.depth) >= 0.99:
+			if not teste:
+				remove_item("pino", 1)
+				_update_inventory()
+			if str(al.kind) == "c":
+				_constr.pin_done(al.pc, int(al.k))
+			else:
+				_maq.tie(int(al.mi), int(al.ji))
+			(_pin.node as Node).queue_free()
+			_pin.node = null
+			_pin.sel = -1
+			_pin.alvos = _pin_targets()
+			var pronta: bool = str(al.kind) == "m" and _maq.pronta(int(al.mi))
+			_show_toast("Pino batido! " + ("A serra está pronta!" if pronta else ("Faltam %d aqui perto." % (_pin.alvos as Array).size() if not (_pin.alvos as Array).is_empty() else "Todos os pinos daqui estão batidos.")))
+		else:
+			_pin_place_node()
+	else:
+		# pegou torto: o pino racha e não serve mais
+		Sons.play_at(self, "estalo", w, -2.0, 1.2)
+		if not teste:
+			remove_item("pino", 1)
+			_update_inventory()
+		(_pin.node as Node).queue_free()
+		_pin.node = null
+		_pin.sel = -1
+		_show_toast("A marreta pegou torto e o pino rachou! Ponha outro.")
+
+
+func _build_pin_ui() -> void:
+	_pin_ui = Control.new()
+	_pin_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_pin_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(_pin_ui)
+	var info := PanelContainer.new()
+	info.name = "info"
+	info.offset_left = 16
+	info.offset_top = 90
+	info.offset_right = 360
+	info.offset_bottom = 170
+	info.add_theme_stylebox_override("panel", Mochila._box(Color(0.05, 0.05, 0.04, 0.82), Color(1, 1, 1, 0.18), 2, 8))
+	info.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var il := Label.new()
+	il.name = "il"
+	il.add_theme_font_size_override("font_size", 17)
+	info.add_child(il)
+	_pin_ui.add_child(info)
+	var mk := Control.new()
+	mk.name = "mk"
+	mk.set_anchors_preset(Control.PRESET_FULL_RECT)
+	mk.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mk.draw.connect(func(): _draw_pin_marks(mk))
+	_pin_ui.add_child(mk)
+	var tb := Control.new()
+	tb.name = "tb"
+	tb.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	tb.offset_left = -270
+	tb.offset_right = 270
+	tb.offset_top = -110
+	tb.offset_bottom = -30
+	tb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tb.draw.connect(func(): _draw_pin_bar(tb))
+	_pin_ui.add_child(tb)
+	var hit := Icones.IconButton.new()
+	hit.name = "hit"
+	hit.text = "Bater"
+	hit.add_theme_font_size_override("font_size", 22)
+	hit.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	hit.offset_left = -190
+	hit.offset_top = -190
+	hit.offset_right = -30
+	hit.offset_bottom = -30
+	hit.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+	hit.pressed.connect(_pin_hit)
+	hit.visible = false
+	_pin_ui.add_child(hit)
+	var out := Icones.IconButton.new()
+	out.text = "Sair"
+	out.add_theme_font_size_override("font_size", 20)
+	out.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	out.offset_left = -360
+	out.offset_top = -160
+	out.offset_right = -230
+	out.offset_bottom = -30
+	out.pressed.connect(_pin_end)
+	_pin_ui.add_child(out)
+
+
+func _draw_pin_marks(mk: Control) -> void:
+	if _pin.is_empty():
+		return
+	var font := ThemeDB.fallback_font
+	var tsec := Time.get_ticks_msec() / 1000.0
+	var alvos: Array = _pin.alvos
+	for k in alvos.size():
+		var w: Vector3 = alvos[k].pos
+		if _cam.is_position_behind(w):
+			continue
+		var p := _cam.unproject_position(w)
+		var sel := k == int(_pin.sel)
+		var col := Color(0.3, 0.85, 0.3) if sel else Color(1, 1, 1, 0.95)
+		var r := 16.0 + (3.0 * sin(tsec * 6.0) if sel else 0.0)
+		var pts := PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0), p + Vector2(0, r), p + Vector2(-r, 0)])
+		if sel:
+			mk.draw_circle(p, r * 1.6, Color(0.3, 0.9, 0.3, 0.25))
+		mk.draw_polyline(pts + PackedVector2Array([pts[0]]), col, 3.0, true)
+		var txt := ("%d%%" % int(float(_pin.depth) * 100.0)) if sel else ("Pino" if int(alvos[k].get("stage", 0)) == 1 else "Furar")
+		var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+		var lb := Rect2(p + Vector2(-tw * 0.5 - 8, -r - 44), Vector2(tw + 16, 28))
+		mk.draw_rect(lb, Color(0.05, 0.05, 0.04, 0.85))
+		mk.draw_rect(lb, col, false, 2.0)
+		mk.draw_string(font, lb.position + Vector2(8, 20), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.95, 0.8))
+
+
+func _draw_pin_bar(tb: Control) -> void:
+	if _pin.is_empty() or int(_pin.sel) < 0:
+		return
+	var w := tb.size.x
+	var r := Rect2(Vector2(0, 34), Vector2(w, 34))
+	var font := ThemeDB.fallback_font
+	var txt := "Bata quando o marcador estiver no verde"
+	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	tb.draw_rect(Rect2(Vector2(w * 0.5 - tw * 0.5 - 10, 0), Vector2(tw + 20, 28)), Color(0.05, 0.05, 0.04, 0.85))
+	tb.draw_string(font, Vector2(w * 0.5 - tw * 0.5, 21), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.95, 0.8))
+	tb.draw_rect(r.grow(4), Color(0.05, 0.05, 0.04, 0.9))
+	var n := 60
+	for k in n:
+		var u := (k + 0.5) / n
+		var d := absf(u - float(_pin.gc)) - float(_pin.gw) * 0.5
+		var col := Color(0.2, 0.75, 0.2) if d <= 0.0 else (Color(0.92, 0.55, 0.1) if d <= KNAP_EDGE else Color(0.8, 0.12, 0.1))
+		tb.draw_rect(Rect2(r.position + Vector2(w * k / n, 0), Vector2(w / n + 0.5, r.size.y)), col)
+	tb.draw_rect(r, Color(0, 0, 0, 0.8), false, 2.0)
+	var m: float = float(_pin.get("frozen", 0.5)) if float(_pin.anim) >= 0.0 else _pin_marker()
+	var x := r.position.x + m * w
+	tb.draw_rect(Rect2(Vector2(x - 4, r.position.y - 7), Vector2(8, r.size.y + 14)), Color(1.0, 0.85, 0.15))
+	tb.draw_rect(Rect2(Vector2(x - 4, r.position.y - 7), Vector2(8, r.size.y + 14)), Color(0.2, 0.12, 0.0), false, 2.0)
+
+
+# ================== CORTAR A PONTA QUE SOBROU (PLANTA) ==================
+
+func _trim_tick(delta: float) -> void:
+	if _trim.is_empty():
+		return
+	var mi := int(_trim.mi)
+	var si := int(_trim.si)
+	if mi >= _maq.plantas.size() or float(_maq.plantas[mi].sobra[si]) <= 0.0:
+		_trim = {}
+		return
+	var inf: Dictionary = _maq.sobra_info(mi, si)
+	var at: Vector3 = inf.pos
+	if Vector2(at.x - _player.position.x, at.z - _player.position.z).length() > 2.4:
+		_trim = {}
+		_show_toast("Você saiu de perto: parou de cortar.")
+		return
+	_face_to(at)
+	_trim.t = float(_trim.t) + delta
+	_trim.s = float(_trim.s) - delta
+	if float(_trim.s) <= 0.0:
+		_trim.s = 0.45 if str(_trim.tool) == "serra" else 0.6
+		if str(_trim.tool) == "serra":
+			Sons.play_at(self, "serra", at, 0.0, 0.95 + randf() * 0.1)
+			_sawdust(at)
+		else:
+			Sons.play_at(self, "machado", at, -2.0, 1.0 + randf() * 0.1)
+			_chips(at)
+	if float(_trim.t) >= (0.3 if teste else 3.5):
+		var fl: Dictionary = _maq.trim(mi, si)
+		var mid: Vector3 = inf.mid
+		var ax: Vector3 = (_maq.xform(mi).basis * Maquinas.slot_basis(str(Maquinas.TIPOS[_maq.plantas[mi].tipo].pecas[si][3])).x)
+		var yaw := atan2(-ax.z, ax.x) if Vector2(ax.x, ax.z).length() > 0.3 else randf() * TAU
+		_arvores.drop_log(fl, mid, yaw)
+		Sons.play_at(self, "baque", mid, -8.0, 1.2)
+		_trim = {}
+		_show_toast("Ponta cortada: o pedaço caiu no chão.")
+		_act_check = 0.0

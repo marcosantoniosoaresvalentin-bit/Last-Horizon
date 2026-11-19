@@ -34,6 +34,12 @@ const ITENS := {
 		"desc": "Três raízes de titica trançadas: bem mais forte. É a alça do balde e vai servir para muitas outras coisas."},
 	"rodela": {"nome": "Rodela", "kg": 2.5, "cat": "Recursos",
 		"desc": "Fatia fina cortada da ponta da tora apoiada nas forquilhas. É o fundo do balde."},
+	"ponta_pedra": {"nome": "Ponta de Pedra", "kg": 0.25, "cat": "Recursos",
+		"desc": "Pedra lascada grossa atrás e com a ponta bem aguda. Amarrada num cabo vira o furador."},
+	"furador": {"nome": "Furador de Pedra", "kg": 0.6, "cat": "Ferramentas",
+		"desc": "Ponta de pedra amarrada com cipó num cabo de galho. Encostada na madeira e batida com a marreta, abre o furo para o pino.", "ferramenta": true, "dur": 120},
+	"pino": {"nome": "Pino de Madeira", "kg": 0.03, "cat": "Recursos",
+		"desc": "Pino roliço lascado de uma mata-junta (ripa), com a ponta afinada. Batido com a marreta num furo, prende uma madeira na outra."},
 	"ripa": {"nome": "Ripa", "kg": 0.4, "cat": "Recursos",
 		"desc": "Mata-junta: tira fina e reta de madeira, rachada com o machado de uma tábua pequena. 12 delas fazem a parede do balde."},
 	"cunha": {"nome": "Cunha de Pedra", "kg": 0.6, "cat": "Ferramentas",
@@ -86,6 +92,8 @@ const RECEITAS_MAO := [
 	{"id": "veneno_timbo", "qtd": 1, "ingredientes": [["raiz_timbo", 3]]},
 	{"id": "oleo_andiroba", "qtd": 1, "ingredientes": [["semente_andiroba", 6]]},
 	{"id": "lasca_silex", "qtd": 3, "ingredientes": [["silex", 1]]},
+	{"id": "pino", "qtd": 2, "ingredientes": [["ripa", 1]]},
+	{"id": "furador", "qtd": 1, "ingredientes": [["ponta_pedra", 1], ["galho", 1], ["cipo", 1]]},
 	{"id": "balde", "qtd": 1, "ingredientes": [["ripa", 12], ["rodela", 1], ["cipo", 6], ["cipo_trancado", 1]]},
 ]
 

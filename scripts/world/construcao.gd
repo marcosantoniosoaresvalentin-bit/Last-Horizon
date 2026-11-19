@@ -10,6 +10,8 @@ extends Node3D
 ## Cada peça: {log: dados da madeira, p: [x,y,z] centro, q: [x,y,z,w] rotação}.
 ## No modelo da madeira o comprimento é o eixo X, a grossura o Y e a largura o Z.
 
+const Furo := preload("res://scripts/world/furo.gd")
+
 var pieces: Array = []
 var _jogo: Node
 var _arv: Node
@@ -363,7 +365,11 @@ func add(fl: Dictionary, b: Basis, c: Vector3, juntas := []) -> void:
 	fl.erase("em_pe")
 	fl.erase("racha")
 	var q := b.get_rotation_quaternion()
-	pieces.append({"log": fl, "p": [c.x, c.y, c.z], "q": [q.x, q.y, q.z, q.w], "amarras": juntas})
+	# cada encosto em madeira é um lugar de pino (ainda sem pino: o jogador bate depois)
+	var pinos := []
+	for u in juntas:
+		pinos.append([float(u), 0])      # 0 sem nada, 1 furado, 2 com o pino
+	pieces.append({"log": fl, "p": [c.x, c.y, c.z], "q": [q.x, q.y, q.z, q.w], "pinos": pinos})
 	_rebuild()
 
 
@@ -494,64 +500,99 @@ func _rebuild() -> void:
 		var bx := piece_box(pc)
 		n.transform = Transform3D(bx.b, bx.c)
 		_nodes.append(n)
-		var am: Array = pc.get("amarras", [])
-		if not am.is_empty():
-			var mi := MeshInstance3D.new()
-			mi.mesh = _lash_mesh(bx.h, am)
-			mi.material_override = _lash_mat()
-			n.add_child(mi)
+
+	# furos: atravessam a peça e entram no apoio de baixo (que também fica furado)
+	var segs := []
+	for pc in pieces:
+		for pn in pc.get("pinos", []):
+			if int(pn[1]) >= 1:
+				segs.append(pin_seg(pc, float(pn[0])))
+	if not segs.is_empty():
+		for i in pieces.size():
+			var pc: Dictionary = pieces[i]
+			var bx := piece_box(pc)
+			var inv := Transform3D(bx.b, bx.c).affine_inverse()
+			var holes := []
+			for sg in segs:
+				var a: Vector3 = inv * (sg[0] as Vector3)
+				var b: Vector3 = inv * (sg[1] as Vector3)
+				if not Furo._clip_box(a, b, (bx.h as Vector3) + Vector3.ONE * 0.01).is_empty():
+					holes.append([a, b, 0.022])
+			if not holes.is_empty():
+				Furo.apply(_nodes[i], holes, bx.h)
+	# pinos batidos: aparecem passando pelo furo
+	for pc in pieces:
+		for pn in pc.get("pinos", []):
+			if int(pn[1]) < 2:
+				continue
+			var sg := pin_seg(pc, float(pn[0]))
+			var up: Vector3 = ((sg[1] as Vector3) - (sg[0] as Vector3)).normalized()
+			var pm := Furo.pin_node(sg[0], (sg[1] as Vector3) + up * 0.012)
+			add_child(pm)
+			_nodes.append(pm)
 
 
-static var _lmat: StandardMaterial3D
+## O furo do pino: do topo da peça (no ponto u) atravessando ela e entrando uns 12 cm
+## no apoio de baixo. [fundo, topo]
+func pin_seg(pc: Dictionary, u: float) -> Array:
+	var bx := piece_box(pc)
+	var b: Basis = bx.b
+	var h: Vector3 = bx.h
+	var k := 1 if absf(b.y.y) >= absf(b.z.y) else 2
+	var top := pin_pos(pc, u)
+	var c: Vector3 = (bx.c as Vector3) + b.x * (u * h.x)
+	var down := (c - top).normalized()
+	if down.length() < 0.5:
+		down = Vector3.DOWN
+	var depth: float = h[k] * 2.0 + 0.12
+	return [top + down * depth, top - down * 0.01]
 
 
-static func _lash_mat() -> StandardMaterial3D:
-	if _lmat == null:
-		_lmat = StandardMaterial3D.new()
-		_lmat.vertex_color_use_as_albedo = true
-		_lmat.vertex_color_is_srgb = true
-		_lmat.roughness = 0.9
-	return _lmat
+static var _pmat: StandardMaterial3D
 
 
-## As voltas de cipó em volta da peça em cada amarração (no eixo da peça: x é o
-## comprido): umas voltas retas apertadas e duas cruzadas, por cima da madeira.
-static func _lash_mesh(h: Vector3, juntas: Array) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var ry := h.y + 0.008
-	var rz := h.z + 0.008
-	var tube := 0.0065
-	for ju in juntas:
-		var x0 := float(ju) * h.x
-		var turns := []
-		for t in 4:
-			turns.append([x0 + (t - 1.5) * 0.017, 0.0])
-		turns.append([x0, 0.045])           # as duas cruzadas (em X)
-		turns.append([x0, -0.045])
-		var ti := 0
-		for tr in turns:
-			var xc := float(tr[0])
-			var lean := float(tr[1])
-			var col := Color(0.2, 0.15, 0.07).darkened(0.1 * (ti % 2))
-			var segs := 14
-			var pts := []
-			for k in segs + 1:
-				var a := TAU * k / segs
-				# a volta inclinada vai de um lado ao outro no comprido (o X)
-				pts.append(Vector3(xc + lean * sin(a) * 1.4, cos(a) * ry, sin(a) * rz))
-			for k in segs:
-				var A: Vector3 = pts[k]
-				var B: Vector3 = pts[k + 1]
-				var out := Vector3(0, A.y, A.z).normalized()
-				var side := Vector3(1, 0, 0) * tube
-				var up := out * tube
-				for v in [A - side, B - side, B + side, A - side, B + side, A + side, A + up, B + up, B - side, A + up, B - side, A - side]:
-					st.set_color(col)
-					st.add_vertex(v)
-			ti += 1
-	st.generate_normals()
-	return st.commit()
+static func _pin_mat() -> StandardMaterial3D:
+	if _pmat == null:
+		_pmat = StandardMaterial3D.new()
+		_pmat.albedo_color = Color(0.62, 0.47, 0.3)
+		_pmat.roughness = 0.9
+	return _pmat
+
+
+## Onde vai o pino (em cima da peça, no ponto u do comprimento).
+func pin_pos(pc: Dictionary, u: float) -> Vector3:
+	var bx := piece_box(pc)
+	var b: Basis = bx.b
+	var h: Vector3 = bx.h
+	var k := 1 if absf(b.y.y) >= absf(b.z.y) else 2
+	var up: Vector3 = b[k] * signf((b[k] as Vector3).y if absf((b[k] as Vector3).y) > 0.01 else 1.0)
+	if absf(b.x.y) > 0.7:
+		# peça em pé: o pino entra de lado, perto de onde ela encosta
+		up = b.y
+	return (bx.c as Vector3) + b.x * (u * h.x) + up * h[k]
+
+
+## Pinos que faltam bater perto: [{pc, k, pos}]
+func pin_targets(pos: Vector3, reach := 2.6) -> Array:
+	var out := []
+	for pc in pieces:
+		var pns: Array = pc.get("pinos", [])
+		for k in pns.size():
+			if int(pns[k][1]) >= 2:
+				continue
+			var w := pin_pos(pc, float(pns[k][0]))
+			if Vector2(w.x - pos.x, w.z - pos.z).length() < reach and absf(w.y - pos.y - 0.9) < 2.2:
+				out.append({"pc": pc, "k": k, "pos": w, "stage": int(pns[k][1])})
+	return out
+
+
+func pin_done(pc: Dictionary, k: int) -> void:
+	set_stage(pc, k, 2)
+
+
+func set_stage(pc: Dictionary, k: int, st: int) -> void:
+	pc.pinos[k][1] = st
+	_rebuild()
 
 
 func save(path: String) -> void:
@@ -567,3 +608,14 @@ func _load(path: String) -> void:
 	var d = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if d is Dictionary:
 		pieces = d.get("pecas", [])
+		for pc in pieces:
+			if pc.has("amarras"):
+				# versão antiga (amarrada com cipó): os lugares viram pinos já batidos
+				var pns := []
+				for u in pc.amarras:
+					pns.append([float(u), 2])
+				pc["pinos"] = pns
+				pc.erase("amarras")
+			for pn in pc.get("pinos", []):
+				if pn[1] is bool:
+					pn[1] = 2 if pn[1] else 0
