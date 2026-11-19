@@ -1,9 +1,9 @@
 {
-  "version": 130,
-  "file": "update_130.zip",
-  "size": 4735515,
-  "sha256": "54db297f537c530edb603da5ca0ef6cd771ef8bab5ef0547b55af9bf476375d0",
+  "version": 131,
+  "file": "update_131.zip",
+  "size": 4736879,
+  "sha256": "f3f44514a15b34a8d502719f0429312a8bfebc03b6acae59453f2dd630d57bb8",
   "min_build": 1,
-  "notes": "Nova máquina: Desfibradeira de Talo (fibra de buriti)",
+  "notes": "Desfibradeira: tábuas retas, pinos rentes, talo cortando em tiras",
   "date": "2026-11-19"
 }
