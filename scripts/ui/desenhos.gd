@@ -233,12 +233,10 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_polyline(bl + PackedVector2Array([bl[0]]), ink, 2.0 * u, true)
 		"folha_buriti", "acao_cortar":
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95)
-		"peconha":
-			_braid_loop(ci, c, Vector2(40, 26) * u, u, 0.0, TAU)
+		"folha_buriti_seca":
+			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95, true)
 		"acao_derrubar":
 			fell_icon(ci, c, s)
-		"acao_escalar":
-			climb_icon(ci, c, s)
 		"ponta_pedra", "furador":
 			if id == "furador":
 				ci.draw_line(c + Vector2(-44, 30) * u, c + Vector2(4, -4) * u, Color(0.55, 0.36, 0.2), 13 * u, true)
@@ -388,7 +386,7 @@ static func flint(ci: CanvasItem, pts: PackedVector2Array, base: Color, seed_: i
 
 ## Folha de buriti em leque: talo curvo e a "mão" aberta de lâminas pregueadas
 ## (vinco claro e escuro alternando) com as pontas caindo.
-static func buriti_leaf(ci: CanvasItem, c: Vector2, s: float) -> void:
+static func buriti_leaf(ci: CanvasItem, c: Vector2, s: float, seca := false) -> void:
 	var u := s / 100.0
 	var hub := c + Vector2(-2, -4) * u
 	# talo: do canto de baixo até a mão, levemente curvo
@@ -396,8 +394,8 @@ static func buriti_leaf(ci: CanvasItem, c: Vector2, s: float) -> void:
 	for k in 9:
 		var t := k / 8.0
 		pet.append(c + Vector2(lerpf(-46, -2, t), lerpf(46, -4, t) + sin(t * PI) * 6.0) * u)
-	ci.draw_polyline(pet, Color(0.2, 0.3, 0.1), 7.5 * u, true)
-	ci.draw_polyline(pet, Color(0.42, 0.58, 0.24), 4.0 * u, true)
+	ci.draw_polyline(pet, Color(0.25, 0.17, 0.08) if seca else Color(0.2, 0.3, 0.1), 7.5 * u, true)
+	ci.draw_polyline(pet, Color(0.6, 0.45, 0.26) if seca else Color(0.42, 0.58, 0.24), 4.0 * u, true)
 	# as lâminas (de trás para a frente)
 	var n := 19
 	for k in n:
@@ -413,6 +411,8 @@ static func buriti_leaf(ci: CanvasItem, c: Vector2, s: float) -> void:
 		var w := 3.6 * u
 		var light := k % 2 == 0
 		var col := Color(0.3, 0.55, 0.18) if light else Color(0.16, 0.36, 0.1)
+		if seca:
+			col = Color(0.62, 0.45, 0.24) if light else Color(0.45, 0.31, 0.15)
 		var poly := PackedVector2Array([base - side * 1.0 * u, mid - side * w, tip, mid + side * w, base + side * 1.0 * u])
 		ci.draw_colored_polygon(poly, col)
 		# a ponta rasgada em duas (como a folha de verdade)
@@ -420,23 +420,8 @@ static func buriti_leaf(ci: CanvasItem, c: Vector2, s: float) -> void:
 		ci.draw_line(tip, tip + dir * 5.0 * u - side * 2.5 * u + droop * 0.3, col.darkened(0.15), 1.6 * u, true)
 		ci.draw_line(base, mid, col.lightened(0.25), 1.0 * u, true)
 	# o centro da mão (onde o talo abre)
-	ci.draw_circle(hub, 5.0 * u, Color(0.3, 0.42, 0.16))
-	ci.draw_circle(hub + Vector2(-1, -1) * u, 2.5 * u, Color(0.5, 0.64, 0.3))
-
-
-## Laço de cipó trançado (a peconha), elipse de raios rr; arco de a0 até a1.
-static func _braid_loop(ci: CanvasItem, c: Vector2, rr: Vector2, u: float, a0: float, a1: float) -> void:
-	for strand in 3:
-		var pts := PackedVector2Array()
-		var n := 64
-		for i in n + 1:
-			var a := lerpf(a0, a1, i / float(n))
-			var wob := sin(a * 9.0 + strand * TAU / 3.0) * 3.2 * u
-			pts.append(c + Vector2(cos(a) * (rr.x + wob), sin(a) * (rr.y + wob)))
-		var col := Color(0.44, 0.36, 0.2).darkened(strand * 0.12)
-		ci.draw_polyline(pts, Color(0.18, 0.13, 0.06), 6.5 * u, true)
-		ci.draw_polyline(pts, col, 4.5 * u, true)
-		ci.draw_polyline(pts, col.lightened(0.3), 1.4 * u, true)
+	ci.draw_circle(hub, 5.0 * u, Color(0.4, 0.28, 0.14) if seca else Color(0.3, 0.42, 0.16))
+	ci.draw_circle(hub + Vector2(-1, -1) * u, 2.5 * u, Color(0.6, 0.46, 0.28) if seca else Color(0.5, 0.64, 0.3))
 
 
 ## Derrubar: o toco cortado com o machado cravado e o tronco caído na frente.
@@ -478,37 +463,6 @@ static func fell_icon(ci: CanvasItem, c: Vector2, s: float) -> void:
 	ci.draw_polyline(head + PackedVector2Array([head[0]]), ink, 1.6 * u, true)
 	for k in 3:
 		ci.draw_line(c + Vector2(-32 + k * 2, -10 + k * 2) * u, c + Vector2(-25 + k * 2, -12 + k * 2) * u, Color(0.68, 0.56, 0.3), 1.6 * u, true)
-
-
-## Escalar: o tronco do buriti e os dois pés presos na peconha.
-static func climb_icon(ci: CanvasItem, c: Vector2, s: float) -> void:
-	var u := s / 100.0
-	var ink := Color(0.1, 0.07, 0.04)
-	# tronco cinza com os anéis
-	var tr := Rect2(c + Vector2(-13, -50) * u, Vector2(26, 100) * u)
-	ci.draw_rect(tr, Color(0.55, 0.53, 0.5))
-	ci.draw_rect(Rect2(tr.position + Vector2(17, 0) * u, Vector2(9, 100) * u), Color(0.42, 0.4, 0.37))
-	ci.draw_rect(Rect2(tr.position, Vector2(5, 100) * u), Color(0.64, 0.62, 0.58))
-	for k in 8:
-		var y := -46 + k * 13
-		ci.draw_line(c + Vector2(-13, y) * u, c + Vector2(13, y + 2) * u, Color(0.36, 0.34, 0.31), 1.6 * u, true)
-	ci.draw_rect(tr, ink, false, 1.6 * u)
-	# a peconha passando atrás do tronco, de um pé ao outro
-	_braid_loop(ci, c + Vector2(0, 14) * u, Vector2(30, 9) * u, u, PI * 1.05, TAU * 0.98)
-	# os pés (sola encostada no tronco), dos dois lados
-	for sg in [-1.0, 1.0]:
-		var f := PackedVector2Array()
-		var pts := [[-12, 8], [-36, 2], [-44, 8], [-44, 18], [-36, 24], [-12, 24]]
-		for p in pts:
-			f.append(c + Vector2(float(p[0]) * sg, float(p[1])) * u)
-		ci.draw_colored_polygon(f, Color(0.78, 0.55, 0.4))
-		ci.draw_polyline(f + PackedVector2Array([f[0]]), ink, 1.6 * u, true)
-		# canela subindo
-		ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-34 * sg, 4) * u, c + Vector2(-22 * sg, 4) * u, c + Vector2(-20 * sg, -40) * u, c + Vector2(-34 * sg, -40) * u]), Color(0.72, 0.5, 0.36))
-		ci.draw_line(c + Vector2(-34 * sg, 4) * u, c + Vector2(-34 * sg, -40) * u, ink, 1.4 * u, true)
-		ci.draw_line(c + Vector2(-22 * sg, 4) * u, c + Vector2(-20 * sg, -40) * u, ink, 1.4 * u, true)
-	# a frente do laço (por cima dos pés)
-	_braid_loop(ci, c + Vector2(0, 14) * u, Vector2(30, 9) * u, u, 0.02, PI * 0.98)
 
 
 ## O olho (botão de olhar o que dá para fazer): branco amendoado, íris, pupila e brilho.

@@ -464,13 +464,6 @@ func _use() -> void:
 		else:
 			_say("Largue a tora antes de colocar %s." % Itens.nome(str(it.id)).to_lower())
 		return
-	if it.id == "peconha" and _game:
-		var msg: String = _game.use_peconha()
-		if msg == "":
-			fechar()
-		else:
-			_say(msg)
-		return
 	if it.id == "semente" and _game:
 		if _game.put_seed_from_bag(true):
 			fechar()

@@ -1,10 +1,12 @@
 extends Node3D
 ## Araras-canindé (Ara ararauna): vivem em bando, em casais para a vida toda.
 ##
-## Comida: frutos da bacaba (maduros de outubro a dezembro) e do cipó-titica (dezembro a
-## fevereiro); no resto do ano, flores, frutos verdes e o miolo das palmeiras, sempre
-## perto de bacaba ou cipó adulto. Sem nenhum dos dois por perto passam fome.
-## Elas espalham os caroços: a bacaba (junto com os macacos) e o cipó (só elas).
+## Comida: frutos da bacaba (maduros de outubro a dezembro), do buriti (dezembro a
+## junho: elas roem a casca de escamas e comem a polpa amarela, pousadas nos cachos) e
+## do cipó-titica (dezembro a fevereiro); no resto do ano, flores, frutos verdes e o
+## miolo das palmeiras, sempre perto de bacaba, buriti ou cipó adulto. Sem nada disso
+## por perto passam fome. Elas espalham os caroços: a bacaba (junto com os macacos), o
+## buriti (nasce se cair em chão encharcado) e o cipó (só elas).
 ##
 ## Dia: dormem juntas numa árvore alta; ao clarear saem gritando em bando (os casais
 ## voam lado a lado), comem de manhã, descansam no calor, comem de novo à tarde e
@@ -135,9 +137,17 @@ func _pick_roost() -> void:
 		roost = Vector2(float(best[0]), float(best[1]))
 
 
+func _bur_adults() -> Array:
+	if _bur == null:
+		return []
+	return _bur.palms.filter(func(p): return _bur.is_adult(p))
+
+
 func _food_points() -> Array:
 	var out := []
 	for p in _bac.adult_palms():
+		out.append(Vector2(float(p.x), float(p.z)))
+	for p in _bur_adults():
 		out.append(Vector2(float(p.x), float(p.z)))
 	for pl in _cip.adult_plants():
 		out.append(Vector2(float(pl.x), float(pl.z)))
@@ -160,7 +170,8 @@ func tick() -> void:
 func _day(day: int) -> void:
 	var palms: Array = _bac.adult_palms()
 	var vines: Array = _cip.adult_plants()
-	fome = fome + 1 if palms.is_empty() and vines.is_empty() else 0
+	var burs: Array = _bur_adults()
+	fome = fome + 1 if palms.is_empty() and vines.is_empty() and burs.is_empty() else 0
 	# morrendo: fome, velhice, gavião
 	var keep := []
 	for b in birds:
@@ -186,6 +197,13 @@ func _day(day: int) -> void:
 				var a := _rng.randf() * TAU
 				var d := _rng.randf_range(30.0, 400.0)    # voam longe com o fruto no bico
 				_bac.drop_seed(float(src.x) + cos(a) * d, float(src.z) + sin(a) * d, day)
+	if _bur and _bur.fruit_season(day) and not burs.is_empty():
+		for b in birds:
+			if _rng.randf() < 0.05:
+				var src: Dictionary = burs[_rng.randi() % burs.size()]
+				var a := _rng.randf() * TAU
+				var d := _rng.randf_range(20.0, 300.0)
+				_bur.drop_seed(float(src.x) + cos(a) * d, float(src.z) + sin(a) * d)
 	if cipo_season(day) and not vines.is_empty():
 		for b in birds:
 			if _rng.randf() < 0.08:
@@ -372,7 +390,10 @@ func _feeding_site(rng: RandomNumberGenerator) -> Array:
 	if _bac.ripe_season(last_day):
 		for p in _bac.adult_palms():
 			trees.append({"bac": p})
-	elif cipo_season(last_day):
+	if _bur and _bur.fruit_season(last_day):
+		for p in _bur_adults():
+			trees.append({"bur": p})
+	if trees.is_empty() and cipo_season(last_day):
 		for pl in _cip.adult_plants():
 			var host = _cip._host_of(pl)
 			if host != null:
@@ -380,6 +401,8 @@ func _feeding_site(rng: RandomNumberGenerator) -> Array:
 	if trees.is_empty():
 		for p in _bac.adult_palms():
 			trees.append({"bac": p})
+		for p in _bur_adults():
+			trees.append({"bur": p})
 	if trees.is_empty():
 		for p in _arv.plants:
 			if int(p[5]) == 0 and _arv.height_of(p, last_day) > 10.0:
@@ -399,6 +422,8 @@ func _feeding_site(rng: RandomNumberGenerator) -> Array:
 static func _tree_xz(t: Dictionary) -> Vector2:
 	if t.has("bac"):
 		return Vector2(float(t.bac.x), float(t.bac.z))
+	if t.has("bur"):
+		return Vector2(float(t.bur.x), float(t.bur.z))
 	return Vector2(float(t.arv[0]), float(t.arv[1]))
 
 
@@ -411,6 +436,20 @@ func _crown_spot(t: Dictionary, rng: RandomNumberGenerator) -> Vector3:
 		var th: float = _bac.trunk_h(t.bac)
 		var r := rng.randf_range(0.5, 1.6)
 		return Vector3(xz.x + cos(a) * r, gy + th + 0.7 + r * 0.25, xz.y + sin(a) * r)
+	if t.has("bur"):
+		# pousada no cacho de frutos, embaixo da copa (como a arara comendo buriti)
+		var bp: Dictionary = t.bur
+		var top: float = gy + float(_bur.trunk_h(bp)) - 0.1
+		var rot := float(bp.get("rot", 0.0))
+		var nf := 2 + int(absf(sin(float(bp.x) * 2.3 + float(bp.z) * 5.1)) * 2.99)
+		var k := rng.randi() % nf
+		var ca := rot + k * TAU / nf + 0.4
+		var b := Basis(Vector3.UP, ca)
+		var cacho := Vector3(xz.x, top, xz.y) + b * Vector3(0.45, -0.25, 0)
+		if _bur.fruit_season(last_day) and rng.randf() < 0.8:
+			return cacho + b * Vector3(0.12, 0.05, 0)
+		var rr := rng.randf_range(0.8, 2.0)
+		return Vector3(xz.x + cos(a) * rr, top + 0.5 + rr * 0.2, xz.y + sin(a) * rr)
 	var h: float = _arv.height_of(t.arv, last_day)
 	var r := rng.randf_range(0.0, h * 0.13)
 	return Vector3(xz.x + cos(a) * r, gy + h * 0.94 - r * 0.4, xz.y + sin(a) * r)

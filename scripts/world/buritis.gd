@@ -45,6 +45,12 @@ var _leaf_mat: StandardMaterial3D
 var _trunk_mat: StandardMaterial3D
 var _dead_mat: StandardMaterial3D
 var _nodes: Array = []
+var secas: Array = []             # folhas secas caídas no chão: [x, z, variante, folha, giro, escala, dia]
+var _seca_nodes: Array = []
+var drop_hook := Callable()       # o jogo mostra a folha seca caindo (perto do jogador)
+const SECA_CHANCE := 1.0 / 80.0   # cada buriti solta uma folha seca a cada uns 80 dias
+const SECA_DAYS := 150            # a folha seca no chão apodrece em uns 5 meses
+const SECA_MAX := 700
 var _grid := {}
 var _last_month := -1
 
@@ -205,11 +211,6 @@ func trunk_r(p: Dictionary) -> float:
 	return TRUNK_R * lerpf(0.7, 1.0, clampf(trunk_h(p) / 8.0, 0.0, 1.0))
 
 
-## Até onde os pés sobem na peconha: vivo, com os olhos na base das folhas; seco, no topo.
-func climb_top(p: Dictionary) -> float:
-	return maxf(0.0, trunk_h(p) - (1.0 if dead(p) else 1.75))
-
-
 ## O buriti mais perto (de pé, ou broto com folhas).
 func palm_near(pos: Vector3, reach: float) -> Dictionary:
 	var best := {}
@@ -233,10 +234,6 @@ func reach_leaves(p: Dictionary) -> Array:
 ## Pequeno: alguma folha verde está ao alcance do chão (não precisa subir).
 func is_small(p: Dictionary) -> bool:
 	return not reach_leaves(p).is_empty()
-
-
-func can_climb(p: Dictionary) -> bool:
-	return not p.has("toco") and climb_top(p) > 1.0 and not is_small(p)
 
 
 func can_fell(p: Dictionary) -> bool:
@@ -316,6 +313,108 @@ func cut_leaf(p: Dictionary, li: int) -> void:
 	_rebuild()
 
 
+## ================== FOLHAS SECAS QUE CAEM SOZINHAS ==================
+
+## Índices das folhas secas (a "saia") da copa desse buriti.
+func dry_leaves_of(p: Dictionary) -> Array:
+	var v := int(p.get("var", 0)) % CROWN_VARIANTS
+	var out := []
+	for i in (_crown_params[v] as Array).size():
+		if bool(_crown_params[v][i].seca):
+			out.append(i)
+	return out
+
+
+## Onde a folha seca deita: para fora do tronco, do lado em que ela pendia.
+func seca_land(p: Dictionary, li: int) -> Vector3:
+	var v := int(p.get("var", 0)) % CROWN_VARIANTS
+	var az := float(_crown_params[v][li].az) + float(p.get("rot", 0.0))
+	var r := _rng.randf_range(0.6, 1.8) * maxf(crown_scale(p), 0.4)
+	var x := float(p.x) + cos(-az) * r
+	var z := float(p.z) + sin(-az) * r
+	return Vector3(x, _jogo.height_at(x, z), z)
+
+
+func add_seca(p: Dictionary, li: int, land: Vector3, yaw: float) -> void:
+	secas.append([land.x, land.z, int(p.get("var", 0)) % CROWN_VARIANTS, li, yaw, crown_scale(p), last_day])
+	while secas.size() > SECA_MAX:
+		secas.pop_front()
+	_rebuild_secas()
+
+
+## O meio da folha deitada (o talo começa no ponto da folha; a mão abre lá na frente).
+func _seca_mid(e: Array) -> Vector2:
+	var v := int(e[2])
+	var li := int(e[3])
+	var lp: Dictionary = _crown_params[v][li]
+	var az := float(lp.az)
+	var o := Vector3(cos(az), 0, sin(az))
+	var el := float(lp.elev)
+	var dir := (o * cos(el) + Vector3.UP * sin(el)).normalized()
+	var m: Vector3 = leaf_lying_basis(v, li, float(e[4])) * (dir * (float(lp.pet) + float(lp.R) * 0.4) * float(e[5]))
+	return Vector2(float(e[0]) + m.x, float(e[1]) + m.z)
+
+
+func seca_near(pos: Vector3, reach: float) -> int:
+	var best := -1
+	var bd := reach
+	for i in secas.size():
+		var a := Vector2(float(secas[i][0]), float(secas[i][1]))
+		var b := _seca_mid(secas[i])
+		var q := Vector2(pos.x, pos.z)
+		var ab := b - a
+		var t := clampf((q - a).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
+		var d := q.distance_to(a + ab * t)          # perto de qualquer ponto do talo à mão
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+func take_seca(i: int) -> void:
+	secas.remove_at(i)
+	_rebuild_secas()
+
+
+func _rebuild_secas() -> void:
+	for n in _seca_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	_seca_nodes.clear()
+	var groups := {}
+	for e in secas:
+		var v := int(e[2])
+		var li := int(e[3])
+		var k := v * 100 + li
+		if not groups.has(k):
+			groups[k] = []
+		var s := float(e[5])
+		var x := float(e[0])
+		var z := float(e[1])
+		var b: Basis = leaf_lying_basis(v, li, float(e[4])).scaled(Vector3(s, s, s))
+		groups[k].append(Transform3D(b, Vector3(x, _jogo.height_at(x, z) + 0.04, z)))
+	for k in groups:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = leaf_mesh(int(k) / 100, int(k) % 100)
+		mm.instance_count = (groups[k] as Array).size()
+		for i in mm.instance_count:
+			mm.set_instance_transform(i, groups[k][i])
+		var mi := MultiMeshInstance3D.new()
+		mi.multimesh = mm
+		mi.material_override = _leaf_mat
+		mi.visibility_range_end = 90.0
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+		_seca_nodes.append(mi)
+
+
+## As araras (ou a água) levam o fruto: se cair em chão encharcado, nasce buriti.
+func drop_seed(x: float, z: float) -> void:
+	if palms.size() < MAX_PALMS and _rng.randf() < 0.25 and _spot_ok(x, z):
+		palms.append(_new_palm(x, z, last_day))
+
+
 ## Troncos secos de pé (para as araras): os que ainda têm uns 6 m ou mais.
 func snags() -> Array:
 	return palms.filter(func(p): return dead(p) and trunk_h(p) > 6.0)
@@ -351,6 +450,23 @@ func tick() -> void:
 					p.morta = last_day
 			keep.append(p)
 		palms = keep
+		# as folhas secas da saia caem sozinhas (a última do dia aparece caindo)
+		for p in palms:
+			if p.has("toco") or dead(p) or _rng.randf() > SECA_CHANCE:
+				continue
+			var dl := dry_leaves_of(p)
+			if dl.is_empty():
+				continue
+			var li: int = dl[_rng.randi() % dl.size()]
+			var land := seca_land(p, li)
+			var yaw := _rng.randf() * TAU
+			if last_day == day and drop_hook.is_valid() and bool(drop_hook.call(p, li, land, yaw)):
+				continue           # o jogo mostra caindo e põe no chão quando ela deitar
+			secas.append([land.x, land.z, int(p.get("var", 0)) % CROWN_VARIANTS, li, yaw, crown_scale(p), last_day])
+		# a folha seca no chão apodrece
+		secas = secas.filter(func(e): return last_day - int(e[6]) < SECA_DAYS)
+		while secas.size() > SECA_MAX:
+			secas.pop_front()
 		# os frutos caem perto (e a água leva): de vez em quando nasce buriti novo
 		if palms.size() < MAX_PALMS and _rng.randf() < 0.02 and fruit_season(last_day):
 			var adults := palms.filter(func(p): return is_adult(p))
@@ -363,6 +479,7 @@ func tick() -> void:
 				if _spot_ok(x, z):
 					palms.append(_new_palm(x, z, last_day))
 	last_day = day
+	_rebuild_secas()
 	# folha nova brota no lugar das cortadas (uma a cada uns 2 meses)
 	for p in palms:
 		var cl: Array = p.get("cortadas", [])
@@ -394,6 +511,7 @@ func push_out(p: Vector3) -> Vector3:
 # ================== NA TELA ==================
 
 func _rebuild() -> void:
+	_rebuild_secas()
 	for n in _nodes:
 		if is_instance_valid(n):
 			n.queue_free()
@@ -815,7 +933,7 @@ static func _fruit(st: SurfaceTool, c: Vector3, r: float, col: Color) -> void:
 func save(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "palmeiras": palms}))
+		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "palmeiras": palms, "secas": secas}))
 		f.close()
 
 
@@ -826,6 +944,7 @@ func _load(path: String) -> bool:
 	if not d is Dictionary:
 		return false
 	palms = d.get("palmeiras", [])
+	secas = d.get("secas", [])
 	for p in palms:
 		for k in ["degraus", "lado"]:
 			(p as Dictionary).erase(k)
