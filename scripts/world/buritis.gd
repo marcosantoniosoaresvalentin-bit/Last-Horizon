@@ -14,6 +14,9 @@ extends Node3D
 ## Planta: {x, z, nasc (dia), hmax (m), var, rot, morta (dia ou -1)}
 
 const MundoSim := preload("res://scripts/mundo_sim.gd")
+const Furo := preload("res://scripts/world/furo.gd")
+const STEP := 0.45                # um degrau a cada 45 cm
+const RUNG_L := 0.5
 const START := 230
 const MAX_PALMS := 420
 const ROSETTE_DAYS := 2190       # 6 anos só com as folhas no chão (sem tronco)
@@ -35,6 +38,8 @@ var _jogo: Node
 var _arv: Node
 var _rng := RandomNumberGenerator.new()
 var _crowns: Array = []
+var _crown_params: Array = []     # por variante: as folhas [{az, elev, pet, R, col, seed, seca}]
+var _leaf_meshes := {}            # (variante, folha) -> malha da folha sozinha (para cair)
 var _cacho_mesh: ArrayMesh
 var _leaf_mat: StandardMaterial3D
 var _trunk_mat: StandardMaterial3D
@@ -188,6 +193,107 @@ func trunk_point(p: Dictionary, y: float, ang: float, out := 0.0) -> Vector3:
 	return Vector3(x + cos(ang) * r, _jogo.height_at(x, z) + y, z + sin(ang) * r)
 
 
+## ================== ESCADA E FOLHAS ==================
+
+## O degrau é uma ripa grossa (tábua pequena) atravessada no tronco.
+func rung_log() -> Dictionary:
+	var h: Array = preload("res://scripts/world/arvores.gd").split_sec(preload("res://scripts/world/arvores.gd").circle_sec(), false)
+	var b: Array = preload("res://scripts/world/arvores.gd").split_sec(h[0], true)
+	return {"cil": {"L": RUNG_L, "ra": 0.07, "rb": 0.07}, "sec": b[0], "pos": [0, 0, 0], "yaw": 0.0, "dia": 0, "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0, "bot": {}, "top": {}}
+
+
+## Degrau k (0 = o de baixo): {c (centro), basis, out (para fora), h}
+func rung_pos(p: Dictionary, k: int) -> Dictionary:
+	var ang := float(p.get("lado", 0.0))
+	var h := STEP * (k + 1)
+	var out := Vector3(cos(ang), 0, sin(ang))
+	var tan := Vector3(-out.z, 0, out.x)
+	var c := trunk_point(p, h, ang, 0.06)
+	# a ripa deitada, atravessada (comprido de lado), encostada na frente do tronco
+	var b := Basis(tan, Vector3.UP, tan.cross(Vector3.UP))
+	return {"c": c, "basis": b, "out": out, "h": h}
+
+
+## Quantos degraus até chegar nas folhas (ou no topo do tronco seco).
+func rungs_to_top(p: Dictionary) -> int:
+	# vivo: para com o olho na base das folhas (o pé uns 1,5 m abaixo da copa)
+	var top := trunk_h(p) - (0.3 if dead(p) else 1.55)
+	return maxi(1, int(ceil(top / STEP)))
+
+
+func palm_near(pos: Vector3, reach: float) -> Dictionary:
+	var best := {}
+	var bd := reach
+	for p in palms:
+		if trunk_h(p) < 2.0:
+			continue
+		var d := Vector2(float(p.x) - pos.x, float(p.z) - pos.z).length()
+		if d < bd:
+			bd = d
+			best = p
+	return best
+
+
+func add_rung(p: Dictionary, ang_if_first: float) -> void:
+	if not p.has("degraus"):
+		p["degraus"] = []
+	if (p.degraus as Array).is_empty():
+		p["lado"] = ang_if_first
+	p.degraus.append([STEP * ((p.degraus as Array).size() + 1), 0])
+	_rebuild()
+
+
+func set_rung_stage(p: Dictionary, k: int, st: int) -> void:
+	p.degraus[k][1] = st
+	_rebuild()
+
+
+## Folhas verdes que dá para cortar: [{li, cut (ponto no talo), base}]
+func leaves_of(p: Dictionary) -> Array:
+	if dead(p) or trunk_h(p) < 2.0:
+		return []
+	var v := int(p.get("var", 0)) % CROWN_VARIANTS
+	var prm: Array = _crown_params[v]
+	var xf := crown_xf(p)
+	var cut: Array = p.get("cortadas", [])
+	var out := []
+	for i in prm.size():
+		var lp: Dictionary = prm[i]
+		if bool(lp.seca) or cut.has(i) or cut.has(float(i)):
+			continue
+		var az := float(lp.az)
+		var o := Vector3(cos(az), 0, sin(az))
+		var el := float(lp.elev)
+		var dir := (o * cos(el) + Vector3.UP * sin(el)).normalized()
+		var base := o * 0.12
+		out.append({"li": i, "cut": xf * (base + dir * 0.7), "base": xf * base})
+	return out
+
+
+func crown_xf(p: Dictionary) -> Transform3D:
+	var gy: float = _jogo.height_at(float(p.x), float(p.z))
+	var s := crown_scale(p)
+	return Transform3D(Basis(Vector3.UP, float(p.get("rot", 0.0))).scaled(Vector3(s, s, s)), Vector3(float(p.x), gy + trunk_h(p) - 0.1, float(p.z)))
+
+
+## Como a folha fica deitada no chão: o talo na horizontal, a mão aberta deitada.
+func leaf_lying_basis(v: int, li: int, yaw: float) -> Basis:
+	var lp: Dictionary = _crown_params[v][li]
+	var az := float(lp.az)
+	var el := float(lp.elev)
+	var tan := Vector3(-sin(az), 0, cos(az))
+	# tira a subida do talo (gira no eixo de lado) e depois gira no chão
+	return Basis(Vector3.UP, yaw) * Basis(tan, el) * Basis(Vector3.UP, 0.0)
+
+
+func cut_leaf(p: Dictionary, li: int) -> void:
+	if not p.has("cortadas"):
+		p["cortadas"] = []
+	p.cortadas.append(li)
+	p["corte_dia"] = last_day
+	_rebuild()
+
+
 ## Troncos secos de pé (para as araras): os que ainda têm uns 6 m ou mais.
 func snags() -> Array:
 	return palms.filter(func(p): return dead(p) and trunk_h(p) > 6.0)
@@ -232,6 +338,12 @@ func tick() -> void:
 				if _spot_ok(x, z):
 					palms.append(_new_palm(x, z, last_day))
 	last_day = day
+	# folha nova brota no lugar das cortadas (uma a cada uns 2 meses)
+	for p in palms:
+		var cl: Array = p.get("cortadas", [])
+		if not cl.is_empty() and day - int(p.get("corte_dia", day)) > 60:
+			cl.pop_front()
+			p["corte_dia"] = day
 	var m := month_of(day)
 	if m != _last_month:
 		_last_month = m
@@ -286,15 +398,46 @@ func _rebuild() -> void:
 		var s := crown_scale(p)
 		var top := Vector3(x, gy + h - 0.1, z)
 		var v := int(p.get("var", 0)) % CROWN_VARIANTS
-		if not ch.cr.has(v):
-			ch.cr[v] = []
-		ch.cr[v].append(Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), top))
+		var cut: Array = p.get("cortadas", [])
+		if cut.is_empty():
+			if not ch.cr.has(v):
+				ch.cr[v] = []
+			ch.cr[v].append(Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), top))
+		else:
+			# copa com folhas cortadas: malha própria (sem as que caíram)
+			var sk := {}
+			for li in cut:
+				sk[int(li)] = true
+			var mi := MeshInstance3D.new()
+			mi.mesh = _crown_mesh(_crown_params[v], sk)
+			mi.material_override = _leaf_mat
+			mi.visibility_range_end = VIEW
+			add_child(mi)
+			mi.transform = Transform3D(Basis(Vector3.UP, rot).scaled(Vector3(s, s, s)), top)
+			_nodes.append(mi)
 		if fruit and is_adult(p):
 			var nf := 2 + int(absf(sin(x * 2.3 + z * 5.1)) * 2.99)
 			for k in nf:
 				var a := rot + k * TAU / nf + 0.4
 				var b := Basis(Vector3.UP, a)
 				ch.fr.append(Transform3D(b, top + b * Vector3(0.35, -0.25, 0)))
+	# degraus da escada (madeira pregada no tronco com pino)
+	for p in palms:
+		var dg: Array = p.get("degraus", [])
+		for k in dg.size():
+			var rw := rung_pos(p, k)
+			var n: Node3D = _arv.free_log_node(rung_log())
+			add_child(n)
+			n.transform = Transform3D(rw.basis, rw.c)
+			_nodes.append(n)
+			if int(dg[k][1]) >= 1:
+				var e := Vector3(RUNG_L * 0.5, 0.015, 0.06)
+				Furo.apply(n, [[Vector3(0, -0.3, 0), Vector3(0, 0.3, 0), 0.02]], e)
+			if int(dg[k][1]) >= 2:
+				var top: Vector3 = rw.c + Vector3.UP * 0.03
+				var pin := Furo.pin_node(top - (rw.out as Vector3) * 0.0 + Vector3.DOWN * 0.08, top)
+				add_child(pin)
+				_nodes.append(pin)
 	for c in chunks:
 		var ch: Dictionary = chunks[c]
 		for kind in ["tr", "dt"]:
@@ -351,7 +494,9 @@ func _make_assets(seed_: int) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_ + 9911
 	for v in CROWN_VARIANTS:
-		_crowns.append(_make_crown(rng))
+		var prm := _crown_params_gen(rng)
+		_crown_params.append(prm)
+		_crowns.append(_crown_mesh(prm, {}))
 	_cacho_mesh = _make_cacho(rng)
 
 
@@ -443,26 +588,50 @@ func _trunks_mesh(list: Array, broken := false) -> ArrayMesh:
 ## "mão" aberta de umas 40 lâminas pregueadas (vinco para cima, vinco para baixo)
 ## em quase meia volta, de 1,5 a 2 m, com as pontas caindo. As folhas mais velhas
 ## (as de baixo) caem para fora; as secas ficam penduradas, marrons.
-func _make_crown(rng: RandomNumberGenerator) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+func _crown_params_gen(rng: RandomNumberGenerator) -> Array:
+	var out := []
 	var n := rng.randi_range(12, 16)
 	for i in n:
-		var az := TAU * i / n + rng.randf_range(-0.2, 0.2)
 		var age := float(i % 4) / 3.0                # 0 nova (em pé), 1 velha (caída)
-		var elev := lerpf(1.25, 0.15, age) + rng.randf_range(-0.12, 0.12)
-		var out := Vector3(cos(az), 0, sin(az))
-		var pet_len := rng.randf_range(2.5, 3.5)
 		var green := Color(0.1, 0.2, 0.06).lerp(Color(0.15, 0.26, 0.08), rng.randf())
-		_frond(st, out, elev, pet_len, rng.randf_range(1.5, 2.0), green, rng)
+		out.append({"az": TAU * i / n + rng.randf_range(-0.2, 0.2), "elev": lerpf(1.25, 0.15, age) + rng.randf_range(-0.12, 0.12),
+			"pet": rng.randf_range(2.5, 3.5), "R": rng.randf_range(1.5, 2.0), "col": green, "seed": rng.randi(), "seca": false})
 	# folhas secas penduradas embaixo da copa (a "saia")
 	for i in rng.randi_range(3, 6):
-		var az := rng.randf() * TAU
-		var out := Vector3(cos(az), 0, sin(az))
-		_frond(st, out, -1.25 + rng.randf_range(-0.15, 0.1), rng.randf_range(1.8, 2.6), rng.randf_range(0.9, 1.3),
-			Color(0.3, 0.2, 0.11).darkened(rng.randf() * 0.2), rng, true)
+		out.append({"az": rng.randf() * TAU, "elev": -1.25 + rng.randf_range(-0.15, 0.1), "pet": rng.randf_range(1.8, 2.6),
+			"R": rng.randf_range(0.9, 1.3), "col": Color(0.3, 0.2, 0.11).darkened(rng.randf() * 0.2), "seed": rng.randi(), "seca": true})
+	return out
+
+
+## A copa com as folhas dos parâmetros (menos as cortadas, em skip).
+func _crown_mesh(prm: Array, skip: Dictionary) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in prm.size():
+		if skip.has(i):
+			continue
+		_leaf_into(st, prm[i])
 	st.generate_normals()
 	return st.commit()
+
+
+func _leaf_into(st: SurfaceTool, lp: Dictionary) -> void:
+	var r2 := RandomNumberGenerator.new()
+	r2.seed = int(lp.seed)
+	var az := float(lp.az)
+	_frond(st, Vector3(cos(az), 0, sin(az)), float(lp.elev), float(lp.pet), float(lp.R), lp.col, r2, bool(lp.seca))
+
+
+## A folha sozinha (no espaço da copa), para mostrar ela caindo e no chão.
+func leaf_mesh(v: int, li: int) -> ArrayMesh:
+	var k := v * 100 + li
+	if not _leaf_meshes.has(k):
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_leaf_into(st, _crown_params[v][li])
+		st.generate_normals()
+		_leaf_meshes[k] = st.commit()
+	return _leaf_meshes[k]
 
 
 ## Uma folha em leque: o talo sai do topo do tronco na direção out, subindo elev

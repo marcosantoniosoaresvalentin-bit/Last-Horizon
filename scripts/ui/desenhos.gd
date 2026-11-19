@@ -223,6 +223,19 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_colored_polygon(P.call([[-28, 2], [28, 2], [28, 36], [-28, 36]]), Color(0.86, 0.68, 0.22))
 			ci.draw_polyline(gar + PackedVector2Array([gar[0]]), ink, 2.0 * u, true)
 			ci.draw_colored_polygon(P.call([[-10, -48], [10, -48], [10, -40], [-10, -40]]), Color(0.4, 0.28, 0.16))
+		"lamina_faca", "faca":
+			if id == "faca":
+				ci.draw_line(c + Vector2(-46, 26) * u, c + Vector2(-8, 4) * u, Color(0.55, 0.36, 0.2), 12 * u, true)
+				for k in 3:
+					ci.draw_line(c + Vector2(-16 + k * 4, -2 + k * 2) * u, c + Vector2(-8 + k * 4, 12 + k * 2) * u, Color(0.7, 0.58, 0.32), 3 * u, true)
+			var bl: PackedVector2Array = P.call([[-10, 6], [-4, -6], [44, -34], [12, 10]]) if id == "faca" else P.call([[-40, 18], [-36, 6], [42, -26], [8, 22]])
+			ci.draw_colored_polygon(bl, Color(0.46, 0.46, 0.44))
+			ci.draw_polyline(bl + PackedVector2Array([bl[0]]), ink, 2.0 * u, true)
+		"folha_buriti":
+			ci.draw_line(c + Vector2(-44, 40) * u, c + Vector2(-4, 0) * u, Color(0.3, 0.45, 0.18), 6 * u, true)
+			for k in 11:
+				var a := lerpf(-2.2, 0.6, k / 10.0)
+				ci.draw_line(c + Vector2(-4, 0) * u, c + (Vector2(-4, 0) + Vector2(cos(a), sin(a)) * 48) * u, Color(0.22, 0.42, 0.14), 5 * u, true)
 		"ponta_pedra", "furador":
 			if id == "furador":
 				ci.draw_line(c + Vector2(-44, 30) * u, c + Vector2(4, -4) * u, Color(0.55, 0.36, 0.2), 13 * u, true)
