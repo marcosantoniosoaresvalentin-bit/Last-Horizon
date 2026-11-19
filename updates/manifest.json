@@ -1,9 +1,9 @@
 {
-  "version": 117,
-  "file": "update_117.zip",
-  "size": 4625010,
-  "sha256": "e825e486015aadbbeab688c22dec971d537998764283a6ce9a543b26de07e7ad",
+  "version": 118,
+  "file": "update_118.zip",
+  "size": 4626300,
+  "sha256": "3df82cde3d3786ca1f5e7955c7ebbd1d116d22b6a72f116d0ebadd184655103b",
   "min_build": 1,
-  "notes": "Novo: palmeira de buriti nos brejos e beira de rios",
+  "notes": "Buriti seco (morto) vira o ninho preferido das araras",
   "date": "2026-11-19"
 }
