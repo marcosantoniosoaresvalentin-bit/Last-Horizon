@@ -533,9 +533,9 @@ func role_at(mi: int, pos: Vector3) -> String:
 	var l := xform(mi).affine_inverse() * pos
 	if l.z < -1.2 and l.z > -2.6 and absf(l.x) < 1.2:
 		return "pedal"                 # do lado, fora do caminho da tora
-	if l.x > 2.9 and l.x < 4.6 and absf(l.z) < 1.3:
+	if l.x > 2.6 and l.x < 5.2 and absf(l.z) < 1.7:
 		return "mesa"                  # na ponta da mesa de entrada (empurra daqui)
-	if l.x < -2.9 and l.x > -4.6 and absf(l.z) < 1.3:
+	if l.x < -2.6 and l.x > -5.2 and absf(l.z) < 1.7:
 		return "saida"                 # na ponta da mesa de saída (pega as peças)
 	return ""
 

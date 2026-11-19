@@ -7326,7 +7326,7 @@ func _proj_place() -> void:
 
 ## Decide o botão de contexto perto de uma planta/máquina. true se pôs algum.
 func _maq_ctx() -> bool:
-	var mi: int = _maq.planta_near(_player.position, 3.2)
+	var mi: int = _maq.planta_near(_player.position, 5.0)     # a serra tem 6 m: as pontas ficam longe do meio
 	if mi < 0:
 		return false
 	var p: Dictionary = _maq.plantas[mi]
@@ -7371,7 +7371,7 @@ func _maq_ctx() -> bool:
 
 
 func _maq_ctx_press(act: String) -> void:
-	var mi: int = _maq.planta_near(_player.position, 3.2)
+	var mi: int = _maq.planta_near(_player.position, 5.0)     # a serra tem 6 m: as pontas ficam longe do meio
 	if mi < 0:
 		return
 	match act:
@@ -8331,6 +8331,8 @@ func _coop_click(intent: Dictionary, fl: Dictionary) -> void:
 func _coop_place() -> Dictionary:
 	var mid := _coop_mid()
 	var L := float(_coop.L)
+	if _maq and _coop_serra(mid) >= 0:
+		return {"a": "serra", "icone": "projetos"}
 	if _maq:
 		var mi: int = _maq.planta_near(mid, 3.5)
 		if mi >= 0 and not _maq.pronta(mi):
@@ -8473,7 +8475,16 @@ func _coop_match(pid: int, lider: bool) -> void:
 		var d := (_player.global_position - (o.global_position if o else _player.global_position - Vector3(-sin(_face), 0, -cos(_face))))
 		var yaw := atan2(-d.z, d.x)
 		var done := false
-		if a == "planta" and _maq:
+		if a == "serra" and _maq:
+			var ms := _coop_serra(mid)
+			var Lc: float = _arvores.free_log_length(fl)
+			if ms >= 0 and Lc >= 0.6 and Lc <= 2.6 and _arvores.free_log_max_radius(fl) <= 0.3 and bool(_maq.cut_plan(fl).ok):
+				_maq.load_log(ms, fl)
+				done = true
+				_show_toast("Tora na mesa da serra! Um pedala (do lado) e o outro empurra.")
+			else:
+				_show_toast("Essa tora não cabe na serra (60 cm a 2,6 m, até 60 cm de largura).")
+		elif a == "planta" and _maq:
 			var mi: int = _maq.planta_near(mid, 3.5)
 			if mi >= 0:
 				var r: Dictionary = _maq.slot_for(mi, fl, mid)
@@ -8495,6 +8506,20 @@ func _coop_match(pid: int, lider: bool) -> void:
 		_show_toast("Pronto!")
 	Sons.play_at(self, "baque", _player.position, -6.0)
 	_coop_end(false)
+
+
+## A serra pronta e vazia com a mesa de entrada perto de onde os dois estão (ou -1).
+func _coop_serra(mid: Vector3) -> int:
+	var mi: int = _maq.planta_near(mid, 5.5)
+	if mi < 0 or str(_maq.plantas[mi].tipo) != "serra_pedal" or not _maq.pronta(mi):
+		return -1
+	var p: Dictionary = _maq.plantas[mi]
+	if not (p.tora as Dictionary).is_empty() or not (p.get("saida", []) as Array).is_empty():
+		return -1
+	var l: Vector3 = _maq.xform(mi).affine_inverse() * mid
+	if l.x < 1.2 or l.x > 5.0 or absf(l.z) > 1.8:
+		return -1                  # os dois têm que estar do lado da mesa de entrada
+	return mi
 
 
 ## Solta (drop = se cair sem combinar: quem vai na frente larga no chão).
