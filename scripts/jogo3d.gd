@@ -2407,7 +2407,7 @@ func _ctx_press() -> void:
 			if not pc.is_empty():
 				if _constr.carrying_others(pc):
 					_show_toast("Tem outra peça apoiada em cima dessa. Tire ela antes.")
-				elif _arvores.free_log_kg(pc.log) > DRAG_KG:
+				elif not _can_solo(pc.log) and _arvores.free_log_kg(pc.log) > DRAG_KG:
 					_show_toast("Pesada demais: %d kg (nem arrastando: até %d kg)." % [roundi(_arvores.free_log_kg(pc.log)), int(DRAG_KG)])
 				else:
 					var npin := 0
@@ -2485,10 +2485,11 @@ func _ctx_press() -> void:
 			if i < 0:
 				return
 			var kg3: float = _arvores.free_log_kg(_apoios.rested[i].log)
-			if kg3 > Arvores.CARRY_MAX_KG and kg3 <= COOP_KG and _coop_possible():
+			var rl: Dictionary = _apoios.rested[i].log
+			if not _can_solo(rl) and _can_coop(rl) and _coop_possible():
 				_coop_click({"a": "pegar", "k": "r:" + _log_key(_apoios.rested[i].log)}, _apoios.rested[i].log)
 				return
-			if kg3 > DRAG_KG:
+			if not _can_solo(rl) and kg3 > DRAG_KG:
 				_show_toast("Pesada demais: %d kg (nem arrastando: até %d kg)." % [roundi(kg3), int(DRAG_KG)])
 				return
 			_crouch_target = {"apoiada": i}
@@ -2550,11 +2551,11 @@ func _update_log_btn() -> void:
 	_log_btn.visible = not t.is_empty()
 	if not t.is_empty():
 		var kg2: float = _arvores.free_log_kg(t.log)
-		if kg2 > Arvores.CARRY_MAX_KG and kg2 <= COOP_KG and _coop_possible():
+		if not _can_solo(t.log) and _can_coop(t.log) and _coop_possible():
 			_log_btn.text = "Cooperativo"
 			(_log_btn as Icones.IconButton).kind = "pegar_tora"
 		else:
-			_log_btn.text = ("Pegar tora (%d kg)" if kg2 <= Arvores.CARRY_MAX_KG else ("Arrastar tora (%d kg)" if kg2 <= DRAG_KG else "Pesada: %d kg")) % roundi(kg2)
+			_log_btn.text = ("Pegar tora (%d kg)" if _can_solo(t.log) else ("Arrastar tora (%d kg)" if kg2 <= DRAG_KG else "Pesada: %d kg")) % roundi(kg2)
 		_log_btn.queue_redraw()
 
 
@@ -2573,8 +2574,8 @@ func _log_action() -> void:
 	if t.is_empty():
 		return
 	var kg: float = _arvores.free_log_kg(t.log)
-	if kg > Arvores.CARRY_MAX_KG:
-		if kg <= COOP_KG and _coop_possible() and t.kind == "solta":
+	if not _can_solo(t.log):
+		if _can_coop(t.log) and _coop_possible() and t.kind == "solta":
 			_coop_click({"a": "pegar", "k": _log_key(t.log)}, t.log)
 			return
 		if kg > DRAG_KG:
@@ -3097,7 +3098,7 @@ func _hold_log(fl: Dictionary) -> void:
 	_carry_kg = _arvores.free_log_kg(fl)
 	_carry_node = _arvores.free_log_node(fl)
 	add_child(_carry_node)
-	_drag = _carry_kg > Arvores.CARRY_MAX_KG
+	_drag = not _can_solo(fl)
 	if _drag:
 		# pesada demais para o ombro: segura uma ponta e a outra vai arrastando no chão
 		var fwd := Vector3(-sin(_face), 0, -cos(_face))
@@ -8270,7 +8271,19 @@ func _buck_go() -> void:
 # forquilhas ou na planta), de novo: um clica "Cooperativo", depois o outro.
 
 const COOP_KG := 120.0
-const DRAG_KG := 250.0            # sozinho, mais pesada que o ombro aguenta: arrasta (uma ponta no chão)
+const DRAG_KG := 250.0            # sozinho, maior que o ombro aguenta: arrasta (uma ponta no chão)
+const SOLO_L := 1.0               # sozinho pega no ombro tora de até 1 m (qualquer grossura)
+const COOP_L := 2.0               # dois juntos: até 2 m
+
+
+## Um sozinho consegue pôr no ombro? Até 1 m sempre (ou leve, até 60 kg).
+func _can_solo(fl: Dictionary) -> bool:
+	return _arvores.free_log_length(fl) <= SOLO_L + 0.03 or _arvores.free_log_kg(fl) <= Arvores.CARRY_MAX_KG
+
+
+## Dois juntos conseguem? Até 2 m sempre (ou até 120 kg).
+func _can_coop(fl: Dictionary) -> bool:
+	return _arvores.free_log_length(fl) <= COOP_L + 0.03 or _arvores.free_log_kg(fl) <= COOP_KG
 
 var _coop_int := {}                # meu clique esperando o outro: {a, k, ts, ok_ms}
 var _coop_int_fl := {}             # a tora do clique (cópia, para quem vai atrás)
