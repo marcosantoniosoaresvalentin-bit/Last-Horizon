@@ -1,9 +1,9 @@
 {
-  "version": 124,
-  "file": "update_124.zip",
-  "size": 4724348,
-  "sha256": "197957707b4b92d062eb3fa3c12fa3666a1759066ae32869043125191f590cd1",
+  "version": 125,
+  "file": "update_125.zip",
+  "size": 4724815,
+  "sha256": "c0d24a4368a0a595b8f3be9642c3f4b9fa90e1a32b413630aa9b9e469ee90e45",
   "min_build": 1,
-  "notes": "Craft: rolar a lista passando o dedo em cima dos itens",
+  "notes": "Anel de corte centrado na tora; topo do toco do buriti com rachaduras",
   "date": "2026-11-19"
 }
