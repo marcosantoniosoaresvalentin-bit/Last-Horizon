@@ -14,9 +14,9 @@ extends Node3D
 ## Planta: {x, z, nasc (dia), hmax (m), var, rot, morta (dia ou -1)}
 
 const MundoSim := preload("res://scripts/mundo_sim.gd")
-const Furo := preload("res://scripts/world/furo.gd")
-const STEP := 0.45                # um degrau a cada 45 cm
-const RUNG_L := 0.5
+const TOCO_H := 0.95
+const TOCO_DAYS := 1100          # o toco do buriti derrubado apodrece em uns 3 anos
+const REACH_H := 2.15            # do chão o braço (com a faca) alcança o talo até essa altura
 const START := 230
 const MAX_PALMS := 420
 const ROSETTE_DAYS := 2190       # 6 anos só com as folhas no chão (sem tronco)
@@ -55,6 +55,8 @@ func build(jogo: Node, arvores: Node, seed_: int, save_path := "") -> void:
 	_rng.seed = (seed_ if seed_ != 0 else randi()) + 7717
 	last_day = int(jogo.sim.elapsed_days())
 	_make_assets(seed_)
+	_arv.extra_barks["buriti"] = _trunk_mat
+	_arv.extra_barks["buriti_seco"] = _dead_mat
 	if save_path == "" or not _load(save_path):
 		_generate()
 	palms = palms.filter(func(p): return not _arv._in_sea(float(p.x), float(p.z)))
@@ -154,6 +156,8 @@ func _generate() -> void:
 # ================== CRESCER ==================
 
 func trunk_h(p: Dictionary, day := -1) -> float:
+	if p.has("toco"):
+		return TOCO_H
 	if dead(p):
 		return _alive_h(p, int(p.morta)) * 0.86       # morto: o topo quebrou
 	return _alive_h(p, last_day if day < 0 else day)
@@ -173,7 +177,7 @@ func crown_scale(p: Dictionary) -> float:
 
 
 func is_adult(p: Dictionary) -> bool:
-	return last_day - int(p.nasc) >= ADULT_DAYS and not dead(p)
+	return last_day - int(p.nasc) >= ADULT_DAYS and not dead(p) and not p.has("toco")
 
 
 static func month_of(day: int) -> int:
@@ -193,39 +197,25 @@ func trunk_point(p: Dictionary, y: float, ang: float, out := 0.0) -> Vector3:
 	return Vector3(x + cos(ang) * r, _jogo.height_at(x, z) + y, z + sin(ang) * r)
 
 
-## ================== ESCADA E FOLHAS ==================
+## ================== SUBIR, CORTAR FOLHAS E DERRUBAR ==================
 
-## O degrau é uma ripa grossa (tábua pequena) atravessada no tronco.
-func rung_log() -> Dictionary:
-	var h: Array = preload("res://scripts/world/arvores.gd").split_sec(preload("res://scripts/world/arvores.gd").circle_sec(), false)
-	var b: Array = preload("res://scripts/world/arvores.gd").split_sec(h[0], true)
-	return {"cil": {"L": RUNG_L, "ra": 0.07, "rb": 0.07}, "sec": b[0], "pos": [0, 0, 0], "yaw": 0.0, "dia": 0, "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0, "bot": {}, "top": {}}
-
-
-## Degrau k (0 = o de baixo): {c (centro), basis, out (para fora), h}
-func rung_pos(p: Dictionary, k: int) -> Dictionary:
-	var ang := float(p.get("lado", 0.0))
-	var h := STEP * (k + 1)
-	var out := Vector3(cos(ang), 0, sin(ang))
-	var tan := Vector3(-out.z, 0, out.x)
-	var c := trunk_point(p, h, ang, 0.06)
-	# a ripa deitada, atravessada (comprido de lado), encostada na frente do tronco
-	var b := Basis(tan, Vector3.UP, tan.cross(Vector3.UP))
-	return {"c": c, "basis": b, "out": out, "h": h}
+func trunk_r(p: Dictionary) -> float:
+	if p.has("toco"):
+		return float(p.get("toco_r", TRUNK_R))
+	return TRUNK_R * lerpf(0.7, 1.0, clampf(trunk_h(p) / 8.0, 0.0, 1.0))
 
 
-## Quantos degraus até chegar nas folhas (ou no topo do tronco seco).
-func rungs_to_top(p: Dictionary) -> int:
-	# vivo: para com o olho na base das folhas (o pé uns 1,5 m abaixo da copa)
-	var top := trunk_h(p) - (0.3 if dead(p) else 1.55)
-	return maxi(1, int(ceil(top / STEP)))
+## Até onde os pés sobem na peconha: vivo, com os olhos na base das folhas; seco, no topo.
+func climb_top(p: Dictionary) -> float:
+	return maxf(0.0, trunk_h(p) - (1.0 if dead(p) else 1.75))
 
 
+## O buriti mais perto (de pé, ou broto com folhas).
 func palm_near(pos: Vector3, reach: float) -> Dictionary:
 	var best := {}
 	var bd := reach
 	for p in palms:
-		if trunk_h(p) < 2.0:
+		if p.has("toco"):
 			continue
 		var d := Vector2(float(p.x) - pos.x, float(p.z) - pos.z).length()
 		if d < bd:
@@ -234,23 +224,55 @@ func palm_near(pos: Vector3, reach: float) -> Dictionary:
 	return best
 
 
-func add_rung(p: Dictionary, ang_if_first: float) -> void:
-	if not p.has("degraus"):
-		p["degraus"] = []
-	if (p.degraus as Array).is_empty():
-		p["lado"] = ang_if_first
-	p.degraus.append([STEP * ((p.degraus as Array).size() + 1), 0])
-	_rebuild()
+## Folhas que dá para cortar estando no chão (buriti pequeno).
+func reach_leaves(p: Dictionary) -> Array:
+	var gy: float = _jogo.height_at(float(p.x), float(p.z))
+	return leaves_of(p).filter(func(lf): return float(lf.cut.y) - gy < REACH_H)
 
 
-func set_rung_stage(p: Dictionary, k: int, st: int) -> void:
-	p.degraus[k][1] = st
+## Pequeno: alguma folha verde está ao alcance do chão (não precisa subir).
+func is_small(p: Dictionary) -> bool:
+	return not reach_leaves(p).is_empty()
+
+
+func can_climb(p: Dictionary) -> bool:
+	return not p.has("toco") and climb_top(p) > 1.0 and not is_small(p)
+
+
+func can_fell(p: Dictionary) -> bool:
+	return not p.has("toco") and trunk_h(p) >= 0.8
+
+
+## Machadas para derrubar (o buriti é fibroso e mole por dentro: vai rápido).
+func hits_to_fell(p: Dictionary) -> int:
+	return clampi(int(round(4.0 + trunk_r(p) * 30.0)), 5, 11)
+
+
+func add_hit(p: Dictionary, side: float) -> int:
+	if int(p.get("golpes", 0)) == 0:
+		p["lado_corte"] = side
+	p["golpes"] = int(p.get("golpes", 0)) + 1
 	_rebuild()
+	return int(p.golpes)
+
+
+## Derruba: o buriti vira toco. Devolve como ele era (para a queda e a tora no chão).
+func fell(p: Dictionary) -> Dictionary:
+	var info := {"x": float(p.x), "z": float(p.z), "h": trunk_h(p), "r": trunk_r(p), "rot": float(p.get("rot", 0.0)),
+		"v": int(p.get("var", 0)) % CROWN_VARIANTS, "s": crown_scale(p), "morta": dead(p),
+		"folhas": leaves_of(p).map(func(lf): return int(lf.li)), "cortadas": (p.get("cortadas", []) as Array).duplicate(),
+		"gy": float(_jogo.height_at(float(p.x), float(p.z)))}
+	p["toco_r"] = info.r
+	p["toco"] = last_day
+	for k in ["golpes", "cortadas", "corte_dia", "lado_corte"]:
+		p.erase(k)
+	_rebuild()
+	return info
 
 
 ## Folhas verdes que dá para cortar: [{li, cut (ponto no talo), base}]
 func leaves_of(p: Dictionary) -> Array:
-	if dead(p) or trunk_h(p) < 2.0:
+	if dead(p) or p.has("toco"):
 		return []
 	var v := int(p.get("var", 0)) % CROWN_VARIANTS
 	var prm: Array = _crown_params[v]
@@ -316,7 +338,10 @@ func tick() -> void:
 		# morre de velho (raramente antes); o tronco seco cai depois de anos
 		var keep := []
 		for p in palms:
-			if dead(p):
+			if p.has("toco"):
+				if last_day - int(p.toco) > TOCO_DAYS:
+					continue
+			elif dead(p):
 				if last_day - int(p.morta) > SNAG_DAYS:
 					continue
 			else:
@@ -386,7 +411,13 @@ func _rebuild() -> void:
 		var gy: float = _jogo.height_at(x, z)
 		var h := trunk_h(p)
 		var rot := float(p.get("rot", 0.0))
-		var r := TRUNK_R * lerpf(0.7, 1.0, clampf(h / 8.0, 0.0, 1.0))
+		var r := float(p.get("toco_r", 0.2)) if p.has("toco") else TRUNK_R * lerpf(0.7, 1.0, clampf(h / 8.0, 0.0, 1.0))
+		if p.has("toco"):
+			ch.tr.append([x, gy, z, h, r, rot])
+			_toco_cap(Vector3(x, gy + h + 0.1, z), r * 0.9, last_day - int(p.toco))
+			continue
+		if int(p.get("golpes", 0)) > 0:
+			_notch(p, Vector3(x, gy, z), r)
 		if h > 0.05:
 			(ch.dt if dead(p) else ch.tr).append([x, gy, z, h, r, rot])
 			var gk := Vector2i(floori(x / 8.0), floori(z / 8.0))
@@ -421,23 +452,6 @@ func _rebuild() -> void:
 				var a := rot + k * TAU / nf + 0.4
 				var b := Basis(Vector3.UP, a)
 				ch.fr.append(Transform3D(b, top + b * Vector3(0.35, -0.25, 0)))
-	# degraus da escada (madeira pregada no tronco com pino)
-	for p in palms:
-		var dg: Array = p.get("degraus", [])
-		for k in dg.size():
-			var rw := rung_pos(p, k)
-			var n: Node3D = _arv.free_log_node(rung_log())
-			add_child(n)
-			n.transform = Transform3D(rw.basis, rw.c)
-			_nodes.append(n)
-			if int(dg[k][1]) >= 1:
-				var e := Vector3(RUNG_L * 0.5, 0.015, 0.06)
-				Furo.apply(n, [[Vector3(0, -0.3, 0), Vector3(0, 0.3, 0), 0.02]], e)
-			if int(dg[k][1]) >= 2:
-				var top: Vector3 = rw.c + Vector3.UP * 0.03
-				var pin := Furo.pin_node(top - (rw.out as Vector3) * 0.0 + Vector3.DOWN * 0.08, top)
-				add_child(pin)
-				_nodes.append(pin)
 	for c in chunks:
 		var ch: Dictionary = chunks[c]
 		for kind in ["tr", "dt"]:
@@ -452,6 +466,65 @@ func _rebuild() -> void:
 		for v in ch.cr:
 			_add_mm(_crowns[v], _leaf_mat, ch.cr[v], VIEW, true)
 		_add_mm(_cacho_mesh, _leaf_mat, ch.fr, 110.0, false)
+
+
+## O topo cortado do toco: madeira clara e fibrosa (escurece com os dias).
+func _toco_cap(c: Vector3, r: float, age: int) -> void:
+	var mi := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = r
+	cm.bottom_radius = r
+	cm.height = 0.03
+	cm.radial_segments = 14
+	mi.mesh = cm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.86, 0.76, 0.58).lerp(Color(0.4, 0.33, 0.25), clampf(age / 300.0, 0.0, 1.0))
+	m.roughness = 1.0
+	mi.material_override = m
+	add_child(mi)
+	mi.position = c - Vector3.UP * 0.1
+	_nodes.append(mi)
+
+
+## O talho do machado no tronco (cresce a cada machadada), do lado de quem corta:
+## uma faixa curva colada na casca, madeira clara nas bordas e o fundo escuro no meio.
+func _notch(p: Dictionary, base: Vector3, r: float) -> void:
+	var f := clampf(float(p.get("golpes", 0)) / float(hits_to_fell(p)), 0.0, 1.0)
+	var ang := float(p.get("lado_corte", 0.0))
+	var th := 0.35 + 0.75 * f                    # meia abertura (rad) em volta do tronco
+	var hh := 0.05 + 0.06 * f
+	var rows := [[-hh, Color(0.62, 0.52, 0.36)], [-hh * 0.35, Color(0.8, 0.68, 0.48)], [0.0, Color(0.28, 0.2, 0.12)],
+		[hh * 0.35, Color(0.88, 0.77, 0.56)], [hh, Color(0.7, 0.6, 0.42)]]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := 10
+	var cy := base.y + 1.0
+	for i in rows.size() - 1:
+		for k in n:
+			var a0 := ang - th + 2.0 * th * k / n
+			var a1 := ang - th + 2.0 * th * (k + 1) / n
+			# perto das pontas o talho afina (fecha em ponta)
+			var e0 := sin(PI * float(k) / n)
+			var e1 := sin(PI * float(k + 1) / n)
+			var y0: float = rows[i][0]
+			var y1: float = rows[i + 1][0]
+			var rr := r * 1.025
+			var q := [Vector3(base.x + cos(a0) * rr, cy + y0 * e0, base.z + sin(a0) * rr), Vector3(base.x + cos(a1) * rr, cy + y0 * e1, base.z + sin(a1) * rr),
+				Vector3(base.x + cos(a1) * rr, cy + y1 * e1, base.z + sin(a1) * rr), Vector3(base.x + cos(a0) * rr, cy + y1 * e0, base.z + sin(a0) * rr)]
+			var cols := [rows[i][1], rows[i][1], rows[i + 1][1], rows[i + 1][1]]
+			for idx in [0, 2, 1, 0, 3, 2]:
+				st.set_color(cols[idx])
+				st.add_vertex(q[idx])
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.roughness = 1.0
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = m
+	add_child(mi)
+	_nodes.append(mi)
 
 
 func _add_mm(mesh: Mesh, mat: Material, xs: Array, view: float, shadow: bool) -> void:
@@ -753,5 +826,8 @@ func _load(path: String) -> bool:
 	if not d is Dictionary:
 		return false
 	palms = d.get("palmeiras", [])
+	for p in palms:
+		for k in ["degraus", "lado"]:
+			(p as Dictionary).erase(k)
 	last_day = mini(int(d.get("dia", last_day)), last_day)
 	return true

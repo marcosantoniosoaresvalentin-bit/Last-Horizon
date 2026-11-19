@@ -231,11 +231,14 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			var bl: PackedVector2Array = P.call([[-10, 6], [-4, -6], [44, -34], [12, 10]]) if id == "faca" else P.call([[-40, 18], [-36, 6], [42, -26], [8, 22]])
 			ci.draw_colored_polygon(bl, Color(0.46, 0.46, 0.44))
 			ci.draw_polyline(bl + PackedVector2Array([bl[0]]), ink, 2.0 * u, true)
-		"folha_buriti":
-			ci.draw_line(c + Vector2(-44, 40) * u, c + Vector2(-4, 0) * u, Color(0.3, 0.45, 0.18), 6 * u, true)
-			for k in 11:
-				var a := lerpf(-2.2, 0.6, k / 10.0)
-				ci.draw_line(c + Vector2(-4, 0) * u, c + (Vector2(-4, 0) + Vector2(cos(a), sin(a)) * 48) * u, Color(0.22, 0.42, 0.14), 5 * u, true)
+		"folha_buriti", "acao_cortar":
+			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95)
+		"peconha":
+			_braid_loop(ci, c, Vector2(40, 26) * u, u, 0.0, TAU)
+		"acao_derrubar":
+			fell_icon(ci, c, s)
+		"acao_escalar":
+			climb_icon(ci, c, s)
 		"ponta_pedra", "furador":
 			if id == "furador":
 				ci.draw_line(c + Vector2(-44, 30) * u, c + Vector2(4, -4) * u, Color(0.55, 0.36, 0.2), 13 * u, true)
@@ -381,3 +384,165 @@ static func flint(ci: CanvasItem, pts: PackedVector2Array, base: Color, seed_: i
 		var e1: Vector2 = pts[(int(ei) + 1) % n]
 		ci.draw_line(e0, e1, base.lightened(0.6), 3.0 * u, true)
 	ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 2.0 * u, true)
+
+
+## Folha de buriti em leque: talo curvo e a "mão" aberta de lâminas pregueadas
+## (vinco claro e escuro alternando) com as pontas caindo.
+static func buriti_leaf(ci: CanvasItem, c: Vector2, s: float) -> void:
+	var u := s / 100.0
+	var hub := c + Vector2(-2, -4) * u
+	# talo: do canto de baixo até a mão, levemente curvo
+	var pet := PackedVector2Array()
+	for k in 9:
+		var t := k / 8.0
+		pet.append(c + Vector2(lerpf(-46, -2, t), lerpf(46, -4, t) + sin(t * PI) * 6.0) * u)
+	ci.draw_polyline(pet, Color(0.2, 0.3, 0.1), 7.5 * u, true)
+	ci.draw_polyline(pet, Color(0.42, 0.58, 0.24), 4.0 * u, true)
+	# as lâminas (de trás para a frente)
+	var n := 19
+	for k in n:
+		var t := k / float(n - 1)
+		var a := lerpf(-2.75, 0.55, t)
+		var L := (40.0 + 8.0 * sin(t * PI)) * u
+		var dir := Vector2(cos(a), sin(a))
+		var side := Vector2(-dir.y, dir.x)
+		var droop := Vector2(0, 1) * (6.0 + 10.0 * absf(cos(a))) * u
+		var base := hub + dir * 5.0 * u
+		var mid := hub + dir * L * 0.65
+		var tip := hub + dir * L + droop
+		var w := 3.6 * u
+		var light := k % 2 == 0
+		var col := Color(0.3, 0.55, 0.18) if light else Color(0.16, 0.36, 0.1)
+		var poly := PackedVector2Array([base - side * 1.0 * u, mid - side * w, tip, mid + side * w, base + side * 1.0 * u])
+		ci.draw_colored_polygon(poly, col)
+		# a ponta rasgada em duas (como a folha de verdade)
+		ci.draw_line(tip, tip + dir * 5.0 * u + side * 2.5 * u + droop * 0.3, col.darkened(0.15), 1.6 * u, true)
+		ci.draw_line(tip, tip + dir * 5.0 * u - side * 2.5 * u + droop * 0.3, col.darkened(0.15), 1.6 * u, true)
+		ci.draw_line(base, mid, col.lightened(0.25), 1.0 * u, true)
+	# o centro da mão (onde o talo abre)
+	ci.draw_circle(hub, 5.0 * u, Color(0.3, 0.42, 0.16))
+	ci.draw_circle(hub + Vector2(-1, -1) * u, 2.5 * u, Color(0.5, 0.64, 0.3))
+
+
+## Laço de cipó trançado (a peconha), elipse de raios rr; arco de a0 até a1.
+static func _braid_loop(ci: CanvasItem, c: Vector2, rr: Vector2, u: float, a0: float, a1: float) -> void:
+	for strand in 3:
+		var pts := PackedVector2Array()
+		var n := 64
+		for i in n + 1:
+			var a := lerpf(a0, a1, i / float(n))
+			var wob := sin(a * 9.0 + strand * TAU / 3.0) * 3.2 * u
+			pts.append(c + Vector2(cos(a) * (rr.x + wob), sin(a) * (rr.y + wob)))
+		var col := Color(0.44, 0.36, 0.2).darkened(strand * 0.12)
+		ci.draw_polyline(pts, Color(0.18, 0.13, 0.06), 6.5 * u, true)
+		ci.draw_polyline(pts, col, 4.5 * u, true)
+		ci.draw_polyline(pts, col.lightened(0.3), 1.4 * u, true)
+
+
+## Derrubar: o toco cortado com o machado cravado e o tronco caído na frente.
+static func fell_icon(ci: CanvasItem, c: Vector2, s: float) -> void:
+	var u := s / 100.0
+	var ink := Color(0.1, 0.07, 0.04)
+	var P := func(arr: Array) -> PackedVector2Array:
+		var out := PackedVector2Array()
+		for p in arr:
+			out.append(c + Vector2(p[0], p[1]) * u)
+		return out
+	# chão (capim)
+	ci.draw_colored_polygon(P.call([[-50, 34], [50, 30], [50, 44], [-50, 44]]), Color(0.24, 0.36, 0.14))
+	for k in 9:
+		var x := -46 + k * 11
+		ci.draw_line(c + Vector2(x, 36) * u, c + Vector2(x + 3, 28) * u, Color(0.36, 0.52, 0.2), 2.0 * u, true)
+	# tronco caído (deitado, da esquerda para a direita, atrás)
+	var lg: PackedVector2Array = P.call([[-18, 16], [46, 6], [48, 26], [-16, 36]])
+	ci.draw_colored_polygon(lg, Color(0.47, 0.44, 0.4))
+	ci.draw_colored_polygon(P.call([[-18, 16], [46, 6], [46, 12], [-18, 22]]), Color(0.6, 0.57, 0.52))
+	for k in 5:
+		var x := -6 + k * 11
+		ci.draw_line(c + Vector2(x, 15 - k * 1.8) * u, c + Vector2(x + 1, 33 - k * 1.8) * u, Color(0.36, 0.33, 0.3), 1.6 * u, true)
+	ci.draw_polyline(lg + PackedVector2Array([lg[0]]), ink, 1.8 * u, true)
+	# a ponta cortada do tronco caído (madeira clara)
+	_ellipse(ci, c + Vector2(-17, 26) * u, Vector2(6, 10) * u, Color(0.86, 0.74, 0.52), ink, u)
+	# o toco
+	var st: PackedVector2Array = P.call([[-44, 0], [-20, 0], [-18, 38], [-46, 38]])
+	ci.draw_colored_polygon(st, Color(0.42, 0.39, 0.35))
+	ci.draw_colored_polygon(P.call([[-24, 0], [-20, 0], [-18, 38], [-22, 38]]), Color(0.32, 0.29, 0.26))
+	ci.draw_polyline(st + PackedVector2Array([st[0]]), ink, 1.8 * u, true)
+	_ellipse(ci, c + Vector2(-32, 0) * u, Vector2(12, 5) * u, Color(0.88, 0.76, 0.54), ink, u)
+	ci.draw_arc(c + Vector2(-32, 0) * u, 6.0 * u, 0, TAU, 16, Color(0.7, 0.56, 0.36), 1.2 * u, true)
+	# o machado cravado no toco
+	ci.draw_line(c + Vector2(-30, -2) * u, c + Vector2(-8, -38) * u, Color(0.25, 0.15, 0.07), 7.0 * u, true)
+	ci.draw_line(c + Vector2(-30, -2) * u, c + Vector2(-8, -38) * u, Color(0.6, 0.4, 0.22), 4.0 * u, true)
+	var head: PackedVector2Array = P.call([[-40, -6], [-30, -14], [-22, -6], [-30, 2]])
+	ci.draw_colored_polygon(head, Color(0.5, 0.5, 0.47))
+	ci.draw_polyline(head + PackedVector2Array([head[0]]), ink, 1.6 * u, true)
+	for k in 3:
+		ci.draw_line(c + Vector2(-32 + k * 2, -10 + k * 2) * u, c + Vector2(-25 + k * 2, -12 + k * 2) * u, Color(0.68, 0.56, 0.3), 1.6 * u, true)
+
+
+## Escalar: o tronco do buriti e os dois pés presos na peconha.
+static func climb_icon(ci: CanvasItem, c: Vector2, s: float) -> void:
+	var u := s / 100.0
+	var ink := Color(0.1, 0.07, 0.04)
+	# tronco cinza com os anéis
+	var tr := Rect2(c + Vector2(-13, -50) * u, Vector2(26, 100) * u)
+	ci.draw_rect(tr, Color(0.55, 0.53, 0.5))
+	ci.draw_rect(Rect2(tr.position + Vector2(17, 0) * u, Vector2(9, 100) * u), Color(0.42, 0.4, 0.37))
+	ci.draw_rect(Rect2(tr.position, Vector2(5, 100) * u), Color(0.64, 0.62, 0.58))
+	for k in 8:
+		var y := -46 + k * 13
+		ci.draw_line(c + Vector2(-13, y) * u, c + Vector2(13, y + 2) * u, Color(0.36, 0.34, 0.31), 1.6 * u, true)
+	ci.draw_rect(tr, ink, false, 1.6 * u)
+	# a peconha passando atrás do tronco, de um pé ao outro
+	_braid_loop(ci, c + Vector2(0, 14) * u, Vector2(30, 9) * u, u, PI * 1.05, TAU * 0.98)
+	# os pés (sola encostada no tronco), dos dois lados
+	for sg in [-1.0, 1.0]:
+		var f := PackedVector2Array()
+		var pts := [[-12, 8], [-36, 2], [-44, 8], [-44, 18], [-36, 24], [-12, 24]]
+		for p in pts:
+			f.append(c + Vector2(float(p[0]) * sg, float(p[1])) * u)
+		ci.draw_colored_polygon(f, Color(0.78, 0.55, 0.4))
+		ci.draw_polyline(f + PackedVector2Array([f[0]]), ink, 1.6 * u, true)
+		# canela subindo
+		ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-34 * sg, 4) * u, c + Vector2(-22 * sg, 4) * u, c + Vector2(-20 * sg, -40) * u, c + Vector2(-34 * sg, -40) * u]), Color(0.72, 0.5, 0.36))
+		ci.draw_line(c + Vector2(-34 * sg, 4) * u, c + Vector2(-34 * sg, -40) * u, ink, 1.4 * u, true)
+		ci.draw_line(c + Vector2(-22 * sg, 4) * u, c + Vector2(-20 * sg, -40) * u, ink, 1.4 * u, true)
+	# a frente do laço (por cima dos pés)
+	_braid_loop(ci, c + Vector2(0, 14) * u, Vector2(30, 9) * u, u, 0.02, PI * 0.98)
+
+
+## O olho (botão de olhar o que dá para fazer): branco amendoado, íris, pupila e brilho.
+static func eye(ci: CanvasItem, c: Vector2, s: float, lit := false) -> void:
+	var u := s / 100.0
+	var n := 28
+	var pts := PackedVector2Array()
+	for i in n + 1:
+		var t := i / float(n)
+		pts.append(c + Vector2(lerpf(-46, 46, t), -sin(t * PI) * 26.0) * u)
+	for i in range(n - 1, 0, -1):
+		var t := i / float(n)
+		pts.append(c + Vector2(lerpf(-46, 46, t), sin(t * PI) * 22.0) * u)
+	ci.draw_circle(c, 52.0 * u, Color(0.04, 0.04, 0.03, 0.55))
+	if lit:
+		ci.draw_circle(c, 52.0 * u, Color(1.0, 0.8, 0.3, 0.35))
+	ci.draw_colored_polygon(pts, Color(0.97, 0.95, 0.9))
+	ci.draw_circle(c + Vector2(0, -1) * u, 18.0 * u, Color(0.33, 0.22, 0.1))
+	ci.draw_circle(c + Vector2(0, -1) * u, 14.0 * u, Color(0.47, 0.33, 0.14))
+	ci.draw_circle(c + Vector2(0, -1) * u, 7.5 * u, Color(0.03, 0.02, 0.02))
+	ci.draw_circle(c + Vector2(-5, -7) * u, 3.6 * u, Color(1, 1, 1, 0.95))
+	ci.draw_polyline(pts + PackedVector2Array([pts[0]]), Color(0.05, 0.04, 0.03), 4.0 * u, true)
+	# cílios em cima
+	for k in 5:
+		var t := 0.2 + k * 0.15
+		var p := c + Vector2(lerpf(-46, 46, t), -sin(t * PI) * 26.0) * u
+		var d := (p - c).normalized()
+		ci.draw_line(p, p + d * 9.0 * u, Color(0.05, 0.04, 0.03), 3.0 * u, true)
+
+
+static func _ellipse(ci: CanvasItem, c: Vector2, r: Vector2, fill: Color, ink: Color, u: float) -> void:
+	var pts := PackedVector2Array()
+	for i in 24:
+		var a := TAU * i / 24.0
+		pts.append(c + Vector2(cos(a) * r.x, sin(a) * r.y))
+	ci.draw_colored_polygon(pts, fill)
+	ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 1.4 * u, true)

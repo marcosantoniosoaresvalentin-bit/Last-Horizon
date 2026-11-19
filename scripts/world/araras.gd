@@ -298,7 +298,7 @@ func _host(n):
 		if _bur == null:
 			return null
 		for p in _bur.palms:
-			if absf(float(p.x) - float(n.x)) < 0.05 and absf(float(p.z) - float(n.z)) < 0.05:
+			if absf(float(p.x) - float(n.x)) < 0.05 and absf(float(p.z) - float(n.z)) < 0.05 and not p.has("toco"):
 				return p
 		return null
 	if str(n.tipo) == "bac":

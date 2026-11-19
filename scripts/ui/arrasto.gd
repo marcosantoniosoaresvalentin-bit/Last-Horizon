@@ -5,6 +5,7 @@ extends Control
 signal arrastou(d: Vector2)
 
 var text := ""
+var vertical := false        # faixa em pé: o rolo gira para cima e para baixo
 var _drag := -1            # índice do toque (-2 = mouse)
 var _last := Vector2.ZERO
 var _scroll := 0.0          # quanto o rolo já girou (desenho)
@@ -50,13 +51,16 @@ func set_text(t: String) -> void:
 
 
 func _roll(d: Vector2) -> void:
-	_scroll += d.x - d.y
+	_scroll += d.y if vertical else d.x - d.y
 	queue_redraw()
 
 
 ## Um rolo dentro da faixa (como o de girar a bola na sinuca): os frisos andam junto
 ## com o dedo e se apertam nas beiradas, como num cilindro girando.
 func _draw() -> void:
+	if vertical:
+		_draw_v()
+		return
 	var w := size.x
 	var h := size.y
 	var r := Rect2(Vector2.ZERO, size)
@@ -102,3 +106,50 @@ func _draw() -> void:
 		ls.set_corner_radius_all(8)
 		draw_style_box(ls, lb)
 		draw_string(font, Vector2((w - ts.x) * 0.5, h * 0.5 + fs * 0.35), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 0.96, 0.85))
+
+
+## Em pé: o mesmo rolo, deitado (os frisos andam para cima e para baixo com o dedo).
+func _draw_v() -> void:
+	var w := size.x
+	var h := size.y
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.06, 0.05, 0.045, 0.82)
+	sb.border_color = Color(0.55, 0.45, 0.3, 0.95) if _drag == -1 else Color(1.0, 0.82, 0.35)
+	sb.set_border_width_all(3)
+	sb.set_corner_radius_all(int(w * 0.5))
+	draw_style_box(sb, Rect2(Vector2.ZERO, size))
+	var inset := w * 0.22
+	var rr := Rect2(Vector2(inset, w * 0.45), Vector2(w - inset * 2.0, h - w * 0.9))
+	var bands := 40
+	for k in bands:
+		var u0 := float(k) / bands
+		var u1 := float(k + 1) / bands
+		var th := lerpf(-PI * 0.5, PI * 0.5, (u0 + u1) * 0.5)
+		var lit := 0.18 + 0.32 * cos(th)
+		draw_rect(Rect2(Vector2(rr.position.x, rr.position.y + rr.size.y * u0), Vector2(rr.size.x, rr.size.y / bands + 0.6)), Color(lit, lit * 0.92, lit * 0.8))
+	var n := 18
+	var R := rr.size.y * 0.5
+	var cy := rr.position.y + R
+	var ph := _scroll / R
+	for k in n:
+		var th := fposmod(float(k) / n * TAU + ph, TAU)
+		if th > PI:
+			continue
+		var a := th - PI * 0.5
+		var y := cy + sin(a) * R
+		var vis := cos(a)
+		draw_line(Vector2(rr.position.x + 3, y), Vector2(rr.end.x - 3, y), Color(0.05, 0.04, 0.03, 0.35 + 0.5 * vis), 1.5 + 3.0 * vis)
+	draw_rect(Rect2(rr.position, Vector2(rr.size.x * 0.18, rr.size.y)), Color(1, 1, 1, 0.08))
+	if text != "":
+		var font := get_theme_default_font()
+		var fs := 18
+		var lines := text.split("\n")
+		var y0 := h * 0.5 - lines.size() * fs * 0.6
+		for i in lines.size():
+			var ts := font.get_string_size(lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+			var lb := Rect2(Vector2((w - ts.x) * 0.5 - 6, y0 + i * fs * 1.3 - fs * 0.9), Vector2(ts.x + 12, fs * 1.25))
+			var ls := StyleBoxFlat.new()
+			ls.bg_color = Color(0.04, 0.035, 0.03, 0.8)
+			ls.set_corner_radius_all(6)
+			draw_style_box(ls, lb)
+			draw_string(font, Vector2((w - ts.x) * 0.5, y0 + i * fs * 1.3), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 0.96, 0.85))

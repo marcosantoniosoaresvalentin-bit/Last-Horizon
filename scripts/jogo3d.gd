@@ -397,7 +397,12 @@ var _proj_btns: Array = []
 var _buck_sel := {}               # escolhendo onde cortar a tora caída: {info, ponta, d, L, ring}
 var _buck_go_cut := {}             # o corte escolhido, para o machado começar
 var _buck_btns: Array = []
-var _subida := {}                 # na escada do buriti: {p, k (degrau em que está), ang}
+var _olho := {}                   # o olho no tronco do buriti perto: {p, open}
+var _bur := {}                    # o que escolheu no menu do olho: {p, acao}
+var _esc := {}                    # subindo na peconha: {p, ang, c (progresso), alvo, desce}
+var _esc_pad: Control             # faixa de passar o dedo para cima (subir)
+var _esc_rope_mi: MeshInstance3D = null
+var _chop_bur := {}               # derrubando um buriti
 var _sub_btns: Array = []
 var _sub_ui: Control
 var _trim := {}                    # cortando a ponta que sobrou: {mi, si, t, s, tool}
@@ -692,12 +697,22 @@ func _build_hud() -> void:
 	_hud.add_child(_bld_pad)
 	_proj_btns = [mk.call("Pôr a planta", -290, -146, _proj_place), mk.call("Sair", -430, -426, _proj_stop)]
 	_buck_btns = [mk.call("Cortar aqui", -290, -146, _buck_go), mk.call("Sair", -430, -426, _buck_stop)]
-	_sub_btns = [mk.call("Subir", -150, -286, _sub_up), mk.call("Descer", -290, -286, _sub_down), mk.call("Pôr degrau", -290, -146, _sub_rung)]
+	_sub_btns = [mk.call("Descer", -290, -146, _esc_down), mk.call("Sair", -430, -146, _bur_sair)]
 	_sub_ui = Control.new()
 	_sub_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_sub_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_sub_ui.draw.connect(_draw_leaf_marks)
+	_sub_ui.draw.connect(_draw_bur_ui)
 	_hud.add_child(_sub_ui)
+	_esc_pad = Arrasto.new()
+	_esc_pad.vertical = true
+	_esc_pad.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	_esc_pad.offset_left = -150
+	_esc_pad.offset_right = -40
+	_esc_pad.offset_top = -230
+	_esc_pad.offset_bottom = 150
+	_esc_pad.visible = false
+	_esc_pad.arrastou.connect(_esc_drag)
+	_hud.add_child(_esc_pad)
 	_maq_stop = mk.call("Parar", -290, -146, _maq_op_stop)
 	_mark_btns = [mk.call("Cortar aqui", -290, -146, _mark_cut), mk.call("Subir", -150, -286, func(): _mark_move(0.05)),
 		mk.call("Descer", -290, -286, func(): _mark_move(-0.05)), mk.call("Medir", -150, -426, _mark_measure),
@@ -2209,9 +2224,10 @@ func _update_chop(delta: float) -> void:
 	if not _maq_op.is_empty():
 		_maq_op_tick(delta)
 		return
-	if not _subida.is_empty() and _pin.is_empty():
-		_sub_tick()
+	if not _esc.is_empty() and _pin.is_empty():
+		_esc_tick()
 		return
+	_bur_tick()
 	if not _pin.is_empty():
 		_pin_tick(delta)
 		return
@@ -2263,7 +2279,10 @@ func _update_chop(delta: float) -> void:
 		_chop_btn.visible = true
 		_chop_btn.text = "Rachar tábua"
 	elif _mao == "machado" and _arvores != null and not _digging and not _air and _carry.is_empty() and _crouch_job == "":
-		if _arvores.nearest_standing(_player.position, 1.3) != null:
+		if _bur_fell_ready():
+			_chop_btn.visible = true
+			_chop_btn.text = "Derrubar"
+		elif _arvores.nearest_standing(_player.position, 1.3) != null:
 			_chop_btn.visible = true
 			_chop_btn.text = "Cortar"
 		elif not _branch_target().is_empty():
@@ -2304,7 +2323,7 @@ func _update_ctx_btn() -> void:
 		else:
 			_ctx_btn.text = "Cortar estaca"
 		_ctx_action = "estaca"
-	elif _buritis and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _sub_ctx():
+	elif _buritis and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _bur_ctx():
 		pass
 	elif _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _trim.is_empty() and item_qtd("marreta") > 0 and not _pin_targets().is_empty():
 		_ctx_action = "pinos"
@@ -2356,14 +2375,8 @@ func _ctx_press() -> void:
 		"pinos":
 			_pin_start()
 			return
-		"sub_subir":
-			var bp: Dictionary = _buritis.palm_near(_player.position, 1.6)
-			if not bp.is_empty():
-				_subida = {"p": bp, "k": -1, "ang": float(bp.get("lado", 0.0))}
-				_sub_up()
-			return
-		"sub_degrau":
-			_sub_rung()
+		"escalar":
+			_bur_escalar_press()
 			return
 		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra":
 			_maq_ctx_press(_ctx_action)
@@ -4500,6 +4513,21 @@ func _start_chop() -> void:
 	if _mao == "machado" and _board_ahead() >= 0:
 		_start_board_chop(_board_ahead())
 		return
+	if _bur_fell_ready():
+		if _digging:
+			_cancel_dig()
+		_chop_bur = _bur.p
+		_chop_tree = null
+		_chop_log = {}
+		_chop_branch = {}
+		_chopping = true
+		_swing_queued = false
+		_play("Idle", 0.5)
+		if _chop_pose:
+			_chop_pose.vertical = false
+			_chop_pose.ready_pose = true
+		_begin_swing()
+		return
 	var t = _arvores.nearest_standing(_player.position, 1.3)
 	_chop_log = {}
 	_chop_branch = {}
@@ -4545,6 +4573,9 @@ func _chop_hit() -> void:
 
 
 func _chop_hit_now() -> void:
+	if not _chop_bur.is_empty():
+		_bur_chop_hit()
+		return
 	if not _chop_branch.is_empty():
 		var at: Vector3 = _chop_branch.point
 		_chips(at)
@@ -4670,6 +4701,7 @@ func _chips(at: Vector3) -> void:
 
 
 func _cancel_chop() -> void:
+	_chop_bur = {}
 	_chopping = false
 	_swing_on = false
 	_swing_queued = false
@@ -4785,8 +4817,8 @@ func _move_player(delta: float) -> void:
 		_chop_pose.moving = amount > 0.12 or _walking
 		_chop_pose.in_air = _air
 	var p := _player.position
-	if not _subida.is_empty():
-		_sub_move(delta, dir)
+	if not _esc.is_empty():
+		_esc_move(delta, dir)
 		return
 	if not _coop.is_empty() and not bool(_coop.lider) and float(_coop.anim) <= 0.0:
 		var e = _rede.estados.get(int(_coop.pid)) if _rede else null
@@ -4870,6 +4902,15 @@ func _move_player(delta: float) -> void:
 			p.z += mv.y / mv.length() * stp
 		var tl := Vector2(axp.x - p.x, axp.z - p.z)
 		_face = lerp_angle(_face, atan2(-tl.x, -tl.y), minf(1.0, delta * 10.0))
+	elif _chopping and not _chop_bur.is_empty():
+		var tob := Vector2(float(_chop_bur.x) - p.x, float(_chop_bur.z) - p.z)
+		_face = lerp_angle(_face, atan2(-tob.x, -tob.y), minf(1.0, delta * 10.0))
+		var wantb: float = _buritis.trunk_r(_chop_bur) + 0.72
+		var distb := tob.length()
+		if distb > 0.01 and absf(distb - wantb) > 0.05:
+			var stepb := clampf(distb - wantb, -delta * 1.5, delta * 1.5)
+			p.x += tob.x / distb * stepb
+			p.z += tob.y / distb * stepb
 	elif _chopping and _chop_tree != null:
 		# fica de frente para o tronco
 		var to := Vector2(float(_chop_tree[0]) - p.x, float(_chop_tree[1]) - p.z)
@@ -5004,6 +5045,8 @@ static func _best_axis(b: Basis, want: Vector3) -> Vector3:
 ## Primeira pessoa: a câmera fica nos olhos do personagem (segue a cabeça dele, que
 ## abaixa, anda e balança junto) e as mãos dele aparecem na frente.
 func _fp_camera(delta: float, moved: float) -> void:
+	if _sub_ui:
+		_sub_ui.queue_redraw()        # o olho e os losangos do buriti acompanham a câmera
 	var body := _player.global_transform.basis
 	var bfwd := -body.z
 	var eye := _player.global_position + Vector3(0, 1.62, 0) + bfwd * 0.1
@@ -5035,7 +5078,7 @@ func _fp_camera(delta: float, moved: float) -> void:
 	if _chop_pose:
 		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
 		# com ferramenta na mão os braços não aparecem (só a ferramenta, segura por baixo da tela)
-		_chop_pose.hide_arms = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta"] and _vine.is_empty()
+		_chop_pose.hide_arms = _esc.is_empty() and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta"] and _vine.is_empty()
 	for m in _body_mats:
 		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, maxf(_busy_f, down))
 		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, maxf(_busy_f, down))
@@ -5114,7 +5157,7 @@ func _input(e: InputEvent) -> void:
 		return   # escolhendo o projeto
 	if not _pin.is_empty() and _pin_input(e):
 		return
-	if not _subida.is_empty() and _pin.is_empty() and _leaf_input(e):
+	if _bag_ui == null and _craft_ui == null and _cal == null and _work_menu == null and _bur_input(e):
 		return
 	if _cal != null or _bag_ui != null or _craft_ui != null or _work_menu != null:
 		return   # com o calendário, a mochila ou o craft aberto, o toque não anda nem gira a câmera
@@ -5122,7 +5165,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop] + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop] + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns + [_esc_pad]:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -7052,12 +7095,25 @@ func _buriti_relink() -> void:
 			if absf(float(q.x) - float(old.x)) < 0.01 and absf(float(q.z) - float(old.z)) < 0.01:
 				return q
 		return {}
-	if not _subida.is_empty():
-		var np: Dictionary = find.call(_subida.p)
+	if not _esc.is_empty():
+		var np: Dictionary = find.call(_esc.p)
 		if np.is_empty():
-			_subida = {}
+			_esc_end()
 		else:
-			_subida.p = np
+			_esc.p = np
+	for st in [_bur, _olho]:
+		if not st.is_empty():
+			var nb: Dictionary = find.call(st.p)
+			if nb.is_empty():
+				st.clear()
+			else:
+				st.p = nb
+	if not _chop_bur.is_empty():
+		var nc: Dictionary = find.call(_chop_bur)
+		if nc.is_empty():
+			_cancel_chop()
+		else:
+			_chop_bur = nc
 	if not _pin.is_empty() and _pin.has("alvos"):
 		for al in _pin.alvos:
 			if (al as Dictionary).has("bp"):
@@ -7403,19 +7459,6 @@ func _pin_targets() -> Array:
 	if _maq:
 		for t in _maq.pin_targets(_player.position):
 			out.append({"kind": "m", "mi": t.mi, "ji": t.ji, "pos": t.pos, "stage": t.stage})
-	if _buritis:
-		var eye := _player.global_position + Vector3.UP * 1.0
-		for bp in _buritis.palms:
-			var dg: Array = bp.get("degraus", [])
-			if dg.is_empty() or Vector2(float(bp.x) - eye.x, float(bp.z) - eye.z).length() > 3.0:
-				continue
-			for k in dg.size():
-				if int(dg[k][1]) >= 2:
-					continue
-				var rw: Dictionary = _buritis.rung_pos(bp, k)
-				var w: Vector3 = (rw.c as Vector3) + Vector3.UP * 0.03
-				if w.distance_to(eye) < 2.1:
-					out.append({"kind": "b", "bp": bp, "k": k, "pos": w, "stage": int(dg[k][1])})
 	return out
 
 
@@ -7499,8 +7542,8 @@ func _pin_pick(k: int) -> void:
 	_pin.go = k
 	var w: Vector3 = _pin.alvos[k].pos
 	var d := Vector2(w.x - _player.position.x, w.z - _player.position.z)
-	if not _subida.is_empty() or str(_pin.alvos[k].kind) in ["b", "folha"]:
-		_pin_ready()                 # na escada (ou do chão no primeiro degrau) não anda
+	if not _esc.is_empty() or str(_pin.alvos[k].kind) == "folha":
+		_pin_ready()                 # na peconha (ou a folha ao alcance do braço) não anda
 	elif d.length() > 1.1:
 		var spot := Vector3(w.x, 0, w.z) - Vector3(d.x, 0, d.y).normalized() * 0.8
 		_walk_to(_ground_pos(Vector2(spot.x, spot.z)), "pino")
@@ -7664,7 +7707,10 @@ func _pin_tick(delta: float) -> void:
 		for a in _pin.alvos:
 			if int(a.get("stage", 0)) == 0:
 				nf += 1
-		il.text = "Pinos na mochila: %s\nFaltam %d furos e %d pinos aqui perto" % ["∞ (teste)" if teste else str(item_qtd("pino")), nf, (_pin.alvos as Array).size() - nf]
+		if bool(_pin.get("folhas", false)):
+			il.text = "Facas na mochila: %d\nFaca: %d%% · talo cortado %d%%" % [item_qtd("faca"), int(round(tool_dur("faca") * 100.0)), int(float(_pin.depth) * 100.0)]
+		else:
+			il.text = "Pinos na mochila: %s\nFaltam %d furos e %d pinos aqui perto" % ["∞ (teste)" if teste else str(item_qtd("pino")), nf, (_pin.alvos as Array).size() - nf]
 		(_pin_ui.get_node("mk") as Control).queue_redraw()
 		(_pin_ui.get_node("tb") as Control).queue_redraw()
 
@@ -7690,8 +7736,6 @@ func _pin_strike() -> void:
 			if float(_pin.depth) >= 0.99:
 				if str(al.kind) == "c":
 					_constr.set_stage(al.pc, int(al.k), 1)
-				elif str(al.kind) == "b":
-					_buritis.set_rung_stage(al.bp, int(al.k), 1)
 				else:
 					_maq.set_stage(int(al.mi), int(al.ji), 1)
 				(_pin.node as Node).queue_free()
@@ -7716,8 +7760,6 @@ func _pin_strike() -> void:
 				_update_inventory()
 			if str(al.kind) == "c":
 				_constr.pin_done(al.pc, int(al.k))
-			elif str(al.kind) == "b":
-				_buritis.set_rung_stage(al.bp, int(al.k), 2)
 			else:
 				_maq.tie(int(al.mi), int(al.ji))
 			(_pin.node as Node).queue_free()
@@ -8315,178 +8357,165 @@ func _coop_end(drop: bool) -> void:
 	_act_check = 0.0
 
 
-# ================== ESCADA NO BURITI E CORTAR FOLHA ==================
-# Perto do buriti, com uma ripa na mochila: "Pôr degrau" encosta a ripa no tronco;
-# fura (ponteira + marreta) atravessando a ripa e entrando no buriti e bate o pino.
-# "Subir" sobe um degrau; lá em cima põe o próximo, e assim até as folhas (ou o topo
-# do tronco seco). No alto, o controle roda em volta do tronco. Cada folha verde tem
-# um losango (aparece desde o primeiro degrau); com a faca, golpes no talo na barrinha:
-# a folha cai (dá para ver e ouvir) e fica no chão. Errou no vermelho: a faca quebra
-# e a lâmina de pedra cai. "Descer" a qualquer hora.
+# ================== BURITI: O OLHO, CORTAR FOLHA, SUBIR NA PECONHA E DERRUBAR ==================
+# Perto do pé do buriti aparece um olho no tronco. Tocando nele abre o menu (embaixo
+# do olho, com a setinha do lado para fechar). Buriti pequeno (as folhas ao alcance):
+# Cortar e Derrubar. Grande: Escalar e Derrubar.
+#  - Cortar: losangos nas folhas que o braço alcança; com a faca, golpes no talo na
+#    barrinha (errou no vermelho, a lâmina quebra e cai).
+#  - Derrubar: com o machado na mão, aparece o botão de cortar; machadadas no pé até
+#    ele tombar. O tronco fica no chão (dá para cortar em toras) e as folhas espalhadas.
+#  - Escalar: botão Escalar, abre a mochila, USAR a peconha: os pés presos no laço;
+#    passando o dedo para cima na faixa, o personagem sobe (encolhe as pernas e estica).
+#    No alto o controle roda em volta do tronco; as folhas têm losangos. Descer a
+#    qualquer hora.
+const ESC_STEP := 0.42           # quanto sobe a cada encolher e esticar as pernas
 
-func _sub_ctx() -> bool:
-	var bp: Dictionary = _buritis.palm_near(_player.position, 1.6)
-	if bp.is_empty():
-		return false
-	var dg: Array = bp.get("degraus", [])
-	if not dg.is_empty() and int(dg[0][1]) >= 2:
-		_ctx_action = "sub_subir"
-		_ctx_btn.text = "Subir"
-		return true
-	if dg.is_empty() and (item_qtd("ripa") > 0 or teste):
-		_ctx_action = "sub_degrau"
-		_ctx_btn.text = "Pôr degrau"
-		return true
-	return false
+func _olho_free() -> bool:
+	return _esc.is_empty() and _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
+		and not _air and _bld.is_empty() and _proj.is_empty() and _buck_sel.is_empty() and _maq_op.is_empty() \
+		and _trim.is_empty() and _post_mark.is_empty() and _knap.is_empty() and _vine.is_empty() and not _walking \
+		and _coop.is_empty() and _bag_ui == null and _craft_ui == null
 
 
-func _sub_top(bp: Dictionary, k: int) -> bool:
-	return k >= _buritis.rungs_to_top(bp) - 1
-
-
-func _sub_rung() -> void:
-	var bp: Dictionary = _subida.get("p", {}) if not _subida.is_empty() else _buritis.palm_near(_player.position, 1.6)
-	if bp.is_empty():
+## Procura o buriti perto (a cada 1/4 s) e mantém o olho/escolha dele.
+func _olho_tick() -> void:
+	if _buritis == null:
 		return
-	if item_qtd("ripa") <= 0 and not teste:
-		_show_toast("Precisa de uma ripa (mata-junta) para cada degrau.")
+	if not _bur.is_empty():
+		var bp: Dictionary = _bur.p
+		var far := Vector2(float(bp.x) - _player.position.x, float(bp.z) - _player.position.z).length() > 3.2
+		if far or not _buritis.palms.has(bp) or bp.has("toco") or (str(_bur.acao) == "derrubar" and _mao != "machado" and not _chopping):
+			_bur = {}
+	if not _olho_free():
+		_olho = {}
 		return
-	var dg: Array = bp.get("degraus", [])
-	if not _subida.is_empty():
-		var k := int(_subida.k)
-		if k != dg.size() - 1:
-			_show_toast("Suba até o último degrau para pôr o próximo.")
-			return
-		if int(dg[k][1]) < 2:
-			_show_toast("Termine o degrau de baixo (furo e pino) antes.")
-			return
-		if dg.size() >= _buritis.rungs_to_top(bp):
-			_show_toast("A escada já chegou nas folhas.")
-			return
-	elif not dg.is_empty():
+	var p: Dictionary = _buritis.palm_near(_player.position, 2.2)
+	if p.is_empty() or _olho_opts(p).is_empty():
+		_olho = {}
 		return
-	var to := Vector2(_player.position.x - float(bp.x), _player.position.z - float(bp.z))
-	_buritis.add_rung(bp, atan2(to.y, to.x))
-	if not teste:
-		remove_item("ripa", 1)
-		_update_inventory()
-	Sons.play_at(self, "baque", _player.position + Vector3.UP, -12.0, 1.3)
-	_show_toast("Degrau no tronco. Agora fure (ponteira + marreta) e ponha o pino: \"Furar e pinos\".")
-	_act_check = 0.0
+	if _olho.is_empty() or not (_olho.p as Dictionary) == p or not _buritis.palms.has(_olho.p):
+		_olho = {"p": p, "open": false}
 
 
-func _sub_up() -> void:
-	if _subida.is_empty():
-		return
-	var bp: Dictionary = _subida.p
-	var dg: Array = bp.get("degraus", [])
-	var nk := int(_subida.k) + 1
-	if nk >= dg.size():
-		_show_toast("Não tem degrau acima. Ponha outro (precisa de uma ripa).")
-		if int(_subida.k) < 0:
-			_subida = {}
-		return
-	if int(dg[nk][1]) < 2:
-		_show_toast("Esse degrau ainda não está preso: fure e ponha o pino.")
-		if int(_subida.k) < 0:
-			_subida = {}
-		return
-	_subida.k = nk
-	_subida.ang = float(bp.get("lado", 0.0))
-	if _carry_node:
-		_carry_node.visible = false
-	if _sub_top(bp, nk):
-		_show_toast(("Chegou no topo do tronco seco." if _buritis.dead(bp) else "Chegou nas folhas! Use o controle para rodar em volta do tronco e toque no losango da folha."))
-	_act_check = 0.0
+## O que dá para fazer nesse buriti: [[ação, nome]]
+func _olho_opts(p: Dictionary) -> Array:
+	var out := []
+	if _buritis.is_small(p):
+		out.append(["cortar", "Cortar"])
+	elif _buritis.can_climb(p):
+		out.append(["escalar", "Escalar"])
+	if _buritis.can_fell(p):
+		out.append(["derrubar", "Derrubar"])
+	return out
 
 
-func _sub_down() -> void:
-	if _subida.is_empty():
-		return
-	_subida.k = int(_subida.k) - 1
-	if int(_subida.k) < 0:
-		var bp: Dictionary = _subida.p
-		var ang := float(bp.get("lado", 0.0))
-		var g := Vector2(float(bp.x) + cos(ang) * 0.75, float(bp.z) + sin(ang) * 0.75)
-		_player.position = _ground_pos(g)
-		_subida = {}
-		for b in _sub_btns:
-			(b as Control).visible = false
-		_sub_ui.queue_redraw()
-		_jump_btn.visible = true
-	_act_check = 0.0
+## Onde o olho fica: no tronco (na altura do peito), do lado de quem está olhando.
+func _olho_world(p: Dictionary) -> Vector3:
+	var ang := atan2(_player.position.z - float(p.z), _player.position.x - float(p.x))
+	var h: float = _buritis.trunk_h(p)
+	if h > 1.6:
+		return _buritis.trunk_point(p, 1.3, ang, 0.08)
+	return _buritis.trunk_point(p, clampf(h + 0.45, 0.6, 1.25), ang, 0.12)
 
 
-## Na escada: o pé no degrau, de frente para o tronco; no alto, roda em volta.
-func _sub_move(delta: float, dir: Vector2) -> void:
-	var bp: Dictionary = _subida.p
-	var k := int(_subida.k)
-	var dg: Array = bp.get("degraus", [])
-	if k < 0 or k >= dg.size() or not _buritis.palms.has(bp):
-		_subida = {}
-		return
-	var rw: Dictionary = _buritis.rung_pos(bp, k)
-	var pos: Vector3
-	if _sub_top(bp, k):
-		if absf(dir.x) > 0.15:
-			_subida.ang = float(_subida.ang) + dir.x * 0.9 * delta
-		pos = _buritis.trunk_point(bp, float(rw.h) + 0.04, float(_subida.ang), 0.36)
-	else:
-		pos = (rw.c as Vector3) + (rw.out as Vector3) * 0.24 + Vector3.UP * 0.03
-	_player.position = pos
-	_air = false
-	_vy = 0.0
-	var tc := Vector2(float(bp.x) - pos.x, float(bp.z) - pos.z)
-	_face = atan2(-tc.x, -tc.y)
-	_player.rotation.y = _face
-	if _chop_pose:
-		_chop_pose.in_air = true          # nos degraus: os pés não procuram o chão lá embaixo
-	_play("Idle")
-	_fp_camera(delta, 0.0)
+## Posições do menu na tela: {eye, close, rows:[Rect2]}
+func _olho_layout() -> Dictionary:
+	if _olho.is_empty():
+		return {}
+	var w := _olho_world(_olho.p)
+	if _cam.is_position_behind(w):
+		return {}
+	var vs := get_viewport().get_visible_rect().size
+	var e := _cam.unproject_position(w)
+	e.x = clampf(e.x, 70.0, vs.x - 260.0)
+	e.y = clampf(e.y, 70.0, vs.y - 260.0)
+	var rows := []
+	if bool(_olho.open):
+		var opts := _olho_opts(_olho.p)
+		for i in opts.size():
+			rows.append(Rect2(e + Vector2(-125, 62 + i * 74), Vector2(250, 64)))
+	return {"eye": e, "close": e + Vector2(72, 0), "rows": rows}
 
 
-func _sub_tick() -> void:
-	for b in [_log_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn, _jump_btn]:
-		(b as Control).visible = false
-	var bp: Dictionary = _subida.p
-	var dg: Array = bp.get("degraus", [])
-	var k := int(_subida.k)
-	(_sub_btns[0] as Control).visible = k + 1 < dg.size() and int(dg[k + 1][1]) >= 2
-	(_sub_btns[1] as Control).visible = true
-	(_sub_btns[2] as Control).visible = k == dg.size() - 1 and int(dg[k][1]) >= 2 and dg.size() < _buritis.rungs_to_top(bp) and (item_qtd("ripa") > 0 or teste)
-	var tg := _pin_targets()
-	_ctx_btn.visible = not tg.is_empty() and (item_qtd("marreta") > 0 or teste)
-	if _ctx_btn.visible:
-		_ctx_action = "pinos"
-		_ctx_btn.text = "Furar e pinos (%d)" % tg.size()
-	_sub_ui.queue_redraw()
-
-
-func _draw_leaf_marks() -> void:
-	if _subida.is_empty() or not _pin.is_empty():
-		return
-	var bp: Dictionary = _subida.p
-	var top := _sub_top(bp, int(_subida.k))
-	var eye := _cam.global_position
+func _draw_bur_ui() -> void:
 	var font := ThemeDB.fallback_font
-	for lf in _buritis.leaves_of(bp):
+	var L := _olho_layout() if _olho_free() and _bur.is_empty() else {}
+	if not L.is_empty():
+		var e: Vector2 = L.eye
+		Desenhos.eye(_sub_ui, e, 64.0, bool(_olho.open))
+		if bool(_olho.open):
+			# a setinha para cima (fechar), do lado do olho
+			var c: Vector2 = L.close
+			_sub_ui.draw_circle(c, 24.0, Color(0.05, 0.05, 0.04, 0.8))
+			_sub_ui.draw_arc(c, 24.0, 0, TAU, 32, Color(1, 1, 1, 0.6), 2.0, true)
+			_sub_ui.draw_polyline(PackedVector2Array([c + Vector2(-11, 6), c + Vector2(0, -7), c + Vector2(11, 6)]), Color(1, 0.95, 0.8), 4.0, true)
+			var opts := _olho_opts(_olho.p)
+			for i in (L.rows as Array).size():
+				var r: Rect2 = L.rows[i]
+				var sb := StyleBoxFlat.new()
+				sb.bg_color = Color(0.05, 0.045, 0.035, 0.86)
+				sb.border_color = Color(1, 1, 1, 0.22)
+				sb.set_border_width_all(2)
+				sb.set_corner_radius_all(12)
+				_sub_ui.draw_style_box(sb, r)
+				# o quadradinho (losango) para escolher
+				var q := r.position + Vector2(30, r.size.y * 0.5)
+				var rr := 13.0
+				var pts := PackedVector2Array([q + Vector2(0, -rr), q + Vector2(rr, 0), q + Vector2(0, rr), q + Vector2(-rr, 0)])
+				_sub_ui.draw_polyline(pts + PackedVector2Array([pts[0]]), Color(1, 1, 1, 0.95), 3.0, true)
+				_sub_ui.draw_string(font, r.position + Vector2(56, r.size.y * 0.5 + 9), str(opts[i][1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1, 0.96, 0.86))
+				# a ilustração na frente do nome
+				Desenhos.item(_sub_ui, "acao_" + str(opts[i][0]), r.position + Vector2(r.size.x - 40, r.size.y * 0.5), 56.0)
+	# losangos das folhas (cortando do chão, ou subindo)
+	var lfs := _leaf_list()
+	if lfs.is_empty() or not _pin.is_empty():
+		return
+	var eye := _cam.global_position
+	# o nome "Folha" só na que está mais no meio da tela (perto o bastante)
+	var mid := get_viewport().get_visible_rect().size * 0.5
+	var lab := -1
+	var lbd := 1e9
+	for i in lfs.size():
+		var w0: Vector3 = lfs[i].cut
+		if _cam.is_position_behind(w0) or w0.distance_to(eye) >= _leaf_reach():
+			continue
+		var dd := _cam.unproject_position(w0).distance_to(mid)
+		if dd < lbd:
+			lbd = dd
+			lab = i
+	for i in lfs.size():
+		var lf: Dictionary = lfs[i]
 		var w: Vector3 = lf.cut
 		if _cam.is_position_behind(w):
 			continue
 		var p := _cam.unproject_position(w)
-		var perto := top and w.distance_to(eye) < 3.0
+		var perto := w.distance_to(eye) < _leaf_reach()
 		var col := Color(0.4, 0.95, 0.4) if perto else Color(1, 1, 1, 0.75)
 		var r := 13.0
 		var pts := PackedVector2Array([p + Vector2(0, -r), p + Vector2(r, 0), p + Vector2(0, r), p + Vector2(-r, 0)])
 		_sub_ui.draw_polyline(pts + PackedVector2Array([pts[0]]), col, 3.0, true)
-		if perto:
+		if i == lab:
 			var tw := font.get_string_size("Folha", HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
 			var lb := Rect2(p + Vector2(-tw * 0.5 - 6, -r - 34), Vector2(tw + 12, 24))
 			_sub_ui.draw_rect(lb, Color(0.05, 0.05, 0.04, 0.85))
 			_sub_ui.draw_string(font, lb.position + Vector2(6, 18), "Folha", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.95, 0.8))
 
 
-func _leaf_input(e: InputEvent) -> bool:
+## Folhas com losango agora: subindo (todas) ou cortando do chão (as que alcança).
+func _leaf_list() -> Array:
+	if not _esc.is_empty():
+		return _buritis.leaves_of(_esc.p)
+	if not _bur.is_empty() and str(_bur.acao) == "cortar":
+		return _buritis.reach_leaves(_bur.p)
+	return []
+
+
+func _leaf_reach() -> float:
+	return 3.0 if not _esc.is_empty() else 2.4
+
+
+func _bur_input(e: InputEvent) -> bool:
 	var pos := Vector2.INF
 	if e is InputEventScreenTouch and e.pressed:
 		pos = e.position
@@ -8494,26 +8523,308 @@ func _leaf_input(e: InputEvent) -> bool:
 		pos = e.position
 	if pos == Vector2.INF:
 		return false
-	for b in _sub_btns + [_ctx_btn]:
+	for b in _sub_btns + [_ctx_btn, _chop_btn, _esc_pad]:
 		if (b as Control).visible and (b as Control).get_global_rect().has_point(pos):
 			return false
-	var bp: Dictionary = _subida.p
-	for lf in _buritis.leaves_of(bp):
-		var w: Vector3 = lf.cut
-		if _cam.is_position_behind(w):
-			continue
-		if pos.distance_to(_cam.unproject_position(w)) < 60.0:
-			_leaf_pick(bp, int(lf.li), w)
+	var L := _olho_layout() if _olho_free() and _bur.is_empty() else {}
+	if not L.is_empty():
+		if pos.distance_to(L.eye) < 48.0:
+			if not bool(_olho.open):
+				_olho.open = true
+				Sons.play_at(self, "pedra_bate", _player.position + Vector3.UP, -30.0, 2.0)
 			return true
+		if bool(_olho.open):
+			if pos.distance_to(L.close) < 34.0:
+				_olho.open = false
+				return true
+			var opts := _olho_opts(_olho.p)
+			for i in (L.rows as Array).size():
+				if (L.rows[i] as Rect2).grow(4).has_point(pos):
+					_olho_pick(str(opts[i][0]))
+					return true
+	if _pin.is_empty():
+		for lf in _leaf_list():
+			var w: Vector3 = lf.cut
+			if _cam.is_position_behind(w):
+				continue
+			if pos.distance_to(_cam.unproject_position(w)) < 60.0:
+				_leaf_pick(_esc.p if not _esc.is_empty() else _bur.p, int(lf.li), w)
+				return true
 	return false
 
 
-func _leaf_pick(bp: Dictionary, li: int, w: Vector3) -> void:
-	if not _sub_top(bp, int(_subida.k)):
-		_show_toast("Suba até as folhas para cortar.")
+func _olho_pick(acao: String) -> void:
+	var p: Dictionary = _olho.p
+	_olho.open = false
+	match acao:
+		"cortar":
+			_bur = {"p": p, "acao": "cortar"}
+			if item_qtd("faca") <= 0:
+				_show_toast("Para cortar a folha precisa de uma faca de pedra (lâmina de faca + galho + cipó, no craft).")
+			else:
+				_show_toast("Toque no losango da folha que quer cortar.")
+		"derrubar":
+			if _mao != "machado":
+				_show_toast("Para derrubar, ponha o machado na mão (Mochila → Equipar) e escolha Derrubar de novo.")
+				return
+			_bur = {"p": p, "acao": "derrubar"}
+			_show_toast("Toque em \"Derrubar\" para dar as machadadas no pé do buriti.")
+		"escalar":
+			_bur = {"p": p, "acao": "escalar"}
+			_show_toast("Toque em \"Escalar\" para subir com a peconha.")
+	_act_check = 0.0
+
+
+## Botões do lugar com o buriti escolhido (Escalar). Devolve true se pôs o botão.
+func _bur_ctx() -> bool:
+	if _bur.is_empty() or str(_bur.acao) != "escalar":
+		return false
+	_ctx_action = "escalar"
+	_ctx_btn.text = "Escalar"
+	return true
+
+
+func _bur_escalar_press() -> void:
+	if item_qtd("peconha") <= 0:
+		_show_toast("Precisa de uma peconha: 3 cipós trançados no craft (cada trançado são 3 cipós).")
 		return
-	if w.distance_to(_cam.global_position) > 3.0:
-		_show_toast("Longe: rode em volta do tronco (controle) até ficar perto dessa folha.")
+	_show_toast("Toque na peconha e em USAR.")
+	_open_backpack()
+
+
+## A mochila chama ao usar a peconha. Devolve "" se começou a subir, ou o porquê não.
+func use_peconha() -> String:
+	if not _esc.is_empty():
+		return "Você já está subindo."
+	var p: Dictionary = _bur.p if not _bur.is_empty() and str(_bur.acao) == "escalar" else _buritis.palm_near(_player.position, 2.2)
+	if p.is_empty() or not _buritis.can_climb(p):
+		return "Chegue perto de um buriti alto, toque no olho do tronco e escolha Escalar."
+	if Vector2(float(p.x) - _player.position.x, float(p.z) - _player.position.z).length() > 3.0:
+		return "Chegue mais perto do buriti."
+	if not _carry.is_empty():
+		return "Largue a tora antes de subir."
+	_esc_start(p)
+	return ""
+
+
+func _esc_start(p: Dictionary) -> void:
+	var ang := atan2(_player.position.z - float(p.z), _player.position.x - float(p.x))
+	_esc = {"p": p, "ang": ang, "c": 0.0, "alvo": 0.0, "desce": false}
+	_bur = {}
+	_olho = {}
+	wear("peconha")
+	if _mao != "" and _mao != "faca":
+		equip("")            # as mãos vão no tronco
+	_esc_pad.visible = true
+	_esc_pad.text = "Passe o dedo\npara cima"
+	_jump_btn.visible = false
+	_esc_rope()
+	_show_toast("Os pés estão na peconha. Passe o dedo para cima na faixa para subir.")
+	_act_check = 0.0
+
+
+func _esc_top_c() -> float:
+	return _buritis.climb_top(_esc.p) / ESC_STEP
+
+
+## Altura dos pés (acima do chão) e quanto as pernas estão encolhidas, para o progresso c.
+func _esc_h(c: float) -> Vector2:
+	var n := floorf(c)
+	var f := c - n
+	var s := smoothstep(0.0, 1.0, clampf((f - 0.5) * 2.0, 0.0, 1.0))
+	var lift := smoothstep(0.0, 1.0, clampf(f * 2.0, 0.0, 1.0)) if f < 0.5 else 1.0 - s
+	return Vector2((n + s) * ESC_STEP, lift * ESC_STEP)
+
+
+func _esc_drag(d: Vector2) -> void:
+	if _esc.is_empty():
+		return
+	_esc.desce = false
+	_esc.alvo = clampf(float(_esc.alvo) - d.y / 150.0, 0.0, _esc_top_c())
+
+
+func _esc_down() -> void:
+	if _esc.is_empty():
+		return
+	_esc.desce = true
+	_show_toast("Descendo...")
+
+
+func _esc_end() -> void:
+	var p: Dictionary = _esc.p
+	var ang := float(_esc.ang)
+	var r: float = _buritis.trunk_r(p)
+	_player.position = _ground_pos(Vector2(float(p.x) + cos(ang) * (r + 0.7), float(p.z) + sin(ang) * (r + 0.7)))
+	_esc = {}
+	_esc_pad.visible = false
+	if _chop_pose:
+		_chop_pose.climbing = false
+	if _esc_rope_mi:
+		_esc_rope_mi.queue_free()
+		_esc_rope_mi = null
+	for b in _sub_btns:
+		(b as Control).visible = false
+	_jump_btn.visible = true
+	_show_toast("No chão.")
+	_act_check = 0.0
+
+
+## Subindo: o corpo na frente do tronco; o progresso anda até onde o dedo mandou.
+func _esc_move(delta: float, dir: Vector2) -> void:
+	var p: Dictionary = _esc.p
+	if not _buritis.palms.has(p) or p.has("toco"):
+		_esc_end()
+		return
+	var top := _esc_top_c()
+	if bool(_esc.desce):
+		_esc.alvo = maxf(0.0, float(_esc.alvo) - delta * 1.6)
+	var c := float(_esc.c)
+	var nc := move_toward(c, float(_esc.alvo), delta * (1.6 if bool(_esc.desce) else 1.1))
+	if int(floor(nc * 2.0)) != int(floor(c * 2.0)):
+		Sons.play_at(self, "passo", _player.position + Vector3.UP * 0.3, -6.0, 0.7)
+	_esc.c = nc
+	if bool(_esc.desce) and nc <= 0.001:
+		_esc_end()
+		return
+	var hv := _esc_h(nc)
+	var at_top := nc >= top - 0.02
+	if at_top and absf(dir.x) > 0.15:
+		_esc.ang = float(_esc.ang) - dir.x * 0.8 * delta
+	var r: float = _buritis.trunk_r(p)
+	var ang := float(_esc.ang)
+	var gy := height_at(float(p.x), float(p.z))
+	_player.position = Vector3(float(p.x) + cos(ang) * (r + 0.42), gy + hv.x, float(p.z) + sin(ang) * (r + 0.42))
+	_air = false
+	_vy = 0.0
+	_face = atan2(cos(ang), sin(ang))
+	_player.rotation.y = _face
+	if _chop_pose:
+		_chop_pose.in_air = true
+		_chop_pose.climbing = true
+		_chop_pose.climb_axis = Vector3(float(p.x), gy, float(p.z))
+		_chop_pose.climb_r = r
+		_chop_pose.climb_feet = hv.y
+		_chop_pose.climb_hands = 1.32 + 0.18 * hv.y / ESC_STEP
+	_play("Idle")
+	_fp_camera(delta, 0.0)
+	_esc_rope_update()
+	if _esc_pad.visible:
+		var txt := "Passe o dedo\npara cima" if not at_top else "No alto!\nControle: rodar"
+		if _esc_pad.text != txt:
+			_esc_pad.set_text(txt)
+	_sub_ui.queue_redraw()
+
+
+## A peconha: o laço de cipó trançado em volta do tronco, preso nos dois pés.
+func _esc_rope() -> void:
+	if _esc_rope_mi:
+		_esc_rope_mi.queue_free()
+	_esc_rope_mi = MeshInstance3D.new()
+	_esc_rope_mi.mesh = ImmediateMesh.new()
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.47, 0.38, 0.21)
+	m.roughness = 0.95
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_esc_rope_mi.material_override = m
+	_esc_rope_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_esc_rope_mi)
+
+
+func _esc_rope_update() -> void:
+	if _esc_rope_mi == null or _skel == null:
+		return
+	var p: Dictionary = _esc.p
+	var r: float = _buritis.trunk_r(p)
+	# os pés ficam onde a pose põe (ver ChopPose._climb): na frente do tronco, um de cada lado
+	var ax := Vector3(float(p.x), 0, float(p.z))
+	var root := _player.global_position
+	var o := Vector3(root.x - ax.x, 0, root.z - ax.z).normalized()
+	var rw := _player.global_transform.basis.x
+	rw.y = 0.0
+	rw = rw.normalized()
+	var fy := root.y + float(_chop_pose.climb_feet if _chop_pose else 0.0) + 0.06
+	var feet := []
+	for sg in [-1.0, 1.0]:
+		feet.append(Vector3(ax.x, fy, ax.z) + o * (r + 0.07) + rw * sg * (r * 0.55 + 0.05))
+	var y := fy
+	# caminho: pé esquerdo -> por trás do tronco -> pé direito -> entre os pés (na frente)
+	var path := PackedVector3Array()
+	var a0 := atan2((feet[0] as Vector3).z - ax.z, (feet[0] as Vector3).x - ax.x)
+	var a1 := atan2((feet[1] as Vector3).z - ax.z, (feet[1] as Vector3).x - ax.x)
+	var front := float(_esc.ang)
+	# vai por trás: do ângulo do pé esquerdo até o do direito pelo lado oposto à frente
+	var da := wrapf(a1 - a0, -PI, PI)
+	da = da - TAU * signf(da) if absf(da) < PI else da
+	var n := 26
+	for i in n + 1:
+		var a := a0 + da * i / float(n)
+		path.append(Vector3(ax.x + cos(a) * (r + 0.025), y + sin(i * 0.9) * 0.006, ax.z + sin(a) * (r + 0.025)))
+	# a volta da frente: passa por cima dos peitos dos pés, um pouco afastada do tronco
+	var fr := Vector3(cos(front), 0, sin(front))
+	var f0: Vector3 = feet[1]
+	var f1: Vector3 = feet[0]
+	for i in range(1, 9):
+		var t := i / 9.0
+		var q := f0.lerp(f1, t)
+		var c2 := Vector3(ax.x, y, ax.z) + fr * (r + 0.09)
+		q = q.lerp(c2, sin(t * PI) * 0.6)
+		q.y = y + 0.03
+		path.append(q)
+	path.append(path[0])
+	var im := _esc_rope_mi.mesh as ImmediateMesh
+	im.clear_surfaces()
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rad := 0.018
+	for i in path.size() - 1:
+		var A: Vector3 = path[i]
+		var B: Vector3 = path[i + 1]
+		var d := (B - A)
+		if d.length() < 0.0001:
+			continue
+		d = d.normalized()
+		var s1 := d.cross(Vector3.UP).normalized() * rad
+		var s2 := d.cross(s1).normalized() * rad
+		for k in 6:
+			var t0 := TAU * k / 6.0 + i * 0.7
+			var t1 := TAU * (k + 1) / 6.0 + i * 0.7
+			var o0 := s1 * cos(t0) + s2 * sin(t0)
+			var o1 := s1 * cos(t1) + s2 * sin(t1)
+			for v in [A + o0, B + o0, B + o1, A + o0, B + o1, A + o1]:
+				im.surface_set_normal(((v - A) - d * (v - A).dot(d)).normalized())
+				im.surface_add_vertex(v)
+	im.surface_end()
+
+
+func _esc_tick() -> void:
+	for b in [_log_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn, _jump_btn, _ctx_btn]:
+		(b as Control).visible = false
+	(_sub_btns[0] as Control).visible = true       # Descer
+	(_sub_btns[1] as Control).visible = false
+
+
+## Cortando folha do chão: botão Sair.
+var _olho_t := 0.0
+
+func _bur_tick() -> void:
+	_olho_t -= get_process_delta_time()
+	if _olho_t <= 0.0:
+		_olho_t = 0.2
+		_olho_tick()
+	(_sub_btns[1] as Control).visible = not _bur.is_empty() and str(_bur.acao) == "cortar" and _pin.is_empty()
+
+
+func _bur_sair() -> void:
+	_bur = {}
+	(_sub_btns[1] as Control).visible = false
+	_act_check = 0.0
+
+
+func _leaf_pick(bp: Dictionary, li: int, w: Vector3) -> void:
+	if w.distance_to(_cam.global_position) > _leaf_reach():
+		_show_toast(("Longe: rode em volta do tronco (controle) até ficar perto dessa folha." if not _esc.is_empty() else "Longe: chegue mais perto dessa folha."))
+		return
+	if not _esc.is_empty() and float(_esc.c) < _esc_top_c() - 0.05:
+		_show_toast("Suba até as folhas para cortar.")
 		return
 	if item_qtd("faca") <= 0:
 		_show_toast("Precisa de uma faca de pedra (lâmina de faca + galho + cipó, no craft).")
@@ -8523,6 +8834,105 @@ func _leaf_pick(bp: Dictionary, li: int, w: Vector3) -> void:
 	_pin.folhas = true
 	_pin_pick(0)
 	_show_toast("Golpeie o talo com a faca quando o marcador estiver no verde. Errou no vermelho, a faca quebra!")
+
+
+# ---------- derrubar ----------
+
+func _bur_fell_ready() -> bool:
+	return not _bur.is_empty() and str(_bur.acao) == "derrubar" and _mao == "machado" and _carry.is_empty() and not _air
+
+
+func _bur_chop_hit() -> void:
+	var p: Dictionary = _chop_bur
+	if not _buritis.palms.has(p) or p.has("toco"):
+		_cancel_chop()
+		return
+	var side := atan2(_player.position.z - float(p.z), _player.position.x - float(p.x))
+	var n: int = _buritis.add_hit(p, side)
+	var need: int = 1 if teste else _buritis.hits_to_fell(p)
+	var at: Vector3 = _buritis.trunk_point(p, 1.0, side, 0.02)
+	_chips(at)
+	Sons.play_at(self, "machado", at, 0.0, 1.05)
+	if n >= need:
+		var away := Vector3(float(p.x) - _player.position.x, 0, float(p.z) - _player.position.z)
+		_cancel_chop()
+		_bur = {}
+		_bur_fall(p, away)
+	else:
+		_show_toast("Derrubando: %d de %d machadadas" % [n, need])
+
+
+## O buriti tomba para o lado contrário de quem cortou e fica deitado no chão.
+func _bur_fall(p: Dictionary, away: Vector3) -> void:
+	var info: Dictionary = _buritis.fell(p)
+	var h := float(info.h)
+	var r := float(info.r)
+	var gy := float(info.gy)
+	var base := Vector3(float(info.x), gy + Buritis.TOCO_H, float(info.z))
+	var dir := Vector3(away.x, 0, away.z)
+	dir = dir.normalized() if dir.length() > 0.01 else Vector3(1, 0, 0)
+	var L := maxf(h - Buritis.TOCO_H, 0.5)
+	var root := Node3D.new()
+	add_child(root)
+	root.global_position = base
+	# o tronco (de pé, em volta da base) e a copa em cima
+	var tr := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = r * 0.9
+	cm.bottom_radius = r * 1.02
+	cm.height = L
+	cm.radial_segments = 14
+	tr.mesh = cm
+	tr.material_override = _buritis._dead_mat if bool(info.morta) else _buritis._trunk_mat
+	tr.position = Vector3.UP * L * 0.5
+	root.add_child(tr)
+	if not bool(info.morta):
+		var sk := {}
+		for li in info.cortadas:
+			sk[int(li)] = true
+		var cr := MeshInstance3D.new()
+		cr.mesh = _buritis._crown_mesh(_buritis._crown_params[int(info.v)], sk)
+		cr.material_override = _buritis._leaf_mat
+		var s := float(info.s)
+		cr.transform = Transform3D(Basis(Vector3.UP, float(info.rot)).scaled(Vector3(s, s, s)), Vector3.UP * (L - 0.1))
+		root.add_child(cr)
+	var axis := Vector3.UP.cross(dir).normalized()
+	var dur := clampf(sqrt(L) * 0.75, 1.4, 3.6)
+	Sons.play_at(self, "estalo", base, 2.0, 0.8)
+	var tw := root.create_tween()
+	tw.tween_method(func(t: float) -> void:
+		# começa devagar (estalando) e acelera; no fim quica um pouquinho
+		var a := (t * t) * (PI * 0.5 - 0.04)
+		root.global_transform = Transform3D(Basis(axis, a), base), 0.0, 1.0, dur)
+	tw.tween_callback(func():
+		Sons.play_at(self, "queda", base + dir * L * 0.6, clampf(-6.0 + L * 0.5, -6.0, 6.0), clampf(1.3 - L * 0.025, 0.8, 1.2))
+		if not bool(info.morta):
+			Sons.play_at(self, "folha_cai", base + dir * L, 2.0, 1.4, 120.0, 10.0))
+	tw.tween_interval(0.25)
+	tw.tween_callback(func():
+		root.queue_free()
+		_bur_fallen(info, base, dir, L))
+
+
+## Depois da queda: a tora do buriti deitada no chão e as folhas verdes espalhadas.
+func _bur_fallen(info: Dictionary, base: Vector3, dir: Vector3, L: float) -> void:
+	var r := float(info.r)
+	var c := base + dir * (L * 0.5 + 0.1)
+	var cy := height_at(c.x, c.z) + r * 0.95
+	var yaw := atan2(-dir.z, dir.x)
+	var fl := {"cil": {"L": L, "ra": r * 1.02, "rb": r * 0.9}, "sec": Arvores.circle_sec(), "pos": [c.x, cy, c.z],
+		"yaw": yaw, "dia": int(sim.elapsed_days()), "casca": "buriti_seco" if bool(info.morta) else "buriti"}
+	_arvores.free_logs.append(fl)
+	_arvores._rebuild_logs()
+	if not bool(info.morta):
+		var top := base + dir * L
+		var s := float(info.s)
+		for li in info.folhas:
+			var a := randf() * TAU
+			var q := top + Vector3(cos(a), 0, sin(a)) * randf_range(0.4, 2.2) + dir * randf_range(-0.5, 1.0)
+			_add_ground("folha_buriti", 1, q.x, q.z, 0.0, [int(info.v), int(li), randf() * TAU, s])
+	_show_toast("O buriti caiu! A tora ficou no chão (dá para cortar com o machado)%s." % ("" if bool(info.morta) else " e as folhas também"))
+	_act_check = 0.0
 
 
 func _faca_node() -> Node3D:

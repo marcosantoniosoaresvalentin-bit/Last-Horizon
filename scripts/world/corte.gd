@@ -591,6 +591,11 @@ class ChopPose extends SkeletonModifier3D:
 	var grip_high := GRIP_HIGH
 	var carry_grip := GRIP_HIGH
 	var _carry_cal := {}          # ferramenta -> pegada gravada parado (mão no antebraço, ferramenta na mão)
+	var climbing := false         # subindo no buriti com a peconha
+	var climb_axis := Vector3.ZERO  # o eixo do tronco (no mundo)
+	var climb_r := 0.2            # raio do tronco
+	var climb_feet := 0.0         # quanto os pés estão acima da base (0 a ~0,42: encolhendo as pernas)
+	var climb_hands := 1.4        # altura das mãos abraçando o tronco (acima da base)
 	var log_node: Node3D = null   # tora no ombro
 	var log_r := 0.2
 	var _b := {}
@@ -636,6 +641,13 @@ class ChopPose extends SkeletonModifier3D:
 		var up: Vector3 = (tb * Vector3.UP).normalized()
 		var fwd: Vector3 = (tb * -player.global_transform.basis.z).normalized()
 		var right: Vector3 = (tb * player.global_transform.basis.x).normalized()
+		if climbing:
+			if axe:
+				axe.visible = false
+			_climb(sk, up, fwd, right)
+			if hide_head:
+				_hide_head(sk)
+			return
 		if reach_on:
 			if axe:
 				axe.visible = false
@@ -868,6 +880,62 @@ class ChopPose extends SkeletonModifier3D:
 			var hp := sk.get_bone_global_pose(b)
 			hp.basis = hp.basis.orthonormalized().scaled(Vector3(0.001, 0.001, 0.001))
 			sk.set_bone_global_pose(b, hp)
+
+	# ---------- subindo na peconha: abraçado no tronco, os pés presos no laço ----------
+	# Os pés ficam encostados na frente do tronco (um de cada lado), com a peconha
+	# passando por trás; as mãos abraçam o tronco mais em cima. Encolhendo as pernas
+	# (climb_feet sobe), os joelhos abrem para os lados, como quem sobe no açaizeiro.
+	func _climb(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:
+		var hb := _bone("Hips")
+		if hb < 0:
+			return
+		var gx := sk.global_transform
+		var to_sk := gx.affine_inverse()
+		var root := player.global_position
+		var ax := Vector3(climb_axis.x, root.y, climb_axis.z)
+		var o := Vector3(root.x - ax.x, 0, root.z - ax.z)
+		o = o.normalized() if o.length() > 0.001 else Vector3.FORWARD
+		var bend := clampf(climb_feet / 0.42, 0.0, 1.0)
+		# o quadril fica afastado do tronco (o corpo pendurado pelos braços)
+		var hp := sk.get_bone_global_pose(hb)
+		var hips_w := ax + o * (climb_r + 0.3 + 0.06 * bend) + Vector3.UP * (0.84 + 0.1 * bend)
+		hp.origin = to_sk * hips_w
+		sk.set_bone_global_pose(hb, hp)
+		# o tronco do corpo inclina para a frente, para o buriti
+		_rot_global(sk, "Spine", right, -0.08 - 0.1 * bend)
+		# os pés: sola encostada na frente do tronco, um de cada lado
+		for side in ["Left", "Right"]:
+			var sg := -1.0 if side == "Left" else 1.0
+			var fb := _bone(side + "Foot")
+			if fb < 0:
+				continue
+			var side_w: Vector3 = (gx.basis * right).normalized() * sg
+			side_w.y = 0.0
+			side_w = side_w.normalized()
+			var foot := ax + o * (climb_r + 0.07) + side_w * (climb_r * 0.55 + 0.05) + Vector3.UP * (climb_feet + 0.09)
+			var knee := foot + side_w * 0.6 + o * 0.25 + Vector3.UP * 0.5
+			_ik(sk, side + "UpLeg", side + "Leg", side + "Foot", to_sk * foot, to_sk * knee)
+			# o pé deitado contra o tronco: dedos apontando para o lado de dentro, sola para o buriti
+			var fp := sk.get_bone_global_pose(fb)
+			var toe_want: Vector3 = to_sk.basis * (-o * 0.6 - side_w * 0.8 + Vector3.UP * 0.1).normalized()
+			var tb := _bone(side + "ToeBase")
+			if tb >= 0:
+				var cur := (sk.get_bone_global_pose(tb).origin - fp.origin).normalized()
+				fp.basis = Basis(Quaternion(cur, toe_want.normalized())) * fp.basis
+				sk.set_bone_global_pose(fb, fp)
+		# as mãos abraçando o tronco mais em cima, uma de cada lado
+		for side in ["Left", "Right"]:
+			var sg := -1.0 if side == "Left" else 1.0
+			var sb := _bone(side + "Arm")
+			if sb < 0:
+				continue
+			var side_w: Vector3 = (gx.basis * right).normalized() * sg
+			side_w.y = 0.0
+			side_w = side_w.normalized()
+			var hand := ax + side_w * (climb_r + 0.05) + o * 0.04 + Vector3.UP * (climb_hands + 0.04 * sg)
+			var elbow := hand + side_w * 0.5 + o * 0.35 - Vector3.UP * 0.35
+			_ik(sk, side + "Arm", side + "ForeArm", side + "Hand", to_sk * hand, to_sk * elbow)
+			_curl_fingers(sk, side, 0.85)
 
 	# ---------- esticar o braço direito até um ponto (pegar e puxar o cipó) ----------
 	func _reach(sk: Skeleton3D, up: Vector3, fwd: Vector3, right: Vector3) -> void:

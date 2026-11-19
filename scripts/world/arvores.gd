@@ -89,6 +89,7 @@ var _falling: Array = []
 var fell_hook := Callable()          # avisado quando uma árvore começa a tombar (cipós)
 var fall_done_hook := Callable()
 var _log_nodes := {}               # tora derrubada pelo jogador -> nó desenhado
+var extra_barks := {}              # casca de outras plantas (ex.: "buriti") para as toras soltas
 var free_logs: Array = []          # pedaços de tora soltos (levados pelo jogador): ver _free_log
 var _free_nodes: Array = []
 var _nat_segs: Array = []          # troncos que caíram sozinhos (colisão)
@@ -3050,7 +3051,7 @@ func _piece_node(fl: Dictionary) -> Node3D:
 	bark.commit(mesh)
 	if mesh.get_surface_count() > 0:
 		var age := float(last_day - int(fl.get("dia", last_day)))
-		mesh.surface_set_material(0, _bark if age < 200 else _bark_dead)
+		mesh.surface_set_material(0, extra_barks[str(fl.casca)] if extra_barks.has(str(fl.get("casca", ""))) else (_bark if age < 200 else _bark_dead))
 	wood.commit(mesh)
 	mesh.surface_set_material(mesh.get_surface_count() - 1, _piece_wood_mat())
 	var root := Node3D.new()
