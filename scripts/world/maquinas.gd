@@ -81,7 +81,7 @@ const TIPOS := {
 		"lamina_item": "lamina_faca",
 		"lamina_pecas": [0, 1, 2],
 		# as lâminas de faca em pé em cima da bancada (fio para cima, ao comprido em x)
-		"laminas": [Vector3(0.0, 0.94, -0.045), Vector3(0.0, 0.94, 0.0), Vector3(0.0, 0.94, 0.045)],
+		"laminas": [Vector3(0.0, 0.94, -0.013), Vector3(0.0, 0.94, 0.0), Vector3(0.0, 0.94, 0.013)],
 	},
 }
 
@@ -221,8 +221,8 @@ static func slot_log(pc: Array) -> Dictionary:
 	if kind == "meia":
 		sec = Arvores.split_sec(sec, false)[0]
 	elif kind == "tabua":
-		var h: Array = Arvores.split_sec(sec, false)
-		sec = Arvores.split_sec(h[0], true)[0]
+		# tábua de verdade: retangular, as faces serradas retas (dá para sentar e apoiar)
+		sec = {"pts": [[-1.0, -0.22, 1], [1.0, -0.22, 1], [1.0, 0.22, 1], [-1.0, 0.22, 1]], "ax": [0.0, 0.0]}
 	return {"cil": {"L": L, "ra": r, "rb": r}, "sec": sec, "pos": [0, 0, 0], "yaw": 0.0, "dia": 0, "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0, "bot": {}, "top": {}}
 
 
@@ -722,7 +722,8 @@ func _rebuild() -> void:
 			var sg2 := _joint_seg(str(p.tipo), ji)
 			if int(p.pinos[ji]) >= 2:
 				# o pino batido passando pelo furo (as pontas aparecem dos dois lados)
-				root.add_child(Furo.pin_node((sg2[0] as Vector3) - Vector3.UP * 0.012, (sg2[1] as Vector3) + Vector3.UP * 0.012))
+				# o pino batido até o fim: a cabeça fica rente à madeira (só aparece a cor dele)
+				root.add_child(Furo.pin_node((sg2[0] as Vector3) - Vector3.UP * 0.012, (sg2[1] as Vector3) - Vector3.UP * 0.008))
 			elif _joint_open(mi, ji) and int(p.pinos[ji]) == 0:
 				# onde tem que furar: um pontinho amarelo em cima
 				var mk := MeshInstance3D.new()

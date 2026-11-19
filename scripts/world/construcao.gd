@@ -527,7 +527,7 @@ func _rebuild() -> void:
 				continue
 			var sg := pin_seg(pc, float(pn[0]))
 			var up: Vector3 = ((sg[1] as Vector3) - (sg[0] as Vector3)).normalized()
-			var pm := Furo.pin_node(sg[0], (sg[1] as Vector3) + up * 0.012)
+			var pm := Furo.pin_node(sg[0], (sg[1] as Vector3) - up * 0.012)     # batido até o fim: rente à madeira
 			add_child(pm)
 			_nodes.append(pm)
 

@@ -8433,7 +8433,10 @@ func _coop_end(drop: bool) -> void:
 # o talo em cima das lâminas de faca; tocando em "Puxar", puxa o talo por cima delas
 # (o talo vai se abrindo em fibras). Umas vezes assim e sai a fibra para a mochila; se
 # tiver outro talo, pega sozinho; se não, levanta.
-const DESF_PUXADAS := 4
+const DESF_PUXADAS := 3          # passadas: em 4 tiras, depois em palitos, depois em fibra
+const DESF_TOQUES := 8           # toques em "Puxar" para passar o talo inteiro uma vez
+const DESF_R := 0.026            # raio do talo
+const DESF_L := 1.1              # comprimento do pedaço de talo na mão
 
 func _desf_start(mi: int) -> void:
 	if item_qtd("talo_buriti") <= 0:
@@ -8441,7 +8444,7 @@ func _desf_start(mi: int) -> void:
 		return
 	if _mao != "":
 		equip("")
-	_desf = {"mi": mi, "fase": "bater", "n": 0, "anim": -1.0, "acao": "", "node": null, "drag": -9, "dy": 0.0}
+	_desf = {"mi": mi, "fase": "bater", "anim": -1.0, "acao": "", "node": null, "drag": -9, "dy": 0.0}
 	_olho = {}
 	_bur = {}
 	_jump_btn.visible = false
@@ -8461,40 +8464,114 @@ func _desf_start(mi: int) -> void:
 func _desf_take() -> void:
 	remove_item("talo_buriti", 1)
 	_update_inventory()
-	_desf.n = 0
-	_desf.fase = "bater"
-	_desf.anim = -1.0
 	if _desf.node != null and is_instance_valid(_desf.node):
 		(_desf.node as Node).queue_free()
-	var root := Node3D.new()
-	add_child(root)
 	var mi := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.02
-	cm.bottom_radius = 0.026
-	cm.height = 1.1
-	cm.radial_segments = 8
-	mi.mesh = cm
+	mi.mesh = ImmediateMesh.new()
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.36, 0.5, 0.2)
-	m.roughness = 0.8
+	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
+	m.roughness = 0.85
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mi.material_override = m
-	mi.rotation = Vector3(0, 0, PI * 0.5)          # deitado ao comprido (x)
-	root.add_child(mi)
-	_desf.node = root
-	_desf.mat = m
-	_desf.fios = []
-	_desf_place(0.0, 0.0)
+	add_child(mi)
+	_desf.node = mi
+	_desf.passe = 0              # passadas completas
+	_desf.pull = 0.0             # quanto da passada atual já foi puxado (0 a 1)
+	_desf.alvo = 0.0             # até onde os toques mandaram puxar
+	_desf.down = 0.0
+	_desf.rot = 0.0
+	_desf.fase = "bater"
+	_desf.anim = -1.0
+	_desf_build()
+	_desf_place()
 	(_desf_btns[0] as Control).visible = false
 	_show_toast("Passe o dedo PARA BAIXO na tela para bater o talo nas lâminas.")
 
 
-## O talo no espaço da máquina: desce (0 em cima, 1 nas lâminas) e é puxado (0 a 1).
-func _desf_place(down: float, pull: float) -> void:
-	var mi := int(_desf.mi)
-	var xf: Transform3D = _maq.xform(mi)
-	var l := Vector3(0.32 - pull * 0.3, lerpf(1.1, 0.99, down), 0.0)
-	(_desf.node as Node3D).global_transform = Transform3D(xf.basis, xf * l)
+## O talo no espaço da máquina: centro em x (vai vindo para o banco ao puxar), descido
+## nas lâminas (down) e girado no comprido (rot).
+func _desf_place() -> void:
+	var xf: Transform3D = _maq.xform(int(_desf.mi))
+	var l := Vector3(-0.55 * float(_desf.pull), lerpf(1.1, 0.95 + DESF_R, float(_desf.down)), 0.0)
+	(_desf.node as Node3D).global_transform = Transform3D(xf.basis * Basis(Vector3.RIGHT, float(_desf.rot)), xf * l)
+
+
+## Monta o talo: a parte da mão inteira; da lâmina para a frente, cortado em tiras (4),
+## depois em palitos (4x4), depois em fibras (6x6), abrindo para a ponta.
+func _desf_build() -> void:
+	var im := (_desf.node as MeshInstance3D).mesh as ImmediateMesh
+	im.clear_surfaces()
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	var green := Color(0.34, 0.48, 0.19)
+	var fiber := Color(0.82, 0.76, 0.52)
+	var R := DESF_R
+	var half := DESF_L * 0.5
+	var passe := int(_desf.passe)
+	var uc := half * float(_desf.pull) if str(_desf.fase) == "puxar" else -1.0
+	# a parte da mão (inteira): prisma de 8 lados
+	_desf_prism(im, -half, 0.0, R, green)
+	var nseg := 11
+	for sgi in nseg:
+		var u0 := half * sgi / nseg
+		var u1 := half * (sgi + 1) / nseg
+		var um := (u0 + u1) * 0.5
+		var lev := passe + (1 if um < uc else 0)
+		if lev <= 0:
+			_desf_prism(im, u0, u1, R, green)
+			continue
+		var nz := 4 if lev <= 2 else 6
+		var ny := 1 if lev == 1 else (4 if lev == 2 else 6)
+		var col := green.lerp(fiber, 0.25 + 0.22 * lev)
+		var open := um * 0.06 * lev             # as tiras se abrem para a ponta
+		for iz in nz:
+			for iy in ny:
+				var z0 := -R + 2.0 * R * iz / nz
+				var z1 := -R + 2.0 * R * (iz + 1) / nz
+				var zc := (z0 + z1) * 0.5
+				var y0: float
+				var y1: float
+				if ny == 1:
+					var hh := sqrt(maxf(R * R - zc * zc, 0.0001))
+					y0 = -hh
+					y1 = hh
+				else:
+					y0 = -R + 2.0 * R * iy / ny
+					y1 = -R + 2.0 * R * (iy + 1) / ny
+					var yc0 := (y0 + y1) * 0.5
+					if zc * zc + yc0 * yc0 > R * R * 1.05:
+						continue
+				var yc := (y0 + y1) * 0.5
+				var g := 0.0012
+				var off := Vector2(zc, yc).normalized() * open if Vector2(zc, yc).length() > 0.001 else Vector2.ZERO
+				var droop := -um * um * 0.04 * lev
+				var c2 := col.darkened(0.08 * float((iz + iy) % 2))
+				_desf_box(im, u0, u1, z0 + g + off.x, z1 - g + off.x, y0 + g + off.y + droop, y1 - g + off.y + droop, c2)
+	im.surface_end()
+
+
+func _desf_quad(im: ImmediateMesh, a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Color) -> void:
+	var n := (b - a).cross(c - a).normalized()
+	for v in [a, b, c, a, c, d]:
+		im.surface_set_normal(n)
+		im.surface_set_color(col)
+		im.surface_add_vertex(v)
+
+
+func _desf_prism(im: ImmediateMesh, u0: float, u1: float, R: float, col: Color) -> void:
+	for k in 8:
+		var a0 := TAU * k / 8.0
+		var a1 := TAU * (k + 1) / 8.0
+		var p0 := Vector2(cos(a0), sin(a0)) * R
+		var p1 := Vector2(cos(a1), sin(a1)) * R
+		_desf_quad(im, Vector3(u0, p0.y, p0.x), Vector3(u1, p0.y, p0.x), Vector3(u1, p1.y, p1.x), Vector3(u0, p1.y, p1.x), col.darkened(0.06 * (k % 2)))
+
+
+func _desf_box(im: ImmediateMesh, u0: float, u1: float, z0: float, z1: float, y0: float, y1: float, col: Color) -> void:
+	_desf_quad(im, Vector3(u0, y1, z0), Vector3(u1, y1, z0), Vector3(u1, y1, z1), Vector3(u0, y1, z1), col)
+	_desf_quad(im, Vector3(u0, y0, z0), Vector3(u0, y0, z1), Vector3(u1, y0, z1), Vector3(u1, y0, z0), col.darkened(0.15))
+	_desf_quad(im, Vector3(u0, y0, z0), Vector3(u1, y0, z0), Vector3(u1, y1, z0), Vector3(u0, y1, z0), col.darkened(0.08))
+	_desf_quad(im, Vector3(u0, y0, z1), Vector3(u0, y1, z1), Vector3(u1, y1, z1), Vector3(u1, y0, z1), col.darkened(0.08))
 
 
 ## Sentado no banco, de frente para a bancada.
@@ -8563,18 +8640,23 @@ func _desf_input(e: InputEvent) -> bool:
 func _desf_bater() -> void:
 	if str(_desf.fase) != "bater" or float(_desf.anim) >= 0.0:
 		if str(_desf.fase) == "puxar":
-			_show_toast("Agora toque em \"Puxar\".")
+			_show_toast("Agora vá tocando em \"Puxar\" para passar o talo nas lâminas.")
 		return
 	_desf.acao = "bater"
 	_desf.anim = 0.0
+	_desf.rot0 = float(_desf.rot)
+	_desf.rot_to = PI * 0.5 * int(_desf.passe)       # de uma passada para a outra o talo gira um quarto de volta
 
 
+## Cada toque puxa um pouco (o talo vem devagar por cima das lâminas).
 func _desf_puxar() -> void:
 	if _desf.is_empty() or str(_desf.fase) != "puxar" or float(_desf.anim) >= 0.0:
 		return
-	_desf.acao = "puxar"
-	_desf.anim = 0.0
-	(_desf_btns[0] as Control).visible = false
+	_desf.alvo = minf(1.0, float(_desf.alvo) + 1.0 / DESF_TOQUES)
+	var xf: Transform3D = _maq.xform(int(_desf.mi))
+	var at: Vector3 = xf * Vector3(0.0, 0.96, 0.0)
+	Sons.play_at(self, "talo_corte", at, -7.0, randf_range(0.55, 0.7))
+	_fiber_chips(at)
 
 
 func _desf_tick(delta: float) -> void:
@@ -8582,72 +8664,58 @@ func _desf_tick(delta: float) -> void:
 		(b as Control).visible = false
 	if _desf.node == null or not is_instance_valid(_desf.node):
 		return
-	var mi := int(_desf.mi)
-	var xf: Transform3D = _maq.xform(mi)
+	if str(_desf.fase) == "puxar" and float(_desf.anim) < 0.0:
+		# o talo vem até onde os toques mandaram (devagar, cortando)
+		if float(_desf.pull) < float(_desf.alvo):
+			_desf.pull = move_toward(float(_desf.pull), float(_desf.alvo), delta * 0.45)
+			_desf_build()
+			_desf_place()
+			if float(_desf.pull) >= 0.999:
+				_desf.passe = int(_desf.passe) + 1
+				_desf.acao = "volta"
+				_desf.anim = 0.0
+				(_desf_btns[0] as Control).visible = false
+		return
 	if float(_desf.anim) < 0.0:
-		_desf_place(0.0 if str(_desf.fase) == "bater" else 1.0, 0.0)
 		return
 	_desf.anim = float(_desf.anim) + delta
 	var t := float(_desf.anim)
 	if str(_desf.acao) == "bater":
-		# levanta um pouco e desce batendo nas lâminas
-		var T := 0.32
+		# vira um quarto de volta (a partir da 2ª), levanta e desce batendo nas lâminas
+		var T := 0.42
 		var k := clampf(t / T, 0.0, 1.0)
-		var down := -0.6 * sin(k * PI) * (1.0 - k) + k * k
-		_desf_place(clampf(down, -0.8, 1.0), 0.0)
+		_desf.rot = lerpf(float(_desf.rot0), float(_desf.rot_to), smoothstep(0.0, 0.5, k))
+		_desf.down = clampf(-0.6 * sin(k * PI) * (1.0 - k) + k * k, -0.8, 1.0)
+		_desf_place()
 		if k >= 1.0:
-			var at: Vector3 = xf * Vector3(0.0, 0.97, 0.0)
+			var at: Vector3 = _maq.xform(int(_desf.mi)) * Vector3(0.0, 0.96, 0.0)
 			Sons.play_at(self, "talo_corte", at, -2.0, 0.9)
 			_fiber_chips(at)
 			_desf.anim = -1.0
 			_desf.fase = "puxar"
+			_desf.pull = 0.0
+			_desf.alvo = 0.0
+			_desf_build()
 			(_desf_btns[0] as Control).visible = true
+			_show_toast("Vá tocando em \"Puxar\": o talo passa devagar pelas lâminas (passada %d de %d)." % [int(_desf.passe) + 1, DESF_PUXADAS])
 	else:
-		# puxa por cima das lâminas (vem para o banco) e volta para a frente
-		var T1 := 0.5
-		var T2 := 0.3
-		if t < T1:
-			var k := smoothstep(0.0, 1.0, t / T1)
-			_desf_place(1.0, k)
-			if int(_desf.get("som", 0)) == 0:
-				_desf.som = 1
-				Sons.play_at(self, "talo_corte", xf * Vector3(0.0, 0.97, 0.0), -6.0, 0.6)
-			if randf() < delta * 14.0:
-				_fiber_chips(xf * Vector3(0.0, 0.97, 0.0))
-		elif t < T1 + T2:
-			var k := (t - T1) / T2
-			_desf_place(1.0 - k, 1.0 - k)
-		else:
-			_desf.som = 0
-			_desf.n = int(_desf.n) + 1
-			_desf_fibers()
+		# a passada terminou: levanta o talo e leva de volta para a frente
+		var T2 := 0.4
+		var k2 := clampf(t / T2, 0.0, 1.0)
+		_desf.pull = 1.0 - k2
+		_desf.down = 1.0 - k2
+		_desf.fase = "volta"
+		_desf_place()
+		if k2 >= 1.0:
 			_desf.anim = -1.0
+			_desf.pull = 0.0
+			_desf.alvo = 0.0
 			_desf.fase = "bater"
-			if int(_desf.n) >= DESF_PUXADAS:
+			_desf_build()
+			if int(_desf.passe) >= DESF_PUXADAS:
 				_desf_done()
 			else:
-				_show_toast("Puxada %d de %d. Bata de novo (dedo para baixo)." % [int(_desf.n), DESF_PUXADAS])
-
-
-## O talo vai se abrindo: clareia e as fibras soltas aparecem penduradas na ponta.
-func _desf_fibers() -> void:
-	var f := float(_desf.n) / DESF_PUXADAS
-	(_desf.mat as StandardMaterial3D).albedo_color = Color(0.36, 0.5, 0.2).lerp(Color(0.8, 0.74, 0.52), f)
-	var root: Node3D = _desf.node
-	var fm := StandardMaterial3D.new()
-	fm.albedo_color = Color(0.66, 0.6, 0.4)
-	fm.roughness = 1.0
-	for k in 3:
-		var fi := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		var L := randf_range(0.12, 0.26)
-		bm.size = Vector3(L, 0.002, 0.003)
-		fi.mesh = bm
-		fi.material_override = fm
-		root.add_child(fi)
-		# soltas na ponta de lá do talo, caindo um pouco
-		fi.position = Vector3(-0.5 - L * 0.4, -0.015 - L * 0.15, randf_range(-0.03, 0.03))
-		fi.rotation = Vector3(randf_range(-0.2, 0.2), randf_range(-0.25, 0.25), -0.25 - randf() * 0.3)
+				_show_toast("O talo abriu em %s. Bata de novo (dedo para baixo): ele gira e corta do outro lado." % ("4 tiras" if int(_desf.passe) == 1 else "palitos"))
 
 
 func _desf_done() -> void:
@@ -8675,7 +8743,7 @@ func _desf_end() -> void:
 		return
 	if _desf.node != null and is_instance_valid(_desf.node):
 		# o talo que estava na mão (pela metade) volta para a mochila
-		if int(_desf.n) < DESF_PUXADAS:
+		if int(_desf.get("passe", 0)) < DESF_PUXADAS:
 			add_item("talo_buriti", 1)
 			_update_inventory()
 		(_desf.node as Node).queue_free()
