@@ -260,6 +260,7 @@ func fell(p: Dictionary) -> Dictionary:
 		"folhas": leaves_of(p).map(func(lf): return int(lf.li)), "cortadas": (p.get("cortadas", []) as Array).duplicate(),
 		"gy": float(_jogo.height_at(float(p.x), float(p.z)))}
 	p["toco_r"] = info.r
+	p["toco_lado"] = float(p.get("lado_corte", 0.0))
 	p["toco"] = last_day
 	for k in ["golpes", "cortadas", "corte_dia", "lado_corte"]:
 		p.erase(k)
@@ -531,8 +532,11 @@ func _rebuild() -> void:
 		var rot := float(p.get("rot", 0.0))
 		var r := float(p.get("toco_r", 0.2)) if p.has("toco") else TRUNK_R * lerpf(0.7, 1.0, clampf(h / 8.0, 0.0, 1.0))
 		if p.has("toco"):
-			ch.tr.append([x, gy, z, h, r, rot])
-			_toco_cap(Vector3(x, gy + h + 0.1 + 0.002, z), r * 0.9, last_day - int(p.toco))
+			_toco_node(p, Vector3(x, gy, z), r)
+			var gk2 := Vector2i(floori(x / 8.0), floori(z / 8.0))
+			if not _grid.has(gk2):
+				_grid[gk2] = []
+			_grid[gk2].append(Vector3(x, z, r + 0.28))
 			continue
 		if int(p.get("golpes", 0)) > 0:
 			_notch(p, Vector3(x, gy, z), r)
@@ -586,54 +590,129 @@ func _rebuild() -> void:
 		_add_mm(_cacho_mesh, _leaf_mat, ch.fr, 110.0, false)
 
 
-## O topo cortado do toco: a madeira fibrosa do buriti com os anéis e as rachaduras
-## (como o toco das outras árvores), escurecendo com os dias.
-func _toco_cap(c: Vector3, r: float, age: int) -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = int(c.x * 31.0 + c.z * 17.0)
+## O toco do buriti derrubado no machado. Em cima não é liso: do lado das machadadas
+## fica a boca inclinada, com as facetas de cada golpe; no meio, as fibras rasgadas em
+## pé (onde o tronco quebrou ao tombar); atrás, a quebra mais alta e irregular.
+## A casca vai até a beirada desse corte. Escurece com os dias.
+func _toco_node(p: Dictionary, base: Vector3, r: float) -> void:
+	var age := last_day - int(p.toco)
 	var old := clampf(age / 300.0, 0.0, 1.0)
-	var base := Color(0.66, 0.53, 0.36).lerp(Color(0.36, 0.3, 0.23), old)
-	var cracks := []
-	for k in rng.randi_range(4, 7):
-		cracks.append([rng.randf() * TAU, rng.randf_range(0.45, 0.95)])     # ângulo, até onde vai
+	var side := float(p.get("toco_lado", 0.0))
+	var su := Vector2(cos(side), sin(side))          # para o lado de quem cortou
+	var sv := Vector2(-su.y, su.x)
+	var seed_ := int(absf(base.x * 31.0 + base.z * 17.0))
+	var top := TOCO_H                                 # altura média do corte
+	var na := 40
+	var nr := 10
+	var rt := r * 0.95                                # raio em cima
+	# alturas de cada ponto da grade (polar): a mesma para quem divide o ponto
+	var hgt := func(i: int, k: int) -> float:
+		var rho := float(i) / nr
+		var a := TAU * float(k % na) / na
+		var u := Vector2(cos(a), sin(a)).dot(su) * rho
+		var w := Vector2(cos(a), sin(a)).dot(sv) * rho
+		var hsh := float(absi(hash(Vector3i(seed_, i, k % na))) % 1000) / 1000.0
+		if i == 0:
+			return 0.02
+		if u > 0.18:
+			# a boca do machado: desce para fora em facetas (uma por golpe)
+			var fac := int(floor((w + 1.0) * 3.0))
+			var tilt := (float(absi(hash(Vector2i(seed_, fac))) % 100) / 100.0 - 0.5) * 0.04
+			return -(u - 0.18) * 0.16 + tilt * (u - 0.18) * 3.0 + hsh * 0.006
+		if u > -0.22:
+			# a dobradiça que rasgou: fibras em pé, de alturas diferentes
+			var spike := hsh * hsh * 0.13
+			return 0.015 + spike * (1.0 - absf(u) * 2.5)
+		# atrás: a quebra, um degrau acima e irregular
+		return 0.035 + (-u - 0.22) * 0.03 + hsh * 0.025
+	var H := []
+	for i in nr + 1:
+		var row := []
+		for k in na:
+			row.append(float(hgt.call(i, k)))
+		H.append(row)
+	var P := func(i: int, k: int) -> Vector3:
+		var rho := float(i) / nr
+		var a := TAU * float(k % na) / na
+		return Vector3(base.x + cos(a) * rho * rt, base.y + top + float(H[i][k % na]), base.z + sin(a) * rho * rt)
+	var wood := Color(0.68, 0.55, 0.37).lerp(Color(0.36, 0.3, 0.23), old)
+	var fiber := Color(0.78, 0.66, 0.44).lerp(Color(0.4, 0.33, 0.25), old)
+	var colf := func(i: int, k: int) -> Color:
+		var rho := float(i) / nr
+		var a := TAU * float(k % na) / na
+		var u := Vector2(cos(a), sin(a)).dot(su) * rho
+		var hv := float(H[i][k % na])
+		var c: Color
+		if u > 0.18:
+			var fac := int(floor((Vector2(cos(a), sin(a)).dot(sv) * rho + 1.0) * 3.0))
+			c = wood.lightened(0.08 if fac % 2 == 0 else 0.0).darkened(0.1 * absf(sin(rho * 40.0)))
+		elif u > -0.22:
+			c = fiber.darkened(clampf(0.35 - hv * 3.0, 0.0, 0.35))     # o fundo entre as fibras mais escuro
+		else:
+			c = wood.darkened(0.12 + 0.1 * absf(sin(rho * 33.0 + a * 3.0)))
+		if rho > 0.92:
+			c = c.darkened(0.25)
+		return c
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var na := 32
-	var nr := 7
-	var col := func(rr: float, a: float) -> Color:
-		var cc: Color = base.darkened(0.12 * absf(sin(rr * 46.0)) + 0.18 * (1.0 - rr))   # anéis e o miolo mais escuro
-		for cr in cracks:
-			var da := absf(wrapf(a - float(cr[0]), -PI, PI))
-			if rr > 1.0 - float(cr[1]) and da < 0.05 + 0.03 * rr:
-				cc = cc.darkened(0.55)                                             # rachadura
-		if rr > 0.93:
-			cc = cc.darkened(0.25)                                                 # a beirada (perto da casca)
-		return cc
 	for i in nr:
-		var r0 := float(i) / nr
-		var r1 := float(i + 1) / nr
 		for k in na:
-			var a0 := TAU * k / na
-			var a1 := TAU * (k + 1) / na
-			var q := [Vector3(cos(a0) * r0 * r, 0, sin(a0) * r0 * r), Vector3(cos(a1) * r0 * r, 0, sin(a1) * r0 * r),
-				Vector3(cos(a1) * r1 * r, 0, sin(a1) * r1 * r), Vector3(cos(a0) * r1 * r, 0, sin(a0) * r1 * r)]
-			var cs := [col.call(r0, a0), col.call(r0, a1), col.call(r1, a1), col.call(r1, a0)]
-			for idx in [0, 2, 1, 0, 3, 2]:
-				st.set_normal(Vector3.UP)
-				st.set_color(cs[idx])
-				st.add_vertex(c + (q[idx] as Vector3))
+			var q := [P.call(i, k), P.call(i, k + 1), P.call(i + 1, k + 1), P.call(i + 1, k)]
+			var cs := [colf.call(i, k), colf.call(i, k + 1), colf.call(i + 1, k + 1), colf.call(i + 1, k)]
+			for tri in [[0, 1, 2], [0, 2, 3]]:
+				var ord: Array = tri
+				if ((q[tri[2]] as Vector3) - q[tri[0]]).cross((q[tri[1]] as Vector3) - q[tri[0]]).dot(Vector3.UP) < 0.0:
+					ord = [tri[0], tri[2], tri[1]]           # mesma regra do tronco: a frente para cima
+				for idx in ord:
+					st.set_color(cs[idx])
+					st.add_vertex(q[idx])
+	st.generate_normals()
+	var wm := StandardMaterial3D.new()
+	wm.vertex_color_use_as_albedo = true
+	wm.vertex_color_is_srgb = true
+	wm.roughness = 1.0
+	wm.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	wm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var mi := MeshInstance3D.new()
 	mi.mesh = st.commit()
-	var m := StandardMaterial3D.new()
-	m.vertex_color_use_as_albedo = true
-	m.vertex_color_is_srgb = true
-	m.roughness = 1.0
-	m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mi.material_override = m
+	mi.material_override = wm
 	mi.visibility_range_end = VIEW
 	add_child(mi)
 	_nodes.append(mi)
+	# a casca: do chão até a beirada do corte (que sobe e desce com ele)
+	var bk := SurfaceTool.new()
+	bk.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var reps := maxf(1.0, roundf(TAU * r / BARK_W))
+	var levels := [[-0.3, 1.3], [0.1, 1.12], [0.5, 1.0], [-1.0, 1.0]]       # -1: a beirada do corte
+	for li in levels.size() - 1:
+		for k in na:
+			var a0 := TAU * float(k) / na
+			var a1 := TAU * float(k + 1) / na
+			var pts := []
+			var uvs := []
+			for e in [[li, a0, k], [li, a1, k + 1], [li + 1, a1, k + 1], [li + 1, a0, k]]:
+				var lv: Array = levels[int(e[0])]
+				var y: float = float(lv[0]) if float(lv[0]) > -0.5 else top + float(H[nr][int(e[2]) % na])
+				var rr: float = (r * float(lv[1])) if float(lv[0]) > -0.5 else rt
+				pts.append(Vector3(base.x + cos(float(e[1])) * rr, base.y + y, base.z + sin(float(e[1])) * rr))
+				uvs.append(Vector2(float(e[1]) / TAU * reps, -y / BARK_H))
+			var nn := Vector3(cos((a0 + a1) * 0.5), 0, sin((a0 + a1) * 0.5))
+			for tri in [[0, 1, 2], [0, 2, 3]]:
+				var ord: Array = tri
+				if ((pts[tri[2]] as Vector3) - pts[tri[0]]).cross((pts[tri[1]] as Vector3) - pts[tri[0]]).dot(nn) < 0.0:
+					ord = [tri[0], tri[2], tri[1]]
+				for idx in ord:
+					var pp: Vector3 = pts[idx]
+					bk.set_normal(Vector3(pp.x - base.x, 0, pp.z - base.z).normalized())
+					bk.set_uv(uvs[idx])
+					bk.add_vertex(pp)
+	bk.generate_tangents()
+	var bmi := MeshInstance3D.new()
+	bmi.mesh = bk.commit()
+	bmi.material_override = _trunk_mat if old < 0.6 else _dead_mat
+	bmi.visibility_range_end = VIEW
+	add_child(bmi)
+	_nodes.append(bmi)
 
 
 ## O talho do machado no tronco (cresce a cada machadada), do lado de quem corta:
