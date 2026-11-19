@@ -400,6 +400,8 @@ var _buck_btns: Array = []
 var _olho := {}                   # o olho no tronco do buriti perto: {p, open}
 var _bur := {}                    # o que escolheu no menu do olho: {p, acao}
 var _chop_bur := {}               # derrubando um buriti
+var _drag := false                # arrastando a tora pesada (sozinho)
+var _drag_b := Vector3.ZERO       # a ponta que vai no chão
 var _desf := {}                   # sentado na desfibradeira: {mi, fase, n, anim, node, ...}
 var _desf_btns: Array = []
 var _sub_btns: Array = []
@@ -1381,6 +1383,8 @@ func _process(delta: float) -> void:
 			_update_water(w)
 			_water_timer = 3.0
 	_move_player(delta)
+	if _drag:
+		_drag_update()
 	_update_grass()
 	if _arvores and _mp_client():
 		# convidado: a natureza (crescer, cupins, frutos, bichos comendo) roda no dono e
@@ -2403,8 +2407,8 @@ func _ctx_press() -> void:
 			if not pc.is_empty():
 				if _constr.carrying_others(pc):
 					_show_toast("Tem outra peça apoiada em cima dessa. Tire ela antes.")
-				elif _arvores.free_log_kg(pc.log) > Arvores.CARRY_MAX_KG:
-					_show_toast("Pesada demais: %d kg (você aguenta até %d kg)." % [roundi(_arvores.free_log_kg(pc.log)), int(Arvores.CARRY_MAX_KG)])
+				elif _arvores.free_log_kg(pc.log) > DRAG_KG:
+					_show_toast("Pesada demais: %d kg (nem arrastando: até %d kg)." % [roundi(_arvores.free_log_kg(pc.log)), int(DRAG_KG)])
 				else:
 					var npin := 0
 					for pn in pc.get("pinos", []):
@@ -2484,8 +2488,8 @@ func _ctx_press() -> void:
 			if kg3 > Arvores.CARRY_MAX_KG and kg3 <= COOP_KG and _coop_possible():
 				_coop_click({"a": "pegar", "k": "r:" + _log_key(_apoios.rested[i].log)}, _apoios.rested[i].log)
 				return
-			if kg3 > Arvores.CARRY_MAX_KG:
-				_show_toast("Pesada demais: %d kg (você aguenta até %d kg)." % [roundi(kg3), int(Arvores.CARRY_MAX_KG)])
+			if kg3 > DRAG_KG:
+				_show_toast("Pesada demais: %d kg (nem arrastando: até %d kg)." % [roundi(kg3), int(DRAG_KG)])
 				return
 			_crouch_target = {"apoiada": i}
 			_crouch_job = "tora_apoiada"
@@ -2550,7 +2554,7 @@ func _update_log_btn() -> void:
 			_log_btn.text = "Cooperativo"
 			(_log_btn as Icones.IconButton).kind = "pegar_tora"
 		else:
-			_log_btn.text = ("Pegar tora (%d kg)" if kg2 <= Arvores.CARRY_MAX_KG else "Pesada: %d kg") % roundi(kg2)
+			_log_btn.text = ("Pegar tora (%d kg)" if kg2 <= Arvores.CARRY_MAX_KG else ("Arrastar tora (%d kg)" if kg2 <= DRAG_KG else "Pesada: %d kg")) % roundi(kg2)
 		_log_btn.queue_redraw()
 
 
@@ -2573,11 +2577,10 @@ func _log_action() -> void:
 		if kg <= COOP_KG and _coop_possible() and t.kind == "solta":
 			_coop_click({"a": "pegar", "k": _log_key(t.log)}, t.log)
 			return
-		if kg <= COOP_KG:
-			_show_toast("Pesada demais para um: %d kg. Com outro jogador (multiplayer) dá: os dois juntos aguentam até %d kg." % [roundi(kg), int(COOP_KG)])
-		else:
-			_show_toast("Pesada demais: %d kg (nem dois juntos aguentam: até %d kg). Corte em pedaços menores com o machado." % [roundi(kg), int(COOP_KG)])
-		return
+		if kg > DRAG_KG:
+			_show_toast("Pesada demais: %d kg (nem arrastando: até %d kg). Corte em pedaços menores com o machado." % [roundi(kg), int(DRAG_KG)])
+			return
+		# sozinho: arrasta (segue para pegar)
 	if _digging:
 		_cancel_dig()
 	_crouch_target = t
@@ -2974,6 +2977,16 @@ func _update_crouch(delta: float) -> void:
 		elif _crouch_job == "pegar":
 			var fl: Dictionary = _arvores.take_log(_crouch_target)
 			_hold_log(fl)
+		elif _drag and _carry_node:
+			# arrastando: larga onde ela está (deita no chão no mesmo rumo)
+			var x2: Vector3 = _carry_node.global_transform.basis.x
+			var c2: Vector3 = _carry_node.global_position
+			_arvores.drop_log(_carry, c2, atan2(-x2.z, x2.x))
+			Sons.play_at(self, "baque", c2)
+			_carry = {}
+			_carry_node.queue_free()
+			_carry_node = null
+			_drag = false
 		else:
 			var fwd := Vector3(-sin(_face), 0, -cos(_face))
 			var r: float = _arvores.free_log_radius(_carry)
@@ -3084,9 +3097,45 @@ func _hold_log(fl: Dictionary) -> void:
 	_carry_kg = _arvores.free_log_kg(fl)
 	_carry_node = _arvores.free_log_node(fl)
 	add_child(_carry_node)
+	_drag = _carry_kg > Arvores.CARRY_MAX_KG
+	if _drag:
+		# pesada demais para o ombro: segura uma ponta e a outra vai arrastando no chão
+		var fwd := Vector3(-sin(_face), 0, -cos(_face))
+		_drag_b = _player.global_position - fwd * _arvores.free_log_length(fl)
+		if _chop_pose:
+			_chop_pose.log_node = null
+		_drag_update()
+		_show_toast("Tora pesada (%d kg): você vai arrastando, uma ponta no chão." % roundi(_carry_kg))
+		return
 	if _chop_pose:
 		_chop_pose.log_node = _carry_node
 		_chop_pose.log_r = _arvores.free_log_radius(fl)
+
+
+## Arrastando: a ponta da mão atrás do corpo, na altura do quadril; a outra ponta vem
+## escorregando no chão atrás (segue o caminho, como uma corda).
+func _drag_update() -> void:
+	if _carry.is_empty() or _carry_node == null or not is_instance_valid(_carry_node):
+		_drag = false
+		return
+	var L: float = _arvores.free_log_length(_carry)
+	var r: float = _arvores.free_log_radius(_carry)
+	var fwd := Vector3(-sin(_face), 0, -cos(_face))
+	var A := _player.global_position + Vector3.UP * 0.72 - fwd * 0.32
+	var B := _drag_b
+	for it in 3:
+		var d := Vector3(B.x - A.x, 0, B.z - A.z)
+		if d.length() < 0.05:
+			d = -fwd
+		d = d.normalized()
+		var dy := clampf(A.y - B.y, -L * 0.9, L * 0.9)
+		var horiz := sqrt(maxf(L * L - dy * dy, 0.01))
+		B = Vector3(A.x + d.x * horiz, 0, A.z + d.z * horiz)
+		B.y = height_at(B.x, B.z) + r
+	_drag_b = B
+	var x := (A - B).normalized()
+	var y := (Vector3.UP - x * x.dot(Vector3.UP)).normalized()
+	_carry_node.global_transform = Transform3D(Basis(x, y, x.cross(y)), (A + B) * 0.5)
 
 
 ## Galho para cortar: da copa da árvore derrubada ou galho grande caído no chão.
@@ -4869,6 +4918,8 @@ func _move_player(delta: float) -> void:
 		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow
 		if not _carry.is_empty():
 			sp *= lerpf(0.9, 0.4, clampf(_carry_kg / 300.0, 0.0, 1.0))   # tora pesada: anda devagar
+			if _drag:
+				sp *= 0.8                                              # arrastando: mais devagar ainda
 		if not _coop.is_empty():
 			sp *= lerpf(0.75, 0.45, clampf(float(_coop.kg) / COOP_KG, 0.0, 1.0))   # devagar, junto com o outro
 		if _mao == "balde" and not _balde_carga.is_empty():
@@ -8219,6 +8270,7 @@ func _buck_go() -> void:
 # forquilhas ou na planta), de novo: um clica "Cooperativo", depois o outro.
 
 const COOP_KG := 120.0
+const DRAG_KG := 250.0            # sozinho, mais pesada que o ombro aguenta: arrasta (uma ponta no chão)
 
 var _coop_int := {}                # meu clique esperando o outro: {a, k, ts, ok_ms}
 var _coop_int_fl := {}             # a tora do clique (cópia, para quem vai atrás)
