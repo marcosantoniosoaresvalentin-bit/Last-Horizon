@@ -207,7 +207,7 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null, support_only := fa
 			if touch and lying:
 				var side_v: float = cs.x if down_k == 1 else cs.y
 				# só a face de baixo apoia; o lado só vale encostado numa estaca fincada
-				# (amarrado nela com cipó)
+				# (presa nela com pino)
 				if side_v * down_s <= 0.0 and not (wood_i >= 0 and (near[wood_i] as Dictionary).has("post")):
 					touch = false
 			if touch and wood_i >= 0:
@@ -222,7 +222,7 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null, support_only := fa
 				if absf(u) < 0.25 and h.x < 0.3:
 					lo = true          # pecinha curta: encostar no meio já segura
 					hi = true
-	# estaca fincada encostada em qualquer ponto (amarrada nela): conta sempre, no
+	# estaca fincada encostada em qualquer ponto (presa nela): conta sempre, no
 	# ponto exato do comprimento (os pontos de teste podem passar do lado da estaca fina)
 	var grown := {"c": c, "b": b, "h": h + Vector3.ONE * TOUCH}
 	for bi in near.size():
@@ -238,7 +238,8 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null, support_only := fa
 			joint_u[bi] = [u2]
 	if not (lo and hi):
 		return {"ok": false, "why": "Não fica apoiada: precisa encostar nas duas metades.", "juntas": []}
-	# amarrações: uma em cada madeira em que encosta (no meio de onde encosta), até 4
+	# pinos: um em cada madeira em que encosta (no meio de onde encosta), sem limite:
+	# 2 troncos embaixo = 2 pinos, 5 troncos = 5 pinos
 	var juntas := []
 	for k in joint_u:
 		var us: Array = joint_u[k]
@@ -247,8 +248,6 @@ func check(fl: Dictionary, b: Basis, c: Vector3, skip = null, support_only := fa
 			m += float(v)
 		juntas.append(snappedf(m / us.size(), 0.01))
 	juntas.sort()
-	if juntas.size() > 4:
-		juntas = [juntas[0], juntas[1], juntas[juntas.size() - 2], juntas[juntas.size() - 1]]
 	return {"ok": true, "why": "", "juntas": juntas}
 
 

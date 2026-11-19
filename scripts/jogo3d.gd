@@ -7269,7 +7269,7 @@ func _proj_place() -> void:
 		_maq.complete(_maq.plantas.size() - 1)        # modo de teste: já sai montada
 		_show_toast("Modo de teste: a %s já ficou pronta." % str(Maquinas.TIPOS[_maq.plantas[-1].tipo].nome).to_lower())
 		return
-	_show_toast("Planta no chão! Traga as madeiras e toque em \"Pôr na planta\" perto dela. Depois amarre as juntas (bolinhas amarelas).")
+	_show_toast("Planta no chão! Traga as madeiras e toque em \"Pôr na planta\" perto dela. Depois fure e bata os pinos nas juntas (bolinhas amarelas).")
 
 
 ## Decide o botão de contexto perto de uma planta/máquina. true se pôs algum.

@@ -656,7 +656,7 @@ func _rebuild() -> void:
 		if int(p.get("golpes", 0)) > 0:
 			_notch(p, Vector3(x, gy, z), r)
 		if h > 0.05:
-			(ch.dt if dead(p) else ch.tr).append([x, gy, z, h, r, rot])
+			(ch.dt if dead(p) else ch.tr).append([x, gy, z, h, r, rot, crown_scale(p)])
 			var gk := Vector2i(floori(x / 8.0), floori(z / 8.0))
 			if not _grid.has(gk):
 				_grid[gk] = []
@@ -700,6 +700,14 @@ func _rebuild() -> void:
 			mi.visibility_range_end = VIEW
 			add_child(mi)
 			_nodes.append(mi)
+			if kind == "tr":
+				# as bainhas das folhas abraçando o topo do tronco (embaixo da copa)
+				var sh := MeshInstance3D.new()
+				sh.mesh = _sheath_mesh(ch.tr)
+				sh.material_override = _leaf_mat
+				sh.visibility_range_end = VIEW
+				add_child(sh)
+				_nodes.append(sh)
 		for v in ch.cr:
 			_add_mm(_crowns[v], _leaf_mat, ch.cr[v], VIEW, true)
 		_add_mm(_cacho_mesh, _leaf_mat, ch.fr, 110.0, false)
@@ -940,6 +948,19 @@ func _trunks_mesh(list: Array, broken := false) -> ArrayMesh:
 		var r: float = t[4]
 		var rot: float = t[5]
 		var rows := [[-0.3, 1.35], [0.1, 1.2], [0.6, 1.02], [h * 0.5, 1.0], [h + 0.1, 0.9]]
+		if not broken:
+			# vivo: o tronco não termina reto. Engrossa um pouco embaixo da copa (onde as
+			# folhas nascem) e vai afinando até fechar em ponta dentro da copa
+			var sc: float = float(t[6]) if t.size() > 6 else 1.0
+			rows = [[-0.3, 1.35], [0.1, 1.2], [0.6, 1.02], [h * 0.5, 1.0], [h - 0.35 * sc, 1.0], [h - 0.05 * sc, 1.08],
+				[h + 0.2 * sc, 0.88], [h + 0.38 * sc, 0.58], [h + 0.5 * sc, 0.28], [h + 0.57 * sc, 0.04]]
+			var asc := []
+			var last := -1e9
+			for rw in rows:
+				if float(rw[0]) > last + 0.02:
+					asc.append(rw)
+					last = float(rw[0])
+			rows = asc
 		var vofs := fmod(rot * 3.7, 1.0)
 		var reps := maxf(1.0, roundf(TAU * r / BARK_W))
 		for i in rows.size() - 1:
@@ -1109,6 +1130,54 @@ func _frond(st: SurfaceTool, out: Vector3, elev: float, pet_len: float, R: float
 				st.set_color(leaf_col.darkened(0.12))
 				st.add_vertex(v)
 			prev_l = cpos
+
+
+## As bainhas: a base larga de cada folha, abraçando o topo do tronco (lâminas curvas,
+## marrom embaixo, onde já está velha, e verde-escuro em cima, entrando na copa).
+func _sheath_mesh(list: Array) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for t in list:
+		var x: float = t[0]
+		var gy: float = t[1]
+		var z: float = t[2]
+		var h: float = t[3]
+		var r: float = t[4]
+		var rot: float = t[5]
+		var sc: float = float(t[6]) if t.size() > 6 else 1.0
+		var nb := 11
+		for k in nb:
+			var a := rot + TAU * k / nb + 0.15 * sin(k * 2.7)
+			var o := Vector3(cos(a), 0, sin(a))
+			var tg := Vector3(-o.z, 0, o.x)
+			var y0 := gy + h - (0.6 + 0.12 * absf(sin(k * 1.9))) * sc
+			var y1 := gy + h + (0.22 + 0.1 * absf(cos(k * 1.3))) * sc
+			var w0 := 0.17 * sc + r * 0.3
+			var w1 := 0.07 * sc
+			var old := 0.35 + 0.65 * absf(sin(k * 3.1))
+			var cb := Color(0.33, 0.25, 0.15).lerp(Color(0.27, 0.22, 0.13), old)
+			var ct := Color(0.2, 0.3, 0.12).lerp(Color(0.34, 0.27, 0.16), old * 0.6)
+			var segs := 4
+			var prev := []
+			for i in segs + 1:
+				var u := float(i) / segs
+				var y := lerpf(y0, y1, u)
+				# encostada no tronco embaixo, abrindo para fora em cima (curva)
+				var rr := r * lerpf(1.04, 0.92, u) + 0.02 * sc + sin(u * PI * 0.5) * 0.12 * sc
+				var w := lerpf(w0, w1, u)
+				var c := Vector3(x, y, z) + o * rr
+				var cur := [c - tg * w, c + tg * w, cb.lerp(ct, u)]
+				if i > 0:
+					var A: Vector3 = prev[0]
+					var B: Vector3 = prev[1]
+					var C: Vector3 = cur[1]
+					var D: Vector3 = cur[0]
+					for v in [[A, prev[2]], [B, prev[2]], [C, cur[2]], [A, prev[2]], [C, cur[2]], [D, cur[2]]]:
+						st.set_color(v[1])
+						st.add_vertex(v[0])
+				prev = cur
+	st.generate_normals()
+	return st.commit()
 
 
 ## Cacho de buriti: um eixo comprido pendurado com dezenas de frutos ovais
