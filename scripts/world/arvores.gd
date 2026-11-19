@@ -1947,7 +1947,7 @@ func _cut_info(p: Array) -> Dictionary:
 # ================== TORAS SOLTAS (pegar, carregar e largar) ==================
 
 const WOOD_DENSITY := 520.0     # kg por m³ (madeira de Cedrinho ainda verde, mais leve)
-const CARRY_MAX_KG := 50.0
+const CARRY_MAX_KG := 60.0      # o máximo que uma pessoa carrega no ombro
 
 ## Tora solta: {v, s, h0, h1, bot, top (pontas), pos [x, y, z] (centro), yaw, dia}.
 ## O desenho usa o tronco do modelo de h0 a h1 (no tamanho s), deitado ao longo de +X.
@@ -2159,6 +2159,59 @@ func _free_ends(fl: Dictionary) -> Array:
 	var c := Vector3(float(fl.pos[0]), float(fl.pos[1]), float(fl.pos[2]))
 	var L := free_log_length(fl)
 	return [c - dir * L * 0.5, c + dir * L * 0.5]
+
+
+## Tora solta no chão mais perto (para cortar de novo com o machado), ou -1.
+func free_log_near(pos: Vector3, reach: float, min_len := 0.55) -> int:
+	var best := -1
+	var bd := reach
+	for i in free_logs.size():
+		var fl: Dictionary = free_logs[i]
+		if free_log_length(fl) < min_len:
+			continue
+		var d := _seg_dist(pos, _free_ends(fl))
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+## Parte a tora solta em duas no ponto u (0 = ponta de -x, 1 = ponta de +x): as duas
+## ficam no mesmo lugar, a ponta nova de cada uma cortada a machado.
+func split_free_log(fl: Dictionary, u: float) -> Array:
+	var i := free_logs.find(fl)
+	if i < 0:
+		return []
+	var L := free_log_length(fl)
+	var ends := _free_ends(fl)
+	var A: Vector3 = ends[0]
+	var B: Vector3 = ends[1]
+	var a: Dictionary = fl.duplicate(true)
+	var b: Dictionary = fl.duplicate(true)
+	for k in ["entalhe", "racha", "cupim", "veneno", "oleo", "em_pe", "corte_m"]:
+		a.erase(k)
+		b.erase(k)
+	if fl.has("cil"):
+		var rm := lerpf(float(fl.cil.ra), float(fl.cil.rb), u)
+		a.cil = {"L": L * u, "ra": float(fl.cil.ra), "rb": rm}
+		b.cil = {"L": L * (1.0 - u), "ra": rm, "rb": float(fl.cil.rb)}
+	else:
+		var hm := lerpf(float(fl.h0), float(fl.h1), u)
+		var seed_ := absi(hash(Vector3(float(fl.h0), float(fl.h1), hm))) % 100000
+		a.h1 = hm
+		a.top = {"ac": PI, "seed": seed_, "rough": 0.45, "sign": -1.0}
+		b.h0 = hm
+		b.bot = {"ac": PI, "seed": seed_ + 1, "rough": 0.45, "sign": 1.0}
+	var cut := A.lerp(B, u)
+	var ca := (A + cut) * 0.5
+	var cb := (cut + B) * 0.5
+	a.pos = [ca.x, float(fl.pos[1]), ca.z]
+	b.pos = [cb.x, float(fl.pos[1]), cb.z]
+	free_logs.remove_at(i)
+	free_logs.append(a)
+	free_logs.append(b)
+	_rebuild_logs()
+	return [a, b]
 
 
 static func _seg_dist(pos: Vector3, seg: Array) -> float:

@@ -2235,7 +2235,7 @@ func _update_chop(delta: float) -> void:
 		elif not _branch_target().is_empty():
 			_chop_btn.visible = true
 			_chop_btn.text = "Cortar galho"
-		elif not _arvores.log_piece_near(_player.position, 1.6).is_empty():
+		elif not _arvores.log_piece_near(_player.position, 1.6).is_empty() or _arvores.free_log_near(_player.position, 1.4) >= 0:
 			_chop_btn.visible = true
 			_chop_btn.text = "Cortar tora"
 
@@ -2328,6 +2328,8 @@ func _ctx_press() -> void:
 			if not pc.is_empty():
 				if _constr.carrying_others(pc):
 					_show_toast("Tem outra peça apoiada em cima dessa. Tire ela antes.")
+				elif _arvores.free_log_kg(pc.log) > Arvores.CARRY_MAX_KG:
+					_show_toast("Pesada demais: %d kg (você aguenta até %d kg)." % [roundi(_arvores.free_log_kg(pc.log)), int(Arvores.CARRY_MAX_KG)])
 				else:
 					var npin := 0
 					for pn in pc.get("pinos", []):
@@ -2403,6 +2405,10 @@ func _ctx_press() -> void:
 			var i: int = _apoios.nearest_rested(_player.position, 1.6)
 			if i < 0:
 				return
+			var kg3: float = _arvores.free_log_kg(_apoios.rested[i].log)
+			if kg3 > Arvores.CARRY_MAX_KG:
+				_show_toast("Pesada demais: %d kg (você aguenta até %d kg)." % [roundi(kg3), int(Arvores.CARRY_MAX_KG)])
+				return
 			_crouch_target = {"apoiada": i}
 			_crouch_job = "tora_apoiada"
 	_crouch_t = 0.0
@@ -2450,7 +2456,8 @@ func _update_log_btn() -> void:
 	var t: Dictionary = _arvores.pick_target(_player.position, 1.3)
 	_log_btn.visible = not t.is_empty()
 	if not t.is_empty():
-		_log_btn.text = "Pegar tora"
+		var kg2: float = _arvores.free_log_kg(t.log)
+		_log_btn.text = ("Pegar tora (%d kg)" if kg2 <= Arvores.CARRY_MAX_KG else "Pesada: %d kg") % roundi(kg2)
 
 
 func _log_action() -> void:
@@ -2464,6 +2471,9 @@ func _log_action() -> void:
 	if t.is_empty():
 		return
 	var kg: float = _arvores.free_log_kg(t.log)
+	if kg > Arvores.CARRY_MAX_KG:
+		_show_toast("Pesada demais: %d kg (você aguenta até %d kg). Corte em pedaços menores com o machado." % [roundi(kg), int(Arvores.CARRY_MAX_KG)])
+		return
 	if _digging:
 		_cancel_dig()
 	_crouch_target = t
@@ -4489,6 +4499,29 @@ func _chop_hit_now() -> void:
 		return
 	if bool(_chop_log.get("tabua", false)):
 		_board_hit()
+		return
+	if _chop_log.has("solta"):
+		var fl: Dictionary = _chop_log.solta
+		if not _arvores.free_logs.has(fl):
+			_cancel_chop()
+			return
+		var at: Vector3 = _chop_log.point
+		_chips(at)
+		Sons.play_at(self, "machado", at, 0.0, 0.95)
+		var cm: Array = fl.get("corte_m", [])
+		if cm.is_empty() or absf(float(cm[0]) - float(_chop_log.u)) > 0.01:
+			cm = [float(_chop_log.u), 0]
+		cm[1] = int(cm[1]) + 1
+		fl["corte_m"] = cm
+		var need := 1 if teste else clampi(int(round(2.0 + float(_chop_log.r) * 14.0)), 2, 9)
+		if int(cm[1]) >= need:
+			fl.erase("corte_m")
+			_arvores.split_free_log(fl, float(_chop_log.u))
+			Sons.play_at(self, "estalo", at, -2.0, 0.9)
+			_show_toast("Tora cortada em dois pedaços!")
+			_cancel_chop()
+		else:
+			_show_toast("Cortando: %d de %d machadadas" % [int(cm[1]), need])
 		return
 	if not _chop_log.is_empty():
 		var lp: Array = _chop_log.p
@@ -7769,6 +7802,14 @@ func _trim_end() -> void:
 
 func _buck_open() -> void:
 	var info: Dictionary = _arvores.log_piece_near(_player.position, 1.6)
+	var fi: int = _arvores.free_log_near(_player.position, 1.4)
+	if fi >= 0:
+		var fl: Dictionary = _arvores.free_logs[fi]
+		var ends: Array = _arvores._free_ends(fl)
+		var dfree: float = _arvores._seg_dist(_player.position, ends)
+		var dtree: float = 1e9 if info.is_empty() else _arvores._seg_dist(_player.position, [info.A, info.B])
+		if dfree < dtree:
+			info = {"solta": fl, "A": ends[0], "B": ends[1], "h0": 0.0, "h1": 1.0, "s": _arvores.free_log_length(fl)}
 	if info.is_empty():
 		return
 	var s := float(info.s)
@@ -7779,9 +7820,12 @@ func _buck_open() -> void:
 	var ponta := -1 if Vector2(A.x - _player.position.x, A.z - _player.position.z).length() < Vector2(B.x - _player.position.x, B.z - _player.position.z).length() else 1
 	var d := minf(0.5, L * 0.5)
 	# já tinha começado um corte nessa tora: o anel começa nele
-	var p: Array = info.p
+	var p: Array = info.get("p", [])
 	var buck = p[11] if p.size() > 11 else null
-	if buck is Array and float(buck[0]) > float(info.h0) and float(buck[0]) < float(info.h1):
+	if info.has("solta") and (info.solta as Dictionary).has("corte_m"):
+		var cm: Array = info.solta.corte_m
+		d = (float(cm[0]) if ponta < 0 else 1.0 - float(cm[0])) * L
+	elif buck is Array and float(buck[0]) > float(info.h0) and float(buck[0]) < float(info.h1):
 		var hm := float(buck[0])
 		d = ((hm - float(info.h0)) if ponta < 0 else (float(info.h1) - hm)) * s
 	var ring := MeshInstance3D.new()
@@ -7818,10 +7862,10 @@ func _buck_tick() -> void:
 	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
 		(b as Control).visible = false
 	var info: Dictionary = _buck_sel.info
-	if not _arvores.plants.has(info.p) or Vector2(float((info.A as Vector3).x) - _player.position.x, float((info.A as Vector3).z) - _player.position.z).length() > 12.0:
+	if (info.has("solta") and not _arvores.free_logs.has(info.solta)) or (not info.has("solta") and not _arvores.plants.has(info.p)) or Vector2(float((info.A as Vector3).x) - _player.position.x, float((info.A as Vector3).z) - _player.position.z).length() > 12.0:
 		_buck_stop()
 		return
-	var c: Dictionary = _arvores.log_cut_at(info, _buck_h())
+	var c: Dictionary = _buck_cut()
 	var r := float(c.r)
 	var tm: TorusMesh = (_buck_sel.ring as MeshInstance3D).mesh
 	tm.inner_radius = r + 0.012
@@ -7850,10 +7894,25 @@ func _buck_stop() -> void:
 	_act_check = 0.0
 
 
+## O corte no lugar do anel (tronco caído ou tora solta).
+func _buck_cut() -> Dictionary:
+	var info: Dictionary = _buck_sel.info
+	if not info.has("solta"):
+		return _arvores.log_cut_at(info, _buck_h())
+	var fl: Dictionary = info.solta
+	var u := _buck_h()                    # na tora solta h0=0, h1=1: o h já é a fração
+	var A: Vector3 = info.A
+	var B: Vector3 = info.B
+	var P := A.lerp(B, u)
+	var r: float = _arvores.free_log_radius_at(fl, u)
+	P.y = float(fl.pos[1])
+	return {"solta": fl, "u": u, "point": P + Vector3.UP * r, "axis": P, "along": (B - A).normalized(), "r": r, "galho": false}
+
+
 func _buck_go() -> void:
 	if _buck_sel.is_empty():
 		return
-	var c: Dictionary = _arvores.log_cut_at(_buck_sel.info, _buck_h())
+	var c: Dictionary = _buck_cut()
 	if bool(c.galho):
 		_show_toast("Tem galho preso nessa parte do tronco: corte os galhos primeiro.")
 		return
