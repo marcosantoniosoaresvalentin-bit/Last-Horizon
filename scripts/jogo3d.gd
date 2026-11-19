@@ -2399,7 +2399,7 @@ func _ctx_press() -> void:
 					_show_toast("+1 folha seca de buriti")
 				_act_check = 0.0
 			return
-		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra":
+		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar":
 			_maq_ctx_press(_ctx_action)
 			return
 		"peca":
@@ -7345,6 +7345,11 @@ func _maq_ctx() -> bool:
 				_ctx_action = "empurrar"
 				_ctx_btn.text = "Empurrar a tora"
 				return true
+		if role == "saida" and _carry.is_empty() and not (p.get("saida", []) as Array).is_empty():
+			var sa: Array = p.saida
+			_ctx_action = "saida_pegar"
+			_ctx_btn.text = "Pegar %s (%d)" % ["tábua" if _maq.kind_of(sa[0]) == "tabua" else "peça", sa.size()]
+			return true
 		return false
 	if not _carry.is_empty():
 		_ctx_action = "planta_peca"
@@ -7422,13 +7427,26 @@ func _maq_ctx_press(act: String) -> void:
 				_show_toast("Precisa de %s para cortar essa ponta." % ("uma serra (a peça está deitada)" if tool == "serra" else "um machado (a peça está em pé)"))
 				return
 			_trim_start(int(sb[0]), int(sb[1]), tool)
+		"saida_pegar":
+			var pfl: Dictionary = _maq.take_saida(mi)
+			if not pfl.is_empty():
+				_hold_log(pfl)
+				Sons.play_at(self, "baque", _player.position + Vector3.UP, -10.0)
+				var rest: int = (_maq.plantas[mi].get("saida", []) as Array).size()
+				_show_toast("Pegou da mesa de saída." + (" Ainda tem %d peça lá." % rest if rest > 0 else " Para tirar outra fatia, ponha a tora de novo na mesa de entrada."))
 		"tora_serra":
-			var k: String = _maq.kind_of(_carry)
-			if k == "tabua" or _arvores.free_log_length(_carry) < 0.6:
-				_show_toast("Na serra vai tora ou meia tora (de pelo menos 60 cm).")
+			var Lc: float = _arvores.free_log_length(_carry)
+			if Lc < 0.6 or Lc > 2.6:
+				_show_toast("Na serra vai madeira de 60 cm a 2,6 m (o tamanho da mesa).")
 				return
 			if _arvores.free_log_max_radius(_carry) > 0.3:
 				_show_toast("Tora grossa demais para essa serra (até uns 60 cm de largura).")
+				return
+			if not (_maq.plantas[mi].get("saida", []) as Array).is_empty():
+				_show_toast("Tire antes as peças que estão na mesa do outro lado da serra.")
+				return
+			if not bool(_maq.cut_plan(_carry).ok):
+				_show_toast("Essa madeira já está fina demais para tirar outra fatia.")
 				return
 			var fl := _carry
 			_carry = {}

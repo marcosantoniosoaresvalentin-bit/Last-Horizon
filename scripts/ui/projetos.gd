@@ -177,14 +177,14 @@ func _draw_plan() -> void:
 		return
 	var t: Dictionary = Maquinas.TIPOS[_sel]
 	var s := _draw.size
-	var sc := minf(s.x / 5.0, s.y / 3.2)
+	var sc := minf(s.x / 6.6, s.y / 3.2)
 	var o := Vector2(s.x * 0.5, s.y - 18)
 	if t.has("laminas"):
 		sc = minf(s.x / 2.8, s.y / 1.25)          # máquina pequena: desenho maior
 		o.x += 0.3 * sc
 	var P := func(x: float, y: float) -> Vector2:
 		return o + Vector2(x * sc, -y * sc)
-	_draw.draw_line(P.call(-2.2 if not t.has("laminas") else -1.2, 0), P.call(2.4 if not t.has("laminas") else 0.9, 0), C_DIM, 1.5)
+	_draw.draw_line(P.call(-3.2 if not t.has("laminas") else -1.2, 0), P.call(3.2 if not t.has("laminas") else 0.9, 0), C_DIM, 1.5)
 	for pc in t.pecas:
 		var c: Vector3 = pc[2]
 		var L := float(pc[1])
@@ -216,13 +216,14 @@ func _draw_plan() -> void:
 	for k in 8:
 		var y := lc.y - 0.5 + k * 0.14
 		_draw.draw_line(P.call(lc.x, y), P.call(lc.x + 0.06, y - 0.03), C_HI, 2.0)
-	# setas: a tora entra pela mesa
-	_draw.draw_line(P.call(2.3, 1.45), P.call(1.4, 1.45), C_DIM, 2.0)
-	_draw.draw_line(P.call(1.4, 1.45), P.call(1.55, 1.52), C_DIM, 2.0)
-	_draw.draw_line(P.call(1.4, 1.45), P.call(1.55, 1.38), C_DIM, 2.0)
-	_draw.draw_string(font, P.call(1.5, 1.6), "TORA ENTRA", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
-	_draw.draw_string(font, P.call(-1.9, 0.75), "PEDAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
-	_draw.draw_string(font, P.call(-2.0, 2.95), "VARA DE MOLA", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
+	# setas: a tora entra pela mesa de entrada e sai do outro lado
+	_draw.draw_line(P.call(2.6, 1.55), P.call(1.0, 1.55), C_DIM, 2.0)
+	_draw.draw_line(P.call(1.0, 1.55), P.call(1.15, 1.62), C_DIM, 2.0)
+	_draw.draw_line(P.call(1.0, 1.55), P.call(1.15, 1.48), C_DIM, 2.0)
+	_draw.draw_string(font, P.call(1.4, 1.75), "TORA ENTRA", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
+	_draw.draw_string(font, P.call(-2.8, 1.45), "SAÍDA", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
+	_draw.draw_string(font, P.call(0.15, 0.45), "PEDAL (DO LADO)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
+	_draw.draw_string(font, P.call(-2.1, 2.9), "VARA DE MOLA", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
 
 
 func fechar() -> void:

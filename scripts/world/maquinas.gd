@@ -5,14 +5,18 @@ extends Node3D
 ## serra se a peça é deitada, com o machado se é em pé) — e a lâmina; depois prende
 ## cada junta com um pino de madeira batido com a marreta. Pronta, a máquina funciona.
 ##
-## Serra de pedal (só em dupla): um pisa no pedal (a lâmina sobe e desce: o pedal puxa
-## para baixo pelo cipó e a vara de mola lá em cima puxa de volta para cima) e o outro
-## empurra a tora pela mesa contra a lâmina. Os dentes da lâmina ficam virados para a
-## tora que chega (do lado da mesa), longe da vara de mola e da armação de levantar.
-## A tora sai do outro lado aberta em tábuas.
+## Serra de pedal (só em dupla): um pisa no pedal, do lado da máquina, fora do caminho
+## da tora. O pedal é uma tábua com dobradiça; uma biela de madeira liga ele à lâmina e
+## outra haste de madeira liga a lâmina à vara de mola lá em cima: pisando, a lâmina
+## desce; soltando, a vara puxa ela de volta (tudo de madeira, sem corda). O outro
+## empurra a tora pela mesa de entrada contra os dentes; a tora passa inteira pela
+## lâmina (um corte por passada: tira uma fatia) e as duas peças param na mesa de saída,
+## do outro lado: é lá que se pega. Para tirar outra fatia, põe de novo na entrada.
 ##
 ## Medidas no espaço da máquina: x = caminho da tora (ela entra pelo +x e sai pelo -x,
-## a lâmina fica em x = 0), z = de lado, y = para cima.
+## a lâmina fica em x = 0), z = de lado (o pedal fica no -z), y = para cima.
+
+const Sons := preload("res://scripts/sons.gd")
 
 const Arvores := preload("res://scripts/world/arvores.gd")
 const Furo := preload("res://scripts/world/furo.gd")
@@ -20,42 +24,45 @@ const Furo := preload("res://scripts/world/furo.gd")
 const TIPOS := {
 	"serra_pedal": {
 		"nome": "Serra de Pedal",
-		"desc": "Serraria de madeira movida a pé. Um jogador pisa no pedal e a lâmina sobe e desce; o outro empurra a tora pela mesa contra a serra. A tora sai aberta em tábuas. Só funciona em dupla.",
+		"desc": "Serraria de madeira movida a pé, toda de madeira. Um jogador pisa no pedal (do lado) e a lâmina sobe e desce; o outro empurra a tora pela mesa contra a serra. Cada passada tira uma fatia; as peças saem na mesa do outro lado. Só funciona em dupla.",
+		"versao": 2,
 		"lamina": Vector3(0.0, 1.32, 0.0),
 		# [tipo da madeira, comprimento (m), centro, deitada ao longo de "x"/"z" ou "y" (em pé), raio]
 		"pecas": [
-			["meia", 3.0, Vector3(0.0, 0.1, 0.45), "x", 0.13],      # 0 base esquerda
-			["meia", 3.0, Vector3(0.0, 0.1, -0.45), "x", 0.13],     # 1 base direita
-			["meia", 1.25, Vector3(-1.2, 0.28, 0.0), "z", 0.12],    # 2 travessa do pedal
-			["meia", 1.25, Vector3(1.25, 0.28, 0.0), "z", 0.12],    # 3 travessa da mesa
-			["tora", 2.3, Vector3(0.0, 1.32, 0.45), "y", 0.09],     # 4 coluna esquerda
-			["tora", 2.3, Vector3(0.0, 1.32, -0.45), "y", 0.09],    # 5 coluna direita
-			["meia", 1.25, Vector3(0.0, 2.52, 0.0), "z", 0.12],     # 6 travessa de cima
-			["tora", 2.6, Vector3(-0.8, 2.68, 0.0), "x", 0.05],     # 7 vara de mola
-			["tora", 0.6, Vector3(1.25, 0.66, 0.3), "y", 0.07],     # 8 pé da mesa
-			["tora", 0.6, Vector3(1.25, 0.66, -0.3), "y", 0.07],    # 9 pé da mesa
-			["meia", 2.2, Vector3(1.0, 1.0, 0.3), "x", 0.1],        # 10 trilho da mesa
-			["meia", 2.2, Vector3(1.0, 1.0, -0.3), "x", 0.1],       # 11 trilho da mesa
-			["tabua", 0.9, Vector3(0.6, 1.09, 0.0), "z", 0.17],     # 12 tábua da mesa
-			["tabua", 0.9, Vector3(1.65, 1.09, 0.0), "z", 0.17],    # 13 tábua da mesa
-			["tabua", 0.9, Vector3(-1.2, 0.4, 0.0), "z", 0.17],     # 14 pedal
+			["meia", 1.8, Vector3(0.0, 0.1, 0.45), "x", 0.13],      # 0 base esquerda
+			["meia", 1.8, Vector3(0.0, 0.1, -0.45), "x", 0.13],     # 1 base direita
+			["tora", 2.3, Vector3(0.0, 1.32, 0.45), "y", 0.09],     # 2 coluna esquerda
+			["tora", 2.3, Vector3(0.0, 1.32, -0.45), "y", 0.09],    # 3 coluna direita
+			["meia", 1.25, Vector3(-0.14, 2.52, 0.0), "z", 0.12],   # 4 travessa de cima (atrás da lâmina)
+			["tora", 2.0, Vector3(-1.0, 2.66, 0.0), "x", 0.05],     # 5 vara de mola (a ponta em cima da lâmina)
+			["tora", 0.95, Vector3(2.75, 0.475, 0.0), "y", 0.08],   # 6 pé da mesa de entrada
+			["meia", 0.9, Vector3(2.75, 0.97, 0.0), "z", 0.1],      # 7 travessa da ponta (entrada)
+			["meia", 0.9, Vector3(0.36, 0.97, 0.0), "z", 0.1],      # 8 travessa perto da serra (entrada)
+			["tabua", 2.6, Vector3(1.55, 1.06, 0.14), "x", 0.08],   # 9 tábua da mesa de entrada
+			["tabua", 2.6, Vector3(1.55, 1.06, -0.14), "x", 0.08],  # 10 tábua da mesa de entrada
+			["tora", 0.95, Vector3(-2.75, 0.475, 0.0), "y", 0.08],  # 11 pé da mesa de saída
+			["meia", 0.9, Vector3(-2.75, 0.97, 0.0), "z", 0.1],     # 12 travessa da ponta (saída)
+			["meia", 0.9, Vector3(-0.36, 0.97, 0.0), "z", 0.1],     # 13 travessa perto da serra (saída)
+			["tabua", 2.6, Vector3(-1.55, 1.06, 0.14), "x", 0.08],  # 14 tábua da mesa de saída
+			["tabua", 2.6, Vector3(-1.55, 1.06, -0.14), "x", 0.08], # 15 tábua da mesa de saída
+			["tabua", 1.9, Vector3(0.0, 0.19, -0.35), "z", 0.1],    # 16 pedal (dobradiça no +z, o pé no -z)
 		],
 		# juntas (cada uma leva um pino): [peças que ela prende, ponto]
 		"pinos": [
-			[[0, 4], Vector3(0.0, 0.26, 0.45)], [[1, 5], Vector3(0.0, 0.26, -0.45)],
-			[[4, 6], Vector3(0.0, 2.5, 0.45)], [[5, 6], Vector3(0.0, 2.5, -0.45)],
-			[[6, 7], Vector3(0.0, 2.62, 0.0)],
-			[[0, 2], Vector3(-1.2, 0.22, 0.45)], [[1, 2], Vector3(-1.2, 0.22, -0.45)],
-			[[0, 3], Vector3(1.25, 0.22, 0.45)], [[1, 3], Vector3(1.25, 0.22, -0.45)],
-			[[3, 8], Vector3(1.25, 0.4, 0.3)], [[3, 9], Vector3(1.25, 0.4, -0.3)],
-			[[8, 10], Vector3(1.25, 0.95, 0.3)], [[9, 11], Vector3(1.25, 0.95, -0.3)],
-			[[10, 12], Vector3(0.6, 1.06, 0.3)], [[11, 12], Vector3(0.6, 1.06, -0.3)],
-			[[10, 13], Vector3(1.65, 1.06, 0.3)], [[11, 13], Vector3(1.65, 1.06, -0.3)],
-			[[2, 14], Vector3(-1.2, 0.36, 0.0)],
+			[[0, 2], Vector3(0.0, 0.26, 0.45)], [[1, 3], Vector3(0.0, 0.26, -0.45)],
+			[[2, 4], Vector3(-0.14, 2.5, 0.45)], [[3, 4], Vector3(-0.14, 2.5, -0.45)],
+			[[4, 5], Vector3(-0.14, 2.62, 0.0)],
+			[[6, 7], Vector3(2.75, 0.95, 0.0)],
+			[[7, 9], Vector3(2.75, 1.03, 0.14)], [[7, 10], Vector3(2.75, 1.03, -0.14)],
+			[[8, 9], Vector3(0.36, 1.03, 0.14)], [[8, 10], Vector3(0.36, 1.03, -0.14)],
+			[[11, 12], Vector3(-2.75, 0.95, 0.0)],
+			[[12, 14], Vector3(-2.75, 1.03, 0.14)], [[12, 15], Vector3(-2.75, 1.03, -0.14)],
+			[[13, 14], Vector3(-0.36, 1.03, 0.14)], [[13, 15], Vector3(-0.36, 1.03, -0.14)],
+			[[0, 16], Vector3(0.0, 0.22, 0.45)],
 		],
-		"area": Rect2(-1.6, -0.6, 3.7, 1.2),     # no chão (x, z)
+		"area": Rect2(-3.0, -1.35, 6.0, 1.95),   # no chão (x, z)
 		"lamina_item": "lamina_serra",
-		"lamina_pecas": [4, 5, 6],               # a lâmina vai entre as colunas e a travessa
+		"lamina_pecas": [2, 3, 4],               # a lâmina vai entre as colunas e a travessa
 	},
 	# Desfibradeira de talo: duas toras em pé cortadas na mesma altura com uma tábua
 	# comprida em cima (a bancada), e na frente uma tora mais baixa com uma tábua (o
@@ -156,6 +163,13 @@ func lamina_count(mi: int) -> int:
 	return int(v)
 
 
+static func lamina_count_of(p: Dictionary) -> int:
+	var v = p.get("lamina", false)
+	if v is bool:
+		return 1 if v else 0
+	return int(v)
+
+
 ## Já dá para pôr lâmina (as peças em que ela vai estão no lugar) e ainda falta alguma?
 func lamina_open(mi: int) -> bool:
 	var p: Dictionary = plantas[mi]
@@ -196,7 +210,7 @@ func add_planta(tipo: String, x: float, z: float, yaw: float) -> void:
 	for _p in t.pecas:
 		sob.append(0.0)
 	plantas.append({"tipo": tipo, "x": x, "y": _jogo.surface_at(x, z), "z": z, "yaw": yaw, "pecas": pcs, "pinos": am,
-		"sobra": sob, "lamina": false, "tora": {}, "prog": 0.0})
+		"sobra": sob, "lamina": false, "tora": {}, "prog": 0.0, "saida": [], "versao": int(t.get("versao", 1))})
 	_rebuild()
 
 
@@ -517,22 +531,60 @@ func role_at(mi: int, pos: Vector3) -> String:
 	if str(plantas[mi].tipo) != "serra_pedal":
 		return ""
 	var l := xform(mi).affine_inverse() * pos
-	if l.x < -1.0 and l.x > -2.6 and absf(l.z) < 1.2:
-		return "pedal"
-	if l.x > 1.4 and l.x < 3.6 and absf(l.z) < 1.2:
-		return "mesa"
+	if l.z < -1.2 and l.z > -2.6 and absf(l.x) < 1.2:
+		return "pedal"                 # do lado, fora do caminho da tora
+	if l.x > 2.9 and l.x < 4.6 and absf(l.z) < 1.3:
+		return "mesa"                  # na ponta da mesa de entrada (empurra daqui)
+	if l.x < -2.9 and l.x > -4.6 and absf(l.z) < 1.3:
+		return "saida"                 # na ponta da mesa de saída (pega as peças)
 	return ""
 
 
-## Põe a tora na mesa (do lado de fora, pronta para empurrar).
+## Como a tora vai ser cortada: a lâmina tira uma fatia de BOARD_T de um lado.
+## {a (onde corta, na seção), mn, mx, r, ok}
+func cut_plan(fl: Dictionary) -> Dictionary:
+	var sec: Dictionary = fl.sec if fl.has("sec") else Arvores.circle_sec()
+	var mn := 1e9
+	var mx := -1e9
+	var ymn := 1e9
+	for q in sec.pts:
+		mn = minf(mn, float(q[0]))
+		mx = maxf(mx, float(q[0]))
+		ymn = minf(ymn, float(q[1]))
+	var r: float = _arv.free_log_max_radius(fl)
+	var t := BOARD_T / maxf(r, 0.01)
+	return {"a": mx - t, "mn": mn, "mx": mx, "ymn": ymn, "r": r, "ok": mx - mn > t * 1.6}
+
+
+## Põe a tora na mesa de entrada (a ponta encostando nos dentes).
 func load_log(mi: int, fl: Dictionary) -> void:
 	plantas[mi].tora = fl
 	plantas[mi].prog = 0.0
 	_rebuild()
 
 
+func take_saida(mi: int) -> Dictionary:
+	var sa: Array = plantas[mi].get("saida", [])
+	if sa.is_empty():
+		return {}
+	var fl: Dictionary = sa.pop_front()
+	_rebuild()
+	return fl
+
+
+## A tora está passando pela lâmina agora?
+func cutting(mi: int) -> bool:
+	var p: Dictionary = plantas[mi]
+	if (p.tora as Dictionary).is_empty():
+		return false
+	var L: float = _arv.free_log_length(p.tora)
+	var d := float(p.prog) * (L + 0.1)
+	return d >= 0.05 and d <= L + 0.05
+
+
 ## Quem manda no corte (o dono do mundo, ou quem joga sozinho): soma o pedal e o
-## empurrão de todo mundo. A lâmina só corta com o pedal andando E a tora empurrada.
+## empurrão de todo mundo. Antes de encostar nos dentes a tora escorrega pela mesa; na
+## lâmina, só anda com o pedal subindo e descendo E a tora sendo empurrada.
 func update(delta: float, authority: bool, solo_ok: bool) -> void:
 	_bob += delta
 	var now := Time.get_ticks_msec()
@@ -552,53 +604,78 @@ func update(delta: float, authority: bool, solo_ok: bool) -> void:
 		if solo_ok and emp > 0.0 and pedal <= 0.0:
 			pedal = emp                 # modo de teste: sozinho a serra pedala sola
 		p["_pedal"] = pedal
-		# a lâmina sobe e desce no ritmo do pedal (só desenho, em todo celular)
+		if str(p.tipo) != "serra_pedal":
+			continue
+		var xf := xform(mi)
+		var ph0 := float(p.get("_ph", 0.0))
+		var ph := ph0 + delta * clampf(pedal, 0.0, 3.0) * 7.0
+		p["_ph"] = ph
+		if pronta(mi):
+			_animate(mi, sin(ph) * 0.12)
 		var nd: Dictionary = _nodes.get(mi, {})
-		if nd.has("lamina") and is_instance_valid(nd.lamina):
-			var ph := float(p.get("_ph", 0.0)) + delta * clampf(pedal, 0.0, 3.0) * 7.0
-			p["_ph"] = ph
-			(nd.lamina as Node3D).position = (TIPOS[p.tipo].lamina as Vector3) + Vector3(0, sin(ph) * 0.12, 0)
 		if nd.has("tora") and is_instance_valid(nd.tora) and not (p.tora as Dictionary).is_empty():
 			(nd.tora as Node3D).position = _log_pos(mi)
+		# sons: o pedal range a cada pisada; a lâmina só faz o barulho de serrar com
+		# madeira encostada nela e andando
+		var corta := cutting(mi) and pedal > 0.05 and emp > 0.02
+		if pedal > 0.05 and floori(ph0 / TAU) != floori(ph / TAU):
+			Sons.play_at(_jogo, "pedal_range", xf * Vector3(0.0, 0.25, -1.1), 0.0, randf_range(0.92, 1.08))
+		if corta and floori(ph0 / PI) != floori(ph / PI):
+			Sons.play_at(_jogo, "serra_corte", xf * Vector3(0.0, 1.2, 0.0), 0.0, randf_range(0.94, 1.06))
 		if not authority or (p.tora as Dictionary).is_empty() or not pronta(mi):
-			continue
-		var rate := minf(pedal, emp)
-		if rate <= 0.02:
 			continue
 		var L: float = _arv.free_log_length(p.tora)
 		var r: float = _arv.free_log_max_radius(p.tora)
-		# madeira grossa demora mais (anda uns 8 cm por segundo numa tora de 20 cm)
-		p.prog = float(p.prog) + rate * delta * 0.08 / maxf(r / 0.1, 0.6) / L
+		var v := 0.0
+		if cutting(mi):
+			# madeira grossa demora mais (uns 8 cm por segundo numa tora de 20 cm)
+			v = minf(pedal, emp) * 0.08 / maxf(r / 0.1, 0.6)
+		else:
+			v = emp * 0.35               # escorregando na mesa (antes e depois da lâmina)
+		if v <= 0.0:
+			continue
+		p.prog = minf(1.0, float(p.prog) + v * delta / (L + 0.1))
 		if float(p.prog) >= 1.0:
 			_finish_cut(mi)
 
 
-## Onde a tora está na mesa (centro dela, no espaço da máquina).
+## Onde a tora está na mesa (centro dela, no espaço da máquina): começa com a ponta
+## encostando nos dentes e vai passando para o -x até sair inteira do outro lado.
 func _log_pos(mi: int) -> Vector3:
 	var p: Dictionary = plantas[mi]
 	var L: float = _arv.free_log_length(p.tora)
-	var r: float = _arv.free_log_max_radius(p.tora)
-	# começa com a ponta encostando na lâmina e vai passando para o -x
-	var x := L * 0.5 + 0.02 - float(p.prog) * L
-	return Vector3(x, 1.12 + r, 0.0)
+	var cp := cut_plan(p.tora)
+	var x := L * 0.5 + 0.05 - float(p.prog) * (L + 0.1)
+	return Vector3(x, 1.09 - float(cp.ymn) * float(cp.r), -float(cp.a) * float(cp.r))
 
 
-## Terminou de passar: a tora vira tábuas (e as duas costaneiras com casca) do lado de lá.
+## Passou inteira: um corte só. A fatia e o resto ficam na mesa de saída.
 func _finish_cut(mi: int) -> void:
 	var p: Dictionary = plantas[mi]
 	var fl: Dictionary = p.tora
 	p.tora = {}
 	p.prog = 0.0
-	var pieces := rip(fl)
-	var xf := xform(mi)
-	var k := 0
-	for pc in pieces:
-		var at := xf * Vector3(-1.9 - _arv.free_log_length(pc) * 0.0, 0.0, -0.4 + k * 0.28)
-		_arv.drop_log(pc, at + Vector3(0, 0.2, 0), float(p.yaw))
-		k += 1
+	var cp := cut_plan(fl)
+	var sec: Dictionary = fl.sec if fl.has("sec") else Arvores.circle_sec()
+	var cil: Dictionary
+	if fl.has("cil"):
+		cil = (fl.cil as Dictionary).duplicate()
+	else:
+		cil = {"L": _arv.free_log_length(fl), "ra": _arv.free_log_radius_at(fl, 0.02), "rb": _arv.free_log_radius_at(fl, 0.98)}
+	var out := []
+	for band in [[float(cp.a), float(cp.mx)], [float(cp.mn), float(cp.a)]]:
+		var poly := _band(sec.pts, band[0], band[1])
+		if poly.size() < 3:
+			continue
+		var pc := {"cil": cil.duplicate(), "sec": Arvores._lay_flat(poly, sec.ax), "v": int(fl.get("v", 0)), "s": 1.0,
+			"h0": 0.0, "h1": 1.0, "bot": {}, "top": {}, "pos": [0, 0, 0], "yaw": 0.0, "dia": int(fl.get("dia", 0))}
+		if fl.has("casca"):
+			pc["casca"] = fl.casca
+		out.append(pc)
+	p["saida"] = out
 	_rebuild()
 	if _jogo.has_method("_show_toast"):
-		_jogo._show_toast("A serra abriu a tora em %d peças (tábuas e costaneiras)!" % pieces.size())
+		_jogo._show_toast("A serra tirou uma fatia! As peças estão na mesa do outro lado.")
 
 
 ## Abre a madeira em fatias de BOARD_T de grossura (cortes paralelos, na vertical da
@@ -725,6 +802,8 @@ func _rebuild() -> void:
 				if str(pc[0]) == "tabua":
 					bb = b * Basis(Vector3.RIGHT, PI)      # a tábua virada: a face rachada (reta) para cima
 				n.transform = Transform3D(bb, (pc[2] as Vector3) + b.x * e * 0.5)
+				nd["p_%d" % si] = n
+				nd["t_%d" % si] = n.transform
 				# os furos das juntas dessa peça
 				var holes := []
 				var inv := n.transform.affine_inverse()
@@ -797,10 +876,27 @@ func _rebuild() -> void:
 			gl.material_override = _ghost_mat
 			gl.position = t.lamina
 			root.add_child(gl)
-		# pronta: as cordas de cipó do pedal até a lâmina e da lâmina até a vara de mola
-		if pronta(mi):
-			_rope(root, Vector3(0.0, 1.32 + 0.55, 0.0), Vector3(0.45, 2.66, 0.0))
-			_rope(root, Vector3(0.0, 1.32 - 0.55, 0.0), Vector3(-1.2, 0.46, 0.35))
+		# pronta: o mecanismo de madeira (biela do pedal até a lâmina, haste da lâmina até
+		# a ponta da vara de mola) — o pedal e a vara se mexem com a lâmina
+		if pronta(mi) and str(p.tipo) == "serra_pedal":
+			var biela := _stick(Vector3(0.0, 0.23, 0.0), Vector3(0.0, 0.77, 0.0), 0.025)
+			root.add_child(biela)
+			nd["biela"] = biela
+			var haste := _stick(Vector3(0.0, 1.87, 0.0), Vector3(0.0, 2.61, 0.0), 0.022)
+			root.add_child(haste)
+			nd["haste"] = haste
+			# a lâmina presa num caixilho de ripas (as duas pontas)
+			if nd.has("lamina"):
+				for yy in [-0.57, 0.57]:
+					(nd.lamina as Node3D).add_child(_stick(Vector3(-0.08, yy, 0.0), Vector3(0.1, yy, 0.0), 0.02))
+		# as peças cortadas paradas na mesa de saída
+		var sa: Array = p.get("saida", [])
+		for k in sa.size():
+			var sn: Node3D = _arv.free_log_node(sa[k])
+			root.add_child(sn)
+			var Ls: float = _arv.free_log_length(sa[k])
+			var cps := cut_plan(sa[k])
+			sn.position = Vector3(-(Ls * 0.5 + 0.12), 1.09 - float(cps.ymn) * float(cps.r), 0.13 if k == 0 else -0.08)
 		# a tora na mesa
 		if not (p.tora as Dictionary).is_empty():
 			var tn: Node3D = _arv.free_log_node(p.tora)
@@ -808,6 +904,42 @@ func _rebuild() -> void:
 			tn.position = _log_pos(mi)
 			nd["tora"] = tn
 		_nodes[mi] = nd
+
+
+## Uma vareta/haste de madeira (galho fino com casca) de a até b.
+func _stick(a: Vector3, b: Vector3, r: float) -> Node3D:
+	var n: Node3D = _arv.free_log_node(slot_log(["tora", a.distance_to(b), Vector3.ZERO, "x", r]))
+	var x := (b - a).normalized()
+	var up := Vector3.UP if absf(x.y) < 0.9 else Vector3.RIGHT
+	var z := x.cross(up).normalized()
+	var y := z.cross(x)
+	n.transform = Transform3D(Basis(x, y, z), (a + b) * 0.5)
+	return n
+
+
+## O mecanismo da serra no lugar da lâmina (dy: quanto ela está abaixo/acima do meio):
+## o pedal gira na dobradiça, a biela e a haste sobem e descem junto, a vara de mola
+## dobra na ponta.
+func _animate(mi: int, dy: float) -> void:
+	var nd: Dictionary = _nodes.get(mi, {})
+	if nd.is_empty():
+		return
+	var t: Dictionary = TIPOS[plantas[mi].tipo]
+	if nd.has("lamina") and is_instance_valid(nd.lamina):
+		(nd.lamina as Node3D).position = (t.lamina as Vector3) + Vector3(0, dy, 0)
+	for k in ["biela", "haste"]:
+		if nd.has(k) and is_instance_valid(nd[k]):
+			if not nd.has(k + "0"):
+				nd[k + "0"] = (nd[k] as Node3D).position
+			(nd[k] as Node3D).position = (nd[k + "0"] as Vector3) + Vector3(0, dy, 0)
+	if nd.has("p_16") and is_instance_valid(nd.p_16):
+		var hinge := Vector3(0.0, 0.19, 0.6)
+		var th := asin(clampf(dy / 0.6, -0.9, 0.9))
+		(nd.p_16 as Node3D).transform = Transform3D(Basis(Vector3.RIGHT, th), hinge) * Transform3D(Basis(), -hinge) * (nd.t_16 as Transform3D)
+	if nd.has("p_5") and is_instance_valid(nd.p_5):
+		var butt := Vector3(-2.0, 2.66, 0.0)
+		var ph := asin(clampf(dy / 2.0, -0.9, 0.9))
+		(nd.p_5 as Node3D).transform = Transform3D(Basis(Vector3.BACK, ph), butt) * Transform3D(Basis(), -butt) * (nd.t_5 as Transform3D)
 
 
 static var _fbm: ArrayMesh
@@ -957,6 +1089,31 @@ func _load(path: String) -> bool:
 			for _q in p.pecas:
 				sb.append(0.0)
 			p["sobra"] = sb
+	# serra da versão antiga (pedal atrás, cordas): vira a serra nova no mesmo lugar;
+	# se já estava pronta, fica pronta
+	for p in plantas:
+		if str(p.tipo) == "serra_pedal" and int(p.get("versao", 1)) < 2:
+			var tt: Dictionary = TIPOS.serra_pedal
+			var feita := true
+			for b in p.pecas:
+				if not bool(b):
+					feita = false
+			var np := (tt.pecas as Array).size()
+			var nj := (tt.pinos as Array).size()
+			p.pecas = []
+			p.sobra = []
+			p.pinos = []
+			for _i in np:
+				p.pecas.append(feita)
+				p.sobra.append(0.0)
+			for _j in nj:
+				p.pinos.append(2 if feita else 0)
+			p.lamina = feita and lamina_count_of(p) > 0
+			p.erase("madeiras")
+			p["saida"] = []
+			p["tora"] = {}
+			p["prog"] = 0.0
+			p["versao"] = 2
 	# o ritmo da lâmina continua (é só desenho)
 	for i in mini(old.size(), plantas.size()):
 		if (old[i] as Dictionary).has("_ph"):
