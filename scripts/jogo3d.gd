@@ -2174,7 +2174,9 @@ func _update_chop(delta: float) -> void:
 	if not _pin.is_empty():
 		_pin_tick(delta)
 		return
-	_trim_tick(delta)
+	if not _trim.is_empty():
+		_trim_tick(delta)
+		return
 	if not _post_mark.is_empty():
 		_mark_tick()
 		return
@@ -4977,7 +4979,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn] + _bld_btns + _mark_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop] + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []):
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -7097,9 +7099,7 @@ func _maq_ctx_press(act: String) -> void:
 			if item_qtd(tool) <= 0 and not teste:
 				_show_toast("Precisa de %s para cortar essa ponta." % ("uma serra (a peça está deitada)" if tool == "serra" else "um machado (a peça está em pé)"))
 				return
-			equip(tool)
-			_trim = {"mi": int(sb[0]), "si": int(sb[1]), "t": 0.0, "s": 0.0, "tool": tool}
-			_show_toast("Serrando a ponta..." if tool == "serra" else "Cortando a ponta com o machado...")
+			_trim_start(int(sb[0]), int(sb[1]), tool)
 		"tora_serra":
 			var k: String = _maq.kind_of(_carry)
 			if k == "tabua" or _arvores.free_log_length(_carry) < 0.6:
@@ -7154,6 +7154,9 @@ func _maq_op_start(mi: int, role: String) -> void:
 
 
 func _maq_op_stop() -> void:
+	if not _trim.is_empty():
+		_trim_end()                 # o mesmo botão Parar serve para o corte da ponta
+		return
 	if _maq_op.is_empty():
 		return
 	(_maq_op.ctrl as Node).queue_free()
@@ -7632,32 +7635,113 @@ func _trim_tick(delta: float) -> void:
 	var mi := int(_trim.mi)
 	var si := int(_trim.si)
 	if mi >= _maq.plantas.size() or float(_maq.plantas[mi].sobra[si]) <= 0.0:
-		_trim = {}
+		_trim_end()
 		return
 	var inf: Dictionary = _maq.sobra_info(mi, si)
 	var at: Vector3 = inf.pos
 	if Vector2(at.x - _player.position.x, at.z - _player.position.z).length() > 2.4:
-		_trim = {}
+		_trim_end()
 		_show_toast("Você saiu de perto: parou de cortar.")
 		return
 	_face_to(at)
-	_trim.t = float(_trim.t) + delta
-	_trim.s = float(_trim.s) - delta
-	if float(_trim.s) <= 0.0:
-		_trim.s = 0.45 if str(_trim.tool) == "serra" else 0.6
-		if str(_trim.tool) == "serra":
-			Sons.play_at(self, "serra", at, 0.0, 0.95 + randf() * 0.1)
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn, _jump_btn]:
+		(b as Control).visible = false
+	_maq_stop.visible = true
+	if str(_trim.tool) == "serra":
+		# o jogador faz o vai e vem com o dedo no trilho: cada ida e volta afunda o corte
+		var v := float(_trim.ctrl.value)
+		var end := 1 if v > 0.85 else (-1 if v < 0.15 else 0)
+		if _chop_pose:
+			_chop_pose.saw_pos = v * 2.0 - 1.0
+			_chop_pose.saw_depth = float(_trim.hits) / float(_trim.need) * float(_trim.r) * 1.7
+		if end != 0 and end != int(_trim.side):
+			_trim.side = end
+			Sons.play_at(self, "serra", at, 0.0, 0.92 if end > 0 else 1.0)
 			_sawdust(at)
-		else:
-			Sons.play_at(self, "machado", at, -2.0, 1.0 + randf() * 0.1)
-			_chips(at)
-	if float(_trim.t) >= (0.3 if teste else 3.5):
+			if end < 0:
+				_trim.hits = int(_trim.hits) + 1
+				wear("serra")
+	_bld_why.visible = true
+	_bld_why.text = ("Serrando a ponta: %d%%" if str(_trim.tool) == "serra" else "Cortando a ponta: %d%%") % int(100.0 * float(_trim.hits) / float(_trim.need))
+	if int(_trim.hits) >= int(_trim.need):
 		var fl: Dictionary = _maq.trim(mi, si)
 		var mid: Vector3 = inf.mid
 		var ax: Vector3 = (_maq.xform(mi).basis * Maquinas.slot_basis(str(Maquinas.TIPOS[_maq.plantas[mi].tipo].pecas[si][3])).x)
 		var yaw := atan2(-ax.z, ax.x) if Vector2(ax.x, ax.z).length() > 0.3 else randf() * TAU
 		_arvores.drop_log(fl, mid, yaw)
 		Sons.play_at(self, "baque", mid, -8.0, 1.2)
-		_trim = {}
+		_trim_end()
 		_show_toast("Ponta cortada: o pedaço caiu no chão.")
-		_act_check = 0.0
+
+
+## Começa a cortar a ponta: serra (trilho de vai e vem) ou machado (botão Bater).
+func _trim_start(mi: int, si: int, tool: String) -> void:
+	var inf: Dictionary = _maq.sobra_info(mi, si)
+	var pc: Array = Maquinas.TIPOS[_maq.plantas[mi].tipo].pecas[si]
+	var r := float(pc[4])
+	var need := 1 if teste else (clampi(int(round(6.0 + r * 40.0)), 8, 18) if tool == "serra" else clampi(int(round(3.0 + r * 20.0)), 4, 8))
+	_trim = {"mi": mi, "si": si, "tool": tool, "hits": 0, "need": need, "side": -1, "r": r}
+	equip(tool)
+	if tool == "serra":
+		var ctrl := SerraCtrl.new()
+		ctrl.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+		ctrl.offset_left = -150
+		ctrl.offset_right = -30
+		ctrl.offset_top = -470
+		ctrl.offset_bottom = -20
+		_hud.add_child(ctrl)
+		ctrl.value = 0.0
+		_trim.ctrl = ctrl
+		if _chop_pose:
+			var ax: Vector3 = _maq.xform(mi).basis * Maquinas.slot_basis(str(pc[3])).x
+			_chop_pose.sawing = true
+			_chop_pose.saw_point = inf.pos + Vector3.UP * r
+			_chop_pose.saw_axis = ax.normalized()
+			_chop_pose.saw_depth = 0.0
+		_show_toast("Arraste o pegador: para cima empurra a serra, para baixo puxa. Vai e vem até atravessar.")
+	else:
+		var hb := Icones.IconButton.new()
+		hb.text = "Bater"
+		hb.add_theme_font_size_override("font_size", 22)
+		hb.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+		hb.offset_left = -190
+		hb.offset_top = -190
+		hb.offset_right = -30
+		hb.offset_bottom = -30
+		hb.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+		hb.pressed.connect(_trim_axe_hit)
+		_hud.add_child(hb)
+		_trim.ctrl = hb
+		_show_toast("Toque em Bater para cada machadada na ponta.")
+
+
+func _trim_axe_hit() -> void:
+	if _trim.is_empty() or str(_trim.tool) != "machado":
+		return
+	var inf: Dictionary = _maq.sobra_info(int(_trim.mi), int(_trim.si))
+	var at: Vector3 = inf.pos
+	Sons.play_at(self, "machado", at, -2.0, 1.0 + randf() * 0.1)
+	_chips(at)
+	wear("machado")
+	_trim.hits = int(_trim.hits) + 1
+	if _chop_pose:
+		_chop_pose.swinging = true
+		_chop_pose.phase = 0.6
+		get_tree().create_timer(0.25).timeout.connect(func():
+			if _chop_pose:
+				_chop_pose.swinging = false)
+
+
+func _trim_end() -> void:
+	if _trim.is_empty():
+		return
+	if _trim.has("ctrl") and is_instance_valid(_trim.ctrl):
+		(_trim.ctrl as Node).queue_free()
+	if _chop_pose:
+		_chop_pose.sawing = false
+		_chop_pose.swinging = false
+	_trim = {}
+	_maq_stop.visible = false
+	_bld_why.visible = false
+	_jump_btn.visible = true
+	_act_check = 0.0
