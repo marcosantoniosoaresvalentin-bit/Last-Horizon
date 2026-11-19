@@ -1,9 +1,9 @@
 {
-  "version": 133,
-  "file": "update_133.zip",
-  "size": 4737644,
-  "sha256": "8edec1d4ba7d10d378fde0b3314e058cb384c2a6e1e65d436715909a3222a76b",
+  "version": 134,
+  "file": "update_134.zip",
+  "size": 4784039,
+  "sha256": "1049d3f1d94febe3d7e44deb4e2fa872aab10c8fc19cffcd0c1c57800a4b826d",
   "min_build": 1,
-  "notes": "Plantas usam a madeira de verdade do jogo (cor e formato)",
+  "notes": "Som realista da fibra sendo cortada na desfibradeira",
   "date": "2026-11-19"
 }
