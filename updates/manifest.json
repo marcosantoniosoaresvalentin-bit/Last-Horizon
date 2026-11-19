@@ -1,9 +1,9 @@
 {
-  "version": 126,
-  "file": "update_126.zip",
-  "size": 4725775,
-  "sha256": "d75a21bfd9250d9ca38fc7743c44f7ea739880cb1fc6dcae06a5fb4663d62350",
+  "version": 127,
+  "file": "update_127.zip",
+  "size": 4726498,
+  "sha256": "1bff6122ae274b0fd20b5717e269a91432b8165505ce2d56b2915ab7c01466db",
   "min_build": 1,
-  "notes": "Toco do buriti com cara de corte de machado",
+  "notes": "Buriti derrubado: folhas ficam na copa, cortar uma por uma com a faca",
   "date": "2026-11-19"
 }
