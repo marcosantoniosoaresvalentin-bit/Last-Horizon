@@ -233,6 +233,16 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_polyline(bl + PackedVector2Array([bl[0]]), ink, 2.0 * u, true)
 		"folha_buriti", "acao_cortar":
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95)
+		"talo_buriti":
+			# o talo comprido, verde-claro, com as duas pontas cortadas (fibra clara)
+			var a0 := c + Vector2(-44, 34) * u
+			var a1 := c + Vector2(44, -30) * u
+			ci.draw_line(a0, a1, Color(0.18, 0.28, 0.1), 13 * u, true)
+			ci.draw_line(a0, a1, Color(0.42, 0.58, 0.26), 9 * u, true)
+			ci.draw_line(a0 + Vector2(0, -2) * u, a1 + Vector2(0, -2) * u, Color(0.62, 0.74, 0.42), 2.5 * u, true)
+			for e in [a0, a1]:
+				ci.draw_circle(e, 5.5 * u, Color(0.86, 0.8, 0.58))
+				ci.draw_arc(e, 5.5 * u, 0, TAU, 12, Color(0.3, 0.36, 0.16), 1.5 * u, true)
 		"folha_buriti_seca":
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95, true)
 		"acao_derrubar":

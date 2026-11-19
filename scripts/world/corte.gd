@@ -48,6 +48,43 @@ static func marreta_mesh() -> ArrayMesh:
 	return out.commit()
 
 
+## Faca de pedra: cabo curto de galho, a lâmina lascada amarrada com cipó na ponta.
+static func faca_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 3131
+	var path := []
+	for k in 5:
+		var t := float(k) / 4.0
+		path.append(Vector3(sin(t * 2.0) * 0.003, t * 0.17, 0.0))
+	_tube(st, path, 0.016, Color(0.45, 0.31, 0.18), rng)
+	for k in 4:
+		var y := 0.15 + k * 0.01
+		var ring := []
+		for q in 9:
+			var a := TAU * q / 8.0
+			ring.append(Vector3(cos(a) * 0.02, y + sin(a * 2.0) * 0.003, sin(a) * 0.014))
+		_tube(st, ring, 0.0035, Color(0.42, 0.33, 0.17), rng)
+	# a lâmina: pedra cinza fina, gume para a frente (-Z... no plano XY), ponta para cima
+	var g := Color(0.47, 0.47, 0.45)
+	var b0 := Vector3(-0.012, 0.15, 0)
+	var b1 := Vector3(0.03, 0.15, 0)
+	var tip := Vector3(0.018, 0.34, 0)
+	var mid := Vector3(0.042, 0.24, 0)
+	for tri in [[b0, b1, mid], [b0, mid, tip]]:
+		for side in [-1.0, 1.0]:
+			var off := Vector3(0, 0, 0.006 * side)
+			var pts: Array = tri
+			if side < 0.0:
+				pts = [tri[0], tri[2], tri[1]]
+			for v in pts:
+				st.set_color(g.darkened(0.08 if side < 0.0 else 0.0))
+				st.add_vertex((v as Vector3) + off)
+	st.generate_normals()
+	return st.commit()
+
+
 static func axe_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)

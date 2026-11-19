@@ -47,6 +47,8 @@ var _dead_mat: StandardMaterial3D
 var _nodes: Array = []
 var caidos: Array = []            # copas dos buritis derrubados, deitadas no chão (as folhas continuam presas)
 const CAIDO_DAYS := 150           # a copa caída seca e apodrece em uns 5 meses
+var chao_folhas: Array = []       # folhas cortadas caídas, ainda inteiras (falta tirar o talo)
+var maos: Array = []              # o leque que sobrou no chão depois de tirar o talo
 var secas: Array = []             # folhas secas caídas no chão: [x, z, variante, folha, giro, escala, dia]
 var _seca_nodes: Array = []
 var drop_hook := Callable()       # o jogo mostra a folha seca caindo (perto do jogador)
@@ -290,7 +292,7 @@ func leaves_of(p: Dictionary) -> Array:
 		var el := float(lp.elev)
 		var dir := (o * cos(el) + Vector3.UP * sin(el)).normalized()
 		var base := o * 0.12
-		var cp: Vector3 = xf * (base + dir * 0.7)
+		var cp: Vector3 = xf * pet_point(v, i, 0.12)          # o pé do talo, perto do topo
 		if p.has("caido") and cp.y < _jogo.height_at(cp.x, cp.z) + 0.05:
 			continue                     # copa caída: essa folha ficou amassada embaixo
 		out.append({"li": i, "cut": cp, "base": xf * base})
@@ -313,7 +315,7 @@ func leaf_lying_basis(v: int, li: int, yaw: float) -> Basis:
 	var el := float(lp.elev)
 	var tan := Vector3(-sin(az), 0, cos(az))
 	# tira a subida do talo (gira no eixo de lado) e depois gira no chão
-	return Basis(Vector3.UP, yaw) * Basis(tan, el) * Basis(Vector3.UP, 0.0)
+	return Basis(Vector3.UP, yaw) * Basis(tan, -el)
 
 
 func cut_leaf(p: Dictionary, li: int) -> void:
@@ -322,6 +324,60 @@ func cut_leaf(p: Dictionary, li: int) -> void:
 	p.cortadas.append(li)
 	p["corte_dia"] = last_day
 	_rebuild()
+
+
+## Ponto no talo da folha (no espaço da copa), t de 0 (no tronco) a 1 (onde abre o leque).
+func pet_point(v: int, li: int, t: float) -> Vector3:
+	var lp: Dictionary = _crown_params[v][li]
+	var az := float(lp.az)
+	var o := Vector3(cos(az), 0, sin(az))
+	var el := float(lp.elev)
+	var dir := (o * cos(el) + Vector3.UP * sin(el)).normalized()
+	var pet := float(lp.pet)
+	return o * 0.12 + dir * pet * t + Vector3.DOWN * (0.25 * t * t * pet / 3.0) * (0.0 if bool(lp.seca) else 1.0)
+
+
+## ================== FOLHA CORTADA NO CHÃO (falta separar o talo) ==================
+## A folha que caiu ainda inteira: [x, z, variante, folha, giro, escala, dia]. Cortando o
+## talo perto do leque, o talo vai para a mochila e o leque fica no chão (maos).
+
+func lying_xf(e: Array) -> Transform3D:
+	var v := int(e[2])
+	var li := int(e[3])
+	var sc := float(e[5])
+	var x := float(e[0])
+	var z := float(e[1])
+	return Transform3D(leaf_lying_basis(v, li, float(e[4])).scaled(Vector3(sc, sc, sc)), Vector3(x, _jogo.height_at(x, z) + 0.05, z))
+
+
+func talo_point(e: Array, t := 0.93) -> Vector3:
+	return lying_xf(e) * pet_point(int(e[2]), int(e[3]), t)
+
+
+func add_chao_folha(v: int, li: int, land: Vector3, yaw: float, sc: float) -> void:
+	chao_folhas.append([land.x, land.z, v, li, yaw, sc, last_day])
+	_rebuild_secas()
+
+
+func chao_folha_near(pos: Vector3, reach: float) -> int:
+	var best := -1
+	var bd := reach
+	for i in chao_folhas.size():
+		var d := Vector2(pos.x, pos.z).distance_to(Vector2(talo_point(chao_folhas[i]).x, talo_point(chao_folhas[i]).z))
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+## Separou o talo do leque: o leque fica no chão; devolve a folha (para o talo).
+func cut_talo(i: int) -> Array:
+	var e: Array = chao_folhas[i]
+	chao_folhas.remove_at(i)
+	maos.append(e.duplicate())
+	maos[-1][6] = last_day
+	_rebuild_secas()
+	return e
 
 
 ## ================== A COPA DO BURITI DERRUBADO ==================
@@ -420,21 +476,29 @@ func _rebuild_secas() -> void:
 			n.queue_free()
 	_seca_nodes.clear()
 	var groups := {}
+	var all := []
 	for e in secas:
+		all.append([e, 0])
+	for e in chao_folhas:
+		all.append([e, 0])
+	for e in maos:
+		all.append([e, 2])
+	for pair in all:
+		var e: Array = pair[0]
 		var v := int(e[2])
 		var li := int(e[3])
-		var k := v * 100 + li
+		var k := v * 100 + li + int(pair[1]) * 10000
 		if not groups.has(k):
 			groups[k] = []
 		var s := float(e[5])
 		var x := float(e[0])
 		var z := float(e[1])
 		var b: Basis = leaf_lying_basis(v, li, float(e[4])).scaled(Vector3(s, s, s))
-		groups[k].append(Transform3D(b, Vector3(x, _jogo.height_at(x, z) + 0.04, z)))
+		groups[k].append(Transform3D(b, Vector3(x, _jogo.height_at(x, z) + 0.05, z)))
 	for k in groups:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.mesh = leaf_mesh(int(k) / 100, int(k) % 100)
+		mm.mesh = leaf_mesh((int(k) % 10000) / 100, int(k) % 100, int(k) / 10000)
 		mm.instance_count = (groups[k] as Array).size()
 		for i in mm.instance_count:
 			mm.set_instance_transform(i, groups[k][i])
@@ -504,6 +568,8 @@ func tick() -> void:
 		caidos = caidos.filter(func(c): return last_day - int(c.dia) < CAIDO_DAYS)
 		# a folha seca no chão apodrece
 		secas = secas.filter(func(e): return last_day - int(e[6]) < SECA_DAYS)
+		chao_folhas = chao_folhas.filter(func(e): return last_day - int(e[6]) < SECA_DAYS)
+		maos = maos.filter(func(e): return last_day - int(e[6]) < 90)
 		while secas.size() > SECA_MAX:
 			secas.pop_front()
 		# os frutos caem perto (e a água leva): de vez em quando nasce buriti novo
@@ -966,20 +1032,21 @@ func _crown_mesh(prm: Array, skip: Dictionary) -> ArrayMesh:
 	return st.commit()
 
 
-func _leaf_into(st: SurfaceTool, lp: Dictionary) -> void:
+func _leaf_into(st: SurfaceTool, lp: Dictionary, part := 0) -> void:
 	var r2 := RandomNumberGenerator.new()
 	r2.seed = int(lp.seed)
 	var az := float(lp.az)
-	_frond(st, Vector3(cos(az), 0, sin(az)), float(lp.elev), float(lp.pet), float(lp.R), lp.col, r2, bool(lp.seca))
+	_frond(st, Vector3(cos(az), 0, sin(az)), float(lp.elev), float(lp.pet), float(lp.R), lp.col, r2, bool(lp.seca), part)
 
 
 ## A folha sozinha (no espaço da copa), para mostrar ela caindo e no chão.
-func leaf_mesh(v: int, li: int) -> ArrayMesh:
-	var k := v * 100 + li
+## part: 0 a folha inteira, 1 só o talo, 2 só o leque (com o toquinho do talo).
+func leaf_mesh(v: int, li: int, part := 0) -> ArrayMesh:
+	var k := v * 100 + li + part * 10000
 	if not _leaf_meshes.has(k):
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		_leaf_into(st, _crown_params[v][li])
+		_leaf_into(st, _crown_params[v][li], part)
 		st.generate_normals()
 		_leaf_meshes[k] = st.commit()
 	return _leaf_meshes[k]
@@ -987,7 +1054,7 @@ func leaf_mesh(v: int, li: int) -> ArrayMesh:
 
 ## Uma folha em leque: o talo sai do topo do tronco na direção out, subindo elev
 ## (rad); na ponta do talo abre a mão de lâminas.
-func _frond(st: SurfaceTool, out: Vector3, elev: float, pet_len: float, R: float, col: Color, rng: RandomNumberGenerator, seca := false) -> void:
+func _frond(st: SurfaceTool, out: Vector3, elev: float, pet_len: float, R: float, col: Color, rng: RandomNumberGenerator, seca := false, part := 0) -> void:
 	var dir := (out * cos(elev) + Vector3.UP * sin(elev)).normalized()
 	var p0 := Vector3.ZERO + out * 0.12
 	# talo levemente curvo (cai um pouco na ponta)
@@ -997,9 +1064,15 @@ func _frond(st: SurfaceTool, out: Vector3, elev: float, pet_len: float, R: float
 	for k in segs:
 		var t := float(k + 1) / segs
 		var p := p0 + dir * pet_len * t + Vector3.DOWN * (0.25 * t * t * pet_len / 3.0) * (0.0 if seca else 1.0)
-		_tube(st, prev, p, lerpf(0.045, 0.025, t), pet_col)
+		if part != 2:
+			_tube(st, prev, p, lerpf(0.045, 0.025, t), pet_col)
 		prev = p
 	var H := prev                                   # onde abre o leque
+	if part == 1:
+		return                                      # só o talo
+	if part == 2:
+		# só o leque: fica um toquinho de talo cortado preso nele
+		_tube(st, p0 + dir * pet_len * 0.92 + Vector3.DOWN * (0.25 * 0.8464 * pet_len / 3.0), H, 0.027, pet_col)
 	var tip_dir := (H - (p0 + dir * pet_len * 0.8)).normalized()
 	# plano do leque: continua o talo (costapalmado) e abre para os lados
 	var side := tip_dir.cross(Vector3.UP).normalized()
@@ -1093,7 +1166,7 @@ static func _fruit(st: SurfaceTool, c: Vector3, r: float, col: Color) -> void:
 func save(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "palmeiras": palms, "secas": secas, "caidos": caidos}))
+		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "palmeiras": palms, "secas": secas, "caidos": caidos, "chao_folhas": chao_folhas, "maos": maos}))
 		f.close()
 
 
@@ -1106,6 +1179,8 @@ func _load(path: String) -> bool:
 	palms = d.get("palmeiras", [])
 	secas = d.get("secas", [])
 	caidos = d.get("caidos", [])
+	chao_folhas = d.get("chao_folhas", [])
+	maos = d.get("maos", [])
 	for p in palms:
 		for k in ["degraus", "lado"]:
 			(p as Dictionary).erase(k)

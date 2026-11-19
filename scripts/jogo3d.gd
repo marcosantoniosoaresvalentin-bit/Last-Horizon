@@ -1799,6 +1799,16 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 		mi.mesh = _board_mesh(id == "ripa", int(dur[0]) if dur.size() > 0 and id == "tabua" else 0)
 		mi.rotation.y = randf() * TAU
 		node.add_child(mi)
+	elif id == "talo_buriti" and _buritis and dur.size() >= 6:
+		# o talo deitado (o desenho sai do pé dele, guardado em relação ao item)
+		var mi := MeshInstance3D.new()
+		var v := int(dur[0]) % Buritis.CROWN_VARIANTS
+		var li := int(dur[1])
+		mi.mesh = _buritis.leaf_mesh(v, li, 1)
+		mi.material_override = _buritis._leaf_mat
+		var sc := float(dur[3])
+		mi.transform = Transform3D(_buritis.leaf_lying_basis(v, li, float(dur[2])).scaled(Vector3(sc, sc, sc)), Vector3(float(dur[4]), 0.05, float(dur[5])))
+		node.add_child(mi)
 	elif id == "folha_buriti" and _buritis and dur.size() >= 3:
 		# a folha cortada deitada no chão
 		var mi := MeshInstance3D.new()
@@ -1989,7 +1999,7 @@ func equip(id: String) -> void:
 	if _sawing:
 		_stop_saw()
 	if _chop_pose:
-		_chop_pose.holding = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta"]
+		_chop_pose.holding = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca"]
 		_chop_pose.tool = _mao if _mao != "" else "machado"
 		if _mao == "cavadeira" or _mao == "pa":
 			_chop_pose.grip_low = 0.04
@@ -2001,6 +2011,10 @@ func equip(id: String) -> void:
 			_chop_pose.carry_grip = 0.0          # a pedra fica dentro da mão fechada
 		elif _mao == "marreta":
 			_chop_pose.carry_grip = 0.08     # segura perto da ponta do cabo: a cabeça fica longe dos olhos
+		elif _mao == "faca":
+			_chop_pose.grip_low = 0.03
+			_chop_pose.grip_high = 0.09
+			_chop_pose.carry_grip = 0.06
 		else:
 			_chop_pose.grip_low = Corte.ChopPose.GRIP_LOW
 			_chop_pose.grip_high = Corte.ChopPose.GRIP_HIGH
@@ -2019,6 +2033,8 @@ func equip(id: String) -> void:
 			mi.mesh = Balde.mesh()                     # pendurado pela alça
 		elif _mao == "marreta":
 			mi.mesh = Corte.marreta_mesh()
+		elif _mao == "faca":
+			mi.mesh = Corte.faca_mesh()
 		else:
 			mi.mesh = Corte.axe_mesh()
 		if _mao == "balde":
@@ -5070,7 +5086,7 @@ func _fp_camera(delta: float, moved: float) -> void:
 	if _chop_pose:
 		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
 		# com ferramenta na mão os braços não aparecem (só a ferramenta, segura por baixo da tela)
-		_chop_pose.hide_arms = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta"] and _vine.is_empty()
+		_chop_pose.hide_arms = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca"] and _vine.is_empty()
 	for m in _body_mats:
 		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, maxf(_busy_f, down))
 		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, maxf(_busy_f, down))
@@ -7463,6 +7479,10 @@ func _pin_end() -> void:
 		return
 	if _pin.node and is_instance_valid(_pin.node):
 		(_pin.node as Node).queue_free()
+	if _pin.get("knife") != null and is_instance_valid(_pin.knife):
+		(_pin.knife as Node).queue_free()
+		if _chop_pose:
+			_chop_pose.holding = _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca"]
 	_pin = {}
 	if _pin_ui:
 		_pin_ui.queue_free()
@@ -7470,6 +7490,7 @@ func _pin_end() -> void:
 	if _chop_pose:
 		_chop_pose.ready_pose = false
 		_chop_pose.swinging = false
+		_chop_pose.vertical = false
 	_act_check = 0.0
 
 
@@ -7514,7 +7535,7 @@ func _pin_pick(k: int) -> void:
 		_show_toast("Termine esse pino primeiro (ou ele quebra se você sair).")
 		return
 	var stg := int(_pin.alvos[k].get("stage", 0))
-	if str(_pin.alvos[k].kind) == "folha":
+	if str(_pin.alvos[k].kind) in ["folha", "talo"]:
 		stg = 9
 		if item_qtd("faca") <= 0:
 			_show_toast("Precisa de uma faca de pedra (lâmina de faca + galho + cipó, no craft).")
@@ -7528,8 +7549,14 @@ func _pin_pick(k: int) -> void:
 	_pin.go = k
 	var w: Vector3 = _pin.alvos[k].pos
 	var d := Vector2(w.x - _player.position.x, w.z - _player.position.z)
-	if str(_pin.alvos[k].kind) == "folha":
-		_pin_ready()                 # a folha ao alcance do braço: não anda
+	if str(_pin.alvos[k].kind) in ["folha", "talo"]:
+		# o talo: chega perto (uns 70 cm, de frente para ele) e aí começa a cortar
+		var dl := Vector2(w.x - _player.position.x, w.z - _player.position.z)
+		if dl.length() > 0.95:
+			var spot2 := Vector3(w.x, 0, w.z) - Vector3(dl.x, 0, dl.y).normalized() * 0.7
+			_walk_to(_ground_pos(Vector2(spot2.x, spot2.z)), "pino")
+		else:
+			_pin_ready()
 	elif d.length() > 1.1:
 		var spot := Vector3(w.x, 0, w.z) - Vector3(d.x, 0, d.y).normalized() * 0.8
 		_walk_to(_ground_pos(Vector2(spot.x, spot.z)), "pino")
@@ -7548,11 +7575,11 @@ func _pin_ready() -> void:
 	_pin.sel = k
 	_pin.depth = 0.0
 	_pin.stage = int(_pin.alvos[k].get("stage", 0))
-	if str(_pin.alvos[k].kind) == "folha":
+	if str(_pin.alvos[k].kind) in ["folha", "talo"]:
 		_pin.stage = 9
 	var mi: Node3D
 	if int(_pin.stage) == 9:
-		mi = _faca_node()
+		mi = _talho_node(_pin.alvos[k])          # o corte no talo (vai abrindo a cada golpe)
 	elif int(_pin.stage) == 0:
 		mi = _ponteira_node()
 	else:
@@ -7577,10 +7604,31 @@ func _pin_ready() -> void:
 	var tool := "faca" if int(_pin.stage) == 9 else "marreta"
 	if _mao != tool:
 		equip(tool)
+	if int(_pin.stage) == 9:
+		# a faca na mão (só ela aparece, como as outras ferramentas): golpe próprio, que
+		# vai exatamente no talo
+		if _chop_pose:
+			_chop_pose.holding = false
+			_chop_pose.ready_pose = false
+			_chop_pose.vertical = false
+		if _pin.get("knife") == null or not is_instance_valid(_pin.knife):
+			var kn := MeshInstance3D.new()
+			kn.mesh = Corte.faca_mesh()
+			var km: StandardMaterial3D = Corte.axe_material().duplicate()
+			km.no_depth_test = true          # primeira pessoa: a faca na mão nunca some atrás do talo
+			km.render_priority = 10
+			kn.material_override = km
+			kn.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(kn)
+			_pin.knife = kn
+		_pin_new_timing()
+		_knife_pose(-1.0)
+		return
 	if _chop_pose:
 		var top_h: float = w.y - _player.global_position.y
 		_chop_pose.vertical = true
-		_chop_pose.down_hit = lerpf(-42.0, -14.0, clampf(top_h / 0.95, 0.0, 1.0))
+		# o golpe termina na altura do talo: do chão até acima da cabeça
+		_chop_pose.down_hit = clampf(-42.0 + 28.0 * top_h / 0.95, -42.0, 25.0)
 		_chop_pose.ready_pose = true
 		_chop_pose.swinging = false
 	_pin_new_timing()
@@ -7592,8 +7640,17 @@ func _pin_place_node() -> void:
 		return
 	var w: Vector3 = _pin.alvos[k].pos
 	if int(_pin.stage) == 9:
-		# a faca encostada no talo
-		(_pin.node as Node3D).position = w + Vector3.UP * 0.04
+		# o corte no talo vai abrindo (mais largo e mais claro a cada golpe bom)
+		var al: Dictionary = _pin.alvos[k]
+		var dpt := float(_pin.depth)
+		var band := (_pin.node as Node3D).get_child(0) as MeshInstance3D
+		var cm := band.mesh as CylinderMesh
+		cm.height = 0.006 + 0.03 * dpt
+		var rr := float(al.get("r", 0.04))
+		cm.top_radius = rr * (0.8 - 0.25 * dpt)
+		cm.bottom_radius = rr * (0.8 - 0.25 * dpt)
+		band.visible = dpt > 0.01
+		(_pin.node as Node3D).position = w
 	elif int(_pin.stage) == 0:
 		# a ponteira em pé com a ponta na madeira; vai entrando a cada batida boa
 		(_pin.node as Node3D).position = w - Vector3.UP * 0.07 * float(_pin.depth)
@@ -7659,7 +7716,7 @@ func _pin_hit() -> void:
 	_pin.ok = d <= 0.01
 	_pin.anim = 0.0
 	_pin.fired = false
-	if _chop_pose:
+	if _chop_pose and int(_pin.get("stage", 0)) != 9:
 		_chop_pose.swinging = true
 		_chop_pose.phase = 0.0
 
@@ -7672,10 +7729,12 @@ func _pin_tick(delta: float) -> void:
 	if float(_pin.refresh) <= 0.0 and int(_pin.sel) < 0 and not bool(_pin.get("folhas", false)):
 		_pin.refresh = 0.5
 		_pin.alvos = _pin_targets()
+	if _pin.get("knife") != null and is_instance_valid(_pin.knife):
+		_knife_pose(clampf(float(_pin.anim) / 0.6, 0.0, 1.0) if float(_pin.anim) >= 0.0 else -1.0)
 	if float(_pin.anim) >= 0.0:
 		_pin.anim = float(_pin.anim) + delta
-		var ph := clampf(float(_pin.anim) / 0.45, 0.0, 1.0)
-		if _chop_pose:
+		var ph := clampf(float(_pin.anim) / (0.6 if int(_pin.get("stage", 0)) == 9 else 0.45), 0.0, 1.0)
+		if _chop_pose and int(_pin.get("stage", 0)) != 9:
 			_chop_pose.phase = ph
 		if ph >= 0.55 and not bool(_pin.fired):
 			_pin.fired = true
@@ -8455,6 +8514,19 @@ func _draw_bur_ui() -> void:
 				_sub_ui.draw_string(font, r.position + Vector2(56, r.size.y * 0.5 + 9), str(opts[i][1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1, 0.96, 0.86))
 				# a ilustração na frente do nome
 				Desenhos.item(_sub_ui, "acao_" + str(opts[i][0]), r.position + Vector2(r.size.x - 40, r.size.y * 0.5), 56.0)
+	# losangos nos talos das folhas caídas (o 2º corte, perto do leque)
+	if _pin.is_empty() and _olho_free():
+		var tl := _talo_marks()
+		for i in tl.size():
+			var tp: Vector2 = tl[i][1]
+			var rr := 13.0
+			var pts2 := PackedVector2Array([tp + Vector2(0, -rr), tp + Vector2(rr, 0), tp + Vector2(0, rr), tp + Vector2(-rr, 0)])
+			_sub_ui.draw_polyline(pts2 + PackedVector2Array([pts2[0]]), Color(1.0, 0.85, 0.35), 3.0, true)
+			if i == 0:
+				var tw2 := font.get_string_size("Talo", HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+				var lb2 := Rect2(tp + Vector2(-tw2 * 0.5 - 6, -rr - 34), Vector2(tw2 + 12, 24))
+				_sub_ui.draw_rect(lb2, Color(0.05, 0.05, 0.04, 0.85))
+				_sub_ui.draw_string(font, lb2.position + Vector2(6, 18), "Talo", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.95, 0.8))
 	# losangos das folhas (cortando do chão, ou subindo)
 	var lfs := _leaf_list()
 	if lfs.is_empty() or not _pin.is_empty():
@@ -8488,6 +8560,21 @@ func _draw_bur_ui() -> void:
 			var lb := Rect2(p + Vector2(-tw * 0.5 - 6, -r - 34), Vector2(tw + 12, 24))
 			_sub_ui.draw_rect(lb, Color(0.05, 0.05, 0.04, 0.85))
 			_sub_ui.draw_string(font, lb.position + Vector2(6, 18), "Folha", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.95, 0.8))
+
+
+## Talos das folhas caídas perto (na tela): [[índice, ponto na tela]], o mais perto primeiro.
+func _talo_marks() -> Array:
+	var out := []
+	if _buritis == null:
+		return out
+	for i in _buritis.chao_folhas.size():
+		var w: Vector3 = _buritis.talo_point(_buritis.chao_folhas[i])
+		var dd := Vector2(w.x - _player.position.x, w.z - _player.position.z).length()
+		if dd > 4.0 or _cam.is_position_behind(w):
+			continue
+		out.append([i, _cam.unproject_position(w), dd])
+	out.sort_custom(func(a, b): return float(a[2]) < float(b[2]))
+	return out
 
 
 ## Folhas com losango agora: subindo (todas) ou cortando do chão (as que alcança).
@@ -8528,6 +8615,11 @@ func _bur_input(e: InputEvent) -> bool:
 				if (L.rows[i] as Rect2).grow(4).has_point(pos):
 					_olho_pick(str(opts[i][0]))
 					return true
+	if _pin.is_empty() and _olho_free():
+		for tm in _talo_marks():
+			if pos.distance_to(tm[1]) < 50.0:
+				_talo_pick(int(tm[0]))
+				return true
 	if _pin.is_empty():
 		for lf in _leaf_list():
 			var w: Vector3 = lf.cut
@@ -8576,17 +8668,35 @@ func _bur_sair() -> void:
 
 
 func _leaf_pick(bp: Dictionary, li: int, w: Vector3) -> void:
-	if w.distance_to(_cam.global_position) > _leaf_reach():
+	if Vector2(w.x - _player.position.x, w.z - _player.position.z).length() > 5.0:
 		_show_toast("Longe: chegue mais perto dessa folha.")
 		return
 	if item_qtd("faca") <= 0:
 		_show_toast("Precisa de uma faca de pedra (lâmina de faca + galho + cipó, no craft).")
 		return
 	_pin_start()
-	_pin.alvos = [{"kind": "folha", "bp": bp, "li": li, "pos": w, "stage": 9}]
+	var v := int(bp.get("var", 0)) % Buritis.CROWN_VARIANTS
+	var xf: Transform3D = _buritis.crown_xf(bp)
+	var dir: Vector3 = xf * _buritis.pet_point(v, li, 0.2) - xf * _buritis.pet_point(v, li, 0.12)
+	_pin.alvos = [{"kind": "folha", "bp": bp, "li": li, "pos": w, "stage": 9, "dir": dir, "r": 0.045 * _buritis.crown_scale(bp)}]
 	_pin.folhas = true
 	_pin_pick(0)
-	_show_toast("Golpeie o talo com a faca quando o marcador estiver no verde. Errou no vermelho, a faca quebra!")
+	_show_toast("1º corte: no pé do talo. Golpeie com a faca quando o marcador estiver no verde. Errou no vermelho, a faca quebra!")
+
+
+## O 2º corte: na folha caída, o talo perto do leque. O talo vai para a mochila.
+func _talo_pick(i: int) -> void:
+	if item_qtd("faca") <= 0:
+		_show_toast("Precisa de uma faca de pedra (lâmina de faca + galho + cipó, no craft).")
+		return
+	var e: Array = _buritis.chao_folhas[i]
+	var w: Vector3 = _buritis.talo_point(e)
+	var dir: Vector3 = _buritis.talo_point(e, 0.98) - w
+	_pin_start()
+	_pin.alvos = [{"kind": "talo", "e": e, "pos": w, "stage": 9, "dir": dir, "r": 0.03 * float(e[5])}]
+	_pin.folhas = true
+	_pin_pick(0)
+	_show_toast("2º corte: no talo, perto do leque. Assim o talo sai inteiro.")
 
 
 # ---------- derrubar ----------
@@ -8689,6 +8799,114 @@ func _bur_fallen(info: Dictionary, base: Vector3, dir: Vector3, L: float, axis: 
 	_act_check = 0.0
 
 
+## O talo separado do leque: fica no chão (um pouco afastado) para pegar.
+func _talo_drop(e: Array) -> void:
+	var xf: Transform3D = _buritis.lying_xf(e)
+	var v := int(e[2])
+	var li := int(e[3])
+	var mid: Vector3 = xf * _buritis.pet_point(v, li, 0.5)
+	var side: Vector3 = (xf.basis * Vector3.UP).cross(xf * _buritis.pet_point(v, li, 0.9) - xf.origin).normalized()
+	var shift := side * 0.12
+	# o item fica no meio do talo; o desenho guarda onde fica o pé dele
+	var hub := xf.origin + shift
+	_add_ground("talo_buriti", 1, mid.x + shift.x, mid.z + shift.z, 0.0, [v, li, float(e[4]), float(e[5]), hub.x - (mid.x + shift.x), hub.z - (mid.z + shift.z)])
+
+
+## Fibras verdes e claras voando do talo cortado.
+func _fiber_chips(at: Vector3) -> void:
+	var c := CPUParticles3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.05, 0.006, 0.012)
+	c.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.62, 0.72, 0.4)
+	c.material_override = mat
+	c.amount = 12
+	c.one_shot = true
+	c.explosiveness = 0.95
+	c.lifetime = 0.8
+	c.direction = Vector3(0, 1, 0)
+	c.spread = 70.0
+	c.initial_velocity_min = 0.8
+	c.initial_velocity_max = 2.0
+	c.gravity = Vector3(0, -9.8, 0)
+	c.angular_velocity_min = -300.0
+	c.angular_velocity_max = 300.0
+	add_child(c)
+	c.global_position = at
+	c.emitting = true
+	get_tree().create_timer(1.2).timeout.connect(c.queue_free)
+
+
+## A faca na frente da câmera: parada embaixo à direita; no golpe (ph 0 a 1) sobe, desce
+## cortando e o meio da lâmina bate no talo em ph = 0,55; depois volta.
+func _knife_pose(ph: float) -> void:
+	var kn: Node3D = _pin.knife
+	var cam := _cam.global_transform
+	var cr := cam.basis.x.normalized()
+	var cu := cam.basis.y.normalized()
+	var cf := -cam.basis.z.normalized()
+	var eye := cam.origin
+	var k := int(_pin.sel)
+	var w: Vector3 = _pin.alvos[k].pos if k >= 0 and k < (_pin.alvos as Array).size() else eye + cf * 0.6
+	var rest_p := eye + cr * 0.2 - cu * 0.27 + cf * 0.42
+	var rest_y := (cu * 0.8 + cf * 0.45 - cr * 0.1).normalized()
+	var up_p := eye + cr * 0.3 + cu * 0.02 + cf * 0.32
+	var up_y := (cu * 0.75 - cf * 0.25 + cr * 0.35).normalized()
+	# na batida: o meio da lâmina no talo (a mão fica antes, do lado direito)
+	var hit_y := (cf * 0.55 + cu * 0.35 - cr * 0.45).normalized()
+	var hit_p := w - hit_y * 0.25
+	var hp: Vector3 = hit_p - eye
+	if hp.length() > 0.75:
+		hit_p = eye + hp.normalized() * 0.75        # o braço não estica mais que isso
+		hit_y = (w - hit_p).normalized()
+		hit_p = w - hit_y * 0.25
+	var p := rest_p
+	var y := rest_y
+	if ph >= 0.0:
+		if ph < 0.4:
+			var t := smoothstep(0.0, 1.0, ph / 0.4)
+			p = rest_p.lerp(up_p, t)
+			y = rest_y.slerp(up_y, t)
+		elif ph < 0.55:
+			var t := (ph - 0.4) / 0.15
+			t = t * t
+			p = up_p.lerp(hit_p, t)
+			y = up_y.slerp(hit_y, t)
+		else:
+			var t := smoothstep(0.0, 1.0, (ph - 0.55) / 0.45)
+			p = hit_p.lerp(rest_p, t)
+			y = hit_y.slerp(rest_y, t)
+	var x := (-cu + cf * 0.2)
+	x = (x - y * x.dot(y)).normalized()          # o gume virado para baixo (para o talo)
+	kn.global_transform = Transform3D(Basis(x, y, x.cross(y)), p)
+
+
+## O corte no talo: um anel de fibra clara (o miolo aparecendo) atravessado no talo,
+## que vai abrindo e afinando o talo a cada golpe bom.
+func _talho_node(al: Dictionary) -> Node3D:
+	var root := Node3D.new()
+	var band := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.radial_segments = 10
+	cm.height = 0.006
+	cm.top_radius = 0.04
+	cm.bottom_radius = 0.04
+	band.mesh = cm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.86, 0.84, 0.62)       # o miolo fibroso do talo
+	m.roughness = 1.0
+	band.material_override = m
+	band.visible = false
+	root.add_child(band)
+	var d: Vector3 = al.get("dir", Vector3.UP)
+	if d.length() > 0.001:
+		var y := d.normalized()
+		var x := y.cross(Vector3.UP if absf(y.y) < 0.9 else Vector3.RIGHT).normalized()
+		band.basis = Basis(x, y, x.cross(y))
+	return root
+
+
 func _faca_node() -> Node3D:
 	var root := Node3D.new()
 	var cabo := MeshInstance3D.new()
@@ -8717,12 +8935,22 @@ func _faca_node() -> Node3D:
 
 ## Golpe da faca no talo.
 func _leaf_strike(al: Dictionary, w: Vector3) -> void:
-	var bp: Dictionary = al.bp
+	var bp: Dictionary = al.get("bp", {})
 	if bool(_pin.ok):
 		_pin.depth = float(_pin.depth) + 0.25
 		Sons.play_at(self, "talo_corte", w, -2.0)
-		_chips(w)
+		_fiber_chips(w)
 		var broke := wear("faca")
+		if float(_pin.depth) >= 0.99 and str(al.kind) == "talo":
+			var ei: int = _buritis.chao_folhas.find(al.e)
+			if ei >= 0:
+				var e: Array = _buritis.cut_talo(ei)
+				_talo_drop(e)
+			(_pin.node as Node).queue_free()
+			_pin.node = null
+			_pin_end()
+			_show_toast("O talo saiu! Pegue ele no chão (o leque fica).")
+			return
 		if float(_pin.depth) >= 0.99:
 			var li := int(al.li)
 			_buritis.cut_leaf(bp, li)
@@ -8730,7 +8958,7 @@ func _leaf_strike(al: Dictionary, w: Vector3) -> void:
 			(_pin.node as Node).queue_free()
 			_pin.node = null
 			_pin_end()
-			_show_toast("A folha foi cortada e caiu!")
+			_show_toast("A folha caiu! Agora corte o talo perto do leque (losango na folha no chão).")
 			return
 		if broke:
 			_pin_end()
@@ -8818,4 +9046,4 @@ func _leaf_fall(bp: Dictionary, li: int, land_at := Vector3.INF, yaw_at := INF, 
 		if on_land.is_valid():
 			on_land.call()
 		else:
-			_add_ground("folha_buriti", 1, land.x, land.z, 0.0, [v, li, yaw, s]))
+			_buritis.add_chao_folha(v, li, land, yaw, s))
