@@ -1409,6 +1409,7 @@ func _process(delta: float) -> void:
 	_update_pour(delta)
 	_mp_tick(delta)
 	_sync_tick(delta)
+	_coop_tick(delta)
 	if _maq and _ready_world:
 		var auth: bool = _rede == null or not _rede.ativo() or _rede.modo == "dono"
 		var alone: bool = _rede == null or not _rede.ativo() or _rede.jogadores.size() < 2
@@ -2406,6 +2407,9 @@ func _ctx_press() -> void:
 			if i < 0:
 				return
 			var kg3: float = _arvores.free_log_kg(_apoios.rested[i].log)
+			if kg3 > Arvores.CARRY_MAX_KG and kg3 <= COOP_KG and _coop_possible():
+				_coop_click({"a": "pegar", "k": "r:" + _log_key(_apoios.rested[i].log)}, _apoios.rested[i].log)
+				return
 			if kg3 > Arvores.CARRY_MAX_KG:
 				_show_toast("Pesada demais: %d kg (você aguenta até %d kg)." % [roundi(kg3), int(Arvores.CARRY_MAX_KG)])
 				return
@@ -2446,6 +2450,17 @@ func _update_log_btn() -> void:
 		_log_btn.visible = false
 		_bld_btn.visible = false
 		return
+	(_log_btn as Icones.IconButton).kind = ""
+	if not _coop.is_empty():
+		# carregando junto: o botão Cooperativo com o ícone de onde vai pôr
+		_bld_btn.visible = false
+		_plant_btn.visible = false
+		var pl: Dictionary = _coop_place()
+		_log_btn.visible = true
+		_log_btn.text = "Cooperativo"
+		(_log_btn as Icones.IconButton).kind = str(pl.icone)
+		_log_btn.queue_redraw()
+		return
 	_bld_btn.visible = not _carry.is_empty()
 	if not _carry.is_empty():
 		_log_btn.visible = true
@@ -2457,11 +2472,20 @@ func _update_log_btn() -> void:
 	_log_btn.visible = not t.is_empty()
 	if not t.is_empty():
 		var kg2: float = _arvores.free_log_kg(t.log)
-		_log_btn.text = ("Pegar tora (%d kg)" if kg2 <= Arvores.CARRY_MAX_KG else "Pesada: %d kg") % roundi(kg2)
+		if kg2 > Arvores.CARRY_MAX_KG and kg2 <= COOP_KG and _coop_possible():
+			_log_btn.text = "Cooperativo"
+			(_log_btn as Icones.IconButton).kind = "pegar_tora"
+		else:
+			_log_btn.text = ("Pegar tora (%d kg)" if kg2 <= Arvores.CARRY_MAX_KG else "Pesada: %d kg") % roundi(kg2)
+		_log_btn.queue_redraw()
 
 
 func _log_action() -> void:
 	if _crouch_job != "" or _chopping or _air or _arvores == null:
+		return
+	if not _coop.is_empty():
+		var pl: Dictionary = _coop_place()
+		_coop_click({"a": str(pl.a), "k": "carga"}, {})
 		return
 	if not _carry.is_empty():
 		_crouch_job = "largar"
@@ -2472,7 +2496,13 @@ func _log_action() -> void:
 		return
 	var kg: float = _arvores.free_log_kg(t.log)
 	if kg > Arvores.CARRY_MAX_KG:
-		_show_toast("Pesada demais: %d kg (você aguenta até %d kg). Corte em pedaços menores com o machado." % [roundi(kg), int(Arvores.CARRY_MAX_KG)])
+		if kg <= COOP_KG and _coop_possible() and t.kind == "solta":
+			_coop_click({"a": "pegar", "k": _log_key(t.log)}, t.log)
+			return
+		if kg <= COOP_KG:
+			_show_toast("Pesada demais para um: %d kg. Com outro jogador (multiplayer) dá: os dois juntos aguentam até %d kg." % [roundi(kg), int(COOP_KG)])
+		else:
+			_show_toast("Pesada demais: %d kg (nem dois juntos aguentam: até %d kg). Corte em pedaços menores com o machado." % [roundi(kg), int(COOP_KG)])
 		return
 	if _digging:
 		_cancel_dig()
@@ -4699,6 +4729,8 @@ func _move_player(delta: float) -> void:
 		amount = 0.0
 	if _crouch_job != "":
 		amount = 0.0           # abaixado pegando ou largando a tora
+	if not _coop.is_empty() and (not bool(_coop.lider) or float(_coop.anim) > 0.0):
+		amount = 0.0           # carregando junto: quem vai atrás segue quem vai na frente
 	if _walking and amount > 0.12:
 		_walking = false       # o jogador mexeu no controle: para de ir sozinho
 		_work = {}
@@ -4708,6 +4740,21 @@ func _move_player(delta: float) -> void:
 		_chop_pose.moving = amount > 0.12 or _walking
 		_chop_pose.in_air = _air
 	var p := _player.position
+	if not _coop.is_empty() and not bool(_coop.lider) and float(_coop.anim) <= 0.0:
+		var e = _rede.estados.get(int(_coop.pid)) if _rede else null
+		if e != null:
+			var lp: Array = e.p
+			var ly := float(e.y)
+			var fwd2 := Vector3(-sin(ly), 0, -cos(ly))
+			var tgt := Vector3(float(lp[0]), 0, float(lp[2])) - fwd2 * float(_coop.sep)
+			var mv2 := Vector2(tgt.x - p.x, tgt.z - p.z)
+			var stp2 := minf(mv2.length(), 4.0 * delta)
+			if mv2.length() > 0.01:
+				p.x += mv2.x / mv2.length() * stp2
+				p.z += mv2.y / mv2.length() * stp2
+			_face = lerp_angle(_face, ly, minf(1.0, delta * 8.0))
+			_yaw = _face
+			_play("Walk" if mv2.length() > 0.05 else "Idle", 0.8)
 	var cell := Vector2i(int(p.x / CELL), int(p.z / CELL))
 	var depth := 0.0
 	if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
@@ -4725,6 +4772,8 @@ func _move_player(delta: float) -> void:
 		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow
 		if not _carry.is_empty():
 			sp *= lerpf(0.9, 0.4, clampf(_carry_kg / 300.0, 0.0, 1.0))   # tora pesada: anda devagar
+		if not _coop.is_empty():
+			sp *= lerpf(0.75, 0.45, clampf(float(_coop.kg) / COOP_KG, 0.0, 1.0))   # devagar, junto com o outro
 		if _mao == "balde" and not _balde_carga.is_empty():
 			var bkg := float(_balde_carga.vol) * float(DENS.get(_balde_carga.tipo, 1500.0))
 			sp *= lerpf(1.0, 0.72, clampf(bkg / BALDE_KG, 0.0, 1.0))   # balde pesado: mais devagar
@@ -6070,6 +6119,14 @@ func _mp_start() -> void:
 	_rede.parte_mundo.connect(_sync_receive)
 	_sync_baseline()
 	if _rede.modo == "dono":
+		# quem entra pede o mundo de agora: manda todas as partes de novo
+		_rede.pediram_mundo.connect(func():
+			_sync_hash = {}
+			for nome in SYNC_EVERY:
+				_sync_t[nome] = 0.0)
+	else:
+		_rede.pedir_mundo_atual()
+	if _rede.modo == "dono":
 		_rede.hook_salvar = _save_world
 		_rede.hook_tempo = func() -> int: return int(sim.steps)
 		_show_toast("Mundo aberto no multiplayer: quem estiver na mesma Wi-Fi pode entrar.")
@@ -6101,6 +6158,10 @@ func _mp_tick(delta: float) -> void:
 			crouch = 1.0
 		var est := {"p": [snappedf(p.x, 0.01), snappedf(p.y, 0.01), snappedf(p.z, 0.01)], "y": snappedf(_face, 0.01),
 			"a": _anim_now, "s": _anim.speed_scale if _anim else 1.0, "c": crouch, "m": _mao}
+		if not _coop_int.is_empty():
+			est["coop"] = {"a": _coop_int.a, "k": _coop_int.k, "ts": _coop_int.ts}
+		if not _coop.is_empty():
+			est["coopl"] = [snappedf(float(_coop.L), 0.01), snappedf(float(_coop.r), 0.01), int(_coop.pid), bool(_coop.lider)]
 		if not _maq_op.is_empty():
 			est["maq"] = [int(_maq_op.mi), snappedf(float(_maq_op.pedal), 0.01), snappedf(float(_maq_op.emp), 0.01)]
 		if not _carry.is_empty():
@@ -7919,3 +7980,221 @@ func _buck_go() -> void:
 	_buck_stop()
 	_buck_go_cut = c
 	_start_chop()
+
+
+
+# ================== CARREGAR JUNTO (COOPERATIVO) ==================
+# Madeira pesada demais para um (mais de 60 kg) e no máximo 120 kg: com outro jogador,
+# o botão "Cooperativo" aparece. Um clica e espera; o outro clica na mesma tora: os
+# dois se abaixam e levantam juntos. Quem clicou primeiro vai na frente e guia; o
+# outro segue atrás na outra ponta, olhando para o mesmo lado. Para pôr (no chão, nas
+# forquilhas ou na planta), de novo: um clica "Cooperativo", depois o outro.
+
+const COOP_KG := 120.0
+
+var _coop_int := {}                # meu clique esperando o outro: {a, k, ts, ok_ms}
+var _coop_int_fl := {}             # a tora do clique (cópia, para quem vai atrás)
+var _coop := {}                    # carregando junto: {fl, pid, lider, L, r, kg, sep, node, anim}
+var _coop_viz := {}                # tora de outros dois jogadores carregando juntos: pid -> nó
+
+
+func _coop_possible() -> bool:
+	return _rede != null and _rede.ativo() and _rede.jogadores.size() >= 2
+
+
+func _log_key(fl: Dictionary) -> String:
+	return "%.2f,%.2f,%.2f" % [float(fl.pos[0]), float(fl.pos[2]), _arvores.free_log_length(fl)]
+
+
+func _coop_click(intent: Dictionary, fl: Dictionary) -> void:
+	if not _coop_int.is_empty() and str(_coop_int.a) == str(intent.a) and str(_coop_int.k) == str(intent.k):
+		_coop_int = {}
+		_show_toast("Cooperativo cancelado.")
+		return
+	_coop_int = {"a": intent.a, "k": intent.k, "ts": Time.get_unix_time_from_system(), "ok_ms": -1}
+	_coop_int_fl = fl.duplicate(true) if not fl.is_empty() else {}
+	_show_toast("Esperando o outro jogador tocar em \"Cooperativo\" também...")
+
+
+## Onde a tora vai se os dois tocarem agora: planta, forquilhas ou chão (com o ícone).
+func _coop_place() -> Dictionary:
+	var mid := _coop_mid()
+	var L := float(_coop.L)
+	if _maq:
+		var mi: int = _maq.planta_near(mid, 3.5)
+		if mi >= 0 and not _maq.pronta(mi):
+			var pw: Dictionary = _maq.pending_work(mi)
+			if int(pw.furos) + int(pw.pinos) + int(pw.pontas) == 0 and int(_maq.slot_for(mi, _coop.fl, mid).i) >= 0:
+				return {"a": "planta", "icone": "projetos"}
+	if _apoios and not _apoios.pair_for(mid, L).is_empty():
+		return {"a": "forquilha", "icone": "apoiar"}
+	return {"a": "chao", "icone": "largar_tora"}
+
+
+func _coop_partner_node() -> Node3D:
+	if _coop.is_empty():
+		return null
+	return _remotos.get(int(_coop.pid))
+
+
+func _coop_mid() -> Vector3:
+	var o := _coop_partner_node()
+	var a := _player.global_position
+	if o == null:
+		return a
+	return (a + o.global_position) * 0.5
+
+
+func _coop_tick(delta: float) -> void:
+	if _rede == null or not _rede.ativo():
+		if not _coop.is_empty():
+			_coop_end(true)
+		_coop_int = {}
+		return
+	var now := Time.get_ticks_msec()
+	# o meu clique: procura o outro jogador com o mesmo clique
+	if not _coop_int.is_empty():
+		if int(_coop_int.ok_ms) >= 0:
+			if now > int(_coop_int.ok_ms) + 1500:
+				_coop_int = {}               # já combinou: para de avisar
+		else:
+			for pid in _rede.estados:
+				if int(pid) == multiplayer.get_unique_id():
+					continue
+				var e: Dictionary = _rede.estados[pid]
+				var oc = e.get("coop")
+				if oc == null or str(oc.a) != str(_coop_int.a) or str(oc.k) != str(_coop_int.k):
+					continue
+				var lider: bool = float(_coop_int.ts) < float(oc.ts) or (float(_coop_int.ts) == float(oc.ts) and multiplayer.get_unique_id() < int(pid))
+				_coop_int.ok_ms = now
+				_coop_match(int(pid), lider)
+				break
+	# carregando: a tora entre os ombros dos dois
+	if not _coop.is_empty():
+		if not _rede.jogadores.has(int(_coop.pid)):
+			_coop_end(true)
+			_show_toast("O outro jogador saiu: a tora caiu.")
+			return
+		_coop.anim = maxf(0.0, float(_coop.anim) - delta)
+		if _chop_pose:
+			_chop_pose.crouch = clampf(float(_coop.anim) / 0.6, 0.0, 1.0) if float(_coop.anim) > 0.0 else 0.0
+		var o := _coop_partner_node()
+		var lift := 1.0 - clampf(float(_coop.anim) / 0.6, 0.0, 1.0)
+		var me := _player.global_position + Vector3.UP * lerpf(0.35, 1.45, lift)
+		var ot := (o.global_position if o else me) + Vector3.UP * lerpf(0.35, 1.45, lift)
+		if o == null:
+			ot = me - Vector3(-sin(_face), 0, -cos(_face)) * float(_coop.sep)
+		var d := me - ot
+		if d.length() < 0.1:
+			d = Vector3(-sin(_face), 0, -cos(_face))
+		(_coop.node as Node3D).global_transform = Transform3D(Basis(Quaternion(Vector3.RIGHT, d.normalized())), (me + ot) * 0.5)
+	# outros dois jogadores carregando juntos (eu não estou nisso): a tora entre eles
+	for pid in _coop_viz.keys():
+		var e2 = _rede.estados.get(pid)
+		if e2 == null or not (e2 as Dictionary).has("coopl") or not _remotos.has(pid):
+			(_coop_viz[pid] as Node).queue_free()
+			_coop_viz.erase(pid)
+	for pid in _rede.estados:
+		var e3: Dictionary = _rede.estados[pid]
+		if not e3.has("coopl") or not bool(e3.coopl[3]) or not _remotos.has(pid):
+			continue
+		var other := int(e3.coopl[2])
+		if other == multiplayer.get_unique_id() or not _remotos.has(other):
+			continue
+		if not _coop_viz.has(pid):
+			var mi := MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.height = float(e3.coopl[0])
+			cm.top_radius = float(e3.coopl[1])
+			cm.bottom_radius = float(e3.coopl[1])
+			mi.mesh = cm
+			var m := StandardMaterial3D.new()
+			m.albedo_color = Color(0.36, 0.28, 0.2)
+			mi.material_override = m
+			add_child(mi)
+			_coop_viz[pid] = mi
+		var a: Vector3 = (_remotos[pid] as Node3D).global_position + Vector3.UP * 1.45
+		var b: Vector3 = (_remotos[other] as Node3D).global_position + Vector3.UP * 1.45
+		var dd := (a - b)
+		if dd.length() > 0.1:
+			(_coop_viz[pid] as Node3D).global_transform = Transform3D(Basis(Quaternion(Vector3.UP, dd.normalized())), (a + b) * 0.5)
+
+
+## Os dois clicaram a mesma coisa.
+func _coop_match(pid: int, lider: bool) -> void:
+	var a := str(_coop_int.a)
+	if a == "pegar":
+		var k := str(_coop_int.k)
+		var fl := _coop_int_fl
+		# quem vai na frente tira a tora do mundo (o outro recebe pela rede)
+		if lider:
+			if k.begins_with("r:"):
+				for i in _apoios.rested.size():
+					if "r:" + _log_key(_apoios.rested[i].log) == k:
+						fl = _apoios.take_rested(i)
+						break
+			else:
+				for f2 in _arvores.free_logs:
+					if _log_key(f2) == k:
+						fl = f2
+						break
+				_arvores.free_logs.erase(fl)
+				_arvores._rebuild_logs()
+		if fl.is_empty():
+			return
+		fl = fl.duplicate(true)
+		var node: Node3D = _arvores.free_log_node(fl)
+		add_child(node)
+		var L: float = _arvores.free_log_length(fl)
+		_coop = {"fl": fl, "pid": pid, "lider": lider, "L": L, "r": _arvores.free_log_max_radius(fl),
+			"kg": _arvores.free_log_kg(fl), "sep": clampf(L * 0.8, 1.0, 2.6), "node": node, "anim": 0.9}
+		equip("")
+		Sons.play_at(self, "baque", _player.position, -10.0)
+		_show_toast("Pegaram juntos! " + ("Você vai na frente: guie com o controle." if lider else "Você vai atrás: segue quem vai na frente."))
+		return
+	# pôr a tora: quem vai na frente faz (o mundo vai pela rede); os dois soltam
+	if _coop.is_empty():
+		return
+	if bool(_coop.lider):
+		var fl: Dictionary = _coop.fl
+		var mid := _coop_mid()
+		var o := _coop_partner_node()
+		var d := (_player.global_position - (o.global_position if o else _player.global_position - Vector3(-sin(_face), 0, -cos(_face))))
+		var yaw := atan2(-d.z, d.x)
+		var done := false
+		if a == "planta" and _maq:
+			var mi: int = _maq.planta_near(mid, 3.5)
+			if mi >= 0:
+				var r: Dictionary = _maq.slot_for(mi, fl, mid)
+				if int(r.i) >= 0:
+					_maq.fill_slot(mi, int(r.i), float(r.get("sobra", 0.0)))
+					done = true
+					_show_toast("Peça no lugar da planta! Agora fure e ponha os pinos.")
+		elif a == "forquilha" and _apoios:
+			var pr: Array = _apoios.pair_for(mid, float(_coop.L))
+			if not pr.is_empty():
+				fl.erase("em_pe")
+				_apoios.rest(fl, int(pr[0]), int(pr[1]))
+				done = true
+				_show_toast("Tora apoiada nas forquilhas!")
+		if not done:
+			_arvores.drop_log(fl, mid + Vector3.UP * 0.4, yaw)
+			_show_toast("Largaram a tora no chão.")
+	else:
+		_show_toast("Pronto!")
+	Sons.play_at(self, "baque", _player.position, -6.0)
+	_coop_end(false)
+
+
+## Solta (drop = se cair sem combinar: quem vai na frente larga no chão).
+func _coop_end(drop: bool) -> void:
+	if _coop.is_empty():
+		return
+	if drop and bool(_coop.lider):
+		_arvores.drop_log(_coop.fl, _player.global_position + Vector3.UP * 0.4, _face)
+	if is_instance_valid(_coop.node):
+		(_coop.node as Node).queue_free()
+	if _chop_pose:
+		_chop_pose.crouch = 0.0
+	_coop = {}
+	_act_check = 0.0

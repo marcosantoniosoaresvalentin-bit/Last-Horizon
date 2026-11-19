@@ -331,6 +331,21 @@ func _parte(nome: String, z: PackedByteArray, n: int) -> void:
 	parte_mundo.emit(nome, raw.get_string_from_utf8())     # (o dono repassa sozinho: server_relay)
 
 
+## O convidado terminou de carregar: pede ao dono o mundo como está agora (o que
+## mudou enquanto ele carregava não tinha chegado).
+signal pediram_mundo
+
+func pedir_mundo_atual() -> void:
+	if modo == "convidado" and ativo():
+		rpc_id(1, "_pedir_mundo")
+
+
+@rpc("any_peer", "reliable")
+func _pedir_mundo() -> void:
+	if modo == "dono":
+		pediram_mundo.emit()
+
+
 ## Tempo do jogo do dono (os convidados acertam o relógio).
 func mandar_tempo(steps: int) -> void:
 	if modo == "dono" and ativo():
