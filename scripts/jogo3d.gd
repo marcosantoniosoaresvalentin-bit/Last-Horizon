@@ -7083,7 +7083,7 @@ func _sync_set(nome: String, txt: String) -> void:
 ## furando/cortando continua no mesmo buriti (achado pelo lugar).
 func _buriti_relink() -> void:
 	var find := func(old: Dictionary) -> Dictionary:
-		for q in _buritis.palms:
+		for q in _buritis.palms + _buritis.caidos:
 			if absf(float(q.x) - float(old.x)) < 0.01 and absf(float(q.z) - float(old.z)) < 0.01:
 				return q
 		return {}
@@ -8368,22 +8368,26 @@ func _olho_tick() -> void:
 	if not _bur.is_empty():
 		var bp: Dictionary = _bur.p
 		var far := Vector2(float(bp.x) - _player.position.x, float(bp.z) - _player.position.z).length() > 3.2
-		if far or not _buritis.palms.has(bp) or bp.has("toco") or (str(_bur.acao) == "derrubar" and _mao != "machado" and not _chopping):
+		if far or not _buritis.has_palm(bp) or bp.has("toco") or (str(_bur.acao) == "derrubar" and _mao != "machado" and not _chopping):
 			_bur = {}
 	if not _olho_free():
 		_olho = {}
 		return
 	var p: Dictionary = _buritis.palm_near(_player.position, 2.2)
+	if p.is_empty():
+		p = _buritis.caido_near(_player.position, 2.6)      # a copa do buriti derrubado
 	if p.is_empty() or _olho_opts(p).is_empty():
 		_olho = {}
 		return
-	if _olho.is_empty() or not (_olho.p as Dictionary) == p or not _buritis.palms.has(_olho.p):
+	if _olho.is_empty() or not (_olho.p as Dictionary) == p or not _buritis.has_palm(_olho.p):
 		_olho = {"p": p, "open": false}
 
 
 ## O que dá para fazer nesse buriti: [[ação, nome]]
 func _olho_opts(p: Dictionary) -> Array:
 	var out := []
+	if p.has("caido"):
+		return [["cortar", "Cortar"]] if not _buritis.leaves_of(p).is_empty() else []
 	if _buritis.is_small(p):
 		out.append(["cortar", "Cortar"])
 	if _buritis.can_fell(p):
@@ -8393,6 +8397,9 @@ func _olho_opts(p: Dictionary) -> Array:
 
 ## Onde o olho fica: no tronco (na altura do peito), do lado de quem está olhando.
 func _olho_world(p: Dictionary) -> Vector3:
+	if p.has("caido"):
+		var o: Vector3 = _buritis.crown_xf(p).origin
+		return Vector3(o.x, maxf(o.y, height_at(o.x, o.z) + 0.3) + 0.45, o.z)
 	var ang := atan2(_player.position.z - float(p.z), _player.position.x - float(p.x))
 	var h: float = _buritis.trunk_h(p)
 	if h > 1.6:
@@ -8657,11 +8664,11 @@ func _bur_fall(p: Dictionary, away: Vector3) -> void:
 	tw.tween_interval(0.25)
 	tw.tween_callback(func():
 		root.queue_free()
-		_bur_fallen(info, base, dir, L))
+		_bur_fallen(info, base, dir, L, axis))
 
 
 ## Depois da queda: a tora do buriti deitada no chão e as folhas verdes espalhadas.
-func _bur_fallen(info: Dictionary, base: Vector3, dir: Vector3, L: float) -> void:
+func _bur_fallen(info: Dictionary, base: Vector3, dir: Vector3, L: float, axis: Vector3) -> void:
 	var r := float(info.r)
 	var c := base + dir * (L * 0.5 + 0.1)
 	var cy := height_at(c.x, c.z) + r * 0.95
@@ -8671,13 +8678,14 @@ func _bur_fallen(info: Dictionary, base: Vector3, dir: Vector3, L: float) -> voi
 	_arvores.free_logs.append(fl)
 	_arvores._rebuild_logs()
 	if not bool(info.morta):
-		var top := base + dir * L
-		var s := float(info.s)
-		for li in info.folhas:
-			var a := randf() * TAU
-			var q := top + Vector3(cos(a), 0, sin(a)) * randf_range(0.4, 2.2) + dir * randf_range(-0.5, 1.0)
-			_add_ground("folha_buriti", 1, q.x, q.z, 0.0, [int(info.v), int(li), randf() * TAU, s])
-	_show_toast("O buriti caiu! A tora ficou no chão (dá para cortar com o machado)%s." % ("" if bool(info.morta) else " e as folhas também"))
+		# a copa fica deitada no fim da tora, com todas as folhas presas
+		var sc := float(info.s)
+		var fall := Transform3D(Basis(axis, PI * 0.5 - 0.04), base)
+		var xf: Transform3D = fall * Transform3D(Basis(Vector3.UP, float(info.rot)).scaled(Vector3(sc, sc, sc)), Vector3.UP * (L - 0.1))
+		var ends: Array = _arvores.free_axis(fl)
+		xf.origin = (ends[1] as Vector3) + dir * 0.05
+		_buritis.add_caido(info, xf)
+	_show_toast("O buriti caiu! A tora ficou no chão (dá para cortar com o machado)%s." % ("" if bool(info.morta) else ". As folhas continuam na copa: toque no olho para cortar"))
 	_act_check = 0.0
 
 

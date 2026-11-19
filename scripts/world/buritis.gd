@@ -45,6 +45,8 @@ var _leaf_mat: StandardMaterial3D
 var _trunk_mat: StandardMaterial3D
 var _dead_mat: StandardMaterial3D
 var _nodes: Array = []
+var caidos: Array = []            # copas dos buritis derrubados, deitadas no chão (as folhas continuam presas)
+const CAIDO_DAYS := 150           # a copa caída seca e apodrece em uns 5 meses
 var secas: Array = []             # folhas secas caídas no chão: [x, z, variante, folha, giro, escala, dia]
 var _seca_nodes: Array = []
 var drop_hook := Callable()       # o jogo mostra a folha seca caindo (perto do jogador)
@@ -178,6 +180,8 @@ func _alive_h(p: Dictionary, day: int) -> float:
 
 
 func crown_scale(p: Dictionary) -> float:
+	if p.has("caido"):
+		return float(p.s)
 	var d := last_day - int(p.nasc)
 	return clampf(0.25 + d / float(ADULT_DAYS) * 0.75, 0.25, 1.0)
 
@@ -286,11 +290,17 @@ func leaves_of(p: Dictionary) -> Array:
 		var el := float(lp.elev)
 		var dir := (o * cos(el) + Vector3.UP * sin(el)).normalized()
 		var base := o * 0.12
-		out.append({"li": i, "cut": xf * (base + dir * 0.7), "base": xf * base})
+		var cp: Vector3 = xf * (base + dir * 0.7)
+		if p.has("caido") and cp.y < _jogo.height_at(cp.x, cp.z) + 0.05:
+			continue                     # copa caída: essa folha ficou amassada embaixo
+		out.append({"li": i, "cut": cp, "base": xf * base})
 	return out
 
 
 func crown_xf(p: Dictionary) -> Transform3D:
+	if p.has("caido"):
+		var a: Array = p.xf
+		return Transform3D(Vector3(a[0], a[1], a[2]), Vector3(a[3], a[4], a[5]), Vector3(a[6], a[7], a[8]), Vector3(a[9], a[10], a[11]))
 	var gy: float = _jogo.height_at(float(p.x), float(p.z))
 	var s := crown_scale(p)
 	return Transform3D(Basis(Vector3.UP, float(p.get("rot", 0.0))).scaled(Vector3(s, s, s)), Vector3(float(p.x), gy + trunk_h(p) - 0.1, float(p.z)))
@@ -312,6 +322,33 @@ func cut_leaf(p: Dictionary, li: int) -> void:
 	p.cortadas.append(li)
 	p["corte_dia"] = last_day
 	_rebuild()
+
+
+## ================== A COPA DO BURITI DERRUBADO ==================
+
+## O buriti caiu: a copa fica deitada no fim da tora, com as folhas presas nela.
+func add_caido(info: Dictionary, xf: Transform3D) -> void:
+	var b := xf.basis
+	caidos.append({"caido": true, "x": xf.origin.x, "z": xf.origin.z, "var": int(info.v), "rot": float(info.rot), "s": float(info.s),
+		"cortadas": (info.cortadas as Array).duplicate(), "dia": last_day, "morta": -1,
+		"xf": [b.x.x, b.x.y, b.x.z, b.y.x, b.y.y, b.y.z, b.z.x, b.z.y, b.z.z, xf.origin.x, xf.origin.y, xf.origin.z]})
+	_rebuild()
+
+
+## A copa caída mais perto (com folha para cortar).
+func caido_near(pos: Vector3, reach: float) -> Dictionary:
+	var best := {}
+	var bd := reach
+	for c in caidos:
+		var d := Vector2(float(c.x) - pos.x, float(c.z) - pos.z).length()
+		if d < bd and not leaves_of(c).is_empty():
+			bd = d
+			best = c
+	return best
+
+
+func has_palm(p: Dictionary) -> bool:
+	return palms.has(p) or caidos.has(p)
 
 
 ## ================== FOLHAS SECAS QUE CAEM SOZINHAS ==================
@@ -464,6 +501,7 @@ func tick() -> void:
 			if last_day == day and drop_hook.is_valid() and bool(drop_hook.call(p, li, land, yaw)):
 				continue           # o jogo mostra caindo e põe no chão quando ela deitar
 			secas.append([land.x, land.z, int(p.get("var", 0)) % CROWN_VARIANTS, li, yaw, crown_scale(p), last_day])
+		caidos = caidos.filter(func(c): return last_day - int(c.dia) < CAIDO_DAYS)
 		# a folha seca no chão apodrece
 		secas = secas.filter(func(e): return last_day - int(e[6]) < SECA_DAYS)
 		while secas.size() > SECA_MAX:
@@ -518,6 +556,17 @@ func _rebuild() -> void:
 			n.queue_free()
 	_nodes.clear()
 	_grid.clear()
+	for c in caidos:
+		var sk := {}
+		for li in c.get("cortadas", []):
+			sk[int(li)] = true
+		var mi := MeshInstance3D.new()
+		mi.mesh = _crown_mesh(_crown_params[int(c["var"]) % CROWN_VARIANTS], sk)
+		mi.material_override = _leaf_mat
+		mi.visibility_range_end = VIEW
+		add_child(mi)
+		mi.transform = crown_xf(c)
+		_nodes.append(mi)
 	var chunks := {}
 	var fruit := fruit_season(last_day)
 	for p in palms:
@@ -1044,7 +1093,7 @@ static func _fruit(st: SurfaceTool, c: Vector3, r: float, col: Color) -> void:
 func save(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "palmeiras": palms, "secas": secas}))
+		f.store_string(JSON.stringify({"versao": 1, "dia": last_day, "palmeiras": palms, "secas": secas, "caidos": caidos}))
 		f.close()
 
 
@@ -1056,6 +1105,7 @@ func _load(path: String) -> bool:
 		return false
 	palms = d.get("palmeiras", [])
 	secas = d.get("secas", [])
+	caidos = d.get("caidos", [])
 	for p in palms:
 		for k in ["degraus", "lado"]:
 			(p as Dictionary).erase(k)
