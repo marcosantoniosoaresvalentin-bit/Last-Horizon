@@ -1,9 +1,9 @@
 {
-  "version": 134,
-  "file": "update_134.zip",
-  "size": 4784039,
-  "sha256": "1049d3f1d94febe3d7e44deb4e2fa872aab10c8fc19cffcd0c1c57800a4b826d",
+  "version": 135,
+  "file": "update_135.zip",
+  "size": 4784801,
+  "sha256": "6321229a77625e543a59e4890d15eba54bc763f2f7d8bc98a3934b13cc5f01b2",
   "min_build": 1,
-  "notes": "Som realista da fibra sendo cortada na desfibradeira",
+  "notes": "Topo do buriti realista; um pino por tronco na construção",
   "date": "2026-11-19"
 }
