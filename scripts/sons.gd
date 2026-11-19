@@ -35,11 +35,13 @@ const FILES := {
 	# folha de buriti caindo e o talo sendo cortado (sintetizados: tools/sintetizar_folha.py)
 	"folha_cai": ["folha_cai1", "folha_cai2", "folha_cai3"],
 	"talo_corte": ["talo_corte1", "talo_corte2", "talo_corte3"],
+	"fibra_puxa": ["fibra_puxa1", "fibra_puxa2", "fibra_puxa3", "fibra_puxa4"],
+	"fibra_bate": ["fibra_bate1", "fibra_bate2", "fibra_bate3"],
 }
 ## Volume de cada som (dB): passos baixos e a água bem baixinha.
 const VOLUME := {"machado": 0.0, "corrida": -12.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0, "serra": -9.0, "pedra_bate": -4.0, "pedra_lasca": -3.0, "pedra_racha": 0.0,
 	"arara_voo": 2.0, "arara_alarme": 3.0, "arara_resmungo": -8.0, "macaco_assobio": -6.0, "macaco_trinado": -7.0,
-	"macaco_alarme": -1.0, "macaco_guincho": -2.0, "folha_cai": 2.0, "talo_corte": -2.0}
+	"macaco_alarme": -1.0, "macaco_guincho": -2.0, "folha_cai": 2.0, "talo_corte": -2.0, "fibra_puxa": -1.0, "fibra_bate": -2.0}
 
 static var _cache := {}
 

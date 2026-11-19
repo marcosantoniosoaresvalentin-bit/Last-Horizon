@@ -8679,7 +8679,7 @@ func _desf_puxar() -> void:
 	_desf.alvo = minf(1.0, float(_desf.alvo) + 1.0 / DESF_TOQUES)
 	var xf: Transform3D = _maq.xform(int(_desf.mi))
 	var at: Vector3 = xf * Vector3(0.0, 0.96, 0.0)
-	Sons.play_at(self, "talo_corte", at, -7.0, randf_range(0.55, 0.7))
+	Sons.play_at(self, "fibra_puxa", at, 0.0, randf_range(0.92, 1.08))      # o talo rasgando no fio das lâminas
 	_fiber_chips(at)
 
 
@@ -8713,7 +8713,7 @@ func _desf_tick(delta: float) -> void:
 		_desf_place()
 		if k >= 1.0:
 			var at: Vector3 = _maq.xform(int(_desf.mi)) * Vector3(0.0, 0.96, 0.0)
-			Sons.play_at(self, "talo_corte", at, -2.0, 0.9)
+			Sons.play_at(self, "fibra_bate", at, 0.0, randf_range(0.94, 1.06))
 			_fiber_chips(at)
 			_desf.anim = -1.0
 			_desf.fase = "puxar"
