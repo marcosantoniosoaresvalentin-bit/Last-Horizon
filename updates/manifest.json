@@ -1,9 +1,9 @@
 {
-  "version": 119,
-  "file": "update_119.zip",
-  "size": 4626265,
-  "sha256": "ebd04bd8e087fb60f6c4949e7e6aa682b1c3d7d9d42a2938dec4d79000e44399",
+  "version": 120,
+  "file": "update_120.zip",
+  "size": 4717318,
+  "sha256": "34cb836b34afa4ee71287e4846815d8d8af7142ff0f0e54875cc7a8191959984",
   "min_build": 1,
-  "notes": "Araras fazem ninho só no buriti seco",
+  "notes": "Buriti: subir com degraus furados e pinos, faca de pedra, cortar folhas do buriti",
   "date": "2026-11-19"
 }
