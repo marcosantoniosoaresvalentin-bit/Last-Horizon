@@ -1,9 +1,9 @@
 {
-  "version": 131,
-  "file": "update_131.zip",
-  "size": 4736879,
-  "sha256": "f3f44514a15b34a8d502719f0429312a8bfebc03b6acae59453f2dd630d57bb8",
+  "version": 132,
+  "file": "update_132.zip",
+  "size": 4737473,
+  "sha256": "9b23f1a4b92a0fbb342e8fce0df769940f67add4c0c676f781e1ba490f783c41",
   "min_build": 1,
-  "notes": "Desfibradeira: tábuas retas, pinos rentes, talo cortando em tiras",
+  "notes": "Desfibradeira: fibras compridas, talo todo cortado, cor da madeira serrada",
   "date": "2026-11-19"
 }
