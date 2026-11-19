@@ -1,9 +1,9 @@
 {
-  "version": 139,
-  "file": "update_139.zip",
-  "size": 4828480,
-  "sha256": "b4d857efe9f3f617da0f0e5c38a27e79590f157bdccdf1aecaafa4f8cb21d252",
+  "version": 140,
+  "file": "update_140.zip",
+  "size": 4829786,
+  "sha256": "995a0ba8dbc4030a6de05512b081eb9ad1fdde74ece538cf7a49f31549f5ea79",
   "min_build": 1,
-  "notes": "Serra: pôr tora e empurrar sem bug; cooperativo põe tora na serra",
+  "notes": "Cooperativo fincar e construir; mais cunhas em tora grande; serra com giro e tábua lisa",
   "date": "2026-11-19"
 }
