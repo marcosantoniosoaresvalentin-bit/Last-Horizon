@@ -1,9 +1,9 @@
 {
-  "version": 122,
-  "file": "update_122.zip",
-  "size": 4725988,
-  "sha256": "3c33c090dcba45a5a8afefba80c7c5b0d2a9dc4d93bacd3926e1529552e62a49",
+  "version": 123,
+  "file": "update_123.zip",
+  "size": 4723625,
+  "sha256": "778c315e9d8b8dca75d0de2c4a3db8466806cefb519e04d88ac231ca51b28fd6",
   "min_build": 1,
-  "notes": "Peconha: câmera olhando para cima ao subir, laço não aparece",
+  "notes": "Buriti: sem peconha, folhas secas caem sozinhas, araras comem buriti",
   "date": "2026-11-19"
 }
