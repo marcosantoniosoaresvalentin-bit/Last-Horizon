@@ -1,9 +1,9 @@
 {
-  "version": 138,
-  "file": "update_138.zip",
-  "size": 4828102,
-  "sha256": "3d091597850142b54f85ab496e9e489f67742b1b4be2e483f30436421ca14ad8",
+  "version": 139,
+  "file": "update_139.zip",
+  "size": 4828480,
+  "sha256": "b4d857efe9f3f617da0f0e5c38a27e79590f157bdccdf1aecaafa4f8cb21d252",
   "min_build": 1,
-  "notes": "Serra de pedal nova: pedal do lado, mecanismo de madeira, uma fatia por vez, sons",
+  "notes": "Serra: pôr tora e empurrar sem bug; cooperativo põe tora na serra",
   "date": "2026-11-19"
 }
