@@ -1,9 +1,9 @@
 {
-  "version": 115,
-  "file": "update_115.zip",
-  "size": 4614605,
-  "sha256": "c901f1693a62db7d79da555576ab8920514423ed3667a73e6a27f031d3e07af8",
+  "version": 116,
+  "file": "update_116.zip",
+  "size": 4618011,
+  "sha256": "bc1ef83f56562cbf25bb5ba94d28794f060ac9d32323cceffcaa3c919070d4e9",
   "min_build": 1,
-  "notes": "Limite de peso (60 kg) para carregar madeira; cortar de novo qualquer tora no chão com o machado",
+  "notes": "Novo: carregar tora pesada em dupla (botão Cooperativo, até 120 kg)",
   "date": "2026-11-19"
 }
