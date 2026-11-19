@@ -1,9 +1,9 @@
 {
-  "version": 123,
-  "file": "update_123.zip",
-  "size": 4723625,
-  "sha256": "778c315e9d8b8dca75d0de2c4a3db8466806cefb519e04d88ac231ca51b28fd6",
+  "version": 124,
+  "file": "update_124.zip",
+  "size": 4724348,
+  "sha256": "197957707b4b92d062eb3fa3c12fa3666a1759066ae32869043125191f590cd1",
   "min_build": 1,
-  "notes": "Buriti: sem peconha, folhas secas caem sozinhas, araras comem buriti",
+  "notes": "Craft: rolar a lista passando o dedo em cima dos itens",
   "date": "2026-11-19"
 }
