@@ -1,9 +1,9 @@
 {
-  "version": 158,
-  "file": "update_158.zip",
-  "size": 4892668,
-  "sha256": "9a3348461b3bacfd11aa0d327dfce2ef7191b6c742abf613d6036ddae4a00cc7",
+  "version": 159,
+  "file": "update_159.zip",
+  "size": 4898177,
+  "sha256": "521c624e2753d936e7a3c165acc82f2416ff6c75b63989bafbbb237762a43ce1",
   "min_build": 1,
-  "notes": "Fogueira: lenha mantém o fogo (mais lenha, mais forte), apaga sem lenha, brasa reacende com capim seco, fria só com o arco; olho na fogueira; chuva apaga",
+  "notes": "Vida, fome e sede com barras personalizadas; frutos caídos de bacaba e buriti para comer; beber água do rio ou da cabaça",
   "date": "2026-11-21"
 }
