@@ -90,31 +90,38 @@ const TIPOS := {
 		# as lâminas de faca em pé em cima da bancada (fio para cima, ao comprido em x)
 		"laminas": [Vector3(0.0, 0.94, -0.013), Vector3(0.0, 0.94, 0.0), Vector3(0.0, 0.94, 0.013)],
 	},
-	# Mesa de argila: dois pés (toras em pé na mesma altura) com duas tábuas lado a lado
-	# em cima (o tampo), e na frente um banquinho (toco baixo com uma tábua). Despeja o
-	# balde de argila no tampo e, sentado, tira a sujeira com a mão: sai argila limpa.
+	# Mesa de argila: dois pés (toras em pé na mesma altura); em cima de cada pé um pau
+	# deitado atravessado (a travessa, mais comprida que o tampo é largo), pregado no pé;
+	# e o tampo: duas tábuas lado a lado pregadas nas duas travessas. Na frente, um
+	# banquinho (toco baixo com uma tábua). Despeja o balde de argila no tampo e, sentado,
+	# tira a sujeira com a mão: sai argila limpa.
 	"mesa_argila": {
 		"nome": "Mesa de Argila",
 		"desc": "Mesa com banquinho para trabalhar a argila. Despeje um balde de argila em cima e, sentado, tire a sujeira com a mão (pedrinhas, raízes, folhas): sai argila limpa, pronta para fabricar.",
+		"versao": 2,
 		"pecas": [
-			["tora", 0.8, Vector3(0.0, 0.4, 0.34), "y", 0.08],       # 0 pé da mesa
-			["tora", 0.8, Vector3(0.0, 0.4, -0.34), "y", 0.08],      # 1 pé da mesa
-			["tabua", 1.0, Vector3(-0.13, 0.835, 0.0), "z", 0.15],   # 2 tampo (do lado do banco)
-			["tabua", 1.0, Vector3(0.13, 0.835, 0.0), "z", 0.15],    # 3 tampo (do outro lado)
-			["tora", 0.42, Vector3(-0.72, 0.21, 0.0), "y", 0.09],    # 4 pé do banquinho
-			["tabua", 0.45, Vector3(-0.72, 0.455, 0.0), "z", 0.14],  # 5 tábua do banquinho
+			["tora", 0.7, Vector3(0.0, 0.35, 0.34), "y", 0.08],      # 0 pé da mesa
+			["tora", 0.7, Vector3(0.0, 0.35, -0.34), "y", 0.08],     # 1 pé da mesa
+			["tora", 0.72, Vector3(0.0, 0.75, 0.34), "x", 0.05],     # 2 travessa (em cima do pé 0)
+			["tora", 0.72, Vector3(0.0, 0.75, -0.34), "x", 0.05],    # 3 travessa (em cima do pé 1)
+			["tabua", 1.0, Vector3(-0.13, 0.835, 0.0), "z", 0.15],   # 4 tampo (do lado do banco)
+			["tabua", 1.0, Vector3(0.13, 0.835, 0.0), "z", 0.15],    # 5 tampo (do outro lado)
+			["tora", 0.42, Vector3(-0.72, 0.21, 0.0), "y", 0.09],    # 6 pé do banquinho
+			["tabua", 0.45, Vector3(-0.72, 0.455, 0.0), "z", 0.14],  # 7 tábua do banquinho
 		],
+		# travessa no pé (pino em pé no meio); cada tábua nas duas travessas
 		"pinos": [
-			[[0, 2], Vector3(-0.05, 0.81, 0.34)], [[0, 3], Vector3(0.05, 0.81, 0.34)],
-			[[1, 2], Vector3(-0.05, 0.81, -0.34)], [[1, 3], Vector3(0.05, 0.81, -0.34)],
-			[[4, 5], Vector3(-0.72, 0.43, 0.0)],
+			[[0, 2], Vector3(0.0, 0.73, 0.34)], [[1, 3], Vector3(0.0, 0.73, -0.34)],
+			[[2, 4], Vector3(-0.13, 0.81, 0.34)], [[2, 5], Vector3(0.13, 0.81, 0.34)],
+			[[3, 4], Vector3(-0.13, 0.81, -0.34)], [[3, 5], Vector3(0.13, 0.81, -0.34)],
+			[[6, 7], Vector3(-0.72, 0.43, 0.0)],
 		],
 		"area": Rect2(-0.95, -0.6, 1.25, 1.2),
 		"mesa": true,
 	},
 }
 
-const MESA_TOPO := 0.86          # em cima do tampo (m)
+const MESA_TOPO := 0.87          # em cima do tampo (m)
 const MESA_SUJEIRA := 10         # coisas para tirar num balde cheio de argila
 const MESA_BOLAS := 8            # bolas de argila limpa num balde cheio
 
@@ -1404,6 +1411,25 @@ func _load(path: String) -> bool:
 	plantas = d.get("plantas", [])
 	# a caixa de barro saiu do jogo (o barro agora é feito no monte de terra no chão)
 	plantas = plantas.filter(func(q): return str(q.get("tipo", "")) != "caixa_barro")
+	# mesa de argila da versão 1 (tábuas em cima do pé redondo): vira a nova (com as
+	# travessas), montada se estava montada
+	for q in plantas:
+		if str(q.get("tipo", "")) == "mesa_argila" and int(q.get("versao", 1)) < 2:
+			var feita := true
+			for bb in q.get("pecas", []):
+				if not bool(bb):
+					feita = false
+			var tm: Dictionary = TIPOS.mesa_argila
+			q.pecas = []
+			q.sobra = []
+			q.pinos = []
+			for _i in (tm.pecas as Array).size():
+				q.pecas.append(feita)
+				q.sobra.append(0.0)
+			for _j in (tm.pinos as Array).size():
+				q.pinos.append(2 if feita else 0)
+			q.erase("madeiras")
+			q["versao"] = 2
 	for p in plantas:
 		if p.has("amarras") and not p.has("pinos"):
 			p["pinos"] = p.amarras          # planta de versão antiga: as amarras viram pinos

@@ -203,7 +203,7 @@ func _draw_plan() -> void:
 		_draw.draw_rect(Rect2(Vector2(a.x, b.y), Vector2(b.x - a.x, a.y - b.y)), C_INK, false, 2.0)
 	var font := get_theme_default_font()
 	if t.has("mesa"):
-		_draw.draw_string(font, P.call(0.2, 1.0), "MESA (TAMPO DE 2 TÁBUAS)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
+		_draw.draw_string(font, P.call(0.2, 1.0), "TAMPO: 2 TÁBUAS EM 2 TRAVESSAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
 		_draw.draw_string(font, P.call(-1.25, 0.65), "BANQUINHO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
 		return
 	if t.has("laminas"):
