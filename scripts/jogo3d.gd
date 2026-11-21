@@ -9939,16 +9939,71 @@ func _torno_escolher(id: String) -> void:
 		bar.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0))
 	(_torno.ui as Control).add_child(bar)
 	_torno.bar = bar
+	# o mostrador do ritmo: onde está o pino do volante (verde = hora de pisar)
+	var dial := Control.new()
+	dial.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	dial.offset_left = 270
+	dial.offset_top = -170
+	dial.offset_right = 380
+	dial.offset_bottom = -60
+	dial.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dial.draw.connect(func():
+		if _torno.is_empty():
+			return
+		var c := dial.size * 0.5
+		var R := minf(c.x, c.y) - 6.0
+		dial.draw_circle(c, R + 6.0, Color(0.04, 0.04, 0.03, 0.8))
+		dial.draw_arc(c, R, 0.0, PI, 24, Color(0.3, 0.9, 0.35, 0.95), 9.0, true)      # pisar aqui
+		dial.draw_arc(c, R, PI, TAU, 24, Color(0.9, 0.25, 0.2, 0.7), 9.0, true)       # aqui dá tranco
+		var a := float(_torno.ang)
+		var pin := c + Vector2(cos(a), sin(a)) * R
+		dial.draw_line(c, pin, Color(0.85, 0.7, 0.5), 3.0, true)
+		dial.draw_circle(pin, 9.0, Color(1, 1, 1))
+		dial.draw_circle(c, 5.0, Color(0.6, 0.45, 0.3))
+		var font := ThemeDB.fallback_font
+		dial.draw_string(font, Vector2(0, -8), "Pise no verde", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.95, 0.8)))
+	(_torno.ui as Control).add_child(dial)
+	_torno.dial = dial
 	Sons.play_at(self, "cavar", _maq.xform(int(_torno.mi)) * Vector3(0, Maquinas.TORNO_MESA, 0), -6.0, 0.7)
-	_show_toast("Argila no meio da mesa. Toque em \"Pedalar\" para girar (acima da risquinha branca) e passe o dedo no losango.")
+	_show_toast("Argila no meio da mesa. Pise no \"Pedalar\" no ritmo, quando o pino estiver no VERDE (como máquina de costura), até passar da risquinha branca. Aí passe o dedo no losango.")
 
 
+## Pisada no pedal, como na máquina de costura: o pedal puxa a biela, que puxa o pino
+## fora do centro do volante (a manivela). Só ajuda na metade da volta em que o pino
+## está indo para o lado do puxão (a parte verde do mostrador); pisando na outra metade,
+## o pedal empurra contra o giro e dá um tranco (freia). Parado, a primeira pisada dá a
+## partida.
 func _torno_pedalar() -> void:
 	if _torno.is_empty():
 		return
-	_torno.vel = minf(1.2, float(_torno.vel) + 0.16)
 	_torno.pedal = 1.0
-	Sons.play_at(self, "pedal_range", _player.position + Vector3.UP * 0.2, -16.0, 1.2)
+	var f := _torno_pisada_ok()
+	var at := _player.position + Vector3.UP * 0.2
+	if float(_torno.vel) < 0.08:
+		_torno.vel = float(_torno.vel) + 0.14          # a partida
+		Sons.play_at(self, "pedal_range", at, -16.0, 1.2)
+		return
+	if f > 0.25:
+		_torno.vel = minf(1.2, float(_torno.vel) + 0.2 * f)
+		_torno.ritmo = int(_torno.get("ritmo", 0)) + 1
+		Sons.play_at(self, "pedal_range", at, -16.0, 1.2)
+	elif f < -0.25:
+		_torno.vel = maxf(0.0, float(_torno.vel) - 0.14 * -f)
+		_torno.ritmo = 0
+		Sons.play_at(self, "baque", at, -18.0, 0.8)
+		if not bool(_torno.get("dica", false)):
+			_torno.dica = true
+			_show_toast("Tranco! Pise quando o pino estiver na parte VERDE do mostrador (uma pisada por volta, no ritmo).")
+	else:
+		_torno.vel = minf(1.2, float(_torno.vel) + 0.03)
+		Sons.play_at(self, "pedal_range", at, -20.0, 1.2)
+
+
+## Quanto a pisada de agora ajuda (1 = no ponto certo, -1 = bem contra o giro).
+## O pino da manivela está no ângulo do volante; puxado pela biela para o lado do
+## pedal, ele só gira para a frente quando está na metade de lá da volta.
+func _torno_pisada_ok() -> float:
+	return sin(float(_torno.ang))
 
 
 ## Onde fica o losango da etapa (no barro, no mundo).
@@ -10086,9 +10141,11 @@ func _torno_tick(delta: float) -> void:
 	(_torno.ui as Control).queue_redraw()
 	if _torno.has("bar") and is_instance_valid(_torno.bar):
 		(_torno.bar as Control).queue_redraw()
+	if _torno.has("dial") and is_instance_valid(_torno.dial):
+		(_torno.dial as Control).queue_redraw()
 	var mi := int(_torno.mi)
 	# o volante pesado segura o giro: parando de pisar, vai parando devagar
-	_torno.vel = maxf(0.0, float(_torno.vel) - 0.22 * delta)
+	_torno.vel = maxf(0.0, float(_torno.vel) - (0.04 + 0.3 * float(_torno.vel)) * delta)      # o atrito do mancal
 	_torno.pedal = maxf(0.0, float(_torno.pedal) - 3.0 * delta)
 	_torno.ang = fmod(float(_torno.ang) + float(_torno.vel) * 9.0 * delta, TAU)
 	_maq.torno_girar(mi, float(_torno.ang), float(_torno.pedal))
