@@ -1,9 +1,9 @@
 {
-  "version": 152,
-  "file": "update_152.zip",
-  "size": 4868933,
-  "sha256": "03f652ac14477ba1461d3bf2afcd5a969797494d4b18c031d086eef31eeefd20",
+  "version": 153,
+  "file": "update_153.zip",
+  "size": 4869748,
+  "sha256": "4fed155e189e7a5bd6f63f6552d0a364e0c615bb9fa7ca955633d4055379083d",
   "min_build": 1,
-  "notes": "Torno de oleiro de pedal nas plantas: modelar argila limpa em vasilha, garrafa, cabaça (moringa), bacia e filtro de barro",
+  "notes": "Torno de oleiro: pedal no ritmo, como máquina de costura (pise quando o pino estiver no verde)",
   "date": "2026-11-21"
 }
