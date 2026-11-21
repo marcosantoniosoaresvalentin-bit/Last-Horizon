@@ -1,9 +1,9 @@
 {
-  "version": 159,
-  "file": "update_159.zip",
-  "size": 4898177,
-  "sha256": "521c624e2753d936e7a3c165acc82f2416ff6c75b63989bafbbb237762a43ce1",
+  "version": 160,
+  "file": "update_160.zip",
+  "size": 4899102,
+  "sha256": "daaee0b752a879be48ae79c48a1a50d2ec242e6181ccc23e2070cfdf5bd4ac1d",
   "min_build": 1,
-  "notes": "Vida, fome e sede com barras personalizadas; frutos caídos de bacaba e buriti para comer; beber água do rio ou da cabaça",
+  "notes": "Fogueira com as mesmas lenhas rachadas pelo jogador, deitadas com a ponta levantada; sem pedras em volta",
   "date": "2026-11-21"
 }
