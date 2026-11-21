@@ -19,6 +19,16 @@ signal lista_mudou
 signal conectou_e_baixou(world_id: String)
 signal falhou(msg: String)
 signal jogadores_mudou
+signal reconectando
+signal reconectou
+signal voltou(novo: int, antigo: int)   # (no dono) um convidado caiu e voltou com outro id
+
+## Tempo sem resposta até dar a conexão por perdida (ms). Alto: o celular às vezes trava
+## uns segundos (salvando, carregando, recebendo o mundo, indo para segundo plano) e a
+## conexão não pode cair por isso.
+const TIMEOUT_MIN := 15000
+const TIMEOUT_MAX := 45000
+const RECONECTAR_S := 40.0          # o convidado tenta voltar sozinho por até 40 s
 
 var modo := ""                     # "", "dono" ou "convidado"
 var mundo_id := ""
@@ -28,6 +38,13 @@ var estados := {}                  # peer id -> {p, y, a, m, c, t}
 var achados := {}                  # "ip:porta" -> {nome, dono, n, max, ip, porta, visto}
 var hook_salvar := Callable()      # o jogo do dono salva antes de mandar o mundo
 var hook_tempo := Callable()       # o jogo devolve os passos da simulação (tempo do jogo)
+var hook_mandou := Callable()      # (quem) o dono mandou o mundo: o jogo guarda como ficou
+var _ip := ""
+var _porta := 0
+var _no_jogo := false              # o convidado já está jogando (caiu: tenta voltar)
+var _volta_t := -1.0               # reconectando: segundos que ainda tenta
+var _tentar_t := 0.0
+var _id_antigo := 0
 var tempo_recebido := -1
 
 var _udp: PacketPeerUDP
@@ -50,8 +67,8 @@ func _ready() -> void:
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected)
-	multiplayer.connection_failed.connect(func(): _fail("Não conseguiu conectar no mundo."))
-	multiplayer.server_disconnected.connect(func(): _fail("O dono do mundo saiu."))
+	multiplayer.connection_failed.connect(_on_conn_failed)
+	multiplayer.server_disconnected.connect(_on_server_caiu)
 
 
 func meu_nome() -> String:
@@ -124,6 +141,8 @@ func procurar(on: bool) -> void:
 
 func _process(delta: float) -> void:
 	_anuncio_t -= delta
+	if _volta_t >= 0.0:
+		_reconectar_tick(delta)
 	if _udp == null:
 		return
 	if modo == "dono":
@@ -186,14 +205,87 @@ func entrar(ip: String, porta: int) -> bool:
 		return false
 	multiplayer.multiplayer_peer = peer
 	modo = "convidado"
+	_ip = ip
+	_porta = porta
 	_baixando = {}
 	_faltam = -1
 	return true
 
 
+## O jogo do convidado começou (a partir daqui, se a conexão cair, tenta voltar).
+func no_jogo() -> void:
+	_no_jogo = true
+
+
 func _on_connected() -> void:
+	_ajustar_timeout(1)
+	if _volta_t >= 0.0:
+		# voltou depois de cair: o dono já sabe do mundo; só se apresenta de novo
+		_volta_t = -1.0
+		rpc_id(1, "_volta_dono", meu_nome(), meu_skin(), _id_antigo)
+		reconectou.emit()
+		return
 	# conectou: se apresenta e pede o mundo
 	rpc_id(1, "_ola_dono", meu_nome(), meu_skin())
+
+
+func _ajustar_timeout(id: int) -> void:
+	var mp := multiplayer.multiplayer_peer
+	if mp is ENetMultiplayerPeer:
+		var pp: ENetPacketPeer = (mp as ENetMultiplayerPeer).get_peer(id)
+		if pp:
+			pp.set_timeout(64, TIMEOUT_MIN, TIMEOUT_MAX)
+
+
+func _on_conn_failed() -> void:
+	if _volta_t >= 0.0:
+		_tentar_t = 1.5                 # tenta de novo daqui a pouco
+		return
+	_fail("Não conseguiu conectar no mundo.")
+
+
+## A conexão com o dono caiu. Jogando: tenta voltar sozinho (sem sair do mundo).
+func _on_server_caiu() -> void:
+	if modo == "convidado" and _no_jogo and _ip != "":
+		_id_antigo = multiplayer.get_unique_id()
+		_volta_t = RECONECTAR_S
+		_tentar_t = 0.0
+		estados = {}
+		reconectando.emit()
+		return
+	_fail("O dono do mundo saiu.")
+
+
+func _reconectar_tick(delta: float) -> void:
+	_volta_t -= delta
+	if _volta_t <= 0.0:
+		_volta_t = -1.0
+		_fail("A conexão com o dono do mundo caiu.")
+		return
+	_tentar_t -= delta
+	if _tentar_t > 0.0:
+		return
+	_tentar_t = 4.0
+	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		multiplayer.multiplayer_peer.close()
+	var peer := ENetMultiplayerPeer.new()
+	if peer.create_client(_ip, _porta) == OK:
+		multiplayer.multiplayer_peer = peer
+
+
+@rpc("any_peer", "reliable")
+func _volta_dono(nome: String, skin: String, antigo: int) -> void:
+	if modo != "dono":
+		return
+	var who := multiplayer.get_remote_sender_id()
+	jogadores.erase(antigo)
+	estados.erase(antigo)
+	jogadores[who] = {"nome": nome.left(24), "skin": skin}
+	for p in jogadores:
+		if int(p) != 1:
+			rpc_id(int(p), "_lista", jogadores)
+	jogadores_mudou.emit()
+	voltou.emit(who, antigo)
 
 
 @rpc("any_peer", "reliable")
@@ -225,6 +317,8 @@ func _lista(l: Dictionary) -> void:
 func _mandar_mundo(who: int) -> void:
 	if hook_salvar.is_valid():
 		hook_salvar.call()
+	if hook_mandou.is_valid():
+		hook_mandou.call(who)
 	var dir := preload("res://scripts/mundos.gd").dir(mundo_id)
 	var files := []
 	var d := DirAccess.open(dir)
@@ -244,7 +338,7 @@ func _mandar_mundo(who: int) -> void:
 
 var _meta_recebida := {}
 
-@rpc("authority", "reliable")
+@rpc("authority", "reliable", "call_remote", 2)
 func _mundo_inicio(n: int, meta: Dictionary, tempo: int) -> void:
 	_faltam = n
 	_meta_recebida = meta
@@ -254,7 +348,7 @@ func _mundo_inicio(n: int, meta: Dictionary, tempo: int) -> void:
 		_terminou_download()
 
 
-@rpc("authority", "reliable")
+@rpc("authority", "reliable", "call_remote", 2)
 func _mundo_parte(f: String, k: int, parts: int, data: PackedByteArray) -> void:
 	if not _baixando.has(f):
 		_baixando[f] = {"n": parts, "partes": {}}
@@ -298,7 +392,13 @@ func _terminou_download() -> void:
 # ================== DURANTE O JOGO ==================
 
 func ativo() -> bool:
-	return modo != "" and multiplayer.multiplayer_peer is ENetMultiplayerPeer
+	return modo != "" and multiplayer.multiplayer_peer is ENetMultiplayerPeer and _volta_t < 0.0 \
+		and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED
+
+
+## Caiu e está tentando voltar (o jogo continua, sem mandar nada).
+func reconectando_agora() -> bool:
+	return _volta_t >= 0.0
 
 
 ## Manda o meu estado para os outros (posição, para onde olha, animação, mão, agachado).
@@ -316,7 +416,7 @@ func _estado(e: Dictionary) -> void:
 
 
 ## Uma parte do mundo mudou aqui: manda para os outros (compactada).
-signal parte_mundo(nome: String, dados: String)
+signal parte_mundo(nome: String, dados: String, quem: int)
 
 func mandar_parte(nome: String, dados: String) -> void:
 	if not ativo():
@@ -325,10 +425,10 @@ func mandar_parte(nome: String, dados: String) -> void:
 	rpc("_parte", nome, raw.compress(FileAccess.COMPRESSION_GZIP), raw.size())
 
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "reliable", "call_remote", 1)
 func _parte(nome: String, z: PackedByteArray, n: int) -> void:
 	var raw := z.decompress(n, FileAccess.COMPRESSION_GZIP)
-	parte_mundo.emit(nome, raw.get_string_from_utf8())     # (o dono repassa sozinho: server_relay)
+	parte_mundo.emit(nome, raw.get_string_from_utf8(), multiplayer.get_remote_sender_id())     # (o dono repassa sozinho: server_relay)
 
 
 ## O convidado terminou de carregar: pede ao dono o mundo como está agora (o que
@@ -357,8 +457,8 @@ func _tempo(steps: int) -> void:
 	tempo_recebido = steps
 
 
-func _on_peer_connected(_id: int) -> void:
-	pass
+func _on_peer_connected(id: int) -> void:
+	_ajustar_timeout(id)
 
 
 func _on_peer_disconnected(id: int) -> void:
@@ -379,6 +479,8 @@ func _fail(msg: String) -> void:
 
 
 func parar() -> void:
+	_no_jogo = false
+	_volta_t = -1.0
 	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
 		multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = null

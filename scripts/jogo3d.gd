@@ -530,7 +530,7 @@ func _notification(what: int) -> void:
 
 func _exit_tree() -> void:
 	_save_player()
-	if _rede and _rede.ativo():
+	if _rede and _rede.modo != "":
 		_rede.parar()
 	Diag.marcar("menu")
 	if _water_task >= 0:
@@ -1460,7 +1460,7 @@ func _process(delta: float) -> void:
 	_sync_tick(delta)
 	_coop_tick(delta)
 	if _maq and _ready_world:
-		var auth: bool = _rede == null or not _rede.ativo() or _rede.modo == "dono"
+		var auth: bool = _rede == null or _rede.modo != "convidado"
 		var alone: bool = _rede == null or not _rede.ativo() or _rede.jogadores.size() < 2
 		_maq.update(delta, auth, teste and alone)
 	_update_split(delta)
@@ -6508,6 +6508,16 @@ func _mp_start() -> void:
 	_rede = r
 	_rede.parte_mundo.connect(_sync_receive)
 	_sync_baseline()
+	_rede.reconectando.connect(func(): _show_toast("A conexão caiu. Reconectando…"))
+	_rede.reconectou.connect(func():
+		_show_toast("Reconectado!")
+		_rede.pedir_mundo_atual()
+		_sync_hash = {})            # manda tudo de novo (o que mudou enquanto estava fora)
+	_rede.voltou.connect(func(novo: int, antigo: int):
+		for nome in _sync_base:
+			if (_sync_base[nome] as Dictionary).has(antigo):
+				_sync_base[nome][novo] = _sync_base[nome][antigo]
+				(_sync_base[nome] as Dictionary).erase(antigo))
 	if _rede.modo == "dono":
 		# quem entra pede o mundo de agora: manda todas as partes de novo
 		_rede.pediram_mundo.connect(func():
@@ -6518,11 +6528,18 @@ func _mp_start() -> void:
 		_rede.pedir_mundo_atual()
 	if _rede.modo == "dono":
 		_rede.hook_salvar = _save_world
+		# o mundo que foi para quem entrou: é a base para juntar o que ele mudar
+		_rede.hook_mandou = func(who: int) -> void:
+			for nome in SYNC_EVERY:
+				if not _sync_base.has(nome):
+					_sync_base[nome] = {}
+				_sync_base[nome][who] = JSON.parse_string(_sync_get(nome))
 		_rede.hook_tempo = func() -> int: return int(sim.steps)
 		_show_toast("Mundo aberto no multiplayer: quem estiver na mesma Wi-Fi pode entrar.")
 	else:
 		if int(_rede.tempo_recebido) >= 0:
 			sim.steps = int(_rede.tempo_recebido)
+		_rede.no_jogo()
 		_show_toast("Você entrou no mundo de %s." % _dono_nome())
 	_rede.falhou.connect(func(msg: String):
 		_show_toast(msg + " Voltando para o menu…")
@@ -7268,7 +7285,7 @@ const SYNC_ONLY_HOST := ["bacabas"]        # só o dono manda (os bichos comem o
 
 
 func _mp_client() -> bool:
-	return _rede != null and _rede.ativo() and _rede.modo == "convidado"
+	return _rede != null and _rede.modo == "convidado"      # (caindo e voltando também)
 
 
 func _sync_tmp(nome: String) -> String:
@@ -7423,18 +7440,137 @@ func _buriti_relink() -> void:
 					al.bp = nb
 
 
-## Depois de entrar (ou de receber): o que tem aqui é o que todos têm.
+## Depois de entrar: o que tem aqui é o que todos têm (e a base para juntar mudanças).
 func _sync_baseline() -> void:
 	for nome in SYNC_EVERY:
-		_sync_hash[nome] = _sync_get(nome).hash()
+		var txt := _sync_get(nome)
+		_sync_hash[nome] = txt.hash()
 		_sync_t[nome] = randf() * float(SYNC_EVERY[nome])
+		_sync_base0[nome] = JSON.parse_string(txt)
+		if not _sync_base.has(nome):
+			_sync_base[nome] = {}
+		if _mp_client():
+			_sync_base[nome][1] = _sync_base0[nome]      # o mundo veio do dono
 
 
-func _sync_receive(nome: String, txt: String) -> void:
+# ---- juntar as mudanças (em vez de um apagar a do outro) ----
+# Cada parte do mundo vai inteira. Antes, a que chegava por último substituía a daqui:
+# se os dois mexiam quase juntos, a mudança de um sumia (a tora pega voltava para o
+# chão e dava para pegar de novo; o que um fez o outro não via). Agora cada lado guarda
+# a última versão que recebeu de cada jogador (a base) e junta as três: o que mudou lá
+# (base -> recebido) entra aqui sem desfazer o que mudou aqui. Coisa apagada de um lado
+# fica apagada. Os dois mexeram no mesmo valor: vale o do dono (entre convidados, o de
+# id menor), igual nos dois lados.
+
+var _sync_base := {}               # parte -> {id do jogador -> última versão recebida dele}
+var _sync_base0 := {}              # parte -> versão do começo (base de quem ainda não mandou)
+
+
+func _sync_receive(nome: String, txt: String, quem := 1) -> void:
 	if not _ready_world or not SYNC_EVERY.has(nome):
 		return
-	_sync_set(nome, txt)
-	_sync_hash[nome] = _sync_get(nome).hash()       # o que ficou aqui agora (não manda de volta)
+	var r = JSON.parse_string(txt)
+	if r == null:
+		return
+	if not _sync_base.has(nome):
+		_sync_base[nome] = {}
+	var base = (_sync_base[nome] as Dictionary).get(quem, _sync_base0.get(nome))
+	_sync_base[nome][quem] = r
+	var l = JSON.parse_string(_sync_get(nome))
+	var m = r
+	if base != null and l != null:
+		m = _m3(base, l, r, quem < _my_id())
+	if l == null or not _jeq(m, l):
+		_sync_set(nome, txt if _jeq(m, r) else JSON.stringify(m))
+	if _jeq(m, r):
+		_sync_hash[nome] = _sync_get(nome).hash()      # igual ao de lá: não manda de volta
+	else:
+		_sync_hash[nome] = 0                           # tem coisa daqui que lá não tem: manda
+
+
+static func _jeq(a, b) -> bool:
+	return typeof(a) == typeof(b) and a == b
+
+
+## Junta três versões (base, daqui, de lá). rw: no empate vale a de lá.
+static func _m3(b, l, r, rw: bool):
+	if _jeq(l, r):
+		return l
+	if b != null and _jeq(l, b):
+		return r
+	if b != null and _jeq(r, b):
+		return l
+	if l is Dictionary and r is Dictionary:
+		var bd: Dictionary = b if b is Dictionary else {}
+		var out := {}
+		for k in l:
+			if r.has(k):
+				out[k] = _m3(bd.get(k), l[k], r[k], rw)
+			elif not (bd.has(k) and _jeq(bd[k], l[k])):
+				if not bd.has(k):
+					out[k] = l[k]                    # novo aqui
+				# (lá apagou e aqui mudou: apagado vale)
+		for k in r:
+			if not l.has(k) and not bd.has(k):
+				out[k] = r[k]                        # novo lá
+		return out
+	if l is Array and r is Array and _lista_obj(l) and _lista_obj(r):
+		return _m3_lista(b if b is Array else [], l, r, rw)
+	return r if rw else l
+
+
+## Lista de coisas (dicionários ou listas): cada uma tem uma identidade.
+static func _lista_obj(a: Array) -> bool:
+	for e in a:
+		if not (e is Dictionary or e is Array):
+			return false
+	return true
+
+
+## A identidade de uma coisa na lista: o id, ou o lugar (x, z), ou ela inteira.
+static func _ident(e) -> String:
+	if e is Dictionary:
+		for k in ["id", "uid"]:
+			if e.has(k) and not (e[k] is Dictionary or e[k] is Array):
+				if e.has("x") and e.has("z"):
+					break                            # (no chão, "id" é o tipo do item)
+				return "i" + str(e[k])
+		if e.has("x") and e.has("z") and not (e.x is Array):
+			return "p%.3f,%.3f" % [float(e.x), float(e.z)] + ("/" + str(e.id) if e.has("id") else "")
+		if e.has("pos") and e.pos is Array:
+			return "q" + JSON.stringify(e.pos)
+		return "j" + JSON.stringify(e)
+	if e is Array and e.size() >= 5 and (e[0] is float or e[0] is int) and (e[1] is float or e[1] is int):
+		return "a%.3f,%.3f" % [float(e[0]), float(e[1])]          # árvore, toco: pelo lugar
+	return "j" + JSON.stringify(e)
+
+
+static func _por_ident(a: Array) -> Dictionary:
+	var out := {}
+	var cnt := {}
+	for e in a:
+		var k := _ident(e)
+		var n := int(cnt.get(k, 0))
+		cnt[k] = n + 1
+		out[k + "#" + str(n)] = e
+	return out
+
+
+static func _m3_lista(b: Array, l: Array, r: Array, rw: bool) -> Array:
+	var B := _por_ident(b)
+	var L := _por_ident(l)
+	var R := _por_ident(r)
+	var out := []
+	for k in L:
+		if R.has(k):
+			out.append(_m3(B.get(k), L[k], R[k], rw))
+		elif not B.has(k):
+			out.append(L[k])                         # novo aqui
+		# (estava na base e lá sumiu: apagado vale)
+	for k in R:
+		if not L.has(k) and not B.has(k):
+			out.append(R[k])                         # novo lá
+	return out
 
 
 func _sync_tick(delta: float) -> void:
