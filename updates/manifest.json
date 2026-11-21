@@ -1,9 +1,9 @@
 {
-  "version": 147,
-  "file": "update_147.zip",
-  "size": 4856115,
-  "sha256": "4a1c231b44387dcfa797c4e4b678782c402ac309e5608bc08cca8805ae93ca49",
+  "version": 148,
+  "file": "update_148.zip",
+  "size": 4860906,
+  "sha256": "15efab1eca711b430140264d7a274f5182b5b5d7e64c1d97b87567cda8e110fd",
   "min_build": 1,
-  "notes": "Círculo branco no chão mostrando onde a pá e a cavadeira vão cavar; longe, o personagem anda até lá e cava",
+  "notes": "Mesa de argila nas plantas: despejar o balde de argila pelo olho e limpar a sujeira sentado no banquinho (sai argila limpa)",
   "date": "2026-11-21"
 }
