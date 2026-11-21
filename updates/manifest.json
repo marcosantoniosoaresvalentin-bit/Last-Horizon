@@ -1,9 +1,9 @@
 {
-  "version": 161,
-  "file": "update_161.zip",
-  "size": 4901356,
-  "sha256": "733d3c010b079bebb6e4f0a51ec45ebd7c2e446614acfb5369839cd84baab2fd",
+  "version": 162,
+  "file": "update_162.zip",
+  "size": 4903401,
+  "sha256": "5aead3b902ad292bb45d9ba326c2f218e73a8ebb11cd874a3e69fcc31883622a",
   "min_build": 1,
-  "notes": "Rachar lenha no cepo do tamanho que quiser: risco vermelho no topo da madeira",
+  "notes": "Animais sem limite: tamanduás andam pelo mapa todo, araras pousam no chão para comer e só se assustam de perto, a natureza se controla pela comida",
   "date": "2026-11-21"
 }
