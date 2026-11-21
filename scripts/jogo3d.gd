@@ -8048,7 +8048,8 @@ func _maq_ctx_press(act: String) -> void:
 			Sons.play_at(self, "baque", _player.position, -6.0)
 			var sob := float(r.get("sobra", 0.0))
 			var pw2: Dictionary = _maq.pending_work(mi)
-			_show_toast("Peça no lugar! " + ("Sobrou %d cm para fora: corte a ponta. " % roundi(sob * 100.0) if sob > 0.015 else "") + ("Agora fure e ponha %d pino%s nas juntas dela. " % [pw2.furos, "" if int(pw2.furos) == 1 else "s"] if int(pw2.furos) > 0 else "") + ("Faltam %d peças." % falta if falta > 0 else "Todas as madeiras estão no lugar."))
+			var depois: bool = sob > 0.015 and not _maq.sobra_pode(mi, int(r.i))
+			_show_toast("Peça no lugar! " + ("Sobrou %d cm para fora: corte a ponta%s. " % [roundi(sob * 100.0), " depois de pôr as tábuas de cima" if depois else ""] if sob > 0.015 else "") + ("Agora corte rente as pontas que sobraram embaixo. " if int(pw2.pontas) > 0 and sob <= 0.015 else "") + ("Agora fure e ponha %d pino%s nas juntas dela. " % [pw2.furos, "" if int(pw2.furos) == 1 else "s"] if int(pw2.furos) > 0 else "") + ("Faltam %d peças." % falta if falta > 0 else "Todas as madeiras estão no lugar."))
 		"planta_lamina":
 			var lit2 := str(Maquinas.TIPOS[_maq.plantas[mi].tipo].get("lamina_item", "lamina_serra"))
 			if not teste:

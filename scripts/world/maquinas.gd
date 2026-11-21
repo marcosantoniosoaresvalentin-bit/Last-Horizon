@@ -103,8 +103,8 @@ const TIPOS := {
 		"pecas": [
 			["tora", 0.7, Vector3(0.0, 0.35, 0.34), "y", 0.08],      # 0 pé da mesa
 			["tora", 0.7, Vector3(0.0, 0.35, -0.34), "y", 0.08],     # 1 pé da mesa
-			["tabua", 0.75, Vector3(0.0, 0.735, 0.34), "x", 0.15],   # 2 travessa: tábua em cima do pé 0
-			["tabua", 0.75, Vector3(0.0, 0.735, -0.34), "x", 0.15],  # 3 travessa: tábua em cima do pé 1
+			["tabua", 0.52, Vector3(0.0, 0.735, 0.34), "x", 0.15],   # 2 travessa: tábua em cima do pé 0 (a largura do tampo)
+			["tabua", 0.52, Vector3(0.0, 0.735, -0.34), "x", 0.15],  # 3 travessa: tábua em cima do pé 1
 			["tabua", 1.0, Vector3(-0.13, 0.805, 0.0), "z", 0.15],   # 4 tampo (do lado do banco)
 			["tabua", 1.0, Vector3(0.13, 0.805, 0.0), "z", 0.15],    # 5 tampo (do outro lado)
 			["tora", 0.42, Vector3(-0.72, 0.21, 0.0), "y", 0.09],    # 6 pé do banquinho
@@ -119,6 +119,8 @@ const TIPOS := {
 		],
 		"area": Rect2(-0.95, -0.6, 1.25, 1.2),
 		"mesa": true,
+		# a ponta que sobra da travessa só se corta com o tampo já em cima (corta rente)
+		"cortar_depois": {2: [4, 5], 3: [4, 5]},
 	},
 }
 
@@ -415,6 +417,15 @@ func sobra_info(mi: int, si: int) -> Dictionary:
 	return {"pos": xf * cut, "mid": xf * (cut + b.x * e * 0.5), "deitada": str(pc[3]) != "y", "len": e}
 
 
+## Já dá para cortar a ponta dessa peça? (algumas só depois das peças de cima no lugar)
+func sobra_pode(mi: int, si: int) -> bool:
+	var dep: Dictionary = TIPOS[plantas[mi].tipo].get("cortar_depois", {})
+	for d in dep.get(si, []):
+		if not bool(plantas[mi].pecas[int(d)]):
+			return false
+	return true
+
+
 ## Peça com sobra perto (para cortar a ponta): [planta, peça] ou [].
 func sobra_near(pos: Vector3, reach := 1.8) -> Array:
 	var best := []
@@ -422,7 +433,7 @@ func sobra_near(pos: Vector3, reach := 1.8) -> Array:
 	for mi in plantas.size():
 		var sob: Array = plantas[mi].get("sobra", [])
 		for si in sob.size():
-			if float(sob[si]) <= 0.0:
+			if float(sob[si]) <= 0.0 or not sobra_pode(mi, si):
 				continue
 			var w: Vector3 = sobra_info(mi, si).pos
 			var d := Vector2(w.x - pos.x, w.z - pos.z).length()
@@ -505,9 +516,10 @@ func pending_work(mi: int) -> Dictionary:
 			out.furos += 1
 		elif int(p.pinos[ji]) == 1:
 			out.pinos += 1
-	for v in p.get("sobra", []):
-		if float(v) > 0.0:
-			out.pontas += 1
+	var sob: Array = p.get("sobra", [])
+	for i in sob.size():
+		if float(sob[i]) > 0.0 and sobra_pode(mi, i):
+			out.pontas += 1           # (a que só se corta depois, com o de cima no lugar, não trava)
 	return out
 
 
