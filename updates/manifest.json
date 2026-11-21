@@ -1,9 +1,9 @@
 {
-  "version": 154,
-  "file": "update_154.zip",
-  "size": 4870870,
-  "sha256": "116ac5362ce456a1c0f8f8bab8700d1df701679304fd2f86794bf11217085a25",
+  "version": 155,
+  "file": "update_155.zip",
+  "size": 4876996,
+  "sha256": "7314d4510180c22f2ce0ffbdf756601a84473063ad1fc0dc58ab2d0b9656f406",
   "min_build": 1,
-  "notes": "Cabaça de barro: encher de água nas lagoas, rios e nascentes (no mar não) e beber pela mochila",
+  "notes": "Peneira de água (filtro): pedrinhas, carvão, areia da praia e tela de fibra; água filtrada na cabaça; água do rio sem filtrar pode fazer mal",
   "date": "2026-11-21"
 }
