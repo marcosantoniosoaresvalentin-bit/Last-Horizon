@@ -470,7 +470,7 @@ var _split_rng := RandomNumberGenerator.new()
 const BALDE_VOL := 0.024          # cabe uns 24 litros
 const BALDE_KG := 25.0            # mais que isso não dá para carregar pela alça
 const PAZADA := 0.006             # uma pazada: uns 6 litros
-const DENS := {"terra": 1500.0, "argila": 1800.0, "agua": 1000.0, "barro": 1700.0}
+const DENS := {"terra": 1500.0, "argila": 1800.0, "agua": 1000.0, "barro": 1700.0, "areia": 1600.0}
 const REBOCOS_POR_BALDE := 8      # um balde de barro reboca uns 8 pedaços de tábua
 const SWIM_DEPTH := 1.25          # água mais funda que isso: nada (os pés não acham o fundo)
 const SWIM_SINK := 1.32           # nadando: os pés ficam isso abaixo da superfície (cabeça para fora)
@@ -1464,6 +1464,7 @@ func _process(delta: float) -> void:
 	_update_dig(delta)
 	_update_pour(delta)
 	_dig_ring_tick()
+	_filtro_tick(delta)
 	_mp_tick(delta)
 	_sync_tick(delta)
 	_coop_tick(delta)
@@ -1557,7 +1558,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1607,6 +1608,7 @@ func _load_player() -> void:
 				_add_ground(str(g.id), int(g.get("qtd", 1)), float(g.get("x", 0.0)), float(g.get("z", 0.0)), float(g.get("r", 0.0)), g.get("dur", []))
 	_pa_full = bool(d.get("pa_cheia", false))
 	_pa_tipo = str(d.get("pa_tipo", "terra"))
+	_agua_suja = int(d.get("agua_suja", 0))
 	var bc = d.get("balde_carga", {})
 	_balde_carga = bc if bc is Dictionary and bc.has("vol") else {}
 	equip(str(d.get("mao", "")))
@@ -2137,6 +2139,7 @@ func _water_spot() -> Vector3:
 # na mesma lista da durabilidade). USAR na mochila bebe um gole; acabou, vira a cabaça
 # vazia de novo. (A sede vem depois: por enquanto só bebe.)
 const CABACA_FUNDO := 0.12
+var _agua_suja := 0               # goles de água sem filtrar (a doença vem com a sede, depois)
 
 ## Água doce na frente, funda o bastante para mergulhar a boca da cabaça.
 func _cab_spot() -> Vector3:
@@ -2172,27 +2175,44 @@ func _encher_cabaca() -> void:
 		add_item("moringa_agua", 1)
 		_dur_fix("moringa_agua")
 		_update_inventory()
-		_show_toast("Cabaça cheia de água (uns 2 litros, 8 goles). Para beber: Mochila → USAR.")
+		_show_toast("Cabaça cheia de água do rio (8 goles). Sem filtrar pode fazer mal: o certo é filtrar na peneira de água.")
 
 
-## Bebe um gole da cabaça (a primeira). Devolve a mensagem.
-func beber_cabaca() -> String:
-	var l := _dur_fix("moringa_agua")
+## Bebe um gole da cabaça (a primeira). Devolve a mensagem. Do rio (sem filtrar) mata
+## a sede do mesmo jeito, mas fica contado: pode trazer doença (vem com a sede).
+func beber_cabaca(id := "moringa_agua") -> String:
+	var l := _dur_fix(id)
 	if l.is_empty():
 		return "Não tem cabaça com água."
+	var suja := id == "moringa_agua"
+	if suja:
+		_agua_suja += 1
 	l[0] = int(l[0]) - 1
 	Sons.play_at(self, "agua", _player.position + Vector3.UP * 1.5, -14.0, 1.9)
+	var aviso := " Água sem filtrar: pode ter bactérias e fazer mal (filtre na peneira de água)." if suja else ""
 	if int(l[0]) <= 0:
 		l.pop_front()
-		_dur["moringa_agua"] = l
-		remove_item("moringa_agua", 1)
+		_dur[id] = l
+		remove_item(id, 1)
 		add_item("moringa_barro", 1)
-		_dur_fix("moringa_agua")
+		_dur_fix(id)
 		_update_inventory()
-		return "Você bebeu o último gole. A cabaça ficou vazia: encha de novo numa lagoa ou nascente."
-	_dur["moringa_agua"] = l
+		return "Você bebeu o último gole. A cabaça ficou vazia." + aviso
+	_dur[id] = l
 	_update_inventory()
-	return "Você bebeu um gole de água fresquinha (ainda tem %d gole%s nessa cabaça)." % [int(l[0]), "" if int(l[0]) == 1 else "s"]
+	return ("Você bebeu um gole de água do rio (ainda tem %d gole%s)." if suja else "Você bebeu um gole de água filtrada, limpinha (ainda tem %d gole%s).") % [int(l[0]), "" if int(l[0]) == 1 else "s"] + aviso
+
+
+## Chão de areia da praia (perto do mar, a areia que a água deixa)?
+func _praia(at: Vector3) -> bool:
+	var cell := Vector2i(int(at.x / CELL), int(at.z / CELL))
+	var sd: Dictionary = sim.soil_data(cell)
+	if sd.is_empty() or float(sd.sand) < 0.5:
+		return false
+	for o in [Vector2(0, 0), Vector2(8, 0), Vector2(-8, 0), Vector2(0, 8), Vector2(0, -8), Vector2(14, 14), Vector2(-14, -14), Vector2(14, -14), Vector2(-14, 14)]:
+		if _is_sea(at.x + o.x, at.z + o.y):
+			return true
+	return false
 
 
 ## O jogador mexeu no controle neste quadro?
@@ -4416,6 +4436,9 @@ func _pa_hit() -> void:
 		var depth_now := surface_at(at.x, at.z) - y_old
 		var mound_clay: bool = was_clay
 		_pa_tipo = "argila" if (mound_clay or (not sd.is_empty() and float(sd.clay) >= 0.35 and depth_now < 1.2)) else "terra"
+		# na praia (chão de areia perto do mar): a pá sai cheia de areia
+		if _pa_tipo == "terra" and _praia(at):
+			_pa_tipo = "areia"
 		if _pa_tipo == "argila":
 			sim.dig(cell, PAZADA * DENS.argila * 0.004)     # gasta um pouquinho da argila da beira
 		if _pa_dirt:
@@ -4580,6 +4603,8 @@ func _update_balde_fill(mi: MeshInstance3D, c: Dictionary) -> void:
 			row.append(Vector3(x, y, z))
 		pts.append(row)
 	var base := Color(0.62, 0.3, 0.16) if clay else Color(0.36, 0.25, 0.16)
+	if str(c.tipo) == "areia":
+		base = Color(0.8, 0.7, 0.52)               # areia da praia
 	if mud:
 		base = Color(0.2, 0.15, 0.11)             # barro com fibra (molhado)
 	var rng := RandomNumberGenerator.new()
@@ -4756,7 +4781,7 @@ func _update_pour(delta: float) -> void:
 
 ## Torrões caindo da boca do balde até o chão (ou até o outro balde).
 func _falling_lumps(from: Vector3, to: Vector3, tipo: String) -> void:
-	var col := Color(0.55, 0.22, 0.1) if tipo == "argila" else Color(0.3, 0.2, 0.12)
+	var col := Color(0.55, 0.22, 0.1) if tipo == "argila" else (Color(0.78, 0.68, 0.5) if tipo == "areia" else Color(0.3, 0.2, 0.12))
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = col
 	mat.roughness = 0.8
@@ -9905,6 +9930,160 @@ func _reb_tick(delta: float) -> void:
 			_reb_go(nxt)
 
 
+# ================== PENEIRA DE ÁGUA (FILTRO) ==================
+# Pelo olho da peneira pronta, na ordem: pôr as pedrinhas (6 pedras do chão), o carvão
+# (3, da fogueira), a areia (um balde de areia da praia) e a tela de fibra (craft). Põe
+# a vasilha ou bacia de barro embaixo. Com o balde de água na mão, "Jogar água": ela
+# empoça em cima e vai passando devagar pelas camadas, pingando limpa na vasilha. Daí
+# "Encher a cabaça": a cabaça sai com água filtrada (segura para beber).
+
+func _filtro_opts(mi: int) -> Array:
+	var f: Dictionary = _maq.filtro_of(mi)
+	var op := []
+	match _maq.filtro_falta(mi):
+		"pedra": op.append(["pedrinhas", "Pôr pedrinhas"])
+		"carvao": op.append(["carvao", "Pôr carvão"])
+		"areia": op.append(["areia", "Pôr areia"])
+		"tela": op.append(["tela", "Pôr a tela"])
+	if str(f.pote) == "":
+		op.append(["vasilha", "Pôr a vasilha"])
+	if _maq.filtro_falta(mi) == "" and str(f.pote) != "" and _mao == "balde" and str(_balde_carga.get("tipo", "")) == "agua":
+		op.append(["agua_filtro", "Jogar água"])
+	if str(f.pote) != "" and float(_maq.filtro_agora(mi)[1]) >= 0.25:
+		op.append(["encher_limpa", "Encher a cabaça"])
+	return op
+
+
+func _filtro_pick(mi: int, acao: String) -> void:
+	var f: Dictionary = _maq.filtro_of(mi)
+	var at: Vector3 = _maq.xform(mi) * Vector3(0, 0.9, 0)
+	var camada := {"pedrinhas": "pedra", "carvao": "carvao", "areia": "areia", "tela": "tela"}
+	if camada.has(acao) and _maq.filtro_falta(mi) != camada[acao]:
+		return                       # as camadas vão na ordem (de baixo para cima)
+	match acao:
+		"pedrinhas":
+			var tem := item_qtd("pedra")
+			var falta := Maquinas.FILTRO_PEDRAS - int(f.pedra)
+			if tem <= 0 and not teste:
+				_show_toast("Precisa de pedrinhas: pegue as pedras soltas no chão (faltam %d)." % falta)
+				return
+			var n := falta if teste else mini(tem, falta)
+			if not teste:
+				remove_item("pedra", n)
+				_update_inventory()
+			_maq.filtro_por(mi, "pedra", n)
+			Sons.play_at(self, "pedra_bate", at, -6.0, 1.3)
+			var f2 := Maquinas.FILTRO_PEDRAS - int(f.pedra)
+			_show_toast(("Pedrinhas no fundo da caixa (%d de %d). " % [int(f.pedra), Maquinas.FILTRO_PEDRAS]) + ("Traga mais %d." % f2 if f2 > 0 else "Agora o carvão (da fogueira)."))
+		"carvao":
+			var tem2 := item_qtd("carvao")
+			var falta2 := Maquinas.FILTRO_CARVAO - int(f.carvao)
+			if tem2 <= 0 and not teste:
+				_show_toast("Precisa de carvão (faltam %d). O carvão sai da fogueira (vem em breve)." % falta2)
+				return
+			var n2 := falta2 if teste else mini(tem2, falta2)
+			if not teste:
+				remove_item("carvao", n2)
+				_update_inventory()
+			_maq.filtro_por(mi, "carvao", n2)
+			Sons.play_at(self, "pedra_bate", at, -12.0, 1.8)
+			_show_toast("Carvão por cima das pedrinhas (%d de %d)." % [int(f.carvao), Maquinas.FILTRO_CARVAO] + (" Agora um balde de areia da praia." if int(f.carvao) >= Maquinas.FILTRO_CARVAO else ""))
+		"areia":
+			if not teste and (_mao != "balde" or str(_balde_carga.get("tipo", "")) != "areia"):
+				_show_toast("Traga um balde de areia: cave a areia da praia (perto do mar) com a pá e encha o balde.")
+				return
+			var cap := minf(BALDE_VOL, BALDE_KG / float(DENS.areia))
+			var fa := 1.0 if teste else float(_balde_carga.get("vol", 0.0)) / cap
+			if not teste:
+				_balde_carga = {}
+				_update_balde_fill(_balde_fill, _balde_carga)
+				_update_inventory()
+			_maq.filtro_por(mi, "areia", fa)
+			Sons.play_at(self, "cavar", at, -2.0, 1.1)
+			_show_toast("Areia por cima do carvão." + (" Agora a tela de fibra (faça no craft com 6 fibras de buriti)." if _maq.filtro_falta(mi) == "tela" else (" Falta mais areia: traga outro balde." if _maq.filtro_falta(mi) == "areia" else "")))
+		"tela":
+			if item_qtd("tela_fibra") <= 0 and not teste:
+				_show_toast("Precisa da tela de fibra: faça no craft com 6 fibras de buriti.")
+				return
+			if not teste:
+				remove_item("tela_fibra", 1)
+				_update_inventory()
+			_maq.filtro_por(mi, "tela")
+			Sons.play_at(self, "folha_cai", at, -8.0, 1.2)
+			_show_toast("Tela por cima da areia. A peneira está pronta!" + (" Ponha a vasilha de barro embaixo." if str(f.pote) == "" else " Jogue a água do balde por cima."))
+		"vasilha":
+			var id := "bacia_barro" if item_qtd("bacia_barro") > 0 else ("vasilha_barro" if item_qtd("vasilha_barro") > 0 else "")
+			if id == "" and teste:
+				id = "bacia_barro"
+			if id == "":
+				_show_toast("Precisa de uma vasilha ou bacia de barro (faça no torno de oleiro).")
+				return
+			if not teste:
+				remove_item(id, 1)
+				_update_inventory()
+			_maq.filtro_pote(mi, id)
+			Sons.play_at(self, "pedra_bate", at + Vector3.DOWN * 0.8, -10.0, 0.9)
+			_show_toast("%s embaixo da peneira (cabem uns %d litros)." % [Itens.nome(id), int(Maquinas.POTE_L[id])])
+		"agua_filtro":
+			if _mao != "balde" or str(_balde_carga.get("tipo", "")) != "agua":
+				_show_toast("Traga o balde com água (de lagoa, rio ou nascente) e escolha Jogar água.")
+				return
+			var litros := float(_balde_carga.get("vol", 0.0)) * 1000.0
+			var foi: float = _maq.filtro_agua(mi, litros)
+			var sobra := litros - foi
+			_balde_carga = {} if sobra < 0.5 else {"tipo": "agua", "vol": sobra / 1000.0}
+			_update_balde_fill(_balde_fill, _balde_carga)
+			_update_inventory()
+			_face_to(at)
+			Sons.play_at(self, "agua", at, 2.0, 1.0)
+			_show_toast("Água em cima da peneira: vai passando devagar pela areia, carvão e pedrinhas e pinga limpa na vasilha.")
+		"encher_limpa":
+			var mx := Itens.dur_max("moringa_limpa")
+			var l := _dur_fix("moringa_limpa")
+			var alvo := -1
+			for i in l.size():
+				if int(l[i]) < mx:
+					alvo = i
+					break
+			if alvo < 0 and item_qtd("moringa_barro") <= 0:
+				_show_toast("Precisa de uma cabaça vazia (moringa de barro) para encher.")
+				return
+			var precisa := 2.0 if alvo < 0 else float(mx - int(l[alvo])) * 0.25
+			var tirou: float = _maq.filtro_tirar(mi, precisa)
+			var goles := int(floor(tirou / 0.25 + 0.001))
+			if goles <= 0:
+				return
+			if alvo < 0:
+				remove_item("moringa_barro", 1)
+				add_item("moringa_limpa", 1)
+				l = _dur_fix("moringa_limpa")
+				alvo = l.size() - 1
+				l[alvo] = goles
+			else:
+				l[alvo] = int(l[alvo]) + goles
+			_dur["moringa_limpa"] = l
+			_update_inventory()
+			Sons.play_at(self, "agua", at + Vector3.DOWN * 0.8, -4.0, 1.5)
+			_show_toast("Cabaça com água filtrada (%d de 8 goles). Essa é segura para beber." % int(l[alvo]))
+	_act_check = 0.0
+
+
+## A água pingando nas peneiras perto (só o desenho; a conta é pelo relógio do jogo).
+var _filtro_t := 0.0
+
+func _filtro_tick(delta: float) -> void:
+	_filtro_t -= delta
+	if _filtro_t > 0.0 or _maq == null:
+		return
+	_filtro_t = 0.15
+	for mi in _maq.plantas.size():
+		if str(_maq.plantas[mi].tipo) != "filtro_agua" or not _maq.plantas[mi].has("filtro"):
+			continue
+		var c: Vector3 = _maq.xform(mi).origin
+		if c.distance_to(_player.position) < 40.0:
+			_maq.filtro_visual(mi)
+
+
 # ================== TORNO DE OLEIRO: MODELAR A ARGILA ==================
 # Pelo olho do torno pronto, "Modelar": senta no banquinho e escolhe o que fazer
 # (vasilha, garrafa, cabaça/moringa, bacia, filtro de barro); as bolas de argila
@@ -10841,7 +11020,7 @@ func _olho_tick() -> void:
 		p = _buritis.caido_near(_player.position, 2.6)      # a copa do buriti derrubado
 	if p.is_empty() and _maq:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
-		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica"] and _maq.pronta(mi):
+		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua"] and _maq.pronta(mi):
 			p = {"maq": mi}
 	if p.is_empty() and _barr:
 		var bi: int = _barr.near(_player.position, 2.6)
@@ -10858,6 +11037,8 @@ func _olho_tick() -> void:
 func _olho_opts(p: Dictionary) -> Array:
 	var out := []
 	if p.has("maq"):
+		if str(_maq.plantas[int(p.maq)].tipo) == "filtro_agua":
+			return _filtro_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "torno_ceramica":
 			return [["modelar", "Modelar"]]
 		if str(_maq.plantas[int(p.maq)].tipo) == "mesa_argila":
@@ -10884,6 +11065,8 @@ func _olho_opts(p: Dictionary) -> Array:
 ## Onde o olho fica: no tronco (na altura do peito), do lado de quem está olhando.
 func _olho_world(p: Dictionary) -> Vector3:
 	if p.has("maq"):
+		if str(_maq.plantas[int(p.maq)].tipo) == "filtro_agua":
+			return _maq.xform(int(p.maq)) * Vector3(0.0, 1.2, 0.0)
 		if str(_maq.plantas[int(p.maq)].tipo) == "torno_ceramica":
 			return _maq.xform(int(p.maq)) * Vector3(0.0, 1.05, 0.0)
 		if str(_maq.plantas[int(p.maq)].tipo) == "mesa_argila":
@@ -11081,6 +11264,9 @@ func _olho_pick(acao: String) -> void:
 			return
 		"modelar":
 			_torno_start(int(p.maq))
+			return
+		"pedrinhas", "carvao", "areia", "tela", "vasilha", "agua_filtro", "encher_limpa":
+			_filtro_pick(int(p.maq), acao)
 			return
 		"despejar_argila":
 			_mesa_despejar(int(p.maq))

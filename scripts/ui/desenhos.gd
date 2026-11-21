@@ -281,13 +281,41 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95, true)
 		"acao_derrubar":
 			fell_icon(ci, c, s)
+		"tela_fibra", "acao_tela":
+			# a tela quadrada trançada de fibra clara
+			var q0 := c + Vector2(-38, -38) * u
+			ci.draw_rect(Rect2(q0, Vector2(76, 76) * u), Color(0.42, 0.33, 0.18, 0.35))
+			for k in 9:
+				var o := (k * 9.5) * u
+				ci.draw_line(q0 + Vector2(o, 0), q0 + Vector2(o, 76 * u), Color(0.86, 0.78, 0.55), 2.2 * u, true)
+				ci.draw_line(q0 + Vector2(0, o), q0 + Vector2(76 * u, o), Color(0.8, 0.72, 0.5), 2.2 * u, true)
+			ci.draw_rect(Rect2(q0, Vector2(76, 76) * u), Color(0.5, 0.36, 0.2), false, 4.0 * u)
+		"carvao", "acao_carvao":
+			for q in [[-18, 10, 20.0], [14, 14, 17.0], [0, -12, 19.0], [24, -16, 12.0], [-28, -10, 12.0]]:
+				var cc := c + Vector2(q[0], q[1]) * u
+				var rr := float(q[2]) * u
+				ci.draw_colored_polygon(PackedVector2Array([cc + Vector2(-rr, 0), cc + Vector2(-rr * 0.4, -rr * 0.9), cc + Vector2(rr * 0.6, -rr * 0.7), cc + Vector2(rr, 0.1 * rr), cc + Vector2(rr * 0.3, rr * 0.8), cc + Vector2(-rr * 0.7, rr * 0.6)]), Color(0.08, 0.08, 0.09))
+				ci.draw_line(cc + Vector2(-rr * 0.4, -rr * 0.5), cc + Vector2(rr * 0.3, -rr * 0.4), Color(0.35, 0.35, 0.38), 1.5 * u, true)
+		"acao_pedrinhas":
+			for q in [[-20, 14, 13.0], [8, 18, 11.0], [24, 4, 12.0], [-4, -6, 12.0], [-26, -12, 9.0], [14, -18, 10.0]]:
+				ci.draw_circle(c + Vector2(q[0], q[1]) * u, float(q[2]) * u, Color(0.5, 0.48, 0.44))
+				ci.draw_arc(c + Vector2(q[0], q[1]) * u, float(q[2]) * u, 0, TAU, 14, ink, 1.5 * u, true)
+		"acao_areia":
+			balde(ci, c + Vector2(-10, -6) * u, s * 0.75)
+			ci.draw_colored_polygon(P.call([[-30, -30], [10, -30], [6, -22], [-26, -22]]), Color(0.82, 0.72, 0.52))
+		"acao_vasilha":
+			load("res://scripts/world/olaria.gd").icone(ci, "bacia_barro", c, s)
+		"acao_agua_filtro":
+			balde(ci, c + Vector2(-12, -6) * u, s * 0.7)
+			for k in 3:
+				ci.draw_line(c + Vector2(14 + k * 6, -10) * u, c + Vector2(18 + k * 6, 38) * u, Color(0.45, 0.65, 0.88), 3.5 * u, true)
 		"vasilha_barro", "garrafa_barro", "moringa_barro", "bacia_barro", "filtro_barro":
 			load("res://scripts/world/olaria.gd").icone(ci, id, c, s)
-		"moringa_agua", "acao_encher_cabaca":
+		"moringa_agua", "moringa_limpa", "acao_encher_cabaca":
 			load("res://scripts/world/olaria.gd").icone(ci, "moringa_barro", c + Vector2(-6, 2) * u, s * 0.92)
-			# a gota de água
+			# a gota de água (do rio: meio barrenta; filtrada: azul clarinha com o brilho)
 			var gc := c + Vector2(30, -18) * u
-			ci.draw_colored_polygon(PackedVector2Array([gc + Vector2(0, -16) * u, gc + Vector2(9, 2) * u, gc + Vector2(6, 9) * u, gc + Vector2(0, 11) * u, gc + Vector2(-6, 9) * u, gc + Vector2(-9, 2) * u]), Color(0.35, 0.62, 0.92))
+			ci.draw_colored_polygon(PackedVector2Array([gc + Vector2(0, -16) * u, gc + Vector2(9, 2) * u, gc + Vector2(6, 9) * u, gc + Vector2(0, 11) * u, gc + Vector2(-6, 9) * u, gc + Vector2(-9, 2) * u]), Color(0.5, 0.55, 0.42) if id == "moringa_agua" else Color(0.35, 0.62, 0.92))
 			ci.draw_circle(gc + Vector2(-2.5, 3) * u, 2.5 * u, Color(0.8, 0.92, 1.0))
 		"acao_modelar":
 			# a mesa redonda do torno e o pote em cima

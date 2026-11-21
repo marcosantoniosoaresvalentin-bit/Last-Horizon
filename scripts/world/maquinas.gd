@@ -157,7 +157,47 @@ const TIPOS := {
 		"area": Rect2(-1.25, -0.45, 1.7, 0.9),
 		"torno": true,
 	},
+	# Peneira de água (filtro artesanal): quatro pés com duas tábuas em cima, e nelas a
+	# caixa: fundo de duas tábuas (com a fresta no meio, por onde a água pinga) e quatro
+	# tábuas em pé de lado. Dentro, de baixo para cima: pedrinhas, carvão, areia e a tela
+	# de fibra. A água do balde jogada em cima passa devagar e pinga limpa na vasilha de
+	# barro embaixo.
+	"filtro_agua": {
+		"nome": "Peneira de Água",
+		"desc": "Filtro artesanal: caixa de tábuas em quatro pés. Dentro vão pedrinhas, carvão e areia do mar, com a tela de fibra por cima; embaixo, uma vasilha ou bacia de barro. A água do balde jogada em cima sai limpa e segura para beber.",
+		"pecas": [
+			["tora", 0.6, Vector3(0.22, 0.3, 0.22), "y", 0.05],        # 0 pé
+			["tora", 0.6, Vector3(0.22, 0.3, -0.22), "y", 0.05],       # 1 pé
+			["tora", 0.6, Vector3(-0.22, 0.3, 0.22), "y", 0.05],       # 2 pé
+			["tora", 0.6, Vector3(-0.22, 0.3, -0.22), "y", 0.05],      # 3 pé
+			["tabua", 0.56, Vector3(0.0, 0.635, 0.22), "x", 0.14],     # 4 tábua em cima dos pés 0 e 2
+			["tabua", 0.56, Vector3(0.0, 0.635, -0.22), "x", 0.14],    # 5 tábua em cima dos pés 1 e 3
+			["tabua", 0.56, Vector3(-0.11, 0.705, 0.0), "z", 0.13],    # 6 fundo da caixa
+			["tabua", 0.56, Vector3(0.11, 0.705, 0.0), "z", 0.13],     # 7 fundo da caixa
+			["tabua", 0.5, Vector3(0.0, 0.86, 0.2), "x_lado", 0.14],   # 8 lado da frente
+			["tabua", 0.5, Vector3(0.0, 0.86, -0.2), "x_lado", 0.14],  # 9 lado de trás
+			["tabua", 0.36, Vector3(0.23, 0.86, 0.0), "z_lado", 0.14], # 10 lado direito
+			["tabua", 0.36, Vector3(-0.23, 0.86, 0.0), "z_lado", 0.14],# 11 lado esquerdo
+		],
+		"pinos": [
+			[[0, 4], Vector3(0.22, 0.62, 0.22)], [[2, 4], Vector3(-0.22, 0.62, 0.22)],
+			[[1, 5], Vector3(0.22, 0.62, -0.22)], [[3, 5], Vector3(-0.22, 0.62, -0.22)],
+			[[4, 6], Vector3(-0.11, 0.69, 0.22)], [[4, 7], Vector3(0.11, 0.69, 0.22)],
+			[[5, 6], Vector3(-0.11, 0.69, -0.22)], [[5, 7], Vector3(0.11, 0.69, -0.22)],
+			[[8, 10], Vector3(0.23, 0.86, 0.225), Vector3(0, 0, 1)], [[8, 11], Vector3(-0.23, 0.86, 0.225), Vector3(0, 0, 1)],
+			[[9, 10], Vector3(0.23, 0.86, -0.225), Vector3(0, 0, -1)], [[9, 11], Vector3(-0.23, 0.86, -0.225), Vector3(0, 0, -1)],
+		],
+		"area": Rect2(-0.45, -0.45, 0.9, 0.9),
+		"filtro": true,
+	},
 }
+
+const FILTRO_FUNDO := 0.74       # em cima das tábuas do fundo da caixa
+const FILTRO_PEDRAS := 6
+const FILTRO_CARVAO := 3
+const FILTRO_CIMA_MAX := 24.0    # litros de água que cabem em cima da areia
+const FILTRO_VAZAO := 0.06       # litros que passam pelas camadas a cada passo do relógio (6 por segundo)
+const POTE_L := {"vasilha_barro": 3.0, "bacia_barro": 8.0}
 
 const TORNO_MESA := 0.76         # em cima da mesa giratória do torno (m)
 const MESA_TOPO := 0.84          # em cima do tampo (m)
@@ -1003,6 +1043,10 @@ func _rebuild() -> void:
 				mk.material_override = _mark_mat
 				mk.position = sg2[1]
 				root.add_child(mk)
+		if bool(t.get("filtro", false)):
+			_draw_filtro(mi, root, nd)
+			_nodes[mi] = nd
+			continue
 		if bool(t.get("torno", false)):
 			if pronta(mi):
 				nd["biela"] = _stick(Vector3(-0.2, 0.06, 0.0), Vector3(0.2, 0.06, 0.0), 0.018)
@@ -1113,6 +1157,242 @@ func _animate(mi: int, dy: float) -> void:
 		var butt := Vector3(-2.0, 2.66, 0.0)
 		var ph := asin(clampf(dy / 2.0, -0.9, 0.9))
 		(nd.p_5 as Node3D).transform = Transform3D(Basis(Vector3.BACK, ph), butt) * Transform3D(Basis(), -butt) * (nd.t_5 as Transform3D)
+
+
+# ---------- peneira de água ----------
+
+func filtro_of(mi: int) -> Dictionary:
+	var p: Dictionary = plantas[mi]
+	if not p.has("filtro"):
+		p["filtro"] = {"pedra": 0, "carvao": 0, "areia": 0.0, "tela": false, "pote": "", "cima": 0.0, "pote_l": 0.0, "t0": 0}
+	return p.filtro
+
+
+## O que falta pôr (na ordem): pedra, carvao, areia, tela; "" se está tudo.
+func filtro_falta(mi: int) -> String:
+	var f := filtro_of(mi)
+	if int(f.pedra) < FILTRO_PEDRAS:
+		return "pedra"
+	if int(f.carvao) < FILTRO_CARVAO:
+		return "carvao"
+	if float(f.areia) < 0.6:
+		return "areia"
+	if not bool(f.tela):
+		return "tela"
+	return ""
+
+
+func filtro_por(mi: int, what: String, n := 1.0) -> void:
+	var f := filtro_of(mi)
+	match what:
+		"pedra": f.pedra = mini(FILTRO_PEDRAS, int(f.pedra) + int(n))
+		"carvao": f.carvao = mini(FILTRO_CARVAO, int(f.carvao) + int(n))
+		"areia": f.areia = minf(1.2, float(f.areia) + n)
+		"tela": f.tela = true
+	_rebuild()
+
+
+## A água agora: [em cima, na vasilha]. Conta pelo relógio do jogo (o mesmo em todos
+## os jogadores) desde a última mudança, sem precisar mandar nada enquanto pinga.
+func filtro_agora(mi: int) -> Array:
+	var f := filtro_of(mi)
+	var cap: float = POTE_L.get(str(f.pote), 0.0)
+	var dt := maxf(0.0, float(int(_jogo.sim.steps) - int(f.get("t0", 0))))
+	var mv := 0.0
+	if str(f.pote) != "":
+		mv = clampf(minf(float(f.cima), FILTRO_VAZAO * dt), 0.0, maxf(0.0, cap - float(f.pote_l)))
+	return [float(f.cima) - mv, float(f.pote_l) + mv]
+
+
+## Fixa a água de agora (antes de jogar mais água ou tirar da vasilha).
+func _filtro_fixa(mi: int) -> void:
+	var f := filtro_of(mi)
+	var ag := filtro_agora(mi)
+	f.cima = snappedf(float(ag[0]), 0.001)
+	f.pote_l = snappedf(float(ag[1]), 0.001)
+	f.t0 = int(_jogo.sim.steps)
+
+
+## Joga água (litros) em cima da areia (o que não cabe escorre pela beira).
+func filtro_agua(mi: int, litros: float) -> float:
+	_filtro_fixa(mi)
+	var f := filtro_of(mi)
+	var cabe := minf(litros, FILTRO_CIMA_MAX - float(f.cima))
+	f.cima = float(f.cima) + cabe
+	filtro_visual(mi)
+	return cabe
+
+
+## Tira água limpa da vasilha (até litros); devolve quanto tirou.
+func filtro_tirar(mi: int, litros: float) -> float:
+	_filtro_fixa(mi)
+	var f := filtro_of(mi)
+	var tira := minf(litros, float(f.pote_l))
+	f.pote_l = float(f.pote_l) - tira
+	filtro_visual(mi)
+	return tira
+
+
+func filtro_pote(mi: int, id: String) -> void:
+	_filtro_fixa(mi)
+	filtro_of(mi).pote = id
+	_rebuild()
+
+
+## Só a água (a de cima, o fio pingando e a da vasilha), sem refazer a peneira.
+func filtro_visual(mi: int) -> void:
+	if not _nodes.has(mi):
+		return
+	var nd: Dictionary = _nodes[mi]
+	var f := filtro_of(mi)
+	var ag := filtro_agora(mi)
+	var cima := float(ag[0])
+	var pl := float(ag[1])
+	var topo := _filtro_topo(f)
+	if nd.has("agua_cima") and is_instance_valid(nd.agua_cima):
+		var h := clampf(cima / FILTRO_CIMA_MAX, 0.0, 1.0) * 0.06
+		(nd.agua_cima as Node3D).visible = cima > 0.05
+		(nd.agua_cima as Node3D).position.y = topo + 0.004 + h
+	var cap: float = POTE_L.get(str(f.pote), 0.0)
+	if nd.has("fio") and is_instance_valid(nd.fio):
+		(nd.fio as Node3D).visible = cima > 0.05 and str(f.pote) != "" and pl < cap - 0.001
+	if nd.has("agua_pote") and is_instance_valid(nd.agua_pote):
+		var fr := clampf(pl / maxf(cap, 0.1), 0.0, 1.0)
+		(nd.agua_pote as Node3D).visible = fr > 0.01
+		var hp: float = nd.get("pote_h", 0.08)
+		(nd.agua_pote as Node3D).position.y = 0.012 + hp * 0.85 * fr
+		var rp: float = nd.get("pote_r", 0.1)
+		(nd.agua_pote as Node3D).scale = Vector3.ONE * lerpf(0.6, 0.95, fr) * rp / 0.1
+
+
+func _filtro_topo(f: Dictionary) -> float:
+	var y := FILTRO_FUNDO + 0.06 * float(f.pedra) / FILTRO_PEDRAS + 0.05 * float(f.carvao) / FILTRO_CARVAO + 0.07 * minf(1.0, float(f.areia))
+	return y
+
+
+static var _filtro_mats := {}
+
+static func _fmat(k: String, col: Color, rough := 0.9, alpha := 1.0) -> StandardMaterial3D:
+	if not _filtro_mats.has(k):
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(col.r, col.g, col.b, alpha)
+		m.roughness = rough
+		if alpha < 1.0:
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.metallic_specular = 0.4
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_filtro_mats[k] = m
+	return _filtro_mats[k]
+
+
+## As camadas dentro da caixa (pedrinhas, pedaços de carvão, areia, a tela trançada),
+## a água empoçada em cima, o fio pingando e a vasilha de barro embaixo.
+func _draw_filtro(mi: int, root: Node3D, nd: Dictionary) -> void:
+	var f := filtro_of(mi)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = mi * 97 + 5
+	var hx := 0.205
+	var hz := 0.18
+	var y := FILTRO_FUNDO
+	# pedrinhas: cada pedra posta enche um pedaço do fundo
+	var np := int(f.pedra) * 9
+	for k in np:
+		var sm := SphereMesh.new()
+		var r := rng.randf_range(0.018, 0.03)
+		sm.radius = r
+		sm.height = r * 1.5
+		sm.radial_segments = 7
+		sm.rings = 4
+		var n := MeshInstance3D.new()
+		n.mesh = sm
+		n.material_override = _fmat("pedra", Color(0.47, 0.45, 0.41))
+		n.position = Vector3(rng.randf_range(-hx + r, hx - r), y + r * 0.6 + rng.randf() * 0.02, rng.randf_range(-hz + r, hz - r))
+		n.rotation = Vector3(rng.randf() * 3.0, rng.randf() * 3.0, 0)
+		root.add_child(n)
+	y += 0.06 * float(f.pedra) / FILTRO_PEDRAS
+	# carvão: pedaços pretos e quebrados
+	for k in int(f.carvao) * 14:
+		var bm := BoxMesh.new()
+		var a := rng.randf_range(0.015, 0.03)
+		bm.size = Vector3(a, a * 0.7, a * rng.randf_range(0.7, 1.4))
+		var n2 := MeshInstance3D.new()
+		n2.mesh = bm
+		n2.material_override = _fmat("carvao", Color(0.06, 0.06, 0.065), 0.7)
+		n2.position = Vector3(rng.randf_range(-hx + a, hx - a), y + rng.randf() * 0.04, rng.randf_range(-hz + a, hz - a))
+		n2.rotation = Vector3(rng.randf() * 3.0, rng.randf() * 3.0, rng.randf() * 3.0)
+		root.add_child(n2)
+	y += 0.05 * float(f.carvao) / FILTRO_CARVAO
+	# areia: uma camada lisa (molhada fica mais escura)
+	if float(f.areia) > 0.0:
+		var bx := BoxMesh.new()
+		var ah := 0.07 * minf(1.0, float(f.areia))
+		bx.size = Vector3(hx * 2.0, ah, hz * 2.0)
+		var n3 := MeshInstance3D.new()
+		n3.mesh = bx
+		n3.material_override = _fmat("areia", Color(0.5, 0.42, 0.3), 1.0)
+		n3.position = Vector3(0, y + ah * 0.5, 0)
+		root.add_child(n3)
+		y += ah
+	# a tela de fibra: fios cruzados por cima de tudo
+	if bool(f.tela):
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var ty := y + 0.006
+		for k in 15:
+			var o := -hx + (2.0 * hx) * k / 14.0
+			for q in [[Vector3(o - 0.0045, ty, -hz), Vector3(o + 0.0045, ty, -hz), Vector3(o + 0.0045, ty, hz), Vector3(o - 0.0045, ty, hz)]]:
+				for idx in [0, 1, 2, 0, 2, 3]:
+					st.add_vertex(q[idx])
+		for k in 13:
+			var o2 := -hz + (2.0 * hz) * k / 12.0
+			var q2 := [Vector3(-hx, ty + 0.002, o2 - 0.0045), Vector3(hx, ty + 0.002, o2 - 0.0045), Vector3(hx, ty + 0.002, o2 + 0.0045), Vector3(-hx, ty + 0.002, o2 + 0.0045)]
+			for idx in [0, 1, 2, 0, 2, 3]:
+				st.add_vertex(q2[idx])
+		st.generate_normals()
+		var tn := MeshInstance3D.new()
+		tn.mesh = st.commit()
+		tn.material_override = _fmat("tela", Color(0.9, 0.8, 0.55), 0.8)
+		root.add_child(tn)
+	# a água empoçada em cima (some aos poucos, passando)
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(hx * 2.0, hz * 2.0)
+	var wa := MeshInstance3D.new()
+	wa.mesh = pm
+	wa.material_override = _fmat("agua_cima", Color(0.3, 0.32, 0.24), 0.12, 0.8)
+	root.add_child(wa)
+	nd["agua_cima"] = wa
+	# o fio de água limpa pingando pela fresta do fundo até a vasilha
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.004
+	cm.bottom_radius = 0.003
+	cm.height = FILTRO_FUNDO - 0.06
+	var fio := MeshInstance3D.new()
+	fio.mesh = cm
+	fio.material_override = _fmat("fio", Color(0.75, 0.88, 1.0), 0.05, 0.6)
+	fio.position = Vector3(0, (FILTRO_FUNDO - 0.06) * 0.5 + 0.06, 0)
+	root.add_child(fio)
+	nd["fio"] = fio
+	# a vasilha de barro embaixo (no chão) e a água limpa dentro dela
+	if str(f.pote) != "":
+		var Olaria = load("res://scripts/world/olaria.gd")
+		var pot := MeshInstance3D.new()
+		pot.mesh = Olaria.malha(str(f.pote), [1.0, 1.0, 1.0, 1.0])
+		pot.material_override = _fmat("pote", Color(0.55, 0.3, 0.18), 0.85)
+		root.add_child(pot)
+		var pf: Array = Olaria.perfil_final(str(f.pote))
+		nd["pote_h"] = (pf[-1] as Vector2).y
+		nd["pote_r"] = (pf[-1] as Vector2).x
+		var dm := CylinderMesh.new()
+		dm.top_radius = 0.1
+		dm.bottom_radius = 0.1
+		dm.height = 0.004
+		var ap := MeshInstance3D.new()
+		ap.mesh = dm
+		ap.material_override = _fmat("agua_pote", Color(0.55, 0.72, 0.85), 0.05, 0.75)
+		root.add_child(ap)
+		nd["agua_pote"] = ap
+	_nodes[mi] = nd
+	filtro_visual(mi)
 
 
 # ---------- torno de oleiro ----------
