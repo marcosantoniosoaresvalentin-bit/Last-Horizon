@@ -1,13 +1,15 @@
 extends Control
 ## As três barras do jogador (canto de cima, à direita): vida, fome e sede.
 ## Num cartão escuro com borda dourada fina; cada uma com o ícone num círculo (coração,
-## fruta, gota), a barra em degradê com brilho em cima e risquinhos de 25%. Baixa (menos
+## fruta, gota), a barra lisa em degradê com brilho em cima, o trilho escuro da mesma cor
+## atrás (e um rastro claro do que acabou de baixar) e a porcentagem. Baixa (menos
 ## de 25%), o ícone pulsa e a barra pisca. (Os valores vêm do jogo: 0 a 100.)
 
 var vida := 100.0
 var fome := 100.0
 var sede := 100.0
 var _mostra := {"vida": 100.0, "fome": 100.0, "sede": 100.0}     # anima suave até o valor
+var _rastro := {"vida": 100.0, "fome": 100.0, "sede": 100.0}     # o que baixou: vai sumindo devagar
 
 const W := 300.0
 const ROW := 38.0
@@ -28,6 +30,10 @@ func _process(delta: float) -> void:
 	var alvo := {"vida": vida, "fome": fome, "sede": sede}
 	for k in alvo:
 		_mostra[k] = move_toward(float(_mostra[k]), float(alvo[k]), delta * 40.0)
+		if float(_mostra[k]) >= float(_rastro[k]):
+			_rastro[k] = _mostra[k]
+		else:
+			_rastro[k] = move_toward(float(_rastro[k]), float(_mostra[k]), delta * 6.0)
 	queue_redraw()
 
 
@@ -44,11 +50,11 @@ func _draw() -> void:
 	draw_style_box(sb, card)
 	var i := 0
 	for k in ["vida", "fome", "sede"]:
-		_linha(k, Vector2(12, 10 + i * ROW), float(_mostra[k]), t)
+		_linha(k, Vector2(12, 10 + i * ROW), float(_mostra[k]), t, float(_rastro[k]))
 		i += 1
 
 
-func _linha(k: String, o: Vector2, v: float, t: float) -> void:
+func _linha(k: String, o: Vector2, v: float, t: float, rastro := -1.0) -> void:
 	var baixo := v < 25.0
 	var pulse := (0.5 + 0.5 * sin(t * 7.0)) if baixo else 0.0
 	var c: Array = CORES[k]
@@ -63,10 +69,16 @@ func _linha(k: String, o: Vector2, v: float, t: float) -> void:
 	_icone(k, ic, 11.0)
 	# a barra (cápsula)
 	var bx := o + Vector2(38, ROW * 0.5 - 11)
-	var bw := W - 12 - 38 - 44
+	var bw := W - 12 - 38 - 56
 	var bh := 18.0
-	_capsula(Rect2(bx, Vector2(bw, bh)), Color(0.0, 0.0, 0.0, 0.55))
+	# o trilho: a mesma cor, bem escura (o que falta)
+	_capsula(Rect2(bx, Vector2(bw, bh)), c0.darkened(0.72).lerp(Color(0, 0, 0), 0.15))
 	var f := clampf(v / 100.0, 0.0, 1.0)
+	# o rastro do que acabou de baixar (claro, vai sumindo)
+	var fr := clampf(rastro / 100.0, 0.0, 1.0)
+	if fr > f + 0.002:
+		var rr := Rect2(bx + Vector2(2, 2), Vector2(maxf((bw - 4) * fr, bh - 4), bh - 4))
+		_capsula(rr, c1.lerp(Color(1, 1, 1), 0.55))
 	if f > 0.003:
 		var fill := Rect2(bx + Vector2(2, 2), Vector2(maxf((bw - 4) * f, bh - 4), bh - 4))
 		_capsula_degrade(fill, c0, c1)
@@ -74,18 +86,14 @@ func _linha(k: String, o: Vector2, v: float, t: float) -> void:
 		var hl := Rect2(fill.position + Vector2(4, 2), Vector2(maxf(fill.size.x - 8, 0), 3))
 		if hl.size.x > 2:
 			draw_rect(hl, Color(1, 1, 1, 0.28))
-	# risquinhos de 25%
-	for q in [0.25, 0.5, 0.75]:
-		var x: float = bx.x + bw * q
-		draw_line(Vector2(x, bx.y + 4), Vector2(x, bx.y + bh - 4), Color(0, 0, 0, 0.35), 1.5)
 	# a borda (pisca vermelha baixa)
 	var bc := Color(1, 1, 1, 0.25) if not baixo else Color(1.0, 0.25, 0.2, 0.4 + 0.6 * pulse)
 	_capsula_borda(Rect2(bx, Vector2(bw, bh)), bc)
 	# o número
 	var font := ThemeDB.fallback_font
-	var txt := "%d" % roundi(v)
+	var txt := "%d%%" % roundi(v)
 	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
-	var tp := Vector2(W - 12 - 40 + (40 - tw) * 0.5, o.y + ROW * 0.5 + 5)
+	var tp := Vector2(W - 12 - 52 + (52 - tw) * 0.5, o.y + ROW * 0.5 + 5)
 	draw_string(font, tp + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0, 0, 0, 0.7))
 	draw_string(font, tp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1, 0.96, 0.88) if not baixo else Color(1, 0.55, 0.5))
 
