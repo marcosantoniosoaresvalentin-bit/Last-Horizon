@@ -1,9 +1,9 @@
 {
-  "version": 162,
-  "file": "update_162.zip",
-  "size": 4903401,
-  "sha256": "5aead3b902ad292bb45d9ba326c2f218e73a8ebb11cd874a3e69fcc31883622a",
+  "version": 163,
+  "file": "update_163.zip",
+  "size": 5001775,
+  "sha256": "b26f0bbb94c56b9eb33984fc4740201c29c2c1d1d0a2627e78449dad2d7e2eec",
   "min_build": 1,
-  "notes": "Animais sem limite: tamanduás andam pelo mapa todo, araras pousam no chão para comer e só se assustam de perto, a natureza se controla pela comida",
+  "notes": "Cobra jararaca com bote e veneno (vista embaçada); planta jararaca-taia e o remédio contra picada no craft",
   "date": "2026-11-21"
 }
