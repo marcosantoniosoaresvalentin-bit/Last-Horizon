@@ -1,9 +1,9 @@
 {
-  "version": 157,
-  "file": "update_157.zip",
-  "size": 4891177,
-  "sha256": "6d2ba33faaa41ddcb961d0d453effb8a8cc00e1aa15ac0406110c2aa35d5780e",
+  "version": 158,
+  "file": "update_158.zip",
+  "size": 4892668,
+  "sha256": "9a3348461b3bacfd11aa0d327dfce2ef7191b6c742abf613d6036ddae4a00cc7",
   "min_build": 1,
-  "notes": "Arco de fogo: capim alto que seca no fim do mês, vareta e arco no craft, fazer fogo girando a vareta, fogueira com lenha e carvão; barro com capim seco",
+  "notes": "Fogueira: lenha mantém o fogo (mais lenha, mais forte), apaga sem lenha, brasa reacende com capim seco, fria só com o arco; olho na fogueira; chuva apaga",
   "date": "2026-11-21"
 }
