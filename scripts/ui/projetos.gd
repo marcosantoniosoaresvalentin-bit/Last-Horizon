@@ -180,11 +180,12 @@ func _draw_plan() -> void:
 	var s := _draw.size
 	var sc := minf(s.x / 6.6, s.y / 3.2)
 	var o := Vector2(s.x * 0.5, s.y - 18)
-	if t.has("laminas"):
+	if t.has("laminas") or t.has("mesa"):
 		sc = minf(s.x / 2.8, s.y / 1.25)          # máquina pequena: desenho maior
 	var P := func(x: float, y: float) -> Vector2:
 		return o + Vector2(x * sc, -y * sc)
-	_draw.draw_line(P.call(-3.2 if not t.has("laminas") else -1.2, 0), P.call(3.2 if not t.has("laminas") else 0.9, 0), C_DIM, 1.5)
+	var small := t.has("laminas") or t.has("mesa")
+	_draw.draw_line(P.call(-3.2 if not small else -1.2, 0), P.call(3.2 if not small else 0.9, 0), C_DIM, 1.5)
 	for pc in t.pecas:
 		var c: Vector3 = pc[2]
 		var L := float(pc[1])
@@ -201,6 +202,10 @@ func _draw_plan() -> void:
 		var b: Vector2 = P.call(rect.end.x, rect.end.y)
 		_draw.draw_rect(Rect2(Vector2(a.x, b.y), Vector2(b.x - a.x, a.y - b.y)), C_INK, false, 2.0)
 	var font := get_theme_default_font()
+	if t.has("mesa"):
+		_draw.draw_string(font, P.call(0.2, 1.0), "MESA (TAMPO DE 2 TÁBUAS)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
+		_draw.draw_string(font, P.call(-1.25, 0.65), "BANQUINHO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
+		return
 	if t.has("laminas"):
 		# desfibradeira: as lâminas em pé em cima da bancada e os nomes
 		for lp in t.laminas:

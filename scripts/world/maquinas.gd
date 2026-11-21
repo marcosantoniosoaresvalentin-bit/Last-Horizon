@@ -178,7 +178,9 @@ static func needs(tipo: String) -> Dictionary:
 
 ## Quantas lâminas o projeto leva.
 static func lamina_need(tipo: String) -> int:
-	return (TIPOS[tipo].laminas as Array).size() if TIPOS[tipo].has("laminas") else 1
+	if TIPOS[tipo].has("laminas"):
+		return (TIPOS[tipo].laminas as Array).size()
+	return 1 if TIPOS[tipo].has("lamina") else 0          # (a mesa não tem lâmina)
 
 
 ## Quantas lâminas já estão postas (antes era só sim/não).
@@ -939,8 +941,11 @@ func _rebuild() -> void:
 				mk.material_override = _mark_mat
 				mk.position = sg2[1]
 				root.add_child(mk)
-		if bool(t.get("mesa", false)) and p.has("argila"):
-			_draw_argila(p, root)
+		if bool(t.get("mesa", false)):
+			if p.has("argila"):
+				_draw_argila(p, root)
+			_nodes[mi] = nd
+			continue
 		if t.has("laminas"):
 			# lâminas de faca em pé na bancada (as que já estão; as outras em azul)
 			var nl := lamina_count(mi)
