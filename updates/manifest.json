@@ -1,9 +1,9 @@
 {
-  "version": 145,
-  "file": "update_145.zip",
-  "size": 4850764,
-  "sha256": "52ea351c1720ec96a58603460c73dfd0c47033de378f4407f0f90804522199ab",
+  "version": 146,
+  "file": "update_146.zip",
+  "size": 4854842,
+  "sha256": "7302e3319466867f2e6a076953e5b6bc895fbc61baae6ae6ce69199091bf3ef3",
   "min_build": 1,
-  "notes": "Barro feito no monte de terra (a caixa saiu): abrir cova com a enxada, meio balde de água por vez escorrendo pela terra, fibras, misturar; barro no balde e despejado no chão; reboco mais realista; cupim não come madeira rebocada",
+  "notes": "Multiplayer: convidado não cai mais sozinho (reconecta), mudanças dos dois jogadores juntadas (sem duplicar toras, um vê o que o outro faz), cortar árvore no multiplayer não trava o outro",
   "date": "2026-11-21"
 }
