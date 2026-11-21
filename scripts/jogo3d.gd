@@ -4592,7 +4592,7 @@ func _update_pour(delta: float) -> void:
 	var tilt := smoothstep(0.0, 0.45, _pour_t) * (1.0 - smoothstep(1.1, 1.5, _pour_t))
 	if _chop_pose:
 		_chop_pose.pour = tilt
-	if _pour_t >= 0.55 and not _balde_carga.is_empty():
+	if _pour_t >= 0.55 and _pour_t < 1.1 and not _balde_carga.is_empty():
 		var c := _balde_carga
 		var bi := _bucket_ahead()
 		var to := _front(0.95)
@@ -4627,6 +4627,7 @@ func _update_pour(delta: float) -> void:
 				_barr.add_agua(bi2, meio / BALDE_VOL)
 				var left2 := float(c.vol) - meio
 				_balde_carga = {} if left2 <= 0.0005 else {"tipo": "agua", "vol": left2}
+				_pour_t = 1.1               # só meio balde: endireita o balde
 				to = _barr.center(bi2)
 				var m2: Dictionary = _barr.montes[bi2]
 				if _barr.stage(bi2) == "agua":

@@ -33,15 +33,15 @@ func build(jogo: Node, escav: Node, soil_mat: Material, save_path := "") -> void
 	_gloss_mat.vertex_color_use_as_albedo = true
 	_gloss_mat.vertex_color_is_srgb = true
 	_gloss_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_gloss_mat.roughness = 0.16
-	_gloss_mat.metallic_specular = 0.55
+	_gloss_mat.roughness = 0.32
+	_gloss_mat.metallic_specular = 0.25
 	_gloss_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_pool_mat = StandardMaterial3D.new()
 	_pool_mat.vertex_color_use_as_albedo = true
 	_pool_mat.vertex_color_is_srgb = true
 	_pool_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_pool_mat.roughness = 0.06
-	_pool_mat.metallic_specular = 0.5
+	_pool_mat.roughness = 0.3
+	_pool_mat.metallic_specular = 0.12
 	_pool_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_fib_mat = StandardMaterial3D.new()
 	_fib_mat.vertex_color_use_as_albedo = true
@@ -153,7 +153,15 @@ func radius(i: int) -> float:
 	for ix in range(cx - 7, cx + 8):
 		for iz in range(cz - 7, cz + 8):
 			if float(_escav.d.get(Vector2i(ix, iz), 0.0)) > 0.004:
-				rr = maxf(rr, Vector2(ix * RES - float(m.x), iz * RES - float(m.z)).length())
+				var dd := Vector2(ix * RES - float(m.x), iz * RES - float(m.z)).length()
+				# terra de outro monte do lado (mais perto do meio dele) não conta
+				var meu := true
+				for o in montes:
+					if o != m and Vector2(ix * RES - float(o.x), iz * RES - float(o.z)).length() < dd:
+						meu = false
+						break
+				if meu:
+					rr = maxf(rr, dd)
 	m["_R"] = clampf(rr + RES * 0.55, 0.34, 1.45)
 	return float(m._R)
 
@@ -322,7 +330,7 @@ func _monte_node(i: int) -> Node3D:
 	var nz2 := FastNoiseLite.new()
 	nz2.seed = seed + 5
 	nz2.frequency = 22.0
-	var rim_h := 0.05 * openf * (1.0 - 0.9 * mixp)
+	var rim_h := 0.07 * openf * (1.0 - 0.9 * mixp)
 	var sp: Array = mix_spots(i) if not pronto else []
 	# os fios de água escorrendo pela terra (direções fixas de cada monte)
 	var streaks := []
@@ -362,7 +370,7 @@ func _monte_node(i: int) -> Node3D:
 			wet = maxf(wet, wetf * 0.45 * smoothstep(1.0, 0.4, u) * smoothstep(0.0, 6.0, t_pour if t_pour < 50.0 else 6.0))
 		var mud := 0.0
 		if pronto:
-			mud = smoothstep(1.0, 0.85, u)
+			mud = smoothstep(1.0, 0.9, u)
 		else:
 			for k in sp.size():
 				var q: Vector3 = sp[k]
@@ -378,7 +386,7 @@ func _monte_node(i: int) -> Node3D:
 	var N := int(ceil(R / g))
 	var soil := Color(0.33, 0.24, 0.16)
 	var wet_c := Color(0.2, 0.135, 0.085)
-	var mud_c := Color(0.27, 0.215, 0.165)            # barro: mais cinza, cor própria
+	var mud_c := Color(0.25, 0.175, 0.115)            # barro: marrom-escuro, mais liso que a terra
 	var pts := {}
 	var cols := {}
 	var gl := {}
@@ -393,10 +401,12 @@ func _monte_node(i: int) -> Node3D:
 			pts[Vector2i(a, b)] = Vector3(x, y, z)
 			var tone := nz2.get_noise_2d(x * 9.0, z * 9.0)
 			var c := soil.darkened(maxf(-tone, 0.0) * 0.2).lightened(maxf(tone, 0.0) * 0.1)
+			var rc := Vector2(x - cx, z - cz).length()
+			c = c.darkened(0.25 * openf * (1.0 - mixp) * smoothstep(rr * 0.9, rr * 0.3, rc))   # o fundo da cova
 			c = c.lerp(wet_c, float(f[1]) * 0.85)
 			c = c.lerp(mud_c.darkened(0.12 * float(f[1]) + tone * 0.08), float(f[2]))
 			cols[Vector2i(a, b)] = c
-			gl[Vector2i(a, b)] = clampf(maxf(float(f[3]) * 0.6, maxf(float(f[1]) * 0.16, float(f[2]) * 0.42)), 0.0, 0.7)
+			gl[Vector2i(a, b)] = clampf(maxf(float(f[3]) * 0.5, maxf(float(f[1]) * 0.12, float(f[2]) * 0.22)), 0.0, 0.6)
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var sg := SurfaceTool.new()
@@ -422,7 +432,7 @@ func _monte_node(i: int) -> Node3D:
 				anyg = true
 				for idx in [0, 2, 1, 0, 3, 2]:
 					var k: Vector2i = ks[idx]
-					sg.set_color(Color(0.09, 0.065, 0.045, float(gl[k])))
+					sg.set_color(Color(0.13, 0.085, 0.05, float(gl[k])))
 					sg.set_normal(Vector3.UP)
 					sg.add_vertex(pts[k] + Vector3.UP * 0.0025)
 	var root := Node3D.new()
@@ -447,7 +457,7 @@ func _monte_node(i: int) -> Node3D:
 			var ps := SurfaceTool.new()
 			ps.begin(Mesh.PRIMITIVE_TRIANGLES)
 			var segs := 28
-			var col := Color(0.2, 0.14, 0.085, 0.9)
+			var col := Color(0.17, 0.115, 0.07, 0.94)          # água barrenta (a terra solta tinge)
 			for s in segs:
 				var a1 := TAU * s / segs
 				var a2 := TAU * (s + 1) / segs
@@ -477,7 +487,7 @@ func _monte_node(i: int) -> Node3D:
 			var L := rng.randf_range(0.15, 0.42) * (1.0 if not pronto else 0.25)
 			var seg := 9
 			var prev := Vector3.INF
-			var fc := Color(0.78, 0.7, 0.48).darkened(rng.randf() * 0.2 + mixp * 0.35)
+			var fc := Color(0.6, 0.5, 0.3).darkened(rng.randf() * 0.2 + mixp * 0.35 + (0.3 if pronto else 0.0))
 			for s2 in seg + 1:
 				var t := float(s2) / seg
 				ang += rng.randf_range(-0.35, 0.35)

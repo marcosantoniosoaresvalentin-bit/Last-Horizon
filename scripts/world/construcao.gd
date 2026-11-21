@@ -692,7 +692,7 @@ static func _mud_material(stage: int) -> StandardMaterial3D:
 			m.roughness = 0.8
 			m.metallic_specular = 0.15
 		2:
-			m.albedo_color = Color(0.37, 0.31, 0.24)
+			m.albedo_color = Color(0.34, 0.28, 0.21)
 			m.roughness = 0.95
 			m.metallic_specular = 0.06
 		_:
@@ -702,14 +702,14 @@ static func _mud_material(stage: int) -> StandardMaterial3D:
 			cn.noise_type = FastNoiseLite.TYPE_CELLULAR
 			cn.cellular_return_type = FastNoiseLite.RETURN_DISTANCE2_SUB
 			cn.cellular_jitter = 1.0
-			cn.frequency = 0.05
+			cn.frequency = 0.035
 			ct.noise = cn
 			ct.width = 256
 			ct.height = 256
 			ct.seamless = true
 			var g := Gradient.new()
-			g.offsets = PackedFloat32Array([0.0, 0.07, 0.14, 0.5, 1.0])
-			g.colors = PackedColorArray([Color(0.05, 0.04, 0.03), Color(0.1, 0.08, 0.06), Color(0.4, 0.34, 0.27), Color(0.44, 0.38, 0.3), Color(0.48, 0.41, 0.32)])
+			g.offsets = PackedFloat32Array([0.0, 0.035, 0.07, 0.5, 1.0])
+			g.colors = PackedColorArray([Color(0.06, 0.05, 0.04), Color(0.12, 0.1, 0.08), Color(0.3, 0.25, 0.19), Color(0.33, 0.28, 0.21), Color(0.36, 0.3, 0.23)])
 			ct.color_ramp = g
 			m.albedo_texture = ct
 			var cnt := NoiseTexture2D.new()
@@ -718,7 +718,7 @@ static func _mud_material(stage: int) -> StandardMaterial3D:
 			cnt.height = 256
 			cnt.seamless = true
 			cnt.as_normal_map = true
-			cnt.bump_strength = 14.0
+			cnt.bump_strength = 5.0
 			m.normal_texture = cnt
 			m.roughness = 1.0
 			m.metallic_specular = 0.04
@@ -812,7 +812,7 @@ func _mud_patch(pc: Dictionary, e: Array) -> Node3D:
 					st.set_uv(Vector2(uvv.x * la * 2.0 / NA, uvv.y * ls * 2.0 / NS) * 0.9 + Vector2(u * 0.7 + c.x * 0.13, k * 0.3 + c.z * 0.11))
 					st.add_vertex(q[idx])
 	# as fibras de buriti aparecendo no barro (fiapos claros, umas pontas soltas)
-	var fcol := Color(1.9, 1.75, 1.3) if stage < 3 else Color(2.0, 1.85, 1.45)
+	var fcol := Color(1.7, 1.5, 1.05) if stage < 3 else Color(1.6, 1.42, 1.0)
 	for f in 7:
 		var a0 := rng.randf_range(-0.75, 0.75)
 		var b0 := rng.randf_range(-0.7, 0.7)
