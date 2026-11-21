@@ -1,9 +1,9 @@
 {
-  "version": 146,
-  "file": "update_146.zip",
-  "size": 4854842,
-  "sha256": "7302e3319466867f2e6a076953e5b6bc895fbc61baae6ae6ce69199091bf3ef3",
+  "version": 147,
+  "file": "update_147.zip",
+  "size": 4856115,
+  "sha256": "4a1c231b44387dcfa797c4e4b678782c402ac309e5608bc08cca8805ae93ca49",
   "min_build": 1,
-  "notes": "Multiplayer: convidado não cai mais sozinho (reconecta), mudanças dos dois jogadores juntadas (sem duplicar toras, um vê o que o outro faz), cortar árvore no multiplayer não trava o outro",
+  "notes": "Círculo branco no chão mostrando onde a pá e a cavadeira vão cavar; longe, o personagem anda até lá e cava",
   "date": "2026-11-21"
 }
