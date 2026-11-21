@@ -502,6 +502,10 @@ var _chop_branch := {}           # cortando um galho (da árvore caída ou do ch
 var _branch_hits := 0
 var _plant_btn: Button
 var _chop_hole := false           # cavando com a cavadeira
+var _dig_target := Vector3.INF     # onde a pá/cavadeira vai cavar (o círculo branco no chão)
+var _dig_pend := Vector3.INF       # andando até o círculo para cavar lá
+var _dig_ring: MeshInstance3D = null
+const DIG_MAX := 2.2               # o círculo fica no máximo a essa distância do jogador
 var _holes_t := 0.0
 var _step_dist := 0.0
 var _step_player: AudioStreamPlayer3D = null
@@ -1456,6 +1460,7 @@ func _process(delta: float) -> void:
 		# a informação do solo não aparece mais na tela
 	_update_dig(delta)
 	_update_pour(delta)
+	_dig_ring_tick()
 	_mp_tick(delta)
 	_sync_tick(delta)
 	_coop_tick(delta)
@@ -3430,6 +3435,12 @@ func _walk_arrived() -> void:
 		_walk_next = ""
 		_reb_apply()
 		return
+	if _walk_next == "cavar":
+		_walk_next = ""
+		if _dig_pend != Vector3.INF and _mao in ["pa", "cavadeira"]:
+			_start_chop()
+		_dig_pend = Vector3.INF
+		return
 	if _walk_next == "serra_op":
 		_walk_next = ""
 		if not _maq_pend.is_empty():
@@ -4305,7 +4316,7 @@ func _stone_chips(at: Vector3, n: int) -> void:
 ## A pá chegou no chão: se está vazia, tira uma pá de terra do chão na frente (o chão
 ## desce ali); se está cheia, joga a terra na frente (o chão sobe ali).
 func _pa_hit() -> void:
-	var at := _front(0.75)
+	var at := _dig_target if _dig_target != Vector3.INF else _front(0.75)
 	if not _pa_full:
 		var y_old: float = _escav.ground_at(at.x, at.z)
 		var was_clay: bool = _escav.is_clay(at.x, at.z)       # monte de argila despejada
@@ -4339,11 +4350,11 @@ func _pa_hit() -> void:
 		_pa_full = true
 		_pa_vol = v
 	else:
-		var bi := _bucket_ahead()
+		var to := _dig_target if _dig_target != Vector3.INF else _front(1.05)
+		var bi := _bucket_ahead(to)
 		if bi >= 0:
 			_fill_bucket(bi)
 			return
-		var to := _front(1.05)
 		_escav.dump(to, _pa_vol, _pa_tipo)
 		_dirt(to)
 		Sons.play_at(self, "cavar", to, -4.0, 1.15)
@@ -4356,8 +4367,8 @@ func _pa_hit() -> void:
 # ================== BALDE ==================
 
 ## Balde no chão bem na frente (onde a pá vai despejar), ou -1.
-func _bucket_ahead() -> int:
-	var to := _front(1.0)
+func _bucket_ahead(at := Vector3.INF) -> int:
+	var to := _front(1.0) if at == Vector3.INF else at
 	var best := -1
 	var bd := 0.75
 	for i in _chao.size():
@@ -4728,6 +4739,108 @@ func _jump() -> void:
 	_vy = 4.2
 
 
+# ---------- o círculo de cavar ----------
+# Com a pá ou a cavadeira na mão aparece um círculo branco (só a borda) no chão, onde
+# a câmera está olhando (perto do jogador, até DIG_MAX). É ali que vai cavar (ou, com a
+# pá cheia, jogar a terra). Longe: o personagem anda até lá e cava.
+
+## Distância do pé até onde a ferramenta bate.
+func _dig_reach() -> float:
+	if _mao == "cavadeira":
+		return 0.62
+	return 1.05 if _pa_full else 0.75
+
+
+func _dig_radius() -> float:
+	return 0.3 if _mao == "cavadeira" else Escavacao.DIG_R
+
+
+func _dig_dir(tgt: Vector3) -> Vector3:
+	var d := Vector3(tgt.x - _player.position.x, 0, tgt.z - _player.position.z)
+	if d.length() < 0.05:
+		return Vector3(-sin(_face), 0, -cos(_face))
+	return d.normalized()
+
+
+## Onde a câmera olha no chão (do meio da tela), perto do jogador.
+func _dig_aim() -> Vector3:
+	var hit := Vector3.INF
+	if _cam:
+		var vs := get_viewport().get_visible_rect().size
+		var o := _cam.project_ray_origin(vs * 0.5)
+		var dir := _cam.project_ray_normal(vs * 0.5)
+		var t := 0.3
+		while t < 9.0:
+			var p := o + dir * t
+			if p.y <= ground_at(p.x, p.z):
+				hit = p
+				break
+			t += 0.08
+	var pp := _player.position
+	if hit == Vector3.INF:
+		hit = _front(_dig_reach())
+	var off := Vector2(hit.x - pp.x, hit.z - pp.z)
+	var dist := off.length()
+	if dist < 0.01:
+		off = Vector2(-sin(_face), -cos(_face))
+		dist = 1.0
+	var lim := clampf(dist, _dig_reach(), DIG_MAX)
+	off = off / dist * lim
+	var at := Vector3(pp.x + off.x, 0, pp.z + off.y)
+	# a cavadeira: perto de um buraco aberto, é nele (fica mais fundo)
+	if _mao == "cavadeira" and _buracos:
+		var bd := 0.3
+		for h in _buracos.holes:
+			if int(h.get("tora", -1)) >= 0:
+				continue
+			var d := Vector2(float(h.x) - at.x, float(h.z) - at.z).length()
+			if d < bd:
+				bd = d
+				at = Vector3(float(h.x), 0, float(h.z))
+	at.y = ground_at(at.x, at.z)
+	return at
+
+
+func _dig_ring_tick() -> void:
+	if _dig_pend != Vector3.INF and not _walking:
+		_dig_pend = Vector3.INF          # parou de andar (mexeu no controle): desiste
+	var show := _ready_world and _mao in ["pa", "cavadeira"] and _carry.is_empty() and not _swim and not _air \
+		and _crouch_job == "" and _bag_ui == null and _craft_ui == null and _mix.is_empty() and _reb.is_empty() \
+		and (not _walking or _dig_pend != Vector3.INF)
+	if not show:
+		if _dig_ring:
+			_dig_ring.visible = false
+		return
+	var at := _dig_target if _dig_target != Vector3.INF else (_dig_pend if _dig_pend != Vector3.INF else _dig_aim())
+	if _dig_ring == null:
+		_dig_ring = MeshInstance3D.new()
+		_dig_ring.mesh = ImmediateMesh.new()
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = Color(1, 1, 1, 0.92)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.no_depth_test = true
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.render_priority = 2
+		_dig_ring.material_override = m
+		_dig_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_dig_ring)
+	_dig_ring.visible = true
+	var im: ImmediateMesh = _dig_ring.mesh
+	im.clear_surfaces()
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+	var r := _dig_radius()
+	var w := 0.025
+	for i in 49:
+		var a := TAU * i / 48.0
+		var c := Vector2(cos(a), sin(a))
+		for rr in [r - w, r + w]:
+			var x: float = at.x + c.x * rr
+			var z: float = at.z + c.y * rr
+			im.surface_add_vertex(Vector3(x, ground_at(x, z) + 0.03, z))
+	im.surface_end()
+
+
 ## Toque no botão "Cortar": uma machadada (se já está no meio de uma, guarda a próxima).
 func _start_chop() -> void:
 	if _mao == "balde":
@@ -4749,6 +4862,16 @@ func _start_chop() -> void:
 			_begin_swing()
 		return
 	if _mao == "cavadeira" or _mao == "pa":
+		# o lugar: o círculo branco; longe, anda até ele primeiro
+		var tgt := _dig_pend if _dig_pend != Vector3.INF else _dig_aim()
+		_dig_pend = Vector3.INF
+		var stand := tgt - _dig_dir(tgt) * _dig_reach()
+		if Vector2(stand.x - _player.position.x, stand.z - _player.position.z).length() > 0.22:
+			_dig_pend = tgt
+			_walk_to(_ground_pos(Vector2(stand.x, stand.z)), "cavar")
+			return
+		_face_to(tgt)
+		_dig_target = tgt
 		if _digging:
 			_cancel_dig()
 		_chop_hole = true
@@ -4850,7 +4973,7 @@ func _chop_hit_now() -> void:
 		_cancel_chop()
 		return
 	if _chop_hole:
-		var at := _front(0.62)
+		var at := _dig_target if _dig_target != Vector3.INF else _front(0.62)
 		var d: float = _buracos.dig_at(at)
 		_dirt(at)
 		Sons.play_at(self, "cavar", at)
@@ -4962,6 +5085,7 @@ func _cancel_chop() -> void:
 	_chop_log = {}
 	_chop_branch = {}
 	_chop_hole = false
+	_dig_target = Vector3.INF
 	if _chop_pose:
 		_chop_pose.digging = false
 		_chop_pose.vertical = false
