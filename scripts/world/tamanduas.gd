@@ -80,6 +80,17 @@ func _novo(sexo: String, nasc: int, x: float, z: float, mae: int) -> Dictionary:
 	return b
 
 
+## Morreu (picada de cobra, depois outros predadores).
+func matar(id: int) -> void:
+	for i in bichos.size():
+		if int(bichos[i].id) == id:
+			bichos.remove_at(i)
+			break
+	if _agents.has(id):
+		(_agents[id].node as Node).queue_free()
+		_agents.erase(id)
+
+
 func _find(id: int) -> Dictionary:
 	for b in bichos:
 		if int(b.id) == id:

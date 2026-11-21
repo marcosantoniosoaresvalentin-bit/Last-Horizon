@@ -41,6 +41,8 @@ const Barreiros := preload("res://scripts/world/barreiros.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
 const Olaria := preload("res://scripts/world/olaria.gd")
 const Vitais := preload("res://scripts/ui/vitais.gd")
+const Cobras := preload("res://scripts/world/cobras.gd")
+const Taias := preload("res://scripts/world/taias.gd")
 const Capins := preload("res://scripts/world/capins.gd")
 const Fogueiras := preload("res://scripts/world/fogueiras.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
@@ -401,6 +403,10 @@ var _araras: Node3D = null
 var _minerios: Node = null
 var _cupins: Node3D = null
 var _tamanduas: Node3D = null
+var _cobras: Node3D = null         # jararacas (de tocaia nas moitas)
+var _taias: Node3D = null          # jararaca-taia (a planta do remédio)
+var _veneno := -1.0                # picado de cobra: segundos desde a picada (-1 = não)
+var _embaca: ColorRect = null      # a vista embaçando com o veneno
 var teste := false                 # modo de teste (Configurações): tudo de graça e rápido
 var _constr: Node3D = null
 var _maq: Node3D = null
@@ -637,6 +643,42 @@ func _build_hud() -> void:
 	_vitais.offset_top = 82
 	_vitais.offset_bottom = 82 + 136
 	_hud.add_child(_vitais)
+	_embaca = ColorRect.new()
+	_embaca.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_embaca.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sh := Shader.new()
+	sh.code = """shader_type canvas_item;
+uniform sampler2D tela : hint_screen_texture, filter_linear;
+uniform float forca = 0.0;
+void fragment() {
+	// o veneno: a vista embaça (borrada, dobrando um pouco) e escurece nas beiradas
+	vec2 uv = SCREEN_UV;
+	float r = forca * 0.012;
+	float t = TIME * 0.7;
+	vec2 dobra = vec2(sin(t + uv.y * 6.0), cos(t * 0.8 + uv.x * 5.0)) * forca * 0.004;
+	vec3 c = vec3(0.0);
+	float w = 0.0;
+	for (int i = -2; i <= 2; i++) {
+		for (int j = -2; j <= 2; j++) {
+			float k = 1.0 / (1.0 + float(i * i + j * j));
+			c += texture(tela, uv + dobra + vec2(float(i), float(j)) * r).rgb * k;
+			w += k;
+		}
+	}
+	c /= w;
+	float vin = smoothstep(0.35, 0.95, length(uv - 0.5) * 1.4);
+	c = mix(c, c * vec3(0.75, 0.85, 0.6), forca * 0.5);
+	c *= 1.0 - vin * forca * 0.65;
+	COLOR = vec4(c, 1.0);
+}
+"""
+	var smat := ShaderMaterial.new()
+	smat.shader = sh
+	smat.set_shader_parameter("forca", 0.0)
+	_embaca.material = smat
+	_embaca.visible = false
+	_hud.add_child(_embaca)
+	_hud.move_child(_embaca, 0)          # por baixo dos botões e das barras
 	_dano_ui = Control.new()
 	_dano_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_dano_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1114,6 +1156,13 @@ func _on_world_ready() -> void:
 	add_child(_tamanduas)
 	_tamanduas.build(self, _arvores, _cupins, int(sim.world_seed), Mundos.dir(_world_id) + "/tamanduas.json" if _world_id != "" else "")
 	print("tamanduás: %d" % _tamanduas.count())
+	_cobras = Cobras.new()
+	add_child(_cobras)
+	_cobras.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/cobras.json" if _world_id != "" else "")
+	print("cobras: %d" % _cobras.count())
+	_taias = Taias.new()
+	add_child(_taias)
+	_taias.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/taias.json" if _world_id != "" else "")
 	_escav.water_mat = _water_mat
 	_escav.sea_m = MundoSim.SEA * HS
 	_escav_steps = sim.steps
@@ -1470,6 +1519,8 @@ func _process(delta: float) -> void:
 			_macacos.update(delta)
 		if _tamanduas:
 			_tamanduas.update(delta)
+		if _cobras:
+			_cobras.update(delta)
 	elif _arvores:
 		_arvores.tick()   # quando vira o dia: sementes, brotos, crescimento
 		if _cipos:
@@ -1485,6 +1536,11 @@ func _process(delta: float) -> void:
 		if _tamanduas:
 			_tamanduas.tick()
 			_tamanduas.update(delta)
+		if _cobras:
+			_cobras.tick()
+			_cobras.update(delta)
+		if _taias and Engine.get_process_frames() % 120 == 30:
+			_taias.dia(int(sim.elapsed_days()))
 		if _araras:
 			_araras.tick()
 			_araras.update(delta)
@@ -1581,6 +1637,10 @@ func _save_world() -> void:
 		_cupins.save(Mundos.dir(_world_id) + "/cupins.json")
 	if _tamanduas:
 		_tamanduas.save(Mundos.dir(_world_id) + "/tamanduas.json")
+	if _cobras:
+		_cobras.save(Mundos.dir(_world_id) + "/cobras.json")
+	if _taias:
+		_taias.save(Mundos.dir(_world_id) + "/taias.json")
 	if _constr:
 		_constr.save(Mundos.dir(_world_id) + "/construcao.json")
 	if _maq:
@@ -1612,7 +1672,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja, "vida": _vida, "fome": _fome, "sede": _sede, "frutos_dia": _frutos_dia, "lenhas": _lenhas}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja, "vida": _vida, "fome": _fome, "sede": _sede, "frutos_dia": _frutos_dia, "lenhas": _lenhas, "veneno": _veneno}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1668,6 +1728,7 @@ func _load_player() -> void:
 	_sede = float(d.get("sede", 100.0))
 	_frutos_dia = d.get("frutos_dia", {})
 	_lenhas = d.get("lenhas", [])
+	_veneno = float(d.get("veneno", -1.0))
 	var bc = d.get("balde_carga", {})
 	_balde_carga = bc if bc is Dictionary and bc.has("vol") else {}
 	equip(str(d.get("mao", "")))
@@ -2319,12 +2380,16 @@ func _vitais_tick(delta: float) -> void:
 		esforco = 1.35
 	elif _walking or (_chop_pose and bool(_chop_pose.moving)):
 		esforco = 1.15
+	if _veneno >= 0.0:
+		# o veneno da cobra: a vida vai embora depressa e a vista embaça
+		_veneno += delta
+		_vida = maxf(0.0, _vida - 100.0 / VENENO_S * delta)
 	_sede = maxf(0.0, _sede - 100.0 / SEDE_S * delta * esforco)
 	_fome = maxf(0.0, _fome - 100.0 / FOME_S * delta * esforco)
 	if _sede <= 0.0 or _fome <= 0.0:
 		var n := (1.0 if _sede <= 0.0 else 0.0) + (1.0 if _fome <= 0.0 else 0.0)
 		_vida = maxf(0.0, _vida - 100.0 / MORRE_S * delta * n)
-	elif _sede > 40.0 and _fome > 40.0:
+	elif _sede > 40.0 and _fome > 40.0 and _veneno < 0.0:
 		_vida = minf(100.0, _vida + 100.0 / CURA_S * delta)
 	if _vida <= 0.0:
 		if teste:
@@ -2334,12 +2399,53 @@ func _vitais_tick(delta: float) -> void:
 	_vitais_mostrar()
 
 
+const VENENO_S := 30.0              # picado: sem o remédio, a vida some em uns 30 s (1,5 hora do jogo)
+
+
+## A cobra acertou o bote.
+func picada_de_cobra() -> void:
+	if _morto >= 0.0:
+		return
+	_vida = maxf(1.0, _vida - 6.0)
+	if _veneno < 0.0:
+		_veneno = 0.0
+	Sons.play_at(self, "baque", _player.position + Vector3.UP * 0.3, -8.0, 1.4)
+	if item_qtd("remedio_cobra") > 0:
+		_show_toast("PICADA DE COBRA! Tome o remédio de jararaca-taia já (Mochila → USAR)!")
+	else:
+		_show_toast("PICADA DE COBRA! Sem remédio... ache uma jararaca-taia e faça o remédio, rápido!")
+
+
+func tomar_remedio() -> String:
+	if item_qtd("remedio_cobra") <= 0:
+		return "Não tem remédio."
+	if _veneno < 0.0:
+		return "Você não foi picado. Guarde o remédio para quando precisar."
+	remove_item("remedio_cobra", 1)
+	_update_inventory()
+	_veneno = -1.0
+	return "Você tomou o remédio de jararaca-taia. O veneno parou; a vista vai clareando."
+
+
+func vivo() -> bool:
+	return _morto < 0.0
+
+
 func _vitais_mostrar() -> void:
 	_vitais.vida = _vida
 	_vitais.fome = _fome
 	_vitais.sede = _sede
 	if _dano_ui:
 		_dano_ui.queue_redraw()
+	# a vista embaçada do veneno (vai piorando; com o remédio, clareia aos poucos)
+	if _embaca:
+		var alvo := 0.0
+		if _veneno >= 0.0:
+			alvo = clampf(0.25 + _veneno / VENENO_S * 1.1, 0.0, 1.0)
+		var cur := float(_embaca.material.get_shader_parameter("forca"))
+		cur = move_toward(cur, alvo, get_process_delta_time() * (0.6 if alvo > cur else 0.15))
+		_embaca.material.set_shader_parameter("forca", cur)
+		_embaca.visible = cur > 0.01
 
 
 ## Pouca vida: a beirada da tela fica vermelha e pulsa (mais forte quanto menos vida).
@@ -2376,7 +2482,11 @@ func _morrer() -> void:
 		_arvores.drop_log(_carry, _player.position + Vector3(0.8, 0, 0), _face)
 		_soltar_carga()
 	Sons.play_at(self, "baque", _player.position, -4.0, 0.7)
-	_show_toast("A " + ("sede" if _sede <= 0.0 else "fome") + " foi demais: você desmaiou.")
+	if _veneno >= 0.0:
+		_show_toast("O veneno da cobra foi demais: você desmaiou.")
+	else:
+		_show_toast("A " + ("sede" if _sede <= 0.0 else "fome") + " foi demais: você desmaiou.")
+	_veneno = -1.0
 
 
 ## Acorda no começo do mapa, fraco (mas com o que tinha na mochila).
@@ -2737,6 +2847,9 @@ func _update_ctx_btn() -> void:
 	elif _crouch_job == "" and not _air and not _swim and _carry.is_empty() and not _frutos_perto().is_empty():
 		_ctx_action = "frutos"
 		_ctx_btn.text = "Pegar frutos caídos"
+	elif _taias and _crouch_job == "" and not _air and not _swim and _carry.is_empty() and _taias.nearest(_player.position, 1.3) >= 0:
+		_ctx_action = "taia"
+		_ctx_btn.text = "Arrancar jararaca-taia"
 	elif _capins and _crouch_job == "" and not _air and not _swim and _carry.is_empty() and _capins.colhivel(_capins.nearest(_player.position, 1.3)):
 		_ctx_action = "capim"
 		_ctx_btn.text = "Colher capim seco"
@@ -2920,6 +3033,13 @@ func _ctx_press() -> void:
 			_show_toast("+1 lenha na mochila" + (" (mochila cheia: caiu no chão)" if caiu > 0 else ""))
 			_act_check = 0.0
 			return
+		"taia":
+			var ti: int = _taias.nearest(_player.position, 1.3)
+			if ti < 0:
+				return
+			_face_to(_taias.point_of(ti))
+			_crouch_target = {"taia": ti}
+			_crouch_job = "taia"
 		"frutos":
 			var fr := _frutos_perto()
 			if fr.is_empty():
@@ -3437,6 +3557,14 @@ func _update_crouch(delta: float) -> void:
 			Sons.play_at(self, "agua", _crouch_target.agua, 0.0, 1.2)
 			_update_inventory()
 			_show_toast("Balde cheio de água (uns %d litros, %d kg)." % [roundi(BALDE_VOL * 0.92 * 1000.0), roundi(BALDE_VOL * 0.92 * 1000.0)])
+		elif _crouch_job == "taia":
+			var tk := int(_crouch_target.taia)
+			if tk < _taias.items.size():
+				var nb: int = _taias.arrancar(tk)
+				add_item("taia", nb)
+				_update_inventory()
+				Sons.play_at(self, "cavar", _player.position, -8.0, 1.3)
+				_show_toast("+%d batata%s de jararaca-taia. No craft, 2 batatas viram o remédio contra picada de cobra." % [nb, "" if nb == 1 else "s"])
 		elif _crouch_job == "frutos":
 			var fr2: Dictionary = _crouch_target
 			_frutos_dia[str(fr2.key)] = int(sim.elapsed_days())
@@ -8145,8 +8273,8 @@ func _bld_place() -> void:
 var _sync_hash := {}               # parte -> hash do que todos já têm
 var _sync_t := {}                  # parte -> tempo até conferir de novo
 const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
-	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5}
-const SYNC_ONLY_HOST := ["bacabas"]        # só o dono manda (os bichos comem os frutos); buritis: degraus e folhas cortadas vêm de todos
+	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0}
+const SYNC_ONLY_HOST := ["bacabas", "cobras"]        # só o dono manda (os bichos comem os frutos); buritis: degraus e folhas cortadas vêm de todos
 
 
 func _mp_client() -> bool:
@@ -8207,6 +8335,8 @@ func _sync_mod(nome: String):
 		"barreiros": return _barr
 		"capins": return _capins
 		"fogueiras": return _fogos
+		"cobras": return _cobras
+		"taias": return _taias
 	return null
 
 

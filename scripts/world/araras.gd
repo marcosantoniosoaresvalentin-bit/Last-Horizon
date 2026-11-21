@@ -90,6 +90,17 @@ func _new_bird(nasc: int, sexo: String) -> Dictionary:
 	return b
 
 
+## Morreu (picada de cobra comendo no chão, gavião...). O par fica sozinho.
+func matar(id: int) -> void:
+	var b = _bird(id)
+	if b == null:
+		return
+	var pb = _bird(int(b.par))
+	if pb != null:
+		pb.par = -1
+	birds.erase(b)
+
+
 func _bird(id: int):
 	for b in birds:
 		if int(b.id) == id:

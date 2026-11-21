@@ -301,6 +301,34 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				var cc2 := c + Vector2(q[0], q[1]) * u
 				ci.draw_circle(cc2, 10.5 * u, Color(0.2, 0.08, 0.16))
 				ci.draw_circle(cc2 + Vector2(-3, -3) * u, 3.0 * u, Color(0.55, 0.4, 0.55))
+		"taia":
+			# a batata (redonda, casca marrom com raizinhas) e o pé do talo pintado
+			var bp := PackedVector2Array()
+			for i in 24:
+				var a := TAU * i / 24.0
+				bp.append(c + Vector2(cos(a) * 34, sin(a) * 26 + 10) * u)
+			ci.draw_colored_polygon(bp, Color(0.45, 0.32, 0.2))
+			ci.draw_polyline(bp + PackedVector2Array([bp[0]]), ink, 2.0 * u, true)
+			for k in 5:
+				ci.draw_line(c + Vector2(-20 + k * 10, 34) * u, c + Vector2(-24 + k * 12, 46) * u, Color(0.4, 0.3, 0.2), 1.5 * u, true)
+			ci.draw_rect(Rect2(c + Vector2(-6, -40) * u, Vector2(12, 34) * u), Color(0.36, 0.42, 0.3))
+			for k in 4:
+				ci.draw_circle(c + Vector2(-2 + (k % 2) * 4, -34 + k * 8) * u, 2.5 * u, Color(0.14, 0.15, 0.11))
+			for k in 6:
+				ci.draw_circle(c + Vector2(-18 + k * 7, 4 + (k % 2) * 8) * u, 1.6 * u, Color(0.6, 0.48, 0.32))
+		"remedio_cobra":
+			# a cuia com a pasta verde-amarelada e a gota
+			var cu := PackedVector2Array()
+			for i in 13:
+				var a2 := PI * i / 12.0
+				cu.append(c + Vector2(cos(a2) * 40, sin(a2) * 30 + 2) * u)
+			ci.draw_colored_polygon(cu, Color(0.5, 0.3, 0.16))
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-38, 2) * u, c + Vector2(38, 2) * u, c + Vector2(30, -8) * u, c + Vector2(-30, -8) * u]), Color(0.72, 0.68, 0.38))
+			ci.draw_polyline(cu, ink, 2.0 * u, true)
+			ci.draw_line(c + Vector2(-38, 2) * u, c + Vector2(38, 2) * u, ink, 2.0 * u, true)
+			# a cruzinha de remédio
+			ci.draw_rect(Rect2(c + Vector2(18, -46) * u, Vector2(8, 24) * u), Color(0.85, 0.15, 0.15))
+			ci.draw_rect(Rect2(c + Vector2(10, -38) * u, Vector2(24, 8) * u), Color(0.85, 0.15, 0.15))
 		"capim_seco":
 			# um maço de capim seco amarrado no meio
 			for k in 16:
