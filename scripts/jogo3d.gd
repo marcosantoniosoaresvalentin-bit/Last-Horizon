@@ -40,6 +40,8 @@ const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Barreiros := preload("res://scripts/world/barreiros.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
 const Olaria := preload("res://scripts/world/olaria.gd")
+const Capins := preload("res://scripts/world/capins.gd")
+const Fogueiras := preload("res://scripts/world/fogueiras.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
 const SAW_SPEED := 2.6            # quão rápido a serra acompanha o dedo (curso inteiro ≈ 0,8 s)
 const Maos := preload("res://scripts/world/maos.gd")
@@ -437,6 +439,9 @@ var _bld_pad: Control
 const BLD_MODES := ["girar", "inclinar", "virar", "mover", "altura"]
 var _escav: Node3D = null
 var _barr: Node3D = null           # montes de terra no chão virando barro
+var _capins: Node3D = null         # touceiras de capim alto (secam no fim do mês)
+var _fogos: Node3D = null          # fogueiras
+var _arco := {}                    # fazendo fogo com o arco: {ui, calor, brasa, sopros, spot, ...}
 var _escav_steps := 0
 var _escav_timer := 0.0
 var _pa_vol := 0.0                # quanta terra está na pá (m³)
@@ -1055,6 +1060,12 @@ func _on_world_ready() -> void:
 	_escav = Escavacao.new()
 	add_child(_escav)
 	_escav.build(self, _buracos._soil_mat, Mundos.dir(_world_id) + "/escavacao.json" if _world_id != "" else "")
+	_capins = Capins.new()
+	add_child(_capins)
+	_capins.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/capins.json" if _world_id != "" else "")
+	_fogos = Fogueiras.new()
+	add_child(_fogos)
+	_fogos.build(self, Mundos.dir(_world_id) + "/fogueiras.json" if _world_id != "" else "")
 	_barr = Barreiros.new()
 	add_child(_barr)
 	_barr.build(self, _escav, _buracos._soil_mat, Mundos.dir(_world_id) + "/barreiros.json" if _world_id != "" else "")
@@ -1413,6 +1424,10 @@ func _process(delta: float) -> void:
 		_constr.dia(int(sim.elapsed_days()))      # o barro das paredes vai secando (em todos)
 	if _barr and Engine.get_process_frames() % 90 == 45:
 		_barr.check()                            # monte cavado embora com a pá some
+	if _capins and Engine.get_process_frames() % 120 == 60:
+		_capins.dia(int(sim.elapsed_days()))     # o capim seca no fim do mês e rebrota
+	if _fogos and Engine.get_process_frames() % 6 == 0:
+		_fogos.atualizar()                       # o fogo baixa e apaga pelo relógio
 	if _drag:
 		_drag_update()
 	_update_grass()
@@ -1547,6 +1562,10 @@ func _save_world() -> void:
 		_escav.save(Mundos.dir(_world_id) + "/escavacao.json")
 	if _barr:
 		_barr.save(Mundos.dir(_world_id) + "/barreiros.json")
+	if _capins:
+		_capins.save(Mundos.dir(_world_id) + "/capins.json")
+	if _fogos:
+		_fogos.save(Mundos.dir(_world_id) + "/fogueiras.json")
 	if _pedras:
 		_pedras.save(Mundos.dir(_world_id) + "/pedras.json")
 	Mundos.touch(_world_id, _game_date())
@@ -2424,6 +2443,9 @@ func _update_chop(delta: float) -> void:
 	if not _torno.is_empty():
 		_torno_tick(delta)
 		return
+	if not _arco.is_empty():
+		_arco_tick(delta)
+		return
 	if not _mix.is_empty():
 		_mix_tick(delta)
 		return
@@ -2520,6 +2542,15 @@ func _update_ctx_btn() -> void:
 	elif _mao == "balde" and _balde_carga.is_empty() and _crouch_job == "" and not _air and not _swim and _water_spot() != Vector3.INF:
 		_ctx_action = "pegar_agua"
 		_ctx_btn.text = "Pegar água"
+	elif _fogos and _crouch_job == "" and not _air and _carry.is_empty() and _fogos.near(_player.position, 1.4) >= 0 and _fogos.carvao(_fogos.near(_player.position, 1.4)) > 0:
+		_ctx_action = "pegar_carvao"
+		_ctx_btn.text = "Pegar carvão (%d)" % _fogos.carvao(_fogos.near(_player.position, 1.4))
+	elif _fogos and _crouch_job == "" and not _air and _carry.is_empty() and item_qtd("lenha") > 0 and _fogos.near(_player.position, 1.4) >= 0:
+		_ctx_action = "por_lenha"
+		_ctx_btn.text = "Pôr lenha"
+	elif _capins and _crouch_job == "" and not _air and not _swim and _carry.is_empty() and _capins.colhivel(_capins.nearest(_player.position, 1.3)):
+		_ctx_action = "capim"
+		_ctx_btn.text = "Colher capim seco"
 	elif (item_qtd("moringa_barro") > 0 or _cab_falta()) and _crouch_job == "" and not _chopping and not _air and not _swim and _carry.is_empty() and _cab_spot() != Vector3.INF:
 		_ctx_action = "encher_cabaca"
 		_ctx_btn.text = "Encher a cabaça"
@@ -2691,6 +2722,38 @@ func _ctx_press() -> void:
 			_show_toast("+1 lenha na mochila" + (" (mochila cheia: caiu no chão)" if caiu > 0 else ""))
 			_act_check = 0.0
 			return
+		"por_lenha":
+			var fi: int = _fogos.near(_player.position, 1.4)
+			if fi < 0 or item_qtd("lenha") <= 0:
+				return
+			remove_item("lenha", 1)
+			_update_inventory()
+			var acesa: bool = _fogos.acesa(fi)
+			_fogos.por_lenha(fi)
+			_face_to(_fogos.center(fi))
+			Sons.play_at(self, "baque", _fogos.center(fi), -14.0, 1.3)
+			_show_toast(("Lenha no fogo: queima mais uns %d minutos." % roundi(_fogos.resta(fi) / 60.0)) if acesa else "Lenha na fogueira. Acenda com o arco de fogo (Mochila → Arco de Fogo → USAR).")
+			_act_check = 0.0
+			return
+		"pegar_carvao":
+			var fi2: int = _fogos.near(_player.position, 1.4)
+			if fi2 < 0:
+				return
+			var nc: int = _fogos.tirar_carvao(fi2)
+			if nc > 0:
+				add_item("carvao", nc)
+				_update_inventory()
+				Sons.play_at(self, "pedra_bate", _fogos.center(fi2), -14.0, 1.7)
+				_show_toast("+%d carvão (para a peneira de água)." % nc)
+			_act_check = 0.0
+			return
+		"capim":
+			var ci: int = _capins.nearest(_player.position, 1.3)
+			if not _capins.colhivel(ci):
+				return
+			_face_to(_capins.point_of(ci))
+			_crouch_target = {"capim": ci}
+			_crouch_job = "capim"
 		"encher_cabaca":
 			var cs := _cab_spot()
 			if cs == Vector3.INF:
@@ -3187,6 +3250,14 @@ func _update_crouch(delta: float) -> void:
 			Sons.play_at(self, "agua", _crouch_target.agua, 0.0, 1.2)
 			_update_inventory()
 			_show_toast("Balde cheio de água (uns %d litros, %d kg)." % [roundi(BALDE_VOL * 0.92 * 1000.0), roundi(BALDE_VOL * 0.92 * 1000.0)])
+		elif _crouch_job == "capim":
+			var ck := int(_crouch_target.capim)
+			if _capins.colhivel(ck):
+				_capins.colher(ck)
+				var caiu := add_item("capim_seco", Capins.MACOS)
+				_update_inventory()
+				Sons.play_at(self, "folha_cai", _capins.point_of(ck), -6.0, 1.1)
+				_show_toast("+%d maços de capim seco" % Capins.MACOS + (" (mochila cheia: caiu no chão)" if caiu > 0 else ""))
 		elif _crouch_job == "cabaca":
 			_encher_cabaca()
 			Sons.play_at(self, "agua", _crouch_target.agua, -4.0, 1.5)
@@ -4796,7 +4867,7 @@ func _update_pour(delta: float) -> void:
 				if _barr.stage(bi2) == "agua":
 					_show_toast("Água na cova: escorre pela terra. Falta mais %s." % ("meio balde" if _barr.need_agua(m2) - float(m2.agua) <= 0.55 else "%.1f balde" % (_barr.need_agua(m2) - float(m2.agua))))
 				else:
-					_show_toast("Terra molhada! Agora ponha %d fibras de buriti (pelo olho no monte)." % _barr.fibras_need(m2))
+					_show_toast("Terra molhada! Agora ponha %d maços de capim seco (pelo olho no monte)." % _barr.fibras_need(m2))
 			else:
 				_balde_carga = {}           # a água escorre no chão
 		else:
@@ -5376,6 +5447,14 @@ func _move_player(delta: float) -> void:
 	if not _mesa.is_empty():
 		_mesa_move(delta)
 		return
+	if not _arco.is_empty():
+		# agachado fazendo fogo: parado, olhando o arco
+		if _chop_pose:
+			_chop_pose.crouch = 1.0
+			_chop_pose.moving = false
+		_play("Idle")
+		_fp_camera(delta, 0.0)
+		return
 	if not _torno.is_empty():
 		_torno_move(delta)
 		return
@@ -5728,6 +5807,8 @@ func _input(e: InputEvent) -> void:
 	if not _mesa.is_empty() and _mesa_input(e):
 		return
 	if not _torno.is_empty() and _torno_input(e):
+		return
+	if not _arco.is_empty() and _arco_input(e):
 		return
 	if not _desf.is_empty() and _desf_input(e):
 		return
@@ -7698,7 +7779,7 @@ func _bld_place() -> void:
 var _sync_hash := {}               # parte -> hash do que todos já têm
 var _sync_t := {}                  # parte -> tempo até conferir de novo
 const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
-	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4}
+	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5}
 const SYNC_ONLY_HOST := ["bacabas"]        # só o dono manda (os bichos comem os frutos); buritis: degraus e folhas cortadas vêm de todos
 
 
@@ -7758,6 +7839,8 @@ func _sync_mod(nome: String):
 		"minerios": return _minerios
 		"maquinas": return _maq
 		"barreiros": return _barr
+		"capins": return _capins
+		"fogueiras": return _fogos
 	return null
 
 
@@ -9653,7 +9736,7 @@ func _barr_opts(i: int) -> Array:
 		"agua":
 			return [["agua", "Jogar água"]]
 		"fibra":
-			return [["fibra", "Pôr fibras"]]
+			return [["fibra", "Pôr capim seco"]]
 		"mexer":
 			return [["misturar", "Misturar"]]
 		"pronto":
@@ -9679,15 +9762,15 @@ func _barr_pick(i: int, acao: String) -> void:
 			_start_pour()
 		"fibra":
 			var nf: int = _barr.fibras_need(m)
-			if item_qtd("fibra_buriti") < nf and not teste:
-				_show_toast("Precisa de %d fibras de buriti (tem %d). Faça na desfibradeira." % [nf, item_qtd("fibra_buriti")])
+			if item_qtd("capim_seco") < nf and not teste:
+				_show_toast("Precisa de %d maços de capim seco (tem %d). Colha o capim alto quando ele secar (no fim do mês)." % [nf, item_qtd("capim_seco")])
 				return
 			if not teste:
-				remove_item("fibra_buriti", nf)
+				remove_item("capim_seco", nf)
 				_update_inventory()
 			_barr.add_fibra(i)
 			Sons.play_at(self, "folha_cai", at, -8.0, 1.6)
-			_show_toast("Fibras na terra molhada. Agora, com a enxada, escolha Misturar.")
+			_show_toast("Capim seco na terra molhada. Agora, com a enxada, escolha Misturar.")
 		"misturar":
 			if _mao != "enxada":
 				_show_toast("Ponha a enxada na mão (Mochila → Equipar) para misturar.")
@@ -9706,7 +9789,7 @@ func _barr_pick(i: int, acao: String) -> void:
 			Sons.play_at(self, "cavar", at, -4.0, 0.7)
 			_dirt(at)
 			var left: int = _barr.near(at, 0.5)
-			_show_toast("Balde de barro com fibra! Leve até a construção e toque em \"Rebocar com barro\"." + (" Ainda tem barro no monte." if left >= 0 else ""))
+			_show_toast("Balde de barro com capim! Leve até a construção e toque em \"Rebocar com barro\"." + (" Ainda tem barro no monte." if left >= 0 else ""))
 	_act_check = 0.0
 
 
@@ -10100,6 +10183,368 @@ func _reb_tick(delta: float) -> void:
 			_show_toast("Essa madeira está rebocada! Toque em outro losango.")
 		else:
 			_reb_go(nxt)
+
+
+# ================== ARCO DE FOGO: FAZER FOGO ==================
+# Mochila → Arco de Fogo → USAR (com uma vareta, uma ripa e capim seco na mochila; sem
+# chuva). Agachado: a ripa no chão (a base), o capim seco embaixo do furo, a vareta em pé
+# no furo com o cipó do arco dando uma volta nela. Passando o dedo para os lados (vai e
+# volta, rápido), o arco vai e vem e a vareta gira: o calor sobe e sai fumaça; parando,
+# esfria. Calor cheio: a brasa cai no capim. "Soprar" umas vezes e o capim pega fogo: vira
+# a fogueira (ponha lenha logo, só o capim queima pouco).
+const ARCO_SOPROS := 4
+
+func fogo_start() -> String:
+	if not _arco.is_empty():
+		return ""
+	var falta := []
+	if item_qtd("vareta") <= 0:
+		falta.append("uma vareta de pau (craft: 1 galho)")
+	if item_qtd("ripa") <= 0:
+		falta.append("uma ripa para a base (racha a tábua pequena com o machado)")
+	if item_qtd("capim_seco") <= 0:
+		falta.append("capim seco (colha o capim alto quando secar)")
+	if not falta.is_empty() and not teste:
+		return "Para fazer fogo falta: " + ", ".join(falta) + "."
+	if bool(sim.raining):
+		return "Está chovendo: o capim e a madeira molham e o fogo não pega."
+	if _swim or _air or not _carry.is_empty():
+		return "Agora não dá: fique parado no chão, com as mãos livres."
+	var spot := _front(0.85)
+	if _fogos:
+		var fi: int = _fogos.near(spot, 1.0)
+		if fi >= 0:
+			if _fogos.acesa(fi):
+				return "Essa fogueira já está acesa."
+			spot = _fogos.center(fi)           # acende a fogueira que já está ali
+	spot.y = height_at(spot.x, spot.z)
+	if _water_surface(spot.x, spot.z) > spot.y + 0.02:
+		return "Na água não dá para fazer fogo."
+	if _mao != "":
+		equip("")
+	var ui := Control.new()
+	ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(ui)
+	ui.draw.connect(_arco_draw.bind(ui))
+	var sair := Icones.IconButton.new()
+	sair.text = "Sair"
+	sair.add_theme_font_size_override("font_size", 20)
+	sair.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	sair.offset_left = -170
+	sair.offset_top = -160
+	sair.offset_right = -40
+	sair.offset_bottom = -30
+	sair.pressed.connect(_arco_end)
+	ui.add_child(sair)
+	var soprar := Icones.IconButton.new()
+	soprar.text = "Soprar"
+	soprar.add_theme_font_size_override("font_size", 22)
+	soprar.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	soprar.offset_left = 40
+	soprar.offset_top = -190
+	soprar.offset_right = 210
+	soprar.offset_bottom = -40
+	soprar.visible = false
+	soprar.pressed.connect(_arco_soprar)
+	ui.add_child(soprar)
+	_arco = {"ui": ui, "sair": sair, "soprar": soprar, "calor": 0.0, "brasa": false, "sopros": 0, "spot": spot,
+		"x": -1.0, "dir": 0, "ida": 0.0, "giro": 0.0, "bow": 0.0, "tid": -9}
+	_face_to(spot)
+	_yaw = _face
+	_pitch = 0.95
+	if _chop_pose:
+		_chop_pose.crouch = 1.0
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false     # o próprio pé não tapa o arco
+	_arco_props()
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn, _jump_btn]:
+		(b as Control).visible = false
+	_show_toast("Passe o dedo para os LADOS, indo e voltando rápido: o arco gira a vareta e esquenta a ripa.")
+	return ""
+
+
+## A ripa no chão com o capim seco embaixo do furo, a vareta em pé e o arco.
+func _arco_props() -> void:
+	var root := Node3D.new()
+	add_child(root)
+	root.global_transform = Transform3D(Basis(Vector3.UP, _face), _arco.spot)
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = Color(0.62, 0.46, 0.3)
+	wood.roughness = 0.85
+	var ripa := MeshInstance3D.new()
+	var rb := BoxMesh.new()
+	rb.size = Vector3(0.45, 0.025, 0.07)
+	ripa.mesh = rb
+	ripa.material_override = wood
+	ripa.position = Vector3(0, 0.0125, 0)
+	root.add_child(ripa)
+	# o capim seco embaixo do furo (fios de palha)
+	var palha := StandardMaterial3D.new()
+	palha.albedo_color = Color(0.8, 0.68, 0.4)
+	palha.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
+	for k in 22:
+		var a := rng.randf() * TAU
+		var fb := BoxMesh.new()
+		fb.size = Vector3(rng.randf_range(0.08, 0.16), 0.004, 0.006)
+		var fn := MeshInstance3D.new()
+		fn.mesh = fb
+		fn.material_override = palha
+		fn.transform = Transform3D(Basis(Vector3.UP, a) * Basis(Vector3.BACK, rng.randf_range(-0.2, 0.3)), Vector3(cos(a) * 0.04, 0.006 + rng.randf() * 0.01, 0.05 + sin(a) * 0.04))
+		root.add_child(fn)
+	# a brasa (aparece quando o calor enche) e a fumaça
+	var brasa := MeshInstance3D.new()
+	var bs := SphereMesh.new()
+	bs.radius = 0.012
+	bs.height = 0.016
+	brasa.mesh = bs
+	var bm := StandardMaterial3D.new()
+	bm.albedo_color = Color(0.3, 0.06, 0.02)
+	bm.emission_enabled = true
+	bm.emission = Color(1.0, 0.35, 0.05)
+	bm.emission_energy_multiplier = 3.0
+	brasa.material_override = bm
+	brasa.position = Vector3(0, 0.03, 0.04)
+	brasa.visible = false
+	root.add_child(brasa)
+	var fum := CPUParticles3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.06, 0.06)
+	fum.mesh = qm
+	var fm := StandardMaterial3D.new()
+	fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	fm.vertex_color_use_as_albedo = true
+	fm.albedo_texture = Fogueiras.soft_tex()
+	fum.material_override = fm
+	fum.amount = 24
+	fum.lifetime = 1.6
+	fum.direction = Vector3.UP
+	fum.spread = 20.0
+	fum.gravity = Vector3(0.05, 0.25, 0)
+	fum.initial_velocity_min = 0.08
+	fum.initial_velocity_max = 0.18
+	fum.scale_amount_min = 1.0
+	fum.scale_amount_max = 3.0
+	var g := Gradient.new()
+	g.colors = PackedColorArray([Color(0.75, 0.75, 0.72, 0.5), Color(0.8, 0.8, 0.8, 0.0)])
+	fum.color_ramp = g
+	fum.emitting = false
+	fum.position = Vector3(0, 0.03, 0)
+	root.add_child(fum)
+	# a vareta em pé no furo da ripa (gira)
+	var vm := StandardMaterial3D.new()
+	vm.albedo_color = Color(0.5, 0.36, 0.22)
+	var vareta := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.011
+	cm.bottom_radius = 0.012
+	cm.height = 0.42
+	cm.radial_segments = 8
+	vareta.mesh = cm
+	vareta.material_override = vm
+	vareta.position = Vector3(0, 0.025 + 0.21, 0)
+	root.add_child(vareta)
+	# um risco na vareta para ver ela girando
+	var risco := MeshInstance3D.new()
+	var rk := BoxMesh.new()
+	rk.size = Vector3(0.004, 0.36, 0.026)
+	risco.mesh = rk
+	var rm := StandardMaterial3D.new()
+	rm.albedo_color = Color(0.25, 0.16, 0.08)
+	risco.material_override = rm
+	vareta.add_child(risco)
+	# o arco: um galho curvo deitado, com o cipó esticado dando volta na vareta
+	var arco := Node3D.new()
+	root.add_child(arco)
+	for k in 9:
+		var t0 := float(k) / 9.0
+		var t1 := float(k + 1) / 9.0
+		var p0 := Vector3(lerpf(-0.32, 0.32, t0), 0.0, -0.1 * (1.0 - pow(2.0 * t0 - 1.0, 2.0)) - 0.03)
+		var p1 := Vector3(lerpf(-0.32, 0.32, t1), 0.0, -0.1 * (1.0 - pow(2.0 * t1 - 1.0, 2.0)) - 0.03)
+		var sm := CylinderMesh.new()
+		sm.top_radius = 0.01
+		sm.bottom_radius = 0.01
+		sm.height = p0.distance_to(p1)
+		sm.radial_segments = 6
+		var sn := MeshInstance3D.new()
+		sn.mesh = sm
+		sn.material_override = vm
+		var d := (p1 - p0).normalized()
+		sn.transform = Transform3D(Basis(Quaternion(Vector3.UP, d)), (p0 + p1) * 0.5)
+		arco.add_child(sn)
+	var cipo := StandardMaterial3D.new()
+	cipo.albedo_color = Color(0.45, 0.4, 0.2)
+	for seg in [[Vector3(-0.32, 0, -0.03), Vector3(-0.012, 0, 0.012)], [Vector3(0.012, 0, 0.012), Vector3(0.32, 0, -0.03)]]:
+		var a2: Vector3 = seg[0]
+		var b2: Vector3 = seg[1]
+		var cy := CylinderMesh.new()
+		cy.top_radius = 0.003
+		cy.bottom_radius = 0.003
+		cy.height = a2.distance_to(b2)
+		var cn := MeshInstance3D.new()
+		cn.mesh = cy
+		cn.material_override = cipo
+		cn.transform = Transform3D(Basis(Quaternion(Vector3.UP, (b2 - a2).normalized())), (a2 + b2) * 0.5)
+		arco.add_child(cn)
+	arco.position = Vector3(0, 0.2, 0)
+	_arco.root = root
+	_arco.vareta = vareta
+	_arco.arco = arco
+	_arco.brasa_n = brasa
+	_arco.fumaca = fum
+
+
+func _arco_input(e: InputEvent) -> bool:
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var pos := Vector2.INF
+	var tid := -9
+	var pressed := false
+	var released := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		tid = e.index
+		pressed = e.pressed
+		released = not e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		tid = -1
+		pressed = e.pressed
+		released = not e.pressed
+	elif e is InputEventScreenDrag:
+		pos = e.position
+		tid = e.index
+	elif e is InputEventMouseMotion and (e.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		pos = e.position
+		tid = -1
+	if pos == Vector2.INF:
+		return false
+	for c in [_arco.sair, _arco.soprar]:
+		if (c as Control).visible and (c as Control).get_global_rect().has_point(pos):
+			return false
+	if bool(_arco.brasa):
+		return true
+	if pressed:
+		_arco.x = pos.x
+		_arco.tid = tid
+		_arco.dir = 0
+		_arco.ida = 0.0
+		return true
+	if released:
+		_arco.x = -1.0
+		return true
+	if tid != int(_arco.tid) or float(_arco.x) < 0.0:
+		return true
+	_arco_mover(pos.x - float(_arco.x))
+	_arco.x = pos.x
+	return true
+
+
+## O dedo andou dx na tela: o arco vai junto e a vareta gira. Cada ida (ou volta) inteira
+## esquenta; trocar de lado depressa esquenta mais.
+func _arco_mover(dx: float) -> void:
+	if absf(dx) < 0.5:
+		return
+	var d := 1 if dx > 0.0 else -1
+	_arco.bow = clampf(float(_arco.bow) + dx / 300.0, -1.0, 1.0)
+	_arco.giro = float(_arco.giro) + dx * 0.06
+	if d != int(_arco.dir):
+		if float(_arco.ida) > 90.0:
+			var now := Time.get_ticks_msec() / 1000.0
+			var rapido := now - float(_arco.get("t_ida", 0.0)) < 0.7
+			_arco.calor = minf(1.0, float(_arco.calor) + (0.075 if rapido else 0.04))
+			_arco.t_ida = now
+			Sons.play_at(self, "serra", _arco.spot, -22.0, 1.8)
+		_arco.dir = d
+		_arco.ida = 0.0
+	_arco.ida = float(_arco.ida) + absf(dx)
+
+
+func _arco_tick(delta: float) -> void:
+	(_arco.ui as Control).queue_redraw()
+	if not bool(_arco.brasa):
+		if float(_arco.calor) < 0.999:
+			_arco.calor = maxf(0.0, float(_arco.calor) - 0.09 * delta)      # parando, esfria
+		else:
+			_arco.brasa = true
+			(_arco.soprar as Control).visible = true
+			(_arco.brasa_n as Node3D).visible = true
+			Sons.play_at(self, "estalo", _arco.spot, -20.0, 2.0)
+			_show_toast("Saiu a brasa no capim! Toque em \"Soprar\" para o fogo pegar.")
+	(_arco.fumaca as CPUParticles3D).emitting = float(_arco.calor) > 0.3 or bool(_arco.brasa)
+	(_arco.fumaca as CPUParticles3D).amount = 24
+	# o arco e a vareta
+	if is_instance_valid(_arco.vareta):
+		(_arco.vareta as Node3D).rotation.y = float(_arco.giro)
+	if is_instance_valid(_arco.arco):
+		(_arco.arco as Node3D).position = Vector3(float(_arco.bow) * 0.18, 0.2, 0)
+
+
+func _arco_soprar() -> void:
+	if _arco.is_empty() or not bool(_arco.brasa):
+		return
+	_arco.sopros = int(_arco.sopros) + 1
+	Sons.play_at(self, "folha_cai", _arco.spot, -12.0, 0.6)
+	(_arco.brasa_n as Node3D).scale = Vector3.ONE * (1.0 + float(_arco.sopros) * 0.8)
+	if int(_arco.sopros) < ARCO_SOPROS:
+		return
+	# o capim pegou fogo: a fogueira
+	var spot: Vector3 = _arco.spot
+	if not teste:
+		remove_item("capim_seco", 1)
+		wear("arco_fogo")
+		wear("vareta")
+		if randf() < 0.25:
+			remove_item("ripa", 1)          # a ripa queimou de tanto furo
+			_show_toast("A ripa da base ficou toda furada e foi embora.")
+		_update_inventory()
+	_fogos.acender(spot)
+	Sons.play_at(self, "estalo", spot, -6.0, 0.9)
+	_arco_end()
+	_show_toast("FOGO! O capim pegou. Ponha lenha logo (o capim sozinho queima pouco).")
+
+
+func _arco_draw(ui: Control) -> void:
+	if _arco.is_empty():
+		return
+	# a barra de calor (de baixo para cima; azul frio, vermelho quente)
+	var r := Rect2(Vector2(226, ui.size.y - 190), Vector2(24, 150))
+	ui.draw_rect(r.grow(3), Color(0.04, 0.04, 0.03, 0.85))
+	var v := clampf(float(_arco.calor), 0.0, 1.0)
+	var col := Color(0.3, 0.5, 0.9).lerp(Color(1.0, 0.75, 0.2), clampf(v * 1.6, 0.0, 1.0)).lerp(Color(1.0, 0.25, 0.1), clampf(v * 2.0 - 1.0, 0.0, 1.0))
+	ui.draw_rect(Rect2(r.position + Vector2(0, r.size.y * (1.0 - v)), Vector2(r.size.x, r.size.y * v)), col)
+	ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
+	var font := ThemeDB.fallback_font
+	ui.draw_string(font, r.position + Vector2(-8, -10), "Calor", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.95, 0.8))
+	if not bool(_arco.brasa):
+		# a dica: o dedo indo e voltando para os lados
+		var c := Vector2(ui.size.x * 0.5, ui.size.y - 90)
+		var off := sin(Time.get_ticks_msec() / 140.0) * 70.0
+		ui.draw_line(c - Vector2(90, 0), c + Vector2(90, 0), Color(1, 1, 1, 0.35), 3.0, true)
+		ui.draw_circle(c + Vector2(off, 0), 14.0, Color(1, 0.9, 0.5, 0.85))
+		ui.draw_string(font, c + Vector2(-110, -26), "Passe o dedo para os lados", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.95, 0.8))
+	else:
+		ui.draw_string(font, Vector2(40, ui.size.y - 210), "Sopros: %d de %d" % [int(_arco.sopros), ARCO_SOPROS], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.95, 0.8))
+
+
+func _arco_end() -> void:
+	if _arco.is_empty():
+		return
+	if is_instance_valid(_arco.ui):
+		(_arco.ui as Node).queue_free()
+	if _arco.has("root") and is_instance_valid(_arco.root):
+		(_arco.root as Node).queue_free()
+	_arco = {}
+	if _chop_pose:
+		_chop_pose.crouch = 0.0
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	_jump_btn.visible = true
+	_act_check = 0.0
 
 
 # ================== PENEIRA DE ÁGUA (FILTRO) ==================
@@ -11169,7 +11614,7 @@ func _desf_end() -> void:
 # As folhas secas (a "saia" da copa) caem sozinhas de vez em quando: dá para pegar.
 
 func _olho_free() -> bool:
-	return _desf.is_empty() and _mesa.is_empty() and _torno.is_empty() and _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
+	return _desf.is_empty() and _mesa.is_empty() and _torno.is_empty() and _arco.is_empty() and _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
 		and not _air and _bld.is_empty() and _proj.is_empty() and _buck_sel.is_empty() and _maq_op.is_empty() \
 		and _trim.is_empty() and _post_mark.is_empty() and _knap.is_empty() and _vine.is_empty() and not _walking \
 		and _coop.is_empty() and _bag_ui == null and _craft_ui == null and _mix.is_empty() and _reb.is_empty() and _pour_t < 0.0

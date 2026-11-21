@@ -281,6 +281,26 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95, true)
 		"acao_derrubar":
 			fell_icon(ci, c, s)
+		"capim_seco":
+			# um maço de capim seco amarrado no meio
+			for k in 16:
+				var o := (k - 7.5) * 2.4
+				ci.draw_line(c + Vector2(o * 0.35, 6) * u, c + Vector2(o * 1.6 + sin(k * 1.7) * 4.0, -44) * u, Color(0.84, 0.72, 0.42).darkened(0.1 * (k % 3)), 2.2 * u, true)
+				ci.draw_line(c + Vector2(o * 0.35, 6) * u, c + Vector2(o * 0.9, 40) * u, Color(0.78, 0.66, 0.38).darkened(0.1 * (k % 2)), 2.2 * u, true)
+			ci.draw_rect(Rect2(c + Vector2(-9, -2) * u, Vector2(18, 10) * u), Color(0.45, 0.36, 0.18))
+		"vareta":
+			ci.draw_line(c + Vector2(-40, 38) * u, c + Vector2(40, -38) * u, Color(0.35, 0.24, 0.13), 9 * u, true)
+			ci.draw_line(c + Vector2(-40, 38) * u, c + Vector2(40, -38) * u, Color(0.6, 0.44, 0.26), 6 * u, true)
+			ci.draw_circle(c + Vector2(40, -38) * u, 4.5 * u, Color(0.82, 0.68, 0.48))
+		"arco_fogo":
+			# o galho curvo e o cipó esticado, com a vareta atravessada
+			var pts := PackedVector2Array()
+			for i in 13:
+				var t := float(i) / 12.0
+				pts.append(c + Vector2(lerpf(-44, 44, t), 18 - sin(t * PI) * 34) * u)
+			ci.draw_polyline(pts, Color(0.5, 0.35, 0.2), 7 * u, true)
+			ci.draw_line(pts[0], pts[12], Color(0.55, 0.5, 0.25), 2.5 * u, true)
+			ci.draw_line(c + Vector2(-4, -40) * u, c + Vector2(4, 44) * u, Color(0.62, 0.46, 0.28), 6 * u, true)
 		"lenha":
 			# duas achas rachadas (casca de um lado, madeira clara do outro)
 			for k in 2:

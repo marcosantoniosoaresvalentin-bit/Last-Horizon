@@ -464,6 +464,13 @@ func _use() -> void:
 		else:
 			_say("Largue a tora antes de colocar %s." % Itens.nome(str(it.id)).to_lower())
 		return
+	if it.id == "arco_fogo" and _game:
+		var msg: String = _game.fogo_start()
+		if msg == "":
+			fechar()
+		else:
+			_say(msg)
+		return
 	if it.id in ["moringa_agua", "moringa_limpa"] and _game:
 		_say(_game.beber_cabaca(str(it.id)))
 		_refresh()
