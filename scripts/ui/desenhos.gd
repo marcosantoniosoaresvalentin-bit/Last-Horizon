@@ -281,6 +281,13 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95, true)
 		"acao_derrubar":
 			fell_icon(ci, c, s)
+		"vasilha_barro", "garrafa_barro", "moringa_barro", "bacia_barro", "filtro_barro":
+			load("res://scripts/world/olaria.gd").icone(ci, id, c, s)
+		"acao_modelar":
+			# a mesa redonda do torno e o pote em cima
+			ci.draw_colored_polygon(P.call([[-44, 22], [44, 22], [40, 32], [-40, 32]]), Color(0.6, 0.42, 0.25))
+			ci.draw_line(c + Vector2(0, 32) * u, c + Vector2(0, 48) * u, Color(0.4, 0.28, 0.16), 6 * u, true)
+			load("res://scripts/world/olaria.gd").icone(ci, "moringa_barro", c + Vector2(0, -8) * u, s * 0.62)
 		"argila_limpa", "acao_limpar", "acao_despejar_argila":
 			# bola de argila (lisa, alaranjada); limpar: com pedrinhas saindo; despejar: o balde
 			if id == "acao_despejar_argila":

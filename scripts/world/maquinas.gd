@@ -122,8 +122,44 @@ const TIPOS := {
 		# a ponta que sobra da travessa só se corta com o tampo já em cima (corta rente)
 		"cortar_depois": {2: [4, 5], 3: [4, 5]},
 	},
+	# Torno de oleiro (de pedal): armação quadrada (4 pés com 2 tábuas em cima e uma tábua
+	# atravessada no meio, o mancal, com o furo do eixo). O eixo (tora fina em pé) passa
+	# pelo mancal: em cima dele a mesa giratória (rodela grossa de tora), embaixo o
+	# volante (rodela grande e pesada). O pedal (tábua embaixo) puxa o volante por uma
+	# biela de madeira. Sentado no banquinho, pisa no pedal e a mesa gira: a argila limpa
+	# no meio da mesa vira vasilha, bacia, cabaça (moringa), garrafa, filtro de barro...
+	"torno_ceramica": {
+		"nome": "Torno de Oleiro",
+		"desc": "Torno de pedal para modelar argila limpa: pisando no pedal, o volante e a mesa redonda de cima giram, e a argila no meio vira vasilha, bacia, cabaça (moringa), garrafa ou filtro de barro. A mesa e o volante são rodelas: pedaços curtos de tora grossa (ponha o pedaço e corte a sobra com o machado).",
+		"pecas": [
+			["tora", 0.55, Vector3(0.3, 0.275, 0.3), "y", 0.06],     # 0 pé da armação
+			["tora", 0.55, Vector3(0.3, 0.275, -0.3), "y", 0.06],    # 1 pé
+			["tora", 0.55, Vector3(-0.3, 0.275, 0.3), "y", 0.06],    # 2 pé
+			["tora", 0.55, Vector3(-0.3, 0.275, -0.3), "y", 0.06],   # 3 pé
+			["tabua", 0.72, Vector3(0.0, 0.585, 0.3), "x", 0.14],    # 4 tábua em cima dos pés 0 e 2
+			["tabua", 0.72, Vector3(0.0, 0.585, -0.3), "x", 0.14],   # 5 tábua em cima dos pés 1 e 3
+			["tabua", 0.72, Vector3(0.0, 0.655, 0.0), "z", 0.14],    # 6 mancal (atravessada no meio, com o furo do eixo)
+			["tora", 0.7, Vector3(0.0, 0.36, 0.0), "y", 0.035],      # 7 eixo
+			["tora", 0.08, Vector3(0.0, 0.15, 0.0), "y", 0.26, 0.17],  # 8 volante (rodela grossa embaixo)
+			["tora", 0.06, Vector3(0.0, 0.73, 0.0), "y", 0.2, 0.13],   # 9 mesa giratória (rodela em cima)
+			["tabua", 0.6, Vector3(-0.45, 0.04, 0.0), "x", 0.15],    # 10 pedal
+			["tora", 0.45, Vector3(-1.0, 0.225, 0.0), "y", 0.09],    # 11 pé do banquinho
+			["tabua", 0.45, Vector3(-1.0, 0.485, 0.0), "z", 0.14],   # 12 tábua do banquinho
+		],
+		"pinos": [
+			[[0, 4], Vector3(0.3, 0.57, 0.3)], [[2, 4], Vector3(-0.3, 0.57, 0.3)],
+			[[1, 5], Vector3(0.3, 0.57, -0.3)], [[3, 5], Vector3(-0.3, 0.57, -0.3)],
+			[[4, 6], Vector3(0.0, 0.64, 0.3)], [[5, 6], Vector3(0.0, 0.64, -0.3)],
+			[[7, 9], Vector3(0.0, 0.76, 0.0), Vector3(0, 1, 0)],    # a mesa no topo do eixo (de cima)
+			[[7, 8], Vector3(0.0, 0.11, 0.0), Vector3(0, -1, 0)],   # o volante no eixo (de baixo)
+			[[11, 12], Vector3(-1.0, 0.46, 0.0)],
+		],
+		"area": Rect2(-1.25, -0.45, 1.7, 0.9),
+		"torno": true,
+	},
 }
 
+const TORNO_MESA := 0.76         # em cima da mesa giratória do torno (m)
 const MESA_TOPO := 0.84          # em cima do tampo (m)
 const MESA_SUJEIRA := 10         # coisas para tirar num balde cheio de argila
 const MESA_BOLAS := 8            # bolas de argila limpa num balde cheio
@@ -340,6 +376,7 @@ func slot_for(mi: int, fl: Dictionary, pos: Vector3) -> Dictionary:
 	var bd := 1e9
 	var short := 0.0
 	var any_kind := false
+	var thin := 0.0
 	var xf := xform(mi)
 	for i in (t.pecas as Array).size():
 		if bool(p.pecas[i]):
@@ -353,6 +390,9 @@ func slot_for(mi: int, fl: Dictionary, pos: Vector3) -> Dictionary:
 			continue
 		if kind == "tora" and r > float(pc[4]) * 2.6:
 			continue                   # tora grossa demais para essa peça
+		if pc.size() > 5 and r < float(pc[5]):
+			thin = float(pc[5]) if thin <= 0.0 else minf(thin, float(pc[5]))
+			continue                   # fina demais (a rodela da mesa e o volante são de tora grossa)
 		var w := xf * (pc[2] as Vector3)
 		var d := Vector2(w.x - pos.x, w.z - pos.z).length()
 		if d < bd:
@@ -362,6 +402,8 @@ func slot_for(mi: int, fl: Dictionary, pos: Vector3) -> Dictionary:
 		return {"i": best, "sobra": maxf(0.0, L - float(t.pecas[best][1]))}
 	if not any_kind:
 		return {"i": -1, "why": "A planta não precisa de mais %s." % NOMES.get(kind, kind)}
+	if thin > 0.0:
+		return {"i": -1, "why": "Essa tora é fina para a rodela que falta (a mesa e o volante são de tora grossa: raio de pelo menos %d cm)." % roundi(thin * 100.0) + (" Para as outras peças, é curta: precisa de %.2f m." % short if short > 0.0 else "")}
 	if short > 0.0:
 		return {"i": -1, "why": "Essa madeira é curta: essa peça precisa de pelo menos %.2f m." % short}
 	return {"i": -1, "why": "Essa tora é grossa demais para as peças que faltam (precisa ser fina)."}
@@ -961,6 +1003,13 @@ func _rebuild() -> void:
 				mk.material_override = _mark_mat
 				mk.position = sg2[1]
 				root.add_child(mk)
+		if bool(t.get("torno", false)):
+			if pronta(mi):
+				nd["biela"] = _stick(Vector3(-0.2, 0.06, 0.0), Vector3(0.2, 0.06, 0.0), 0.018)
+				root.add_child(nd.biela)
+			_nodes[mi] = nd
+			torno_girar(mi, float(p.get("_ang", 0.0)), 0.0)
+			continue
 		if bool(t.get("mesa", false)):
 			if p.has("argila"):
 				_draw_argila(p, root)
@@ -1064,6 +1113,34 @@ func _animate(mi: int, dy: float) -> void:
 		var butt := Vector3(-2.0, 2.66, 0.0)
 		var ph := asin(clampf(dy / 2.0, -0.9, 0.9))
 		(nd.p_5 as Node3D).transform = Transform3D(Basis(Vector3.BACK, ph), butt) * Transform3D(Basis(), -butt) * (nd.t_5 as Transform3D)
+
+
+# ---------- torno de oleiro ----------
+
+## Gira o eixo, a mesa de cima e o volante (ang, em radianos); o pedal desce (0 a 1) e
+## a biela vai do pedal até o pino do volante.
+func torno_girar(mi: int, ang: float, pedal: float) -> void:
+	plantas[mi]["_ang"] = ang
+	if not _nodes.has(mi):
+		return
+	var nd: Dictionary = _nodes[mi]
+	for si in [7, 8, 9]:
+		if nd.has("p_%d" % si) and is_instance_valid(nd["p_%d" % si]):
+			(nd["p_%d" % si] as Node3D).transform = Transform3D(Basis(Vector3.UP, ang), Vector3.ZERO) * (nd["t_%d" % si] as Transform3D)
+	var hinge := Vector3(-0.75, 0.04, 0.0)
+	var th := -0.12 * pedal
+	if nd.has("p_10") and is_instance_valid(nd.p_10):
+		(nd.p_10 as Node3D).transform = Transform3D(Basis(Vector3.BACK, th), hinge) * Transform3D(Basis(), -hinge) * (nd.t_10 as Transform3D)
+	if nd.has("biela") and is_instance_valid(nd.biela):
+		var tip := hinge + Basis(Vector3.BACK, th) * Vector3(0.58, 0.03, 0.0)
+		var crank := Vector3(cos(ang) * 0.17, 0.2, sin(ang) * 0.17)
+		# a mesma vareta (feita com 0,4 m), esticada até o pino do volante
+		var x := crank - tip
+		var dl := x.length()
+		x = x / maxf(dl, 0.001)
+		var z := x.cross(Vector3.UP).normalized()
+		var y := z.cross(x)
+		(nd.biela as Node3D).transform = Transform3D(Basis(x * (dl / 0.4), y, z), (tip + crank) * 0.5)
 
 
 # ---------- mesa de argila ----------

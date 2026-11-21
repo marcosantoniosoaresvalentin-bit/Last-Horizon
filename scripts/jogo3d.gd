@@ -39,6 +39,7 @@ const MINERAIS_ITENS := ["hematita", "magnetita", "goetita", "silex", "malaquita
 const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Barreiros := preload("res://scripts/world/barreiros.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
+const Olaria := preload("res://scripts/world/olaria.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
 const SAW_SPEED := 2.6            # quão rápido a serra acompanha o dedo (curso inteiro ≈ 0,8 s)
 const Maos := preload("res://scripts/world/maos.gd")
@@ -410,6 +411,7 @@ var _swim_t := 0.0
 var _maq_pend := {}               # indo até o lugar na serra: {mi, papel}
 var _bld_coop := false            # construindo com a tora que os dois carregam juntos
 var _drag_b := Vector3.ZERO       # a ponta que vai no chão
+var _torno := {}                  # sentado no torno de oleiro: {mi, fase, peca, vel, ang, et, etapa, ...}
 var _mesa := {}                   # sentado na mesa de argila limpando: {mi, ui, sair, voa}
 var _desf := {}                   # sentado na desfibradeira: {mi, fase, n, anim, node, ...}
 var _desf_btns: Array = []
@@ -2332,6 +2334,9 @@ func _update_chop(delta: float) -> void:
 		return
 	if not _mesa.is_empty():
 		_mesa_tick(delta)
+		return
+	if not _torno.is_empty():
+		_torno_tick(delta)
 		return
 	if not _mix.is_empty():
 		_mix_tick(delta)
@@ -5206,6 +5211,9 @@ func _move_player(delta: float) -> void:
 	if not _mesa.is_empty():
 		_mesa_move(delta)
 		return
+	if not _torno.is_empty():
+		_torno_move(delta)
+		return
 	if not _coop.is_empty() and not bool(_coop.lider) and float(_coop.anim) <= 0.0:
 		var e = _rede.estados.get(int(_coop.pid)) if _rede else null
 		if e != null:
@@ -5485,7 +5493,7 @@ func _fp_camera(delta: float, moved: float) -> void:
 	if _chop_pose:
 		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
 		# com ferramenta na mão os braços não aparecem (só a ferramenta, segura por baixo da tela)
-		_chop_pose.hide_arms = not _desf.is_empty() or not _mesa.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada"]) and _vine.is_empty()
+		_chop_pose.hide_arms = not _desf.is_empty() or not _mesa.is_empty() or not _torno.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada"]) and _vine.is_empty()
 	for m in _body_mats:
 		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, maxf(_busy_f, down))
 		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, maxf(_busy_f, down))
@@ -5553,6 +5561,8 @@ func _open_calendar() -> void:
 
 func _input(e: InputEvent) -> void:
 	if not _mesa.is_empty() and _mesa_input(e):
+		return
+	if not _torno.is_empty() and _torno_input(e):
 		return
 	if not _desf.is_empty() and _desf_input(e):
 		return
@@ -7964,7 +7974,8 @@ func _proj_place() -> void:
 	_proj_stop()
 	if teste:
 		_maq.complete(_maq.plantas.size() - 1)        # modo de teste: já sai montada
-		_show_toast("Modo de teste: a %s já ficou pronta." % str(Maquinas.TIPOS[_maq.plantas[-1].tipo].nome).to_lower())
+		var nm := str(Maquinas.TIPOS[_maq.plantas[-1].tipo].nome).to_lower()
+		_show_toast(("Modo de teste: o %s já ficou pronto." if nm.begins_with("torno") else "Modo de teste: a %s já ficou pronta.") % nm)
 		return
 	_show_toast("Planta no chão! Traga as madeiras e toque em \"Pôr na planta\" perto dela. Depois fure e bata os pinos nas juntas (bolinhas amarelas).")
 
@@ -9817,6 +9828,307 @@ func _reb_tick(delta: float) -> void:
 			_reb_go(nxt)
 
 
+# ================== TORNO DE OLEIRO: MODELAR A ARGILA ==================
+# Pelo olho do torno pronto, "Modelar": senta no banquinho e escolhe o que fazer
+# (vasilha, garrafa, cabaça/moringa, bacia, filtro de barro); as bolas de argila
+# limpa vão para o meio da mesa redonda. Para girar, vai tocando em "Pedalar" (a
+# barrinha de força mostra a velocidade; parando de pisar, a mesa vai parando). Com a
+# mesa girando, toca no losango e passa o dedo (para baixo ou para cima, como diz a
+# etapa): centraliza, abre o buraco, sobe as paredes e dá a forma. Pronta, a peça vai
+# para a mochila.
+const TORNO_VEL_MIN := 0.3        # girando devagar demais a argila não se forma
+
+func _torno_start(mi: int) -> void:
+	if item_qtd("argila_limpa") <= 0 and not teste:
+		_show_toast("Precisa de argila limpa (limpe a argila na mesa de argila).")
+		return
+	if _mao != "":
+		equip("")
+	var ui := Control.new()
+	ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(ui)
+	ui.draw.connect(_torno_draw.bind(ui))
+	var sair := Icones.IconButton.new()
+	sair.text = "Sair"
+	sair.add_theme_font_size_override("font_size", 20)
+	sair.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	sair.offset_left = -170
+	sair.offset_top = -160
+	sair.offset_right = -40
+	sair.offset_bottom = -30
+	sair.pressed.connect(_torno_end)
+	ui.add_child(sair)
+	_torno = {"mi": mi, "ui": ui, "sair": sair, "fase": "escolher", "vel": 0.0, "ang": float(_maq.plantas[mi].get("_ang", 0.0)),
+		"pedal": 0.0, "et": [0.0, 0.0, 0.0, 0.0], "etapa": 0, "drag": -1.0, "tid": -9, "anim": -1.0}
+	# a escolha da peça: uma lista de botões (com quantas bolas de argila leva)
+	var box := VBoxContainer.new()
+	box.position = Vector2(30, 140)
+	box.add_theme_constant_override("separation", 10)
+	ui.add_child(box)
+	for id in Olaria.ORDEM:
+		var b := Button.new()
+		var na := int(Olaria.PECAS[id].argila)
+		b.text = "%s  (%d argila%s)" % [Olaria.PECAS[id].nome, na, "" if na == 1 else "s"]
+		b.add_theme_font_size_override("font_size", 24)
+		b.custom_minimum_size = Vector2(380, 64)
+		b.pressed.connect(_torno_escolher.bind(id))
+		box.add_child(b)
+	_torno.lista = box
+	_olho = {}
+	_jump_btn.visible = false
+	for bt in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
+		(bt as Control).visible = false
+	if _chop_pose:
+		_chop_pose.crouch = 1.0          # sentado no banquinho
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false
+	_pitch = 0.5
+	Sons.play_at(self, "baque", _player.position + Vector3.UP * 0.4, -14.0, 1.4)
+	_show_toast("O que vai fazer? Escolha a peça (tem %d bola%s de argila limpa)." % [item_qtd("argila_limpa"), "" if item_qtd("argila_limpa") == 1 else "s"])
+
+
+func _torno_escolher(id: String) -> void:
+	var na := int(Olaria.PECAS[id].argila)
+	if item_qtd("argila_limpa") < na and not teste:
+		_show_toast("%s precisa de %d bolas de argila limpa (tem %d)." % [Olaria.PECAS[id].nome, na, item_qtd("argila_limpa")])
+		return
+	if not teste:
+		remove_item("argila_limpa", na)
+		_update_inventory()
+	(_torno.lista as Node).queue_free()
+	_torno.erase("lista")
+	_torno.fase = "modelar"
+	_torno.peca = id
+	var mi := MeshInstance3D.new()
+	mi.material_override = Olaria.material()
+	add_child(mi)
+	_torno.node = mi
+	_torno_malha()
+	# o botão de pedalar e a barrinha de força (a velocidade da mesa)
+	var ped := Icones.IconButton.new()
+	ped.text = "Pedalar"
+	ped.add_theme_font_size_override("font_size", 22)
+	ped.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	ped.offset_left = 40
+	ped.offset_top = -190
+	ped.offset_right = 210
+	ped.offset_bottom = -40
+	ped.pressed.connect(_torno_pedalar)
+	(_torno.ui as Control).add_child(ped)
+	_torno.ped = ped
+	var bar := Control.new()
+	bar.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	bar.offset_left = 226
+	bar.offset_top = -190
+	bar.offset_right = 250
+	bar.offset_bottom = -40
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.draw.connect(func():
+		if _torno.is_empty():
+			return
+		var v := clampf(float(_torno.vel), 0.0, 1.0)
+		var r := Rect2(Vector2.ZERO, bar.size)
+		bar.draw_rect(r.grow(3), Color(0.04, 0.04, 0.03, 0.85))
+		var cols := [Color(0.25, 0.55, 0.95), Color(0.25, 0.85, 0.3), Color(0.95, 0.88, 0.2), Color(1.0, 0.55, 0.12), Color(0.95, 0.18, 0.12)]
+		var f := v * (cols.size() - 1)
+		var i := mini(int(f), cols.size() - 2)
+		bar.draw_rect(Rect2(Vector2(0, r.size.y * (1.0 - v)), Vector2(r.size.x, r.size.y * v)), (cols[i] as Color).lerp(cols[i + 1], f - i))
+		var ym := r.size.y * (1.0 - TORNO_VEL_MIN)
+		bar.draw_line(Vector2(-6, ym), Vector2(r.size.x + 6, ym), Color(1, 1, 1, 0.9), 2.0)
+		bar.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0))
+	(_torno.ui as Control).add_child(bar)
+	_torno.bar = bar
+	Sons.play_at(self, "cavar", _maq.xform(int(_torno.mi)) * Vector3(0, Maquinas.TORNO_MESA, 0), -6.0, 0.7)
+	_show_toast("Argila no meio da mesa. Toque em \"Pedalar\" para girar (acima da risquinha branca) e passe o dedo no losango.")
+
+
+func _torno_pedalar() -> void:
+	if _torno.is_empty():
+		return
+	_torno.vel = minf(1.2, float(_torno.vel) + 0.16)
+	_torno.pedal = 1.0
+	Sons.play_at(self, "pedal_range", _player.position + Vector3.UP * 0.2, -16.0, 1.2)
+
+
+## Onde fica o losango da etapa (no barro, no mundo).
+func _torno_alvo() -> Vector3:
+	var xf: Transform3D = _maq.xform(int(_torno.mi))
+	var id := str(_torno.peca)
+	var et: Array = _torno.et
+	var s := float(et[2]) * 0.65 + float(et[3]) * 0.35
+	var a: Array = Olaria.perfil_bolo(id)
+	var b: Array = Olaria.perfil_final(id)
+	var top: Vector2 = (a[-1] as Vector2).lerp(b[-1], s)
+	var mid: Vector2 = (a[Olaria.N / 2] as Vector2).lerp(b[Olaria.N / 2], s)
+	var y0 := Maquinas.TORNO_MESA
+	match int(_torno.etapa):
+		0: return xf * Vector3(0.0, y0 + top.y + 0.01, 0.0)
+		1: return xf * Vector3(0.0, y0 + top.y * 0.9, 0.0)
+		2: return xf * Vector3(-top.x, y0 + top.y * 0.7, 0.0)
+	return xf * Vector3(-mid.x - 0.01, y0 + mid.y, 0.0)
+
+
+func _torno_draw(ui: Control) -> void:
+	if _torno.is_empty() or str(_torno.fase) != "modelar" or int(_torno.etapa) >= Olaria.ETAPAS.size():
+		return
+	var e: Array = Olaria.ETAPAS[int(_torno.etapa)]
+	var txt := "%s: passe o dedo para %s" % [e[0], "baixo" if int(e[1]) > 0 else "cima"]
+	_draw_marks(ui, [[_torno_alvo(), false]], 0, txt)
+	# a seta mostrando para onde passar o dedo
+	var w := _torno_alvo()
+	if not _cam.is_position_behind(w):
+		var p := _cam.unproject_position(w) + Vector2(46, 0)
+		var dy := 34.0 * float(e[1])
+		ui.draw_line(p - Vector2(0, dy), p + Vector2(0, dy), Color(1, 0.9, 0.5), 4.0, true)
+		ui.draw_polyline(PackedVector2Array([p + Vector2(-9, dy - 10.0 * float(e[1])), p + Vector2(0, dy), p + Vector2(9, dy - 10.0 * float(e[1]))]), Color(1, 0.9, 0.5), 4.0, true)
+
+
+func _torno_input(e: InputEvent) -> bool:
+	if _torno.is_empty() or str(_torno.fase) != "modelar":
+		return false
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var pos := Vector2.INF
+	var tid := -9
+	var pressed := false
+	var released := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		tid = e.index
+		pressed = e.pressed
+		released = not e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		tid = -1
+		pressed = e.pressed
+		released = not e.pressed
+	elif e is InputEventScreenDrag:
+		pos = e.position
+		tid = e.index
+	elif e is InputEventMouseMotion and (e.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		pos = e.position
+		tid = -1
+	if pos == Vector2.INF:
+		return false
+	for c in [_torno.sair, _torno.get("ped")]:
+		if c != null and is_instance_valid(c) and (c as Control).get_global_rect().has_point(pos):
+			return false
+	if pressed:
+		var w := _torno_alvo()
+		if not _cam.is_position_behind(w) and pos.distance_to(_cam.unproject_position(w)) < 90.0:
+			_torno.drag = pos.y
+			_torno.tid = tid
+		return true
+	if released:
+		_torno.drag = -1.0
+		return true
+	if tid == int(_torno.tid) and float(_torno.drag) >= 0.0 and float(_torno.anim) < 0.0:
+		var et: Array = Olaria.ETAPAS[int(_torno.etapa)]
+		if (pos.y - float(_torno.drag)) * float(et[1]) > 70.0:
+			_torno.drag = -1.0
+			_torno_passada()
+	return true
+
+
+## Uma passada das mãos no barro (só forma girando).
+func _torno_passada() -> void:
+	if float(_torno.vel) < TORNO_VEL_MIN:
+		_show_toast("A mesa está devagar: toque em \"Pedalar\" até passar da risquinha branca.")
+		return
+	var k := int(_torno.etapa)
+	var e: Array = Olaria.ETAPAS[k]
+	_torno.et[k] = minf(1.0, float(_torno.et[k]) + 1.0 / float(e[2]))
+	_torno.anim = 0.0
+	Sons.play_at(self, "agua", _torno_alvo(), -16.0, 1.6)
+	if float(_torno.et[k]) >= 0.999:
+		_torno.etapa = k + 1
+		if int(_torno.etapa) >= Olaria.ETAPAS.size():
+			var id := str(_torno.peca)
+			add_item(id, 1)
+			_update_inventory()
+			_show_toast("%s pronta! Foi para a mochila." % Olaria.PECAS[id].nome)
+			_torno.fim = 1.6
+		else:
+			_show_toast("Agora: %s." % Olaria.ETAPAS[int(_torno.etapa)][0])
+	_torno_malha()
+
+
+func _torno_malha() -> void:
+	if not _torno.has("node") or not is_instance_valid(_torno.node):
+		return
+	(_torno.node as MeshInstance3D).mesh = Olaria.malha(str(_torno.peca), _torno.et, int(_torno.mi) * 7 + 3)
+
+
+## Sentado no banquinho, de frente para o torno.
+func _torno_move(delta: float) -> void:
+	var mi := int(_torno.mi)
+	if mi >= _maq.plantas.size():
+		_torno_end()
+		return
+	var xf: Transform3D = _maq.xform(mi)
+	_player.position = xf * Vector3(-0.95, 0.0, 0.0)
+	_air = false
+	_vy = 0.0
+	var fx: Vector3 = xf.basis.x
+	_face = atan2(-fx.x, -fx.z)
+	_player.rotation.y = _face
+	if _chop_pose:
+		_chop_pose.crouch = 1.0
+		_chop_pose.moving = false
+	_play("Idle")
+	_fp_camera(delta, 0.0)
+	var eye: Vector3 = xf * Vector3(-0.62, 1.18, 0.0)          # debruçado sobre o torno
+	_cam.global_transform = Transform3D(Basis.from_euler(Vector3(-_pitch, _yaw, 0.0)), eye)
+
+
+func _torno_tick(delta: float) -> void:
+	(_torno.ui as Control).queue_redraw()
+	if _torno.has("bar") and is_instance_valid(_torno.bar):
+		(_torno.bar as Control).queue_redraw()
+	var mi := int(_torno.mi)
+	# o volante pesado segura o giro: parando de pisar, vai parando devagar
+	_torno.vel = maxf(0.0, float(_torno.vel) - 0.22 * delta)
+	_torno.pedal = maxf(0.0, float(_torno.pedal) - 3.0 * delta)
+	_torno.ang = fmod(float(_torno.ang) + float(_torno.vel) * 9.0 * delta, TAU)
+	_maq.torno_girar(mi, float(_torno.ang), float(_torno.pedal))
+	if _torno.has("node") and is_instance_valid(_torno.node):
+		var xf: Transform3D = _maq.xform(mi)
+		(_torno.node as Node3D).global_transform = Transform3D(xf.basis * Basis(Vector3.UP, float(_torno.ang)), xf * Vector3(0, Maquinas.TORNO_MESA, 0))
+	if float(_torno.anim) >= 0.0:
+		_torno.anim = float(_torno.anim) + delta
+		if float(_torno.anim) > 0.35:
+			_torno.anim = -1.0
+	if _torno.has("fim"):
+		_torno.fim = float(_torno.fim) - delta
+		if float(_torno.fim) <= 0.0:
+			_torno_end()
+
+
+func _torno_end() -> void:
+	if _torno.is_empty():
+		return
+	# saiu no meio: a argila volta (o bolo desmancha em bolas de novo)
+	if str(_torno.fase) == "modelar" and not _torno.has("fim") and not teste:
+		add_item("argila_limpa", int(Olaria.PECAS[str(_torno.peca)].argila))
+		_update_inventory()
+	if _torno.has("node") and is_instance_valid(_torno.node):
+		(_torno.node as Node).queue_free()
+	if is_instance_valid(_torno.ui):
+		(_torno.ui as Node).queue_free()
+	var mi := int(_torno.mi)
+	_torno = {}
+	if _chop_pose:
+		_chop_pose.crouch = 0.0
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	if mi < _maq.plantas.size():
+		var out: Vector3 = _maq.xform(mi) * Vector3(-1.45, 0.0, 0.0)
+		_player.position = _ground_pos(Vector2(out.x, out.z))
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
 # ================== MESA DE ARGILA: LIMPAR A ARGILA ==================
 # Pelo olho da mesa pronta: "Despejar" (com o balde de argila na mão) joga a argila no
 # tampo; ela vem suja (pedrinhas, raízes, gravetos, folha seca). "Limpar": senta no
@@ -10372,7 +10684,7 @@ func _desf_end() -> void:
 # As folhas secas (a "saia" da copa) caem sozinhas de vez em quando: dá para pegar.
 
 func _olho_free() -> bool:
-	return _desf.is_empty() and _mesa.is_empty() and _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
+	return _desf.is_empty() and _mesa.is_empty() and _torno.is_empty() and _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
 		and not _air and _bld.is_empty() and _proj.is_empty() and _buck_sel.is_empty() and _maq_op.is_empty() \
 		and _trim.is_empty() and _post_mark.is_empty() and _knap.is_empty() and _vine.is_empty() and not _walking \
 		and _coop.is_empty() and _bag_ui == null and _craft_ui == null and _mix.is_empty() and _reb.is_empty() and _pour_t < 0.0
@@ -10395,7 +10707,7 @@ func _olho_tick() -> void:
 		p = _buritis.caido_near(_player.position, 2.6)      # a copa do buriti derrubado
 	if p.is_empty() and _maq:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
-		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila"] and _maq.pronta(mi):
+		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica"] and _maq.pronta(mi):
 			p = {"maq": mi}
 	if p.is_empty() and _barr:
 		var bi: int = _barr.near(_player.position, 2.6)
@@ -10412,6 +10724,8 @@ func _olho_tick() -> void:
 func _olho_opts(p: Dictionary) -> Array:
 	var out := []
 	if p.has("maq"):
+		if str(_maq.plantas[int(p.maq)].tipo) == "torno_ceramica":
+			return [["modelar", "Modelar"]]
 		if str(_maq.plantas[int(p.maq)].tipo) == "mesa_argila":
 			var op := []
 			if _maq.plantas[int(p.maq)].has("argila"):
@@ -10436,6 +10750,8 @@ func _olho_opts(p: Dictionary) -> Array:
 ## Onde o olho fica: no tronco (na altura do peito), do lado de quem está olhando.
 func _olho_world(p: Dictionary) -> Vector3:
 	if p.has("maq"):
+		if str(_maq.plantas[int(p.maq)].tipo) == "torno_ceramica":
+			return _maq.xform(int(p.maq)) * Vector3(0.0, 1.05, 0.0)
 		if str(_maq.plantas[int(p.maq)].tipo) == "mesa_argila":
 			return _maq.xform(int(p.maq)) * Vector3(0.06, 1.15, 0.0)
 		return _maq.xform(int(p.maq)) * Vector3(0.05, 1.2, 0.0)
@@ -10628,6 +10944,9 @@ func _olho_pick(acao: String) -> void:
 			return
 		"limpar":
 			_mesa_start(int(p.maq))
+			return
+		"modelar":
+			_torno_start(int(p.maq))
 			return
 		"despejar_argila":
 			_mesa_despejar(int(p.maq))
