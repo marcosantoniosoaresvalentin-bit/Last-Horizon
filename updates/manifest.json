@@ -1,9 +1,9 @@
 {
-  "version": 144,
-  "file": "update_144.zip",
-  "size": 4844215,
-  "sha256": "ac5c86624d14c1acff38876936869d239e74b711ce6312c2c6bf3fbfc5fd4c53",
+  "version": 145,
+  "file": "update_145.zip",
+  "size": 4850764,
+  "sha256": "52ea351c1720ec96a58603460c73dfd0c47033de378f4407f0f90804522199ab",
   "min_build": 1,
-  "notes": "Caixa de barro nova, terra/água/fibra realistas, enxada, barro que seca e racha",
-  "date": "2026-11-19"
+  "notes": "Barro feito no monte de terra (a caixa saiu): abrir cova com a enxada, meio balde de água por vez escorrendo pela terra, fibras, misturar; barro no balde e despejado no chão; reboco mais realista; cupim não come madeira rebocada",
+  "date": "2026-11-21"
 }
