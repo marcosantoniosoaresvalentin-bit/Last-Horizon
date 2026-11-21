@@ -1,9 +1,9 @@
 {
-  "version": 163,
-  "file": "update_163.zip",
-  "size": 5001775,
-  "sha256": "b26f0bbb94c56b9eb33984fc4740201c29c2c1d1d0a2627e78449dad2d7e2eec",
+  "version": 164,
+  "file": "update_164.zip",
+  "size": 5001921,
+  "sha256": "0ff9ba458ba7439476f6938872de513efb33adad771fb96c0fbe982eda6e454f",
   "min_build": 1,
-  "notes": "Cobra jararaca com bote e veneno (vista embaçada); planta jararaca-taia e o remédio contra picada no craft",
+  "notes": "Barras de vida, fome e sede lisas com porcentagem",
   "date": "2026-11-21"
 }
