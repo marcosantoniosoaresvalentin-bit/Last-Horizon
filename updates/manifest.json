@@ -1,9 +1,9 @@
 {
-  "version": 148,
-  "file": "update_148.zip",
-  "size": 4860906,
-  "sha256": "15efab1eca711b430140264d7a274f5182b5b5d7e64c1d97b87567cda8e110fd",
+  "version": 149,
+  "file": "update_149.zip",
+  "size": 4861178,
+  "sha256": "11fcfe6ec748521cb6e34eca3167195bc1c41a5090b03c44450d4a49adb10402",
   "min_build": 1,
-  "notes": "Mesa de argila nas plantas: despejar o balde de argila pelo olho e limpar a sujeira sentado no banquinho (sai argila limpa)",
+  "notes": "Mesa de argila com travessas: as tábuas do tampo pregadas em dois paus atravessados em cima dos pés",
   "date": "2026-11-21"
 }
