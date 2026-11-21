@@ -2910,6 +2910,54 @@ static func split_sec(sec: Dictionary, em_pe: bool) -> Array:
 	return out
 
 
+## Racha a seção numa linha qualquer: os pontos p (z, y) com p·n = d. Devolve os dois
+## pedaços [o do lado p·n >= d, o outro] (a face nova é madeira rachada).
+static func split_sec_linha(sec: Dictionary, n: Vector2, d: float) -> Array:
+	var pts := []
+	for p in sec.pts:
+		pts.append([float(p[0]), float(p[1]), int(p[2])])
+	var out := []
+	for keep in [1.0, -1.0]:
+		var res := []
+		var cnt := pts.size()
+		for k in cnt:
+			var P: Array = pts[k]
+			var Q: Array = pts[(k + 1) % cnt]
+			var t := int(P[2])
+			var vp: float = float(P[0]) * n.x + float(P[1]) * n.y - d
+			var vq: float = float(Q[0]) * n.x + float(Q[1]) * n.y - d
+			var inP: bool = vp * float(keep) >= 0.0
+			var inQ: bool = vq * float(keep) >= 0.0
+			if inP and inQ:
+				res.append([Q[0], Q[1], t])
+			elif inP != inQ:
+				var f := vp / (vp - vq)
+				var I := [lerpf(float(P[0]), float(Q[0]), f), lerpf(float(P[1]), float(Q[1]), f)]
+				if inP:
+					res.append([I[0], I[1], t])
+				else:
+					res.append([I[0], I[1], 1])
+					res.append([Q[0], Q[1], t])
+		if res.size() < 3:
+			continue
+		var poly := []
+		for k in res.size():
+			poly.append([float(res[k][0]), float(res[k][1]), int(res[(k + 1) % res.size()][2])])
+		out.append(_lay_flat(poly, sec.ax))
+	return out
+
+
+## Até onde vai a seção na direção n: [mínimo, máximo] de p·n.
+static func sec_faixa(sec: Dictionary, n: Vector2) -> Vector2:
+	var mn := 1e9
+	var mx := -1e9
+	for p in sec.pts:
+		var v := float(p[0]) * n.x + float(p[1]) * n.y
+		mn = minf(mn, v)
+		mx = maxf(mx, v)
+	return Vector2(mn, mx)
+
+
 ## Deita a seção na aresta mais comprida (embaixo, reta) e centra no meio da caixa.
 static func _lay_flat(poly: Array, ax: Array) -> Dictionary:
 	var best := 0

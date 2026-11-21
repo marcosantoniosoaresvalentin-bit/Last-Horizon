@@ -474,6 +474,7 @@ var _split := {}                  # rachando a tora com cunhas (ver _split_begin
 const TAB_L := 0.4                # comprimento da tábua pequena (m)
 const TOQ_L := 0.25               # o toquinho (pedaço redondo para rachar lenha no cepo)
 var _chop_cepo := -1              # rachando lenha no cepo (índice da tora fincada)
+var _racha := {}                  # escolhendo onde rachar no cepo: {ci, ang, d, node, x, y}
 const RIPAS_POR_TABUA := 4
 const BOARD_HITS := 4
 var _rede: Node = null            # multiplayer (ver rede.gd)
@@ -1512,6 +1513,8 @@ func _process(delta: float) -> void:
 	_vitais_tick(delta)
 	_dig_ring_tick()
 	_filtro_tick(delta)
+	if not _racha.is_empty() and (_mao != "machado" or _cepo_near(1.8, true) != int(_racha.ci)):
+		_racha_end()                     # foi embora ou trocou de ferramenta
 	_mp_tick(delta)
 	_sync_tick(delta)
 	_coop_tick(delta)
@@ -2695,7 +2698,7 @@ func _update_chop(delta: float) -> void:
 	elif _mao == "machado" and _arvores != null and not _digging and not _air and _carry.is_empty() and _crouch_job == "":
 		if _cepo_near(1.4, true) >= 0:
 			_chop_btn.visible = true
-			_chop_btn.text = "Rachar lenha"
+			_chop_btn.text = "Rachar aqui" if not _racha.is_empty() else "Rachar lenha"
 		elif _bur_fell_ready():
 			_chop_btn.visible = true
 			_chop_btn.text = "Derrubar"
@@ -5324,7 +5327,12 @@ func _start_chop() -> void:
 		_begin_swing()
 		return
 	var cj := _cepo_near(1.4, true)
+	if _mao == "machado" and cj >= 0 and (_racha.is_empty() or int(_racha.ci) != cj):
+		_racha_start(cj)                 # primeiro escolhe onde rachar (o risco vermelho)
+		return
 	if _mao == "machado" and cj >= 0:
+		_buracos.posts[cj].lenha["linha"] = [float(_racha.ang), float(_racha.d)]
+		_racha_end()
 		if _digging:
 			_cancel_dig()
 		_chop_cepo = cj
@@ -6005,6 +6013,8 @@ func _input(e: InputEvent) -> void:
 	if not _torno.is_empty() and _torno_input(e):
 		return
 	if not _arco.is_empty() and _arco_input(e):
+		return
+	if not _racha.is_empty() and _racha_input(e):
 		return
 	if not _desf.is_empty() and _desf_input(e):
 		return
@@ -7318,12 +7328,20 @@ func _cepo_hit() -> void:
 		return
 	var nivel := int(fl.get("lenha", 0))
 	var sec: Dictionary = fl.sec if fl.has("sec") else Arvores.circle_sec()
-	var halves: Array = Arvores.split_sec(sec, nivel % 2 == 1)
-	# os dois lados: para a direita e para a esquerda de quem está rachando
-	var side := Vector3(cos(_face), 0, -sin(_face))
+	var ln: Array = fl.get("linha", [_racha_ang0(fl), 0.0])
+	var nn := Vector2(cos(float(ln[0])), sin(float(ln[0])))
+	var halves: Array = Arvores.split_sec_linha(sec, nn, float(ln[1]))
+	if halves.size() < 2:
+		halves = Arvores.split_sec(sec, nivel % 2 == 1)
+	# os dois pedaços caem um para cada lado do risco
+	var xfc := _cepo_acha_xf(ci)
+	var side: Vector3 = xfc.basis * Vector3(0, nn.y, nn.x)
+	side.y = 0.0
+	side = side.normalized() if side.length() > 0.01 else Vector3(cos(_face), 0, -sin(_face))
 	for k in 2:
 		var pc: Dictionary = fl.duplicate(true)
 		pc.erase("golpes")
+		pc.erase("linha")
 		pc["sec"] = halves[k]
 		pc["lenha"] = nivel + 1
 		var sg := 1.0 if k == 0 else -1.0
@@ -7336,10 +7354,162 @@ func _cepo_hit() -> void:
 	_buracos._rebuild()
 	Sons.play_at(self, "estalo", at, -2.0, 1.1)
 	_cancel_chop()
-	if nivel + 1 >= 3:
-		_show_toast("Rachou! Essas achas já estão finas: pegue e guarde como lenha.")
-	else:
-		_show_toast("Rachou! Os pedaços caíram um para cada lado. Rache de novo no cepo ou pegue e guarde como lenha.")
+	_show_toast("Rachou! Os pedaços caíram um para cada lado. Rache de novo no cepo (do tamanho que quiser) ou pegue e guarde como lenha.")
+
+
+# ---------- onde rachar: o risco vermelho no topo ----------
+# Com a madeira em pé no cepo e o machado na mão, "Rachar lenha" mostra um risco
+# vermelho em cima dela (no meio). Passando o dedo para os lados o risco anda; para
+# cima e para baixo ele gira. "Rachar aqui": as machadadas rachem nessa linha (pedaço
+# grande e pequeno, do jeito que o jogador quiser).
+
+## O lugar e o jeito da madeira em pé no cepo (o mesmo do desenho).
+func _cepo_acha_xf(ci: int) -> Transform3D:
+	var po: Dictionary = _buracos.posts[ci]
+	var L: float = _arvores.free_log_length(po.log)
+	var Ll: float = _arvores.free_log_length(po.lenha)
+	var gy: float = surface_at(float(po.x), float(po.z))
+	return Transform3D(Basis(Vector3.UP, float(po.yaw) + 0.7) * Basis(Quaternion(Vector3.RIGHT, Vector3.UP)),
+		Vector3(float(po.x), gy - float(po.d) + L + Ll * 0.5, float(po.z)))
+
+
+## O ângulo de começo do risco (o mesmo jeito que rachava antes).
+func _racha_ang0(fl: Dictionary) -> float:
+	return PI * 0.5 if int(fl.get("lenha", 0)) % 2 == 1 else 0.0
+
+
+func _racha_start(ci: int) -> void:
+	_racha_end()
+	var fl: Dictionary = _buracos.posts[ci].lenha
+	var ang := _racha_ang0(fl)
+	var sec: Dictionary = fl.sec if fl.has("sec") else Arvores.circle_sec()
+	var fx: Vector2 = Arvores.sec_faixa(sec, Vector2(cos(ang), sin(ang)))
+	var node := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(1.0, 0.006, 0.012)
+	node.mesh = bm
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(1.0, 0.12, 0.08)
+	node.material_override = m
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(node)
+	_racha = {"ci": ci, "ang": ang, "d": (fx.x + fx.y) * 0.5, "node": node, "x": -1.0, "y": -1.0, "tid": -9}
+	_racha_desenha()
+	_face_to(_cepo_top(ci))
+	_yaw = _face
+	_pitch = 0.75
+	_act_check = 0.0
+	_show_toast("Passe o dedo para os lados para mudar onde rachar (para cima/baixo gira o risco). Depois toque em \"Rachar aqui\".")
+
+
+func _racha_end() -> void:
+	if _racha.has("node") and is_instance_valid(_racha.node):
+		(_racha.node as Node).queue_free()
+	_racha = {}
+
+
+## Põe o risco no topo da madeira (no plano da seção: p·n = d).
+func _racha_desenha() -> void:
+	if _racha.is_empty():
+		return
+	var ci := int(_racha.ci)
+	if not _cepo_ok(ci) or not _buracos.posts[ci].has("lenha"):
+		_racha_end()
+		return
+	var fl: Dictionary = _buracos.posts[ci].lenha
+	var sec: Dictionary = fl.sec if fl.has("sec") else Arvores.circle_sec()
+	var n := Vector2(cos(float(_racha.ang)), sin(float(_racha.ang)))
+	var fx: Vector2 = Arvores.sec_faixa(sec, n)
+	# não deixa o risco sair da madeira (sobra pelo menos uma lasquinha de cada lado)
+	var folga := (fx.y - fx.x) * 0.1
+	_racha.d = clampf(float(_racha.d), fx.x + folga, fx.y - folga)
+	var t := Vector2(-n.y, n.x)
+	var tf: Vector2 = Arvores.sec_faixa(sec, t)
+	var r: float = float(fl.cil.rb) if fl.has("cil") else _arvores.free_log_radius(fl)
+	var Ll: float = _arvores.free_log_length(fl)
+	# onde o risco cruza a beira da madeira (de uma ponta à outra da corda)
+	var tmin := 1e9
+	var tmax := -1e9
+	var pts: Array = sec.pts
+	for k in pts.size():
+		var P := Vector2(float(pts[k][0]), float(pts[k][1]))
+		var Q := Vector2(float(pts[(k + 1) % pts.size()][0]), float(pts[(k + 1) % pts.size()][1]))
+		var vp := P.dot(n) - float(_racha.d)
+		var vq := Q.dot(n) - float(_racha.d)
+		if (vp >= 0.0) != (vq >= 0.0):
+			var I := P.lerp(Q, vp / (vp - vq))
+			tmin = minf(tmin, I.dot(t))
+			tmax = maxf(tmax, I.dot(t))
+	if tmax < tmin:
+		tmin = tf.x
+		tmax = tf.y
+	var p0 := n * float(_racha.d) + t * (tmin + tmax) * 0.5
+	var c := Vector3(Ll * 0.5 + 0.005, p0.y * r, p0.x * r)
+	var dirl := Vector3(0, t.y, t.x).normalized()
+	var up := Vector3(1, 0, 0)
+	var zz := dirl.cross(up).normalized()
+	var comp := (tmax - tmin) * r
+	var xf := _cepo_acha_xf(ci)
+	(_racha.node as Node3D).global_transform = xf * Transform3D(Basis(dirl * comp, up, zz), c)
+
+
+func _racha_input(e: InputEvent) -> bool:
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var pos := Vector2.INF
+	var tid := -9
+	var pressed := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		tid = e.index
+		pressed = e.pressed
+		if not e.pressed:
+			_racha.x = -1.0
+			return false
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		tid = -1
+		pressed = e.pressed
+		if not e.pressed:
+			_racha.x = -1.0
+			return false
+	elif e is InputEventScreenDrag:
+		pos = e.position
+		tid = e.index
+	elif e is InputEventMouseMotion and (e.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		pos = e.position
+		tid = -1
+	if pos == Vector2.INF:
+		return false
+	# os botões e o controle de andar continuam funcionando
+	for b in [_chop_btn, _jump_btn, _ctx_btn]:
+		if (b as Control).visible and (b as Control).get_global_rect().has_point(pos):
+			return false
+	if pos.x < get_viewport().get_visible_rect().size.x * 0.35:
+		return false
+	if pressed:
+		_racha.x = pos.x
+		_racha.y = pos.y
+		_racha.tid = tid
+		return true
+	if tid != int(_racha.tid) or float(_racha.x) < 0.0:
+		return false
+	var dx := pos.x - float(_racha.x)
+	var dy := pos.y - float(_racha.y)
+	_racha.x = pos.x
+	_racha.y = pos.y
+	_racha_mover(dx, dy)
+	return true
+
+
+func _racha_mover(dx: float, dy: float) -> void:
+	var fl: Dictionary = _buracos.posts[int(_racha.ci)].lenha
+	var r: float = float(fl.cil.rb) if fl.has("cil") else 0.12
+	# o dedo andando para o lado: o risco anda junto (no tamanho de verdade da madeira)
+	_racha.d = float(_racha.d) + dx * 0.0012 / maxf(r, 0.04)
+	_racha.ang = float(_racha.ang) + dy * 0.008
+	_racha_desenha()
 
 
 ## Um pedaço novo com a mesma seção (o mesmo formato) da madeira de origem.
