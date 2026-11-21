@@ -1,9 +1,9 @@
 {
-  "version": 150,
-  "file": "update_150.zip",
-  "size": 4861217,
-  "sha256": "883bd2b99bdff9aee1b81c3754ed3bc31814862dac9a296f0dadbb73d6f759f1",
+  "version": 151,
+  "file": "update_151.zip",
+  "size": 4861480,
+  "sha256": "1254058c05d88719d1b846c3373bfc6963027b7155ab8398071f754bb6c24386",
   "min_build": 1,
-  "notes": "Mesa de argila: travessas de tábua em cima dos pés e o tampo de duas tábuas pregado nelas",
+  "notes": "Mesa de argila: travessas na medida do tampo; cortar a ponta das travessas depois de pôr as tábuas de cima",
   "date": "2026-11-21"
 }
