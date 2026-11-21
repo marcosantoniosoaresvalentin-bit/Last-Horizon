@@ -410,6 +410,7 @@ var _swim_t := 0.0
 var _maq_pend := {}               # indo até o lugar na serra: {mi, papel}
 var _bld_coop := false            # construindo com a tora que os dois carregam juntos
 var _drag_b := Vector3.ZERO       # a ponta que vai no chão
+var _mesa := {}                   # sentado na mesa de argila limpando: {mi, ui, sair, voa}
 var _desf := {}                   # sentado na desfibradeira: {mi, fase, n, anim, node, ...}
 var _desf_btns: Array = []
 var _sub_btns: Array = []
@@ -2328,6 +2329,9 @@ func _update_chop(delta: float) -> void:
 		return
 	if not _desf.is_empty():
 		_desf_tick(delta)
+		return
+	if not _mesa.is_empty():
+		_mesa_tick(delta)
 		return
 	if not _mix.is_empty():
 		_mix_tick(delta)
@@ -5199,6 +5203,9 @@ func _move_player(delta: float) -> void:
 	if not _desf.is_empty():
 		_desf_move(delta)
 		return
+	if not _mesa.is_empty():
+		_mesa_move(delta)
+		return
 	if not _coop.is_empty() and not bool(_coop.lider) and float(_coop.anim) <= 0.0:
 		var e = _rede.estados.get(int(_coop.pid)) if _rede else null
 		if e != null:
@@ -5478,7 +5485,7 @@ func _fp_camera(delta: float, moved: float) -> void:
 	if _chop_pose:
 		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
 		# com ferramenta na mão os braços não aparecem (só a ferramenta, segura por baixo da tela)
-		_chop_pose.hide_arms = not _desf.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada"]) and _vine.is_empty()
+		_chop_pose.hide_arms = not _desf.is_empty() or not _mesa.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada"]) and _vine.is_empty()
 	for m in _body_mats:
 		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, maxf(_busy_f, down))
 		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, maxf(_busy_f, down))
@@ -5545,6 +5552,8 @@ func _open_calendar() -> void:
 
 
 func _input(e: InputEvent) -> void:
+	if not _mesa.is_empty() and _mesa_input(e):
+		return
 	if not _desf.is_empty() and _desf_input(e):
 		return
 	if not _mix.is_empty() and _mix_input(e):
@@ -9807,6 +9816,191 @@ func _reb_tick(delta: float) -> void:
 			_reb_go(nxt)
 
 
+# ================== MESA DE ARGILA: LIMPAR A ARGILA ==================
+# Pelo olho da mesa pronta: "Despejar" (com o balde de argila na mão) joga a argila no
+# tampo; ela vem suja (pedrinhas, raízes, gravetos, folha seca). "Limpar": senta no
+# banquinho e aparece um losango em cada sujeira; tocando, tira com a mão e joga fora.
+# Tudo limpo: as bolas de argila limpa vão para a mochila (para fabricar).
+
+func _mesa_despejar(mi: int) -> void:
+	if _mao != "balde" or str(_balde_carga.get("tipo", "")) != "argila":
+		_show_toast("Traga um balde de argila (cave na beira da lagoa com a pá e encha o balde) e escolha Despejar.")
+		return
+	var cap := minf(BALDE_VOL, BALDE_KG / float(DENS.argila))
+	var f := float(_balde_carga.get("vol", 0.0)) / cap
+	if f < 0.25:
+		_show_toast("Pouca argila no balde. Encha mais.")
+		return
+	_maq.mesa_despejar(mi, f)
+	_balde_carga = {}
+	_update_balde_fill(_balde_fill, _balde_carga)
+	_update_inventory()
+	var at: Vector3 = _maq.xform(mi) * Vector3(0.06, Maquinas.MESA_TOPO, 0.0)
+	Sons.play_at(self, "cavar", at, -2.0, 0.75)
+	_dirt(at)
+	_show_toast("Argila na mesa. Ela vem suja: escolha Limpar (pelo olho) para tirar a sujeira.")
+	_act_check = 0.0
+
+
+func _mesa_start(mi: int) -> void:
+	if not _maq.plantas[mi].has("argila"):
+		_show_toast("Não tem argila na mesa. Despeje um balde de argila primeiro.")
+		return
+	if _mao != "":
+		equip("")
+	var ui := Control.new()
+	ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(ui)
+	ui.draw.connect(func():
+		if _mesa.is_empty():
+			return
+		var pts := []
+		for w in _maq.mesa_sujeira(int(_mesa.mi)):
+			pts.append([w, false])
+		_draw_marks(ui, pts, -1, ""))
+	var sair := Icones.IconButton.new()
+	sair.text = "Sair"
+	sair.add_theme_font_size_override("font_size", 20)
+	sair.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	sair.offset_left = -170
+	sair.offset_top = -160
+	sair.offset_right = -40
+	sair.offset_bottom = -30
+	sair.pressed.connect(_mesa_end)
+	ui.add_child(sair)
+	_mesa = {"mi": mi, "ui": ui, "sair": sair, "voa": []}
+	_olho = {}
+	_jump_btn.visible = false
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn]:
+		(b as Control).visible = false
+	if _chop_pose:
+		_chop_pose.crouch = 1.0          # sentado no banquinho
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false
+	_pitch = 0.95
+	Sons.play_at(self, "baque", _player.position + Vector3.UP * 0.4, -14.0, 1.4)
+	_show_toast("Toque nos losangos para tirar a sujeira da argila.")
+
+
+## Sentado no banquinho, de frente para a mesa, olhando a argila no tampo.
+func _mesa_move(delta: float) -> void:
+	var mi := int(_mesa.mi)
+	if mi >= _maq.plantas.size():
+		_mesa_end()
+		return
+	var xf: Transform3D = _maq.xform(mi)
+	var at: Vector3 = xf * Vector3(-0.66, 0.0, 0.0)
+	_player.position = at
+	_air = false
+	_vy = 0.0
+	var fx: Vector3 = xf.basis.x
+	_face = atan2(-fx.x, -fx.z)
+	_player.rotation.y = _face
+	if _chop_pose:
+		_chop_pose.crouch = 1.0
+		_chop_pose.moving = false
+	_play("Idle")
+	_fp_camera(delta, 0.0)
+	var eye: Vector3 = xf * Vector3(-0.6, 1.2, 0.0)
+	_cam.global_transform = Transform3D(Basis.from_euler(Vector3(-_pitch, _yaw, 0.0)), eye)
+
+
+func _mesa_input(e: InputEvent) -> bool:
+	var pos := Vector2.INF
+	if e is InputEventScreenTouch and e.pressed:
+		pos = e.position
+	elif e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT and e.device != InputEvent.DEVICE_ID_EMULATION:
+		pos = e.position
+	if pos == Vector2.INF:
+		return false
+	if (_mesa.sair as Control).get_global_rect().has_point(pos):
+		return false
+	var pts: Array = _maq.mesa_sujeira(int(_mesa.mi))
+	var best := -1
+	var bd := 60.0
+	for k in pts.size():
+		if _cam.is_position_behind(pts[k]):
+			continue
+		var d := pos.distance_to(_cam.unproject_position(pts[k]))
+		if d < bd:
+			bd = d
+			best = k
+	if best < 0:
+		return false
+	_mesa_tirar(best)
+	return true
+
+
+## Tira a sujeira k: ela sai da argila e é jogada para o lado (cai no chão).
+func _mesa_tirar(k: int) -> void:
+	var mi := int(_mesa.mi)
+	var w: Vector3 = _maq.mesa_sujeira(mi)[k]
+	var e: Array = _maq.plantas[mi].argila.suj[k]
+	var kind: String = _maq.mesa_tirar(mi, k)
+	if kind == "":
+		return
+	# o pedacinho voando para fora da mesa
+	var n: Node3D = _maq._sujeira_node(_maq.plantas[mi] if _maq.plantas[mi].has("argila") else {"argila": {"f": 0.0, "seed": 0}}, e)
+	add_child(n)
+	var xf: Transform3D = _maq.xform(mi)
+	n.global_transform = Transform3D(xf.basis, xf.origin)
+	var side := xf.basis.z * (1.0 if randf() < 0.5 else -1.0)
+	(_mesa.voa as Array).append({"n": n, "t": 0.0, "from": n.position, "v": side * 1.4 + Vector3.UP * 1.2 + xf.basis.x * 0.3})
+	Sons.play_at(self, "pedra_bate" if kind == "pedra" else "folha_cai", w, -10.0, 1.6)
+	var left: int = _maq.mesa_sujeira(mi).size()
+	if left == 0:
+		var nb: int = _maq.mesa_recolher(mi)
+		add_item("argila_limpa", nb)
+		_update_inventory()
+		Sons.play_at(self, "cavar", w, -6.0, 0.7)
+		_show_toast("Argila limpa! +%d bola%s de argila limpa na mochila." % [nb, "" if nb == 1 else "s"])
+		_mesa.fim = 0.9            # levanta daqui a pouco
+	else:
+		_show_toast("Falta%s %d." % ["" if left == 1 else "m", left])
+
+
+func _mesa_tick(delta: float) -> void:
+	(_mesa.ui as Control).queue_redraw()
+	for v in (_mesa.voa as Array).duplicate():
+		v.t = float(v.t) + delta
+		var n: Node3D = v.n
+		if not is_instance_valid(n):
+			(_mesa.voa as Array).erase(v)
+			continue
+		var vel: Vector3 = v.v
+		n.position = (v.from as Vector3) + vel * float(v.t) + Vector3.DOWN * 4.9 * float(v.t) * float(v.t)
+		n.rotate_x(delta * 6.0)
+		if float(v.t) > 0.9:
+			n.queue_free()
+			(_mesa.voa as Array).erase(v)
+	if _mesa.has("fim"):
+		_mesa.fim = float(_mesa.fim) - delta
+		if float(_mesa.fim) <= 0.0:
+			_mesa_end()
+
+
+func _mesa_end() -> void:
+	if _mesa.is_empty():
+		return
+	for v in _mesa.voa:
+		if is_instance_valid(v.n):
+			(v.n as Node).queue_free()
+	if is_instance_valid(_mesa.ui):
+		(_mesa.ui as Node).queue_free()
+	var mi := int(_mesa.mi)
+	_mesa = {}
+	if _chop_pose:
+		_chop_pose.crouch = 0.0
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	if mi < _maq.plantas.size():
+		var out: Vector3 = _maq.xform(mi) * Vector3(-1.25, 0.0, 0.0)
+		_player.position = _ground_pos(Vector2(out.x, out.z))
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
 # ================== DESFIBRADEIRA: TIRAR A FIBRA DO TALO DE BURITI ==================
 # Pelo olho da desfibradeira pronta, "Trabalhar": o jogador senta no banco (só se tiver
 # talo de buriti na mochila) e já pega um talo. Passando o dedo PARA BAIXO na tela, bate
@@ -10177,7 +10371,7 @@ func _desf_end() -> void:
 # As folhas secas (a "saia" da copa) caem sozinhas de vez em quando: dá para pegar.
 
 func _olho_free() -> bool:
-	return _desf.is_empty() and _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
+	return _desf.is_empty() and _mesa.is_empty() and _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
 		and not _air and _bld.is_empty() and _proj.is_empty() and _buck_sel.is_empty() and _maq_op.is_empty() \
 		and _trim.is_empty() and _post_mark.is_empty() and _knap.is_empty() and _vine.is_empty() and not _walking \
 		and _coop.is_empty() and _bag_ui == null and _craft_ui == null and _mix.is_empty() and _reb.is_empty() and _pour_t < 0.0
@@ -10200,7 +10394,7 @@ func _olho_tick() -> void:
 		p = _buritis.caido_near(_player.position, 2.6)      # a copa do buriti derrubado
 	if p.is_empty() and _maq:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
-		if mi >= 0 and str(_maq.plantas[mi].tipo) == "desfibradeira" and _maq.pronta(mi):
+		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila"] and _maq.pronta(mi):
 			p = {"maq": mi}
 	if p.is_empty() and _barr:
 		var bi: int = _barr.near(_player.position, 2.6)
@@ -10217,6 +10411,15 @@ func _olho_tick() -> void:
 func _olho_opts(p: Dictionary) -> Array:
 	var out := []
 	if p.has("maq"):
+		if str(_maq.plantas[int(p.maq)].tipo) == "mesa_argila":
+			var op := []
+			if _maq.plantas[int(p.maq)].has("argila"):
+				op.append(["limpar", "Limpar"])
+			if _mao == "balde" and str(_balde_carga.get("tipo", "")) == "argila":
+				op.append(["despejar_argila", "Despejar"])
+			if op.is_empty():
+				op.append(["despejar_argila", "Despejar"])
+			return op
 		return [["trabalhar", "Trabalhar"]]
 	if p.has("barreiro"):
 		return _barr_opts(int(p.barreiro))
@@ -10232,6 +10435,8 @@ func _olho_opts(p: Dictionary) -> Array:
 ## Onde o olho fica: no tronco (na altura do peito), do lado de quem está olhando.
 func _olho_world(p: Dictionary) -> Vector3:
 	if p.has("maq"):
+		if str(_maq.plantas[int(p.maq)].tipo) == "mesa_argila":
+			return _maq.xform(int(p.maq)) * Vector3(0.06, 1.15, 0.0)
 		return _maq.xform(int(p.maq)) * Vector3(0.05, 1.2, 0.0)
 	if p.has("barreiro"):
 		return _barr.center(int(p.barreiro)) + Vector3.UP * 0.45
@@ -10419,6 +10624,12 @@ func _olho_pick(acao: String) -> void:
 	match acao:
 		"trabalhar":
 			_desf_start(int(p.maq))
+			return
+		"limpar":
+			_mesa_start(int(p.maq))
+			return
+		"despejar_argila":
+			_mesa_despejar(int(p.maq))
 			return
 		"cortar":
 			_bur = {"p": p, "acao": "cortar"}

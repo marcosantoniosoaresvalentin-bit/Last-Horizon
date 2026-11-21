@@ -46,6 +46,8 @@ const ITENS := {
 		"desc": "Lasca de pedra comprida e fina, com fio dos dois lados e ponta aguda. Amarrada num cabo vira a faca."},
 	"faca": {"nome": "Faca de Pedra", "kg": 0.3, "cat": "Ferramentas",
 		"desc": "Lâmina de pedra amarrada com cipó num cabo de galho. Corta o talo das folhas de palmeira. Batida torta, a lâmina quebra.", "ferramenta": true, "dur": 40},
+	"argila_limpa": {"nome": "Argila Limpa", "kg": 2.0, "cat": "Recursos",
+		"desc": "Bola de argila sem pedrinhas, raízes nem folhas (limpa à mão na mesa de argila). Pronta para modelar e fabricar."},
 	"fibra_buriti": {"nome": "Fibra de Buriti", "kg": 0.25, "cat": "Recursos",
 		"desc": "Fibra tirada do talo do buriti na desfibradeira (a \"seda\" do buriti). Forte e leve: serve para cordas, redes e trançados."},
 	"talo_buriti": {"nome": "Talo de Buriti", "kg": 1.1, "cat": "Recursos",

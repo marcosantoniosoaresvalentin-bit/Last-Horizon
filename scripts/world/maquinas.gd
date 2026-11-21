@@ -90,7 +90,33 @@ const TIPOS := {
 		# as lâminas de faca em pé em cima da bancada (fio para cima, ao comprido em x)
 		"laminas": [Vector3(0.0, 0.94, -0.013), Vector3(0.0, 0.94, 0.0), Vector3(0.0, 0.94, 0.013)],
 	},
+	# Mesa de argila: dois pés (toras em pé na mesma altura) com duas tábuas lado a lado
+	# em cima (o tampo), e na frente um banquinho (toco baixo com uma tábua). Despeja o
+	# balde de argila no tampo e, sentado, tira a sujeira com a mão: sai argila limpa.
+	"mesa_argila": {
+		"nome": "Mesa de Argila",
+		"desc": "Mesa com banquinho para trabalhar a argila. Despeje um balde de argila em cima e, sentado, tire a sujeira com a mão (pedrinhas, raízes, folhas): sai argila limpa, pronta para fabricar.",
+		"pecas": [
+			["tora", 0.8, Vector3(0.0, 0.4, 0.34), "y", 0.08],       # 0 pé da mesa
+			["tora", 0.8, Vector3(0.0, 0.4, -0.34), "y", 0.08],      # 1 pé da mesa
+			["tabua", 1.0, Vector3(-0.13, 0.835, 0.0), "z", 0.15],   # 2 tampo (do lado do banco)
+			["tabua", 1.0, Vector3(0.13, 0.835, 0.0), "z", 0.15],    # 3 tampo (do outro lado)
+			["tora", 0.42, Vector3(-0.72, 0.21, 0.0), "y", 0.09],    # 4 pé do banquinho
+			["tabua", 0.45, Vector3(-0.72, 0.455, 0.0), "z", 0.14],  # 5 tábua do banquinho
+		],
+		"pinos": [
+			[[0, 2], Vector3(-0.05, 0.81, 0.34)], [[0, 3], Vector3(0.05, 0.81, 0.34)],
+			[[1, 2], Vector3(-0.05, 0.81, -0.34)], [[1, 3], Vector3(0.05, 0.81, -0.34)],
+			[[4, 5], Vector3(-0.72, 0.43, 0.0)],
+		],
+		"area": Rect2(-0.95, -0.6, 1.25, 1.2),
+		"mesa": true,
+	},
 }
+
+const MESA_TOPO := 0.86          # em cima do tampo (m)
+const MESA_SUJEIRA := 10         # coisas para tirar num balde cheio de argila
+const MESA_BOLAS := 8            # bolas de argila limpa num balde cheio
 
 const NOMES := {"tora": "tora redonda", "meia": "meia tora (tora rachada ao meio)", "tabua": "tábua"}
 const BOARD_T := 0.05            # grossura das tábuas que a serra tira (m)
@@ -913,6 +939,8 @@ func _rebuild() -> void:
 				mk.material_override = _mark_mat
 				mk.position = sg2[1]
 				root.add_child(mk)
+		if bool(t.get("mesa", false)) and p.has("argila"):
+			_draw_argila(p, root)
 		if t.has("laminas"):
 			# lâminas de faca em pé na bancada (as que já estão; as outras em azul)
 			var nl := lamina_count(mi)
@@ -1011,6 +1039,217 @@ func _animate(mi: int, dy: float) -> void:
 		var butt := Vector3(-2.0, 2.66, 0.0)
 		var ph := asin(clampf(dy / 2.0, -0.9, 0.9))
 		(nd.p_5 as Node3D).transform = Transform3D(Basis(Vector3.BACK, ph), butt) * Transform3D(Basis(), -butt) * (nd.t_5 as Transform3D)
+
+
+# ---------- mesa de argila ----------
+
+## Despeja a argila do balde (f = quanto de balde) no tampo, com a sujeira no meio.
+func mesa_despejar(mi: int, f: float) -> void:
+	var p: Dictionary = plantas[mi]
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var a: Dictionary = p.get("argila", {"f": 0.0, "suj": [], "seed": rng.randi() % 100000})
+	a.f = minf(1.2, float(a.f) + f)
+	var n := maxi(2, int(round(MESA_SUJEIRA * f)))
+	var r := _mesa_r(float(a.f))
+	for k in n:
+		var ang := rng.randf() * TAU
+		var d := sqrt(rng.randf()) * r * 0.8
+		var kind: String = ["pedra", "pedra", "raiz", "folha", "graveto"][rng.randi() % 5]
+		(a.suj as Array).append([snappedf(0.06 + cos(ang) * d, 0.001), snappedf(sin(ang) * d, 0.001), kind, rng.randi() % 10000, snappedf(rng.randf() * TAU, 0.01)])
+	p["argila"] = a
+	_rebuild()
+
+
+func _mesa_r(f: float) -> float:
+	return 0.12 + 0.12 * sqrt(clampf(f, 0.0, 1.2))
+
+
+## Altura do monte de argila no ponto (x, z) do tampo (espaço da máquina).
+func mesa_h(p: Dictionary, x: float, z: float) -> float:
+	var a: Dictionary = p.get("argila", {})
+	if a.is_empty():
+		return 0.0
+	var f := float(a.f)
+	var r := _mesa_r(f)
+	var u := Vector2(x - 0.06, z).length() / r
+	if u >= 1.0:
+		return 0.0
+	var nz := sin(x * 41.0 + float(a.seed)) * cos(z * 37.0 - float(a.seed) * 0.3) * 0.006
+	return (0.035 + 0.05 * f) * (1.0 - u * u) * (1.0 - 0.25 * u) + nz * (1.0 - u)
+
+
+## Onde fica cada sujeira (no mundo), para os losangos.
+func mesa_sujeira(mi: int) -> Array:
+	var p: Dictionary = plantas[mi]
+	var out := []
+	var xf := xform(mi)
+	for e in (p.get("argila", {}) as Dictionary).get("suj", []):
+		out.append(xf * Vector3(float(e[0]), MESA_TOPO + mesa_h(p, float(e[0]), float(e[1])) + 0.012, float(e[1])))
+	return out
+
+
+## Tira a sujeira k. Devolve o tipo dela ("" se não tinha).
+func mesa_tirar(mi: int, k: int) -> String:
+	var a: Dictionary = plantas[mi].get("argila", {})
+	var suj: Array = a.get("suj", [])
+	if k < 0 or k >= suj.size():
+		return ""
+	var kind := str(suj[k][2])
+	suj.remove_at(k)
+	_rebuild()
+	return kind
+
+
+## Tudo limpo: tira a argila da mesa. Devolve quantas bolas de argila limpa.
+func mesa_recolher(mi: int) -> int:
+	var a: Dictionary = plantas[mi].get("argila", {})
+	if a.is_empty() or not (a.get("suj", []) as Array).is_empty():
+		return 0
+	plantas[mi].erase("argila")
+	_rebuild()
+	return maxi(1, int(round(MESA_BOLAS * float(a.f))))
+
+
+static var _clay_mat: StandardMaterial3D
+static var _suj_mats := {}
+
+
+## A argila no tampo: um monte achatado e irregular (vermelho-alaranjado, molhado) com a
+## sujeira aparecendo: pedrinhas, raízes, gravetos e pedaços de folha seca.
+func _draw_argila(p: Dictionary, root: Node3D) -> void:
+	var a: Dictionary = p.argila
+	var r := _mesa_r(float(a.f))
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rings := 10
+	var segs := 32
+	var pts := []
+	var nz := FastNoiseLite.new()
+	nz.seed = int(a.seed)
+	nz.frequency = 9.0
+	for ri in rings + 1:
+		var row := []
+		for k in segs:
+			var ang := TAU * k / segs
+			var rr := r * float(ri) / rings * (1.0 + 0.12 * nz.get_noise_2d(cos(ang), sin(ang)))
+			var x := 0.06 + cos(ang) * rr
+			var z := sin(ang) * rr
+			row.append(Vector3(x, MESA_TOPO + mesa_h(p, x, z) + 0.002, z))
+		pts.append(row)
+	for ri in rings:
+		for k in segs:
+			var k2 := (k + 1) % segs
+			var q := [pts[ri][k], pts[ri][k2], pts[ri + 1][k2], pts[ri + 1][k]]
+			for idx in [0, 1, 2, 0, 2, 3]:
+				var v: Vector3 = q[idx]
+				var tone := nz.get_noise_2d(v.x * 6.0, v.z * 6.0)
+				st.set_color(Color(1, 1, 1).darkened(maxf(-tone, 0.0) * 0.25).lightened(maxf(tone, 0.0) * 0.1))
+				st.set_uv(Vector2(v.x, v.z) * 4.0)
+				st.add_vertex(v)
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	if _clay_mat == null:
+		_clay_mat = StandardMaterial3D.new()
+		_clay_mat.vertex_color_use_as_albedo = true
+		_clay_mat.vertex_color_is_srgb = true
+		_clay_mat.albedo_color = Color(0.58, 0.29, 0.16)
+		_clay_mat.roughness = 0.5
+		_clay_mat.metallic_specular = 0.25
+		var nt := NoiseTexture2D.new()
+		var tn := FastNoiseLite.new()
+		tn.frequency = 0.04
+		nt.noise = tn
+		nt.width = 128
+		nt.height = 128
+		nt.seamless = true
+		nt.as_normal_map = true
+		nt.bump_strength = 2.0
+		_clay_mat.normal_enabled = true
+		_clay_mat.normal_texture = nt
+		_clay_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = _clay_mat
+	root.add_child(mi)
+	for e in a.get("suj", []):
+		root.add_child(_sujeira_node(p, e))
+
+
+static func _suj_mat(kind: String) -> StandardMaterial3D:
+	if not _suj_mats.has(kind):
+		var m := StandardMaterial3D.new()
+		m.roughness = 0.9
+		match kind:
+			"pedra": m.albedo_color = Color(0.42, 0.4, 0.36)
+			"raiz": m.albedo_color = Color(0.36, 0.24, 0.13)
+			"graveto": m.albedo_color = Color(0.3, 0.22, 0.14)
+			_: m.albedo_color = Color(0.3, 0.2, 0.09)
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_suj_mats[kind] = m
+	return _suj_mats[kind]
+
+
+## Uma sujeira na argila (meio enterrada): [x, z, tipo, semente, giro].
+func _sujeira_node(p: Dictionary, e: Array) -> Node3D:
+	var x := float(e[0])
+	var z := float(e[1])
+	var kind := str(e[2])
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(e[3])
+	var y := MESA_TOPO + mesa_h(p, x, z)
+	var n := MeshInstance3D.new()
+	n.material_override = _suj_mat(kind)
+	match kind:
+		"pedra":
+			var sm := SphereMesh.new()
+			var s := rng.randf_range(0.011, 0.02)
+			sm.radius = s
+			sm.height = s * 1.4
+			sm.radial_segments = 7
+			sm.rings = 4
+			n.mesh = sm
+			n.position = Vector3(x, y + s * 0.15, z)
+			n.scale = Vector3(1.0, 0.8, rng.randf_range(0.8, 1.3))
+		"raiz", "graveto":
+			# um fio torto meio enterrado
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			var L := rng.randf_range(0.06, 0.12) if kind == "raiz" else rng.randf_range(0.07, 0.11)
+			var w := 0.0025 if kind == "raiz" else 0.004
+			var ang := float(e[4])
+			var prev := Vector3.INF
+			for i in 7:
+				var t := float(i) / 6.0
+				ang += rng.randf_range(-0.4, 0.4) if kind == "raiz" else 0.0
+				var px := x + cos(ang) * L * (t - 0.5)
+				var pz := z + sin(ang) * L * (t - 0.5)
+				var pt := Vector3(px, MESA_TOPO + mesa_h(p, px, pz) + w * 0.6, pz)
+				if prev != Vector3.INF:
+					var d := (pt - prev).normalized()
+					var sd := d.cross(Vector3.UP).normalized() * w
+					var up := Vector3.UP * w
+					for v in [prev - sd, pt - sd, pt + sd, prev - sd, pt + sd, prev + sd, prev + up, pt + up, pt - sd, prev + up, pt - sd, prev - sd]:
+						st.add_vertex(v)
+				prev = pt
+			st.generate_normals()
+			n.mesh = st.commit()
+		_:
+			# pedaço de folha seca, torto
+			var st2 := SurfaceTool.new()
+			st2.begin(Mesh.PRIMITIVE_TRIANGLES)
+			var s2 := rng.randf_range(0.018, 0.03)
+			var c := Vector3(x, y + 0.002, z)
+			var rot := Basis(Vector3.UP, float(e[4]))
+			var vs := []
+			for i in 6:
+				var aa := TAU * i / 6.0
+				vs.append(c + rot * Vector3(cos(aa) * s2 * 1.5, rng.randf_range(0.0, 0.006), sin(aa) * s2 * rng.randf_range(0.6, 1.0)))
+			for i in 6:
+				for v in [c + Vector3.UP * 0.004, vs[i], vs[(i + 1) % 6]]:
+					st2.add_vertex(v)
+			st2.generate_normals()
+			n.mesh = st2.commit()
+	return n
 
 
 static var _fbm: ArrayMesh

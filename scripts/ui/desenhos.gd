@@ -281,6 +281,20 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95, true)
 		"acao_derrubar":
 			fell_icon(ci, c, s)
+		"argila_limpa", "acao_limpar", "acao_despejar_argila":
+			# bola de argila (lisa, alaranjada); limpar: com pedrinhas saindo; despejar: o balde
+			if id == "acao_despejar_argila":
+				balde(ci, c + Vector2(-14, -10) * u, s * 0.7)
+				ci.draw_colored_polygon(P.call([[-2, 6], [10, 4], [16, 20], [2, 24]]), Color(0.58, 0.29, 0.16))
+			var bc := c + (Vector2(14, 18) if id == "acao_despejar_argila" else Vector2(0, 6)) * u
+			var br := (22.0 if id == "acao_despejar_argila" else 32.0) * u
+			ci.draw_circle(bc, br, Color(0.62, 0.31, 0.17))
+			ci.draw_circle(bc + Vector2(-0.3, -0.35) * br, br * 0.4, Color(0.74, 0.42, 0.26))
+			ci.draw_arc(bc, br, 0, TAU, 32, ink, 2.0 * u, true)
+			if id == "acao_limpar":
+				for q in [[26, -30, 5.0], [36, -18, 4.0], [18, -40, 3.5]]:
+					ci.draw_circle(c + Vector2(q[0], q[1]) * u, float(q[2]) * u, Color(0.45, 0.43, 0.4))
+				ci.draw_line(c + Vector2(-30, -26) * u, c + Vector2(-14, -40) * u, Color(0.36, 0.24, 0.13), 2.5 * u, true)
 		"acao_abrir", "acao_agua", "acao_misturar", "acao_pegar_barro", "acao_fibra":
 			# o monte de terra (barro, nos últimos passos) com a cova no meio
 			var mud := id in ["acao_misturar", "acao_pegar_barro"]
