@@ -16,7 +16,7 @@ const Sons := preload("res://scripts/sons.gd")
 const RANGE := 200.0          # até onde o bando procura bacaba (m)
 const EAT_RANGE := 120.0      # de onde come frutos no dia
 const STARVE_DAYS := 15       # dias sem bacaba até começarem a morrer
-const MAX_TROOP := 14
+const SPLIT := 18             # bando grande demais se divide em dois (não tem limite de macacos)
 const SHOW := 80.0            # perto assim do jogador o bando aparece
 
 ## Bando: {x, z (árvore onde está), fome (dias sem comida),
@@ -135,9 +135,23 @@ func _day(day: int) -> void:
 		for pl in adults:
 			if Vector2(float(pl.x) - float(t.x), float(pl.z) - float(t.z)).length() < RANGE:
 				near.append(pl)
-		# fome: sem bacaba adulta ao alcance
+		# fome: sem bacaba adulta ao alcance; aí o bando sai procurando (anda uns 2 km
+		# no dia, na direção da bacaba adulta mais perto, em qualquer canto do mapa)
 		if near.is_empty():
 			t.fome = int(t.fome) + 1
+			var alvo = null
+			var bd := 1e18
+			for pl in adults:
+				var d2 := Vector2(float(pl.x) - float(t.x), float(pl.z) - float(t.z)).length_squared()
+				if d2 < bd:
+					bd = d2
+					alvo = pl
+			if alvo != null:
+				var v := Vector2(float(alvo.x) - float(t.x), float(alvo.z) - float(t.z))
+				var passo := minf(v.length(), 2000.0)
+				var np := Vector2(float(t.x), float(t.z)) + v.normalized() * passo
+				t.x = np.x
+				t.z = np.y
 		else:
 			t.fome = 0
 		var mem: Array = t.membros
@@ -162,7 +176,7 @@ func _day(day: int) -> void:
 					born.append(_member(day, int(m.id)))       # nasce um filhote só
 				continue
 			if breeding and str(m.get("sexo", "")) == "f" and day - int(m.nasc) >= ADULT_F and int(t.fome) == 0 \
-					and mem.size() + born.size() < MAX_TROOP and not _has_baby(mem, int(m.id), day) \
+					and not _has_baby(mem, int(m.id), day) \
 					and _rng.randf() < 0.008:
 				m.gravida_ate = day + _rng.randi_range(150, 180)   # gestação de 5 a 6 meses
 		mem.append_array(born)
@@ -197,6 +211,13 @@ func _day(day: int) -> void:
 					var a := _rng.randf() * TAU
 					var d := _rng.randf_range(10.0, 80.0)
 					_bac.drop_seed(float(pl.x) + cos(a) * d, float(pl.z) + sin(a) * d, day)
+		# bando grande demais: uma parte sai e forma outro bando (vai para outra bacaba)
+		if mem.size() > SPLIT:
+			var sai := []
+			for k in mem.size() / 2:
+				sai.append(mem.pop_back())
+			var dest: Dictionary = adults[_rng.randi() % adults.size()] if not adults.is_empty() else {"x": t.x, "z": t.z}
+			keep.append({"x": float(dest.x), "z": float(dest.z), "fome": 0, "membros": sai})
 		keep.append(t)
 	troops = keep
 

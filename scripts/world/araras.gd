@@ -21,7 +21,7 @@ extends Node3D
 
 const Modelo := preload("res://scripts/world/arara_modelo.gd")
 const Sons := preload("res://scripts/sons.gd")
-const MAX_BIRDS := 40
+# (sem limite de araras: os ocos para o ninho, a comida, a velhice e o gavião controlam)
 const ADULT_DAYS := 1095          # 3 anos
 const INCUB_DAYS := 26
 const NEST_DAYS := 90
@@ -33,6 +33,7 @@ const CRUISE := 16.0              # quanto voam acima das copas (m)
 
 ## Ave: {id, nasc (dia), sexo ("f"/"m"), par (id do par ou -1)}
 var birds: Array = []
+var _aperto := 0.0                # araras a mais do que a comida aguenta (0 = sobra comida)
 ## Ninho: {x, z (árvore ou palmeira), tipo ("bur": buriti seco), h (altura do oco), ang,
 ##   f (fêmea), m (macho), ovos, posto (dia), eclode (dia), filhotes, voa (dia)}
 var nests: Array = []
@@ -172,12 +173,18 @@ func _day(day: int) -> void:
 	var vines: Array = _cip.adult_plants()
 	var burs: Array = _bur_adults()
 	fome = fome + 1 if palms.is_empty() and vines.is_empty() and burs.is_empty() else 0
+	# a comida que tem dá para quantas araras (as palmeiras e os cipós adultos): passou
+	# disso, falta comida para todas: nascem menos e as mais fracas morrem
+	var cabe := maxf(4.0, (palms.size() + burs.size()) * 0.12 + vines.size() * 0.3)
+	_aperto = clampf((birds.size() - cabe) / cabe, 0.0, 2.0)
 	# morrendo: fome, velhice, gavião
 	var keep := []
 	for b in birds:
 		var dead := _rng.randf() < 0.00012
 		if fome > STARVE_DAYS and _rng.randf() < 0.03:
 			dead = true
+		if _aperto > 0.0 and _rng.randf() < 0.004 * _aperto:
+			dead = true                       # comida não dá para todas
 		if day - int(b.nasc) > 365 * 45 and _rng.randf() < 0.002:
 			dead = true
 		if dead:
@@ -211,6 +218,13 @@ func _day(day: int) -> void:
 				var a := _rng.randf() * TAU
 				var d := _rng.randf_range(20.0, 300.0)
 				_cip.drop_seed(float(src.x) + cos(a) * d, float(src.z) + sin(a) * d, day)
+	# no chão comem as sementes de andiroba caídas (mais arara, menos semente sobra)
+	var cup = _jogo._cupins
+	if cup and not birds.is_empty():
+		var chance := 0.06 * clampf(birds.size() / 15.0, 0.2, 2.0)
+		for a in cup.andirobas:
+			if int(a.sem) > 1 and _rng.randf() < chance:
+				a.sem = int(a.sem) - 1
 	# formam casais (para a vida toda)
 	var single_f := []
 	var single_m := []
@@ -227,7 +241,7 @@ func _day(day: int) -> void:
 
 func _nest_day(day: int) -> void:
 	# casais procuram oco e botam
-	if breeding_season(day) and _month(day) <= 11 and _month(day) >= 8 and fome == 0 and birds.size() < MAX_BIRDS:
+	if breeding_season(day) and _month(day) <= 11 and _month(day) >= 8 and fome == 0 and _rng.randf() > _aperto:
 		for f in birds:
 			if f.sexo != "f" or int(f.par) < 0 or _nest_of(int(f.id)) != null:
 				continue
@@ -268,8 +282,7 @@ func _nest_day(day: int) -> void:
 		if int(n.voa) >= 0 and day >= int(n.voa):
 			# os filhotes voam e entram no bando
 			for k in int(n.filhotes):
-				if birds.size() < MAX_BIRDS:
-					_new_bird(int(n.eclode), "f" if _rng.randf() < 0.5 else "m")
+				_new_bird(int(n.eclode), "f" if _rng.randf() < 0.5 else "m")
 			continue
 		keep.append(n)
 	nests = keep
@@ -378,7 +391,8 @@ func _make_plans() -> void:
 			stops.append([0.0, roost_p[rng.randi() % roost_p.size()]])
 			var t := 6.0 + rng.randf_range(0.0, 0.5)
 			while t < 17.3:
-				stops.append([t, _site_perch(site, rng)])
+				var chao := _ground_spot(rng) if rng.randf() < 0.35 else {}
+				stops.append([t, chao if not chao.is_empty() else _site_perch(site, rng)])
 				t += rng.randf_range(0.8, 2.2)
 			stops.append([17.5 + rng.randf_range(0.0, 0.6), roost_p[rng.randi() % roost_p.size()]])
 		_plans[key] = stops
@@ -455,6 +469,29 @@ func _crown_spot(t: Dictionary, rng: RandomNumberGenerator) -> Vector3:
 	return Vector3(xz.x + cos(a) * r, gy + h * 0.94 - r * 0.4, xz.y + sin(a) * r)
 
 
+## Comer no chão: as sementes de andiroba caídas (janeiro a junho) e as frutinhas no pé
+## do cipó (mais de dezembro a fevereiro). {} se não tem nada no chão agora.
+func _ground_spot(rng: RandomNumberGenerator) -> Dictionary:
+	var opts := []
+	var cup = _jogo._cupins
+	if cup:
+		for i in cup.andirobas.size():
+			var a: Dictionary = cup.andirobas[i]
+			if int(a.sem) > 0:
+				opts.append({"x": float(a.x), "z": float(a.z), "r": 3.0})
+	if cipo_season(last_day) or rng.randf() < 0.25:
+		for pl in _cip.adult_plants():
+			opts.append({"x": float(pl.x), "z": float(pl.z), "r": 2.0})
+	if opts.is_empty():
+		return {}
+	var o: Dictionary = opts[rng.randi() % opts.size()]
+	var a2 := rng.randf() * TAU
+	var r := rng.randf_range(0.8, float(o.r))
+	var x := float(o.x) + cos(a2) * r
+	var z := float(o.z) + sin(a2) * r
+	return {"pos": Vector3(x, _jogo.height_at(x, z) + 0.01, z), "chao": true, "yaw": rng.randf() * TAU}
+
+
 func _site_perch(site: Array, rng: RandomNumberGenerator) -> Dictionary:
 	if site.is_empty():
 		return {"pos": Vector3(320, 40, 240)}
@@ -521,7 +558,7 @@ func _unit_state(u: Dictionary, h: float) -> Dictionary:
 			return {"pos": p, "mode": "glide" if k > 0.82 or (k > 0.4 and k < 0.55) else "fly", "yaw": atan2(-dir.x, -dir.z),
 				"flying": true, "k": k, "dist": dist}
 		cur = nxt
-	return {"pos": cur.pos, "mode": "perch", "yaw": float(u.get("yaw", 0.0)), "flying": false, "stop": cur}
+	return {"pos": cur.pos, "mode": "chao" if cur.has("chao") else "perch", "yaw": float(cur.get("yaw", u.get("yaw", 0.0))), "flying": false, "stop": cur}
 
 
 # ================== NA TELA ==================
@@ -626,7 +663,7 @@ func _unit_sounds(u: Dictionary, st: Dictionary, pp: Vector3, delta: float) -> v
 	var pos: Vector3 = st.pos
 	var d := pos.distance_to(pp)
 	_alarm_cd[key] = maxf(0.0, float(_alarm_cd.get(key, 0.0)) - delta)
-	if not st.flying and d < 14.0 and float(_alarm_cd[key]) <= 0.0 and _jogo.sim.hour() > 5.5 and _jogo.sim.hour() < 18.6:
+	if not st.flying and _assustou(st, pos, pp) and float(_alarm_cd[key]) <= 0.0 and _jogo.sim.hour() > 5.5 and _jogo.sim.hour() < 18.6:
 		_alarm_cd[key] = _rng.randf_range(12.0, 20.0)
 		Sons.play_at(self, "arara_alarme", pos, 0.0, _rng.randf_range(0.95, 1.06), 320.0, 22.0)
 		_flee(u, pos)
@@ -643,6 +680,21 @@ func _unit_sounds(u: Dictionary, st: Dictionary, pp: Vector3, delta: float) -> v
 					Sons.play_at(self, "arara_resmungo", pos, 0.0, _rng.randf_range(0.92, 1.08), 90.0, 6.0)
 			t = _rng.randf_range(25.0, 70.0)
 	_snd[key] = t
+
+
+## Só se assusta com o jogador bem perto (ou fazendo barulho perto): no alto da árvore,
+## quem passa embaixo não incomoda; no chão comendo, deixa chegar a uns 5 m. Machado,
+## serra ou martelada perto: voa.
+func _assustou(st: Dictionary, pos: Vector3, pp: Vector3) -> bool:
+	var hd := Vector2(pos.x - pp.x, pos.z - pp.z).length()
+	var alto := pos.y - pp.y
+	var barulho: bool = bool(_jogo._chopping) or bool(_jogo._sawing) or bool(_jogo.get("_swing_on"))
+	var chao := (st.get("stop", {}) as Dictionary).has("chao")
+	if chao:
+		return hd < 4.5 or (barulho and hd < 14.0)
+	if alto > 6.0:
+		return barulho and hd < 10.0          # lá no alto: só o barulho perto espanta
+	return hd < 4.0 or (barulho and hd < 12.0)
 
 
 ## Assustada: voa para outra árvore longe dali (o ninho ela não larga).

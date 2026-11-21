@@ -2,10 +2,12 @@ extends Node3D
 ## Tamanduá-bandeira: o predador dos cupins.
 ##
 ## Vida (um dia de cada vez, mesmo longe do jogador):
-## - Solitário: cada um tem sua área em volta dos cupinzeiros. Come uns 30 mil cupins
-##   por dia, mas de cada cupinzeiro só um pouco (fica um minuto e vai embora antes dos
-##   soldados juntarem): tira um tiquinho de cada colônia, nunca acaba com ela.
-## - Sem cupinzeiro na área, passa fome, muda de lugar e, se não acha, morre.
+## - Solitário e andarilho: não tem lugar fixo. Anda pelo mapa todo de cupinzeiro em
+##   cupinzeiro: come nos que estão em volta de onde chegou (de cada um só um pouco: fica
+##   um minuto e vai embora antes dos soldados juntarem) e, satisfeito ou sem comida ali,
+##   escolhe outro destino (mais um que não visitou faz tempo), andando uns 3 km por dia.
+## - Não tem limite de quantos: a comida (os cupins), a velhice e (depois) os predadores
+##   é que controlam. Sem cupim por perto passa fome; muita fome, morre.
 ## - Cruza no fim das chuvas (março a maio); a gestação é de uns 190 dias, então o
 ##   filhote (um só) nasce no começo das chuvas, junto da revoada dos cupins.
 ## - O filhote anda nas costas da mãe uns 6 meses (deitado em cima, a faixa preta dele
@@ -23,7 +25,8 @@ extends Node3D
 const Modelo := preload("res://scripts/world/tamandua_modelo.gd")
 
 const START := 4
-const MAX_POP := 12
+const PASSO_DIA := 3000.0        # m que anda num dia indo para o próximo cupinzeiro
+const COME_R := 35.0             # come nos cupinzeiros até essa distância de onde está
 const ADULT := 913              # dias (2,5 anos)
 const GEST := 190
 const CARRY := 180              # nas costas da mãe
@@ -124,41 +127,41 @@ func _day(day: int) -> void:
 			b.z = float(mae.z)
 			keep.append(b)
 			continue
-		# come: um pouco de cada cupinzeiro da área
+		# come: um pouco de cada cupinzeiro em volta de onde está
 		var need := 0.0015 if ag >= ADULT else 0.0007
 		var got := 0.0
 		var p := Vector2(float(b.x), float(b.z))
-		var best := -1
-		var bd := 1e9
 		for i in cols.size():
 			var c: Dictionary = cols[i]
-			if float(c.pop) <= 0.05:
+			if float(c.pop) <= 0.05 or got >= need:
 				continue
-			var d := p.distance_to(Vector2(float(c.x), float(c.z)))
-			if d < bd:
-				bd = d
-				best = i
-			if d < HOME and got < need:
-				var bite := minf(0.0005, float(c.pop) * 0.003)
+			if p.distance_to(Vector2(float(c.x), float(c.z))) < COME_R:
+				var bite := minf(need - got, float(c.pop) * 0.01)       # o dia de comida tirado dali
 				_cup.eat_colony(i, bite)
 				got += bite
+				_visitou(b, i, day)
 		if got >= need * 0.5:
 			b.fome = 0
 		else:
 			b.fome = int(b.fome) + 1
-			# muda para perto do cupinzeiro mais perto
-			if best >= 0:
-				var c: Dictionary = cols[best]
-				b.x = float(c.x) + _rng.randf_range(-6, 6)
-				b.z = float(c.z) + _rng.randf_range(-6, 6)
 			if int(b.fome) > 40:
 				continue                           # morreu de fome
-		# o dia acaba perto de um cupinzeiro da área (onde vai dormir)
-		if best >= 0 and _rng.randf() < 0.3 and not _agents.has(int(b.id)):
-			var c2: Dictionary = cols[best]
-			var a := _rng.randf() * TAU
-			b.x = float(c2.x) + cos(a) * _rng.randf_range(4.0, 12.0)
-			b.z = float(c2.z) + sin(a) * _rng.randf_range(4.0, 12.0)
+		# satisfeito ou sem comida aqui: segue viagem para outro cupinzeiro (no mapa todo)
+		if not _agents.has(int(b.id)):
+			var dest := int(b.get("dest", -1))
+			var chegou: bool = dest >= 0 and dest < cols.size() and p.distance_to(Vector2(float(cols[dest].x), float(cols[dest].z))) < COME_R
+			# chegou: fica uns dias comendo ali (vai embora quando a comida fraca ou dá vontade)
+			if chegou and got >= need * 0.9 and _rng.randf() < 0.6:
+				pass
+			elif dest < 0 or dest >= cols.size() or float(cols[dest].pop) <= 0.05 or chegou:
+				dest = _novo_destino(b, day)
+				b["dest"] = dest
+			if dest >= 0:
+				var c3: Dictionary = cols[dest]
+				var v := Vector2(float(c3.x), float(c3.z)) - p
+				var np := p + v.normalized() * minf(v.length(), PASSO_DIA * _rng.randf_range(0.5, 1.0))
+				b.x = np.x
+				b.z = np.y
 		# cria: cruza março-maio, nasce ~190 dias depois
 		if str(b.sexo) == "f" and ag >= ADULT:
 			if int(b.prenhe) >= 0:
@@ -166,7 +169,7 @@ func _day(day: int) -> void:
 					b.prenhe = -1
 					var f := _novo("f" if _rng.randf() < 0.5 else "m", day, float(b.x), float(b.z), int(b.id))
 					born.append(f)
-			elif month >= 3 and month <= 5 and not _has_pup(b, day) and bichos.size() + born.size() < _cap() and _male_adult(day):
+			elif month >= 3 and month <= 5 and not _has_pup(b, day) and _male_adult(day):
 				if _rng.randf() < 0.05:
 					b.prenhe = day
 		keep.append(b)
@@ -178,8 +181,48 @@ func _day(day: int) -> void:
 			b.mae = -1
 
 
-func _cap() -> int:
-	return clampi(2 + int(_cup.colonies.size() * 0.4), 2, MAX_POP)
+## O próximo cupinzeiro para onde vai: qualquer um do mapa com cupim, preferindo os mais
+## perto e os que não visitou faz tempo (assim anda o mapa todo, sem lugar fixo).
+func _novo_destino(b: Dictionary, day: int) -> int:
+	var cols: Array = _cup.colonies
+	var p := Vector2(float(b.x), float(b.z))
+	var vis: Dictionary = b.get("vis", {})
+	var tot := 0.0
+	var pesos := []
+	for i in cols.size():
+		var c: Dictionary = cols[i]
+		var w := 0.0
+		if float(c.pop) > 0.15:
+			var d := p.distance_to(Vector2(float(c.x), float(c.z)))
+			if d >= COME_R:
+				w = float(c.pop) / (1.0 + d / 600.0)
+				var ult := int(vis.get(str(i), -9999))
+				if day - ult < 20:
+					w *= 0.05                 # passou lá faz pouco: quase nunca volta logo
+		pesos.append(w)
+		tot += w
+	if tot <= 0.0:
+		return -1
+	var r := _rng.randf() * tot
+	for i in pesos.size():
+		r -= float(pesos[i])
+		if r <= 0.0:
+			return i
+	return pesos.size() - 1
+
+
+func _visitou(b: Dictionary, i: int, day: int) -> void:
+	if not b.has("vis"):
+		b["vis"] = {}
+	b.vis[str(i)] = day
+	if (b.vis as Dictionary).size() > 30:
+		var velho := ""
+		var vd := 1 << 30
+		for k in b.vis:
+			if int(b.vis[k]) < vd:
+				vd = int(b.vis[k])
+				velho = k
+		(b.vis as Dictionary).erase(velho)
 
 
 func _has_pup(b: Dictionary, day: int) -> bool:
@@ -340,7 +383,7 @@ func _choose_target(b: Dictionary, a: Dictionary) -> void:
 		if a.visto.has(i) and float(a.t) - float(a.visto[i]) < 240.0:
 			continue
 		var d := p.distance_to(Vector2(float(c.x), float(c.z)))
-		if d < HOME and d < bd:
+		if d < 60.0 and d < bd:
 			bd = d
 			best = i
 	if best >= 0:
@@ -357,8 +400,18 @@ func _choose_target(b: Dictionary, a: Dictionary) -> void:
 		a.alvo = hp
 		a.col = best
 	else:
+		# nenhum cupinzeiro aqui perto: segue viagem (para o destino dele no mapa)
+		var dest := int(b.get("dest", -1))
+		if dest < 0 or dest >= _cup.colonies.size():
+			dest = _novo_destino(b, last_day)
+			b["dest"] = dest
 		var ang := _rng.randf() * TAU
-		a.alvo = Vector3(p.x + cos(ang) * 10.0, 0, p.y + sin(ang) * 10.0)
+		var to := Vector2(p.x + cos(ang) * 10.0, p.y + sin(ang) * 10.0)
+		if dest >= 0:
+			var cd: Dictionary = _cup.colonies[dest]
+			var v := Vector2(float(cd.x), float(cd.z)) - p
+			to = p + v.normalized() * minf(v.length(), 25.0)
+		a.alvo = Vector3(to.x, 0, to.y)
 		a.col = -1
 	_set_modo(a, "andar")
 

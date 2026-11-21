@@ -5,7 +5,8 @@ extends Node3D
 ## testa verde; rosto de pele branca com linhas de peninhas pretas; babador preto;
 ## bico preto enorme e curvo. Uns 85 cm do bico à ponta da cauda, 1 m de asa aberta.
 ## Frente = -Z. Modos: "fly" (bate as asas), "glide" (planando), "perch" (pousada,
-## em pé e com as asas fechadas), "nest" (dentro do oco: só a cabeça aparece).
+## em pé e com as asas fechadas), "chao" (no chão comendo, bicando), "nest" (dentro do
+## oco: só a cabeça aparece).
 
 const BLUE := Color(0.05, 0.42, 0.80)
 const BLUE_D := Color(0.03, 0.22, 0.55)
@@ -93,6 +94,17 @@ func _pose() -> void:
 				w.arm.position = Vector3(0.05 * s, 0.045, -0.06)
 				w.arm.basis = Basis(Vector3.BACK, flap * s) * Basis(Vector3.UP, 0.05 * s)
 				w.hand.basis = Basis(Vector3.BACK, (flap * 0.3 - fold * 0.35) * s) * Basis(Vector3.UP, -fold * 0.45 * s)
+		"chao":
+			# no chão comendo: corpo mais deitado, cabeça descendo e bicando a semente
+			_body.rotation = Vector3(0.45, 0, 0)
+			var bica := maxf(0.0, sin(_t * 3.1)) * float(int(_t * 0.4) % 3 != 0)
+			_head.rotation = Vector3(0.35 + bica * 0.7, sin(_t * 0.45) * 0.4 * (1.0 - bica), 0)
+			_tail.rotation = Vector3(-0.15, 0, 0)
+			for w in _wings:
+				var s2: float = w.side
+				w.arm.position = Vector3(0.045 * s2, 0.065, -0.07)
+				w.arm.basis = Basis(Vector3.UP, -1.5 * s2) * Basis(Vector3.RIGHT, -0.7) * Basis().scaled(Vector3(1.0, 1.0, 0.28))
+				w.hand.basis = Basis(Vector3.UP, 0.03 * s2) * Basis().scaled(Vector3(1.0, 1.0, 0.3))
 		"perch":
 			# em pé no galho: corpo inclinado, cauda caída, asas fechadas sobre as costas
 			_body.rotation = Vector3(0.95, 0, 0)
