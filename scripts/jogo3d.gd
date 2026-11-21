@@ -1428,6 +1428,10 @@ func _process(delta: float) -> void:
 		_capins.dia(int(sim.elapsed_days()))     # o capim seca no fim do mês e rebrota
 	if _fogos and Engine.get_process_frames() % 6 == 0:
 		_fogos.atualizar()                       # o fogo baixa e apaga pelo relógio
+		if bool(sim.raining) and not _mp_client():
+			for fi in _fogos.items.size():
+				if not _fogos.fria(fi):
+					_fogos.apagar(fi)            # a chuva apaga o fogo e a brasa
 	if _drag:
 		_drag_update()
 	_update_grass()
@@ -2542,12 +2546,6 @@ func _update_ctx_btn() -> void:
 	elif _mao == "balde" and _balde_carga.is_empty() and _crouch_job == "" and not _air and not _swim and _water_spot() != Vector3.INF:
 		_ctx_action = "pegar_agua"
 		_ctx_btn.text = "Pegar água"
-	elif _fogos and _crouch_job == "" and not _air and _carry.is_empty() and _fogos.near(_player.position, 1.4) >= 0 and _fogos.carvao(_fogos.near(_player.position, 1.4)) > 0:
-		_ctx_action = "pegar_carvao"
-		_ctx_btn.text = "Pegar carvão (%d)" % _fogos.carvao(_fogos.near(_player.position, 1.4))
-	elif _fogos and _crouch_job == "" and not _air and _carry.is_empty() and item_qtd("lenha") > 0 and _fogos.near(_player.position, 1.4) >= 0:
-		_ctx_action = "por_lenha"
-		_ctx_btn.text = "Pôr lenha"
 	elif _capins and _crouch_job == "" and not _air and not _swim and _carry.is_empty() and _capins.colhivel(_capins.nearest(_player.position, 1.3)):
 		_ctx_action = "capim"
 		_ctx_btn.text = "Colher capim seco"
@@ -2720,31 +2718,6 @@ func _ctx_press() -> void:
 			var caiu := add_item("lenha", 1)
 			_update_inventory()
 			_show_toast("+1 lenha na mochila" + (" (mochila cheia: caiu no chão)" if caiu > 0 else ""))
-			_act_check = 0.0
-			return
-		"por_lenha":
-			var fi: int = _fogos.near(_player.position, 1.4)
-			if fi < 0 or item_qtd("lenha") <= 0:
-				return
-			remove_item("lenha", 1)
-			_update_inventory()
-			var acesa: bool = _fogos.acesa(fi)
-			_fogos.por_lenha(fi)
-			_face_to(_fogos.center(fi))
-			Sons.play_at(self, "baque", _fogos.center(fi), -14.0, 1.3)
-			_show_toast(("Lenha no fogo: queima mais uns %d minutos." % roundi(_fogos.resta(fi) / 60.0)) if acesa else "Lenha na fogueira. Acenda com o arco de fogo (Mochila → Arco de Fogo → USAR).")
-			_act_check = 0.0
-			return
-		"pegar_carvao":
-			var fi2: int = _fogos.near(_player.position, 1.4)
-			if fi2 < 0:
-				return
-			var nc: int = _fogos.tirar_carvao(fi2)
-			if nc > 0:
-				add_item("carvao", nc)
-				_update_inventory()
-				Sons.play_at(self, "pedra_bate", _fogos.center(fi2), -14.0, 1.7)
-				_show_toast("+%d carvão (para a peneira de água)." % nc)
 			_act_check = 0.0
 			return
 		"capim":
@@ -10185,6 +10158,70 @@ func _reb_tick(delta: float) -> void:
 			_reb_go(nxt)
 
 
+# ---------- o olho da fogueira ----------
+
+func _fogueira_opts(i: int) -> Array:
+	var op := []
+	if _fogos.acesa(i):
+		op.append(["por_lenha", "Pôr lenha"])
+	elif _fogos.brasa(i):
+		op.append(["por_capim", "Pôr capim seco"])
+		op.append(["por_lenha", "Pôr lenha"])
+	else:
+		op.append(["acender", "Acender"])
+		op.append(["por_lenha", "Pôr lenha"])
+		if _fogos.carvao(i) > 0:
+			op.append(["pegar_carvao", "Pegar carvão"])
+	return op
+
+
+func _fogueira_pick(i: int, acao: String) -> void:
+	var c: Vector3 = _fogos.center(i)
+	match acao:
+		"por_lenha":
+			if item_qtd("lenha") <= 0:
+				_show_toast("Precisa de lenha: rache um toquinho no cepo com o machado.")
+				return
+			remove_item("lenha", 1)
+			_update_inventory()
+			var acesa: bool = _fogos.acesa(i)
+			_fogos.por_lenha(i)
+			_face_to(c)
+			Sons.play_at(self, "baque", c, -14.0, 1.3)
+			if acesa:
+				_show_toast("Lenha no fogo: ficou mais forte (queima uns %d min se não puser mais)." % maxi(1, roundi(_fogos.resta(i) / 60.0)))
+			elif _fogos.brasa(i):
+				_show_toast("Lenha em cima da brasa. Ponha capim seco para o fogo pegar.")
+			else:
+				_show_toast("Lenha na fogueira. Acenda com o arco de fogo (Acender, no olho).")
+		"por_capim":
+			if item_qtd("capim_seco") <= 0:
+				_show_toast("Precisa de capim seco (colha o capim alto quando secar).")
+				return
+			if not _fogos.brasa(i):
+				return
+			remove_item("capim_seco", 1)
+			_update_inventory()
+			_fogos.reacender(i)
+			_face_to(c)
+			Sons.play_at(self, "estalo", c, -8.0, 1.0)
+			_show_toast("O capim pegou na brasa: o fogo voltou! Ponha lenha logo.")
+		"acender":
+			_face_to(c)
+			_yaw = _face
+			var msg := fogo_start()
+			if msg != "":
+				_show_toast(msg)
+		"pegar_carvao":
+			var nc: int = _fogos.tirar_carvao(i)
+			if nc > 0:
+				add_item("carvao", nc)
+				_update_inventory()
+				Sons.play_at(self, "pedra_bate", c, -14.0, 1.7)
+				_show_toast("+%d carvão (para a peneira de água)." % nc)
+	_act_check = 0.0
+
+
 # ================== ARCO DE FOGO: FAZER FOGO ==================
 # Mochila → Arco de Fogo → USAR (com uma vareta, uma ripa e capim seco na mochila; sem
 # chuva). Agachado: a ripa no chão (a base), o capim seco embaixo do furo, a vareta em pé
@@ -10213,10 +10250,14 @@ func fogo_start() -> String:
 	var spot := _front(0.85)
 	if _fogos:
 		var fi: int = _fogos.near(spot, 1.0)
+		if fi < 0:
+			fi = _fogos.near(_player.position, 1.6)
 		if fi >= 0:
 			if _fogos.acesa(fi):
-				return "Essa fogueira já está acesa."
-			spot = _fogos.center(fi)           # acende a fogueira que já está ali
+				return "Essa fogueira já está acesa: ponha lenha."
+			if _fogos.brasa(fi):
+				return "Ainda tem brasa: ponha capim seco nela (pelo olho da fogueira) que o fogo volta."
+			spot = _fogos.center(fi)           # acende a fogueira que já está ali (no lugar exato)
 	spot.y = height_at(spot.x, spot.z)
 	if _water_surface(spot.x, spot.z) > spot.y + 0.02:
 		return "Na água não dá para fazer fogo."
@@ -10505,7 +10546,7 @@ func _arco_soprar() -> void:
 	_fogos.acender(spot)
 	Sons.play_at(self, "estalo", spot, -6.0, 0.9)
 	_arco_end()
-	_show_toast("FOGO! O capim pegou. Ponha lenha logo (o capim sozinho queima pouco).")
+	_show_toast("FOGO! O capim pegou. Ponha lenha logo pelo olho da fogueira (o capim sozinho queima pouco).")
 
 
 func _arco_draw(ui: Control) -> void:
@@ -11639,6 +11680,10 @@ func _olho_tick() -> void:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
 		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua"] and _maq.pronta(mi):
 			p = {"maq": mi}
+	if p.is_empty() and _fogos:
+		var fgi: int = _fogos.near(_player.position, 1.8)
+		if fgi >= 0:
+			p = {"fogueira": fgi}
 	if p.is_empty() and _barr:
 		var bi: int = _barr.near(_player.position, 2.6)
 		if bi >= 0 and Vector2(float(_barr.montes[bi].x) - _player.position.x, float(_barr.montes[bi].z) - _player.position.z).length() < _barr.radius(bi) + 1.1:
@@ -11646,7 +11691,7 @@ func _olho_tick() -> void:
 	if p.is_empty() or _olho_opts(p).is_empty():
 		_olho = {}
 		return
-	if _olho.is_empty() or not (_olho.p as Dictionary) == p or (not p.has("maq") and not p.has("barreiro") and not _buritis.has_palm(_olho.p)):
+	if _olho.is_empty() or not (_olho.p as Dictionary) == p or (not p.has("maq") and not p.has("barreiro") and not p.has("fogueira") and not _buritis.has_palm(_olho.p)):
 		_olho = {"p": p, "open": false}
 
 
@@ -11670,6 +11715,8 @@ func _olho_opts(p: Dictionary) -> Array:
 		return [["trabalhar", "Trabalhar"]]
 	if p.has("barreiro"):
 		return _barr_opts(int(p.barreiro))
+	if p.has("fogueira"):
+		return _fogueira_opts(int(p.fogueira))
 	if p.has("caido"):
 		return [["cortar", "Cortar"]] if not _buritis.leaves_of(p).is_empty() else []
 	if _buritis.is_small(p):
@@ -11691,6 +11738,8 @@ func _olho_world(p: Dictionary) -> Vector3:
 		return _maq.xform(int(p.maq)) * Vector3(0.05, 1.2, 0.0)
 	if p.has("barreiro"):
 		return _barr.center(int(p.barreiro)) + Vector3.UP * 0.45
+	if p.has("fogueira"):
+		return _fogos.center(int(p.fogueira)) + Vector3.UP * 0.75
 	if p.has("caido"):
 		var o: Vector3 = _buritis.crown_xf(p).origin
 		return Vector3(o.x, maxf(o.y, height_at(o.x, o.z) + 0.3) + 0.45, o.z)
@@ -11871,6 +11920,9 @@ func _olho_pick(acao: String) -> void:
 	_olho.open = false
 	if p.has("barreiro"):
 		_barr_pick(int(p.barreiro), acao)
+		return
+	if p.has("fogueira"):
+		_fogueira_pick(int(p.fogueira), acao)
 		return
 	match acao:
 		"trabalhar":

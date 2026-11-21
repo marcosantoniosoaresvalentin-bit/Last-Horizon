@@ -1,19 +1,31 @@
 extends Node3D
-## Fogueiras: o fogo aceso com o arco de fogo (na palha do capim seco) pega na lenha.
-## Cada lenha posta queima uns 4 minutos; o fogo conta pelo relógio do jogo (o mesmo em
-## todos os jogadores), sem precisar mandar nada enquanto queima. Apagada, fica a cinza
-## com o carvão (dá para pegar: vai na peneira de água).
+## Fogueiras: o fogo aceso (com o arco de fogo, no capim seco) só continua com lenha.
+## A lenha no fogo é o combustível: quanto mais lenha, mais forte (chama maior, mais luz)
+## e mais tempo queima; mas fogo forte come a lenha mais depressa (o tempo não cresce na
+## mesma conta). Parou de pôr lenha: vai baixando e apaga. Apagou: fica a brasa por uns
+## minutos (pondo capim seco nela, o fogo reacende sem o arco); a brasa acabou: fria, só
+## acende de novo com o arco. A chuva apaga o fogo e a brasa. Fria, a cinza tem o carvão
+## da lenha que queimou. Tudo conta pelo relógio do jogo (o mesmo em todos os jogadores).
+##
+## Combustível F (em lenhas) queimando: dF/dt = -(A + B*F) por minuto (de verdade, no
+## jogo): 1 lenha dura uns 3 min; 4 lenhas, uns 8 min; 8 lenhas, uns 12 min. Só o capim
+## (0,15) uns 35 s.
 
 const PASSOS_S := 6.0            # passos do relógio por segundo
-const LENHA_S := 240.0           # segundos de fogo por lenha
-const CAPIM_S := 35.0            # só o capim (sem lenha): logo apaga
-const MAX_S := 1500.0
+const A := 0.25                  # lenha por minuto que um fogo bem pequeno gasta
+const B := 0.15                  # e o quanto a mais, pelo tamanho do fogo
+const CAPIM := 0.15              # o capim seco (em "lenhas")
+const MAX_F := 10.0
+const BRASA_MIN := 2.0           # minutos de brasa depois que as chamas apagam (mais com mais lenha)
+const BRASA_MAX := 6.0
 const CARVAO_POR_LENHA := 0.6
 
-## Cada fogueira: {x, z, ate (passo em que apaga), lenha (posta, total), carvao_tirado}
+## Cada fogueira: {x, z, f0 (combustível no t0), t0 (passo), aceso (chamas desde o t0),
+## lenha (queimada, total), pendente (posta com ela fria), carvao_tirado, frio_em (passo
+## em que apagou de vez: chuva)}
 var items: Array = []
 var _jogo: Node
-var _nodes := {}                 # índice -> {root, fogo, luz, brasa}
+var _nodes := {}                 # índice -> {root, fogo, luz, brasa, ...}
 
 
 func build(jogo: Node, save_path := "") -> void:
@@ -27,13 +39,49 @@ func _agora() -> int:
 	return int(_jogo.sim.steps)
 
 
+func _min_desde(t0: int) -> float:
+	return maxf(0.0, float(_agora() - t0)) / PASSOS_S / 60.0
+
+
+## Quanto tempo (min) as chamas duram com f de combustível.
+static func dura(f: float) -> float:
+	if f <= 0.0:
+		return 0.0
+	return log((f + A / B) / (A / B)) / B
+
+
+## Combustível queimando agora (0: sem chamas).
+func fogo(i: int) -> float:
+	var it: Dictionary = items[i]
+	if not bool(it.get("aceso", false)):
+		return 0.0
+	var t := _min_desde(int(it.t0))
+	var f := (float(it.f0) + A / B) * exp(-B * t) - A / B
+	return maxf(0.0, f)
+
+
 func acesa(i: int) -> bool:
-	return _agora() < int(items[i].ate)
+	return fogo(i) > 0.001
 
 
-## Segundos de fogo que ainda tem.
+## Só brasa (as chamas apagaram há pouco).
+func brasa(i: int) -> bool:
+	var it: Dictionary = items[i]
+	if not bool(it.get("aceso", false)) or acesa(i):
+		return false
+	var fim_chama := float(it.t0) + dura(float(it.f0)) * 60.0 * PASSOS_S
+	var bmin := clampf(BRASA_MIN + float(it.get("lenha_ciclo", 0)) * 0.4, BRASA_MIN, BRASA_MAX)
+	return float(_agora()) < fim_chama + bmin * 60.0 * PASSOS_S
+
+
+func fria(i: int) -> bool:
+	return not acesa(i) and not brasa(i)
+
+
+## Segundos de chama que ainda tem (se ninguém puser mais lenha).
 func resta(i: int) -> float:
-	return maxf(0.0, float(int(items[i].ate) - _agora()) / PASSOS_S)
+	var f := fogo(i)
+	return dura(f) * 60.0
 
 
 func near(pos: Vector3, reach: float) -> int:
@@ -53,35 +101,59 @@ func center(i: int) -> Vector3:
 	return Vector3(float(f.x), _jogo.height_at(float(f.x), float(f.z)), float(f.z))
 
 
-## Acende (nova, ou a apagada que já está ali). Só o capim queima pouco; com lenha, mais.
+## Começa as chamas com f de combustível (o que já tinha posto entra junto).
+func _pega(i: int, f: float) -> void:
+	var it: Dictionary = items[i]
+	var pend := int(it.get("pendente", 0))
+	it.lenha = int(it.get("lenha", 0)) + pend
+	it.lenha_ciclo = pend
+	it.pendente = 0
+	it.f0 = minf(f + float(pend), MAX_F)
+	it.t0 = _agora()
+	it.aceso = true
+
+
+## Acendeu com o arco (nova fogueira, ou a que está ali).
 func acender(pos: Vector3) -> int:
 	var i := near(pos, 0.8)
 	if i < 0:
-		items.append({"x": snappedf(pos.x, 0.01), "z": snappedf(pos.z, 0.01), "ate": 0, "lenha": 0, "pendente": 0, "carvao_tirado": 0})
+		items.append({"x": snappedf(pos.x, 0.01), "z": snappedf(pos.z, 0.01), "f0": 0.0, "t0": 0, "aceso": false, "lenha": 0, "pendente": 0, "carvao_tirado": 0})
 		i = items.size() - 1
-	var f: Dictionary = items[i]
-	var s := CAPIM_S + LENHA_S * float(f.get("pendente", 0))
-	f.lenha = int(f.lenha) + int(f.get("pendente", 0))
-	f.pendente = 0
-	f.ate = _agora() + int(minf(s, MAX_S) * PASSOS_S)
+	_pega(i, CAPIM)
 	_rebuild()
 	return i
 
 
-## Põe uma lenha: acesa, queima mais; apagada, fica esperando o fogo.
-func por_lenha(i: int) -> void:
-	var f: Dictionary = items[i]
-	if acesa(i):
-		f.lenha = int(f.lenha) + 1
-		f.ate = _agora() + int(minf(resta(i) + LENHA_S, MAX_S) * PASSOS_S)
-	else:
-		f.pendente = int(f.get("pendente", 0)) + 1
+## Capim seco na brasa: o fogo volta.
+func reacender(i: int) -> void:
+	_pega(i, CAPIM)
 	_rebuild()
 
 
-## Carvão que dá para pegar (só com o fogo apagado, da lenha que queimou).
-func carvao(i: int) -> int:
+## Põe uma lenha: queimando, o fogo cresce; fria ou só brasa, fica esperando o fogo.
+func por_lenha(i: int) -> void:
+	var it: Dictionary = items[i]
 	if acesa(i):
+		it.f0 = minf(fogo(i) + 1.0, MAX_F)
+		it.t0 = _agora()
+		it.lenha = int(it.lenha) + 1
+		it.lenha_ciclo = int(it.get("lenha_ciclo", 0)) + 1
+	else:
+		it.pendente = int(it.get("pendente", 0)) + 1
+	_rebuild()
+
+
+## A chuva apaga (o fogo e a brasa).
+func apagar(i: int) -> void:
+	var it: Dictionary = items[i]
+	it.aceso = false
+	it.f0 = 0.0
+	_rebuild()
+
+
+## Carvão da lenha que queimou (só com a cinza fria).
+func carvao(i: int) -> int:
+	if not fria(i):
 		return 0
 	var f: Dictionary = items[i]
 	return maxi(0, int(floor(float(f.lenha) * CARVAO_POR_LENHA)) - int(f.carvao_tirado))
@@ -193,7 +265,7 @@ func _fogueira_node(i: int) -> Dictionary:
 	cz.position.y = 0.005
 	root.add_child(cz)
 	# as achas de lenha em cone (as que ainda não queimaram de todo)
-	var nl := mini(6, int(f.lenha) + int(f.get("pendente", 0)))
+	var nl := mini(8, int(ceil(fogo(i))) + int(f.get("pendente", 0)))
 	var lenhas := Node3D.new()
 	root.add_child(lenhas)
 	for k in maxi(nl, 0):
@@ -227,29 +299,29 @@ func _fogueira_node(i: int) -> Dictionary:
 	br.material_override = _mat("brasa")
 	br.position.y = 0.03
 	root.add_child(br)
-	# o fogo: chamas (partículas que sobem e somem), faíscas e a luz
-	var fogo := CPUParticles3D.new()
+	# o chama: chamas (partículas que sobem e somem), faíscas e a luz
+	var chama := CPUParticles3D.new()
 	var qm := QuadMesh.new()
 	qm.size = Vector2(0.18, 0.26)
-	fogo.mesh = qm
-	fogo.material_override = _mat("chama")
-	fogo.amount = 40
-	fogo.lifetime = 0.7
-	fogo.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	fogo.emission_sphere_radius = 0.12
-	fogo.direction = Vector3.UP
-	fogo.spread = 12.0
-	fogo.gravity = Vector3(0, 1.2, 0)
-	fogo.initial_velocity_min = 0.3
-	fogo.initial_velocity_max = 0.7
-	fogo.scale_amount_min = 0.6
-	fogo.scale_amount_max = 1.4
+	chama.mesh = qm
+	chama.material_override = _mat("chama")
+	chama.amount = 40
+	chama.lifetime = 0.7
+	chama.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	chama.emission_sphere_radius = 0.12
+	chama.direction = Vector3.UP
+	chama.spread = 12.0
+	chama.gravity = Vector3(0, 1.2, 0)
+	chama.initial_velocity_min = 0.3
+	chama.initial_velocity_max = 0.7
+	chama.scale_amount_min = 0.6
+	chama.scale_amount_max = 1.4
 	var grad := Gradient.new()
 	grad.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
 	grad.colors = PackedColorArray([Color(1.0, 0.85, 0.35, 0.95), Color(1.0, 0.45, 0.08, 0.8), Color(0.6, 0.1, 0.02, 0.0)])
-	fogo.color_ramp = grad
-	fogo.position.y = 0.08
-	root.add_child(fogo)
+	chama.color_ramp = grad
+	chama.position.y = 0.08
+	root.add_child(chama)
 	var luz := OmniLight3D.new()
 	luz.light_color = Color(1.0, 0.6, 0.25)
 	luz.light_energy = 2.2
@@ -261,8 +333,11 @@ func _fogueira_node(i: int) -> Dictionary:
 	qm2.size = Vector2(0.3, 0.3)
 	fumaca.mesh = qm2
 	var fm := StandardMaterial3D.new()
-	fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA       # com luz: o fogo clareia a fumaça por baixo
+	fm.roughness = 1.0
+	fm.disable_fog = true
+	fm.emission_enabled = true
+	fm.emission = Color(0.22, 0.21, 0.2)       # nunca fica preta (de noite, cinza escura)
 	fm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	fm.vertex_color_use_as_albedo = true
 	fm.albedo_texture = soft_tex()
@@ -272,37 +347,53 @@ func _fogueira_node(i: int) -> Dictionary:
 	fumaca.direction = Vector3.UP
 	fumaca.spread = 15.0
 	fumaca.gravity = Vector3(0.15, 0.5, 0)
-	fumaca.initial_velocity_min = 0.3
-	fumaca.initial_velocity_max = 0.5
+	fumaca.initial_velocity_min = 0.5
+	fumaca.initial_velocity_max = 0.8
+	fumaca.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	fumaca.emission_sphere_radius = 0.15
 	fumaca.scale_amount_min = 1.0
 	fumaca.scale_amount_max = 2.5
 	var g2 := Gradient.new()
-	g2.colors = PackedColorArray([Color(0.5, 0.5, 0.5, 0.35), Color(0.6, 0.6, 0.6, 0.0)])
+	g2.offsets = PackedFloat32Array([0.0, 0.15, 1.0])
+	g2.colors = PackedColorArray([Color(0.75, 0.75, 0.75, 0.0), Color(0.75, 0.75, 0.75, 0.3), Color(0.8, 0.8, 0.8, 0.0)])
 	fumaca.color_ramp = g2
-	fumaca.position.y = 0.6
+	fumaca.position.y = 0.75
 	root.add_child(fumaca)
-	return {"root": root, "fogo": fogo, "luz": luz, "fumaca": fumaca, "brasa": br, "lenhas": lenhas, "carv": carv, "aceso": null}
+	return {"root": root, "fogo": chama, "luz": luz, "fumaca": fumaca, "brasa": br, "lenhas": lenhas, "carv": carv}
 
 
-## Liga/desliga o fogo conforme o relógio (chamada sempre: barata).
+## O fogo conforme o relógio (chamada sempre: barata): o tamanho da chama e a luz vão
+## com a lenha no fogo; só brasa, o vermelho pulsando; fria, a cinza com o carvão.
 func atualizar() -> void:
 	for i in _nodes:
 		if i >= items.size():
 			continue
 		var nd: Dictionary = _nodes[i]
-		var on := acesa(i)
-		var fim := clampf(resta(i) / 30.0, 0.15, 1.0)          # nos últimos 30 s vai baixando
-		if nd.aceso != on:
-			nd.aceso = on
+		var f := fogo(i)
+		var on := f > 0.001
+		var br := brasa(i)
+		var est := "fogo" if on else ("brasa" if br else "fria")
+		if nd.get("est", "") != est:
+			nd.est = est
 			(nd.fogo as CPUParticles3D).emitting = on
-			(nd.fumaca as CPUParticles3D).emitting = on
+			(nd.fumaca as CPUParticles3D).emitting = on or br
 			(nd.lenhas as Node3D).visible = on or int(items[i].get("pendente", 0)) > 0
-			(nd.carv as Node3D).visible = not on and carvao(i) > 0
-			(nd.brasa as Node3D).visible = on
+			(nd.carv as Node3D).visible = est == "fria" and carvao(i) > 0
+			(nd.brasa as Node3D).visible = on or br
+		var forca := clampf(0.35 + f * 0.22, 0.35, 1.6)          # mais lenha, fogo maior
 		if on:
 			(nd.luz as OmniLight3D).visible = true
-			(nd.luz as OmniLight3D).light_energy = (1.6 + 0.6 * sin(Time.get_ticks_msec() / 90.0) + 0.3 * sin(Time.get_ticks_msec() / 37.0)) * fim
-			(nd.fogo as CPUParticles3D).scale = Vector3.ONE * lerpf(0.5, 1.0, fim)
+			(nd.luz as OmniLight3D).light_energy = (1.2 + 0.5 * sin(Time.get_ticks_msec() / 90.0) + 0.25 * sin(Time.get_ticks_msec() / 37.0)) * forca
+			(nd.luz as OmniLight3D).omni_range = 3.5 + 3.0 * forca
+			(nd.fogo as CPUParticles3D).scale = Vector3.ONE * forca
+			(nd.fogo as CPUParticles3D).amount = 40
+			(nd.brasa as Node3D).scale = Vector3.ONE
+		elif br:
+			# só brasa: um vermelhinho pulsando, quase sem luz
+			(nd.luz as OmniLight3D).visible = true
+			(nd.luz as OmniLight3D).light_energy = 0.35 + 0.2 * sin(Time.get_ticks_msec() / 400.0)
+			(nd.luz as OmniLight3D).omni_range = 1.6
+			(nd.brasa as Node3D).scale = Vector3(1.0, 0.6, 1.0)
 		else:
 			(nd.luz as OmniLight3D).visible = false
 
@@ -323,4 +414,9 @@ func _load(path: String) -> bool:
 	if not d is Dictionary:
 		return false
 	items = d.get("fogueiras", [])
+	for it in items:
+		if not it.has("f0"):
+			it["f0"] = 0.0                 # fogueira da versão anterior: fria
+			it["t0"] = 0
+			it["aceso"] = false
 	return true
