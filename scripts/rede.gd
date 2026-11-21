@@ -44,7 +44,7 @@ var _porta := 0
 var _no_jogo := false              # o convidado já está jogando (caiu: tenta voltar)
 var _volta_t := -1.0               # reconectando: segundos que ainda tenta
 var _tentar_t := 0.0
-var _id_antigo := 0
+var _meu_id := 0                   # o meu id na conexão de agora (para avisar ao voltar)
 var tempo_recebido := -1
 
 var _udp: PacketPeerUDP
@@ -219,10 +219,12 @@ func no_jogo() -> void:
 
 func _on_connected() -> void:
 	_ajustar_timeout(1)
+	var antigo := _meu_id
+	_meu_id = multiplayer.get_unique_id()
 	if _volta_t >= 0.0:
 		# voltou depois de cair: o dono já sabe do mundo; só se apresenta de novo
 		_volta_t = -1.0
-		rpc_id(1, "_volta_dono", meu_nome(), meu_skin(), _id_antigo)
+		rpc_id(1, "_volta_dono", meu_nome(), meu_skin(), antigo)
 		reconectou.emit()
 		return
 	# conectou: se apresenta e pede o mundo
@@ -247,7 +249,6 @@ func _on_conn_failed() -> void:
 ## A conexão com o dono caiu. Jogando: tenta voltar sozinho (sem sair do mundo).
 func _on_server_caiu() -> void:
 	if modo == "convidado" and _no_jogo and _ip != "":
-		_id_antigo = multiplayer.get_unique_id()
 		_volta_t = RECONECTAR_S
 		_tentar_t = 0.0
 		estados = {}
@@ -280,6 +281,12 @@ func _volta_dono(nome: String, skin: String, antigo: int) -> void:
 	var who := multiplayer.get_remote_sender_id()
 	jogadores.erase(antigo)
 	estados.erase(antigo)
+	# quem não está mais conectado sai da lista
+	var vivos := multiplayer.get_peers()
+	for p in jogadores.keys():
+		if int(p) != 1 and int(p) != who and not vivos.has(int(p)):
+			jogadores.erase(p)
+			estados.erase(p)
 	jogadores[who] = {"nome": nome.left(24), "skin": skin}
 	for p in jogadores:
 		if int(p) != 1:
@@ -416,19 +423,20 @@ func _estado(e: Dictionary) -> void:
 
 
 ## Uma parte do mundo mudou aqui: manda para os outros (compactada).
-signal parte_mundo(nome: String, dados: String, quem: int)
+signal parte_mundo(nome: String, dados: String, quem: int, visto: Dictionary)
 
-func mandar_parte(nome: String, dados: String) -> void:
+## visto: {id do jogador -> hash da última versão dele que já está junta nesta}
+func mandar_parte(nome: String, dados: String, visto := {}) -> void:
 	if not ativo():
 		return
 	var raw := dados.to_utf8_buffer()
-	rpc("_parte", nome, raw.compress(FileAccess.COMPRESSION_GZIP), raw.size())
+	rpc("_parte", nome, raw.compress(FileAccess.COMPRESSION_GZIP), raw.size(), visto)
 
 
 @rpc("any_peer", "reliable", "call_remote", 1)
-func _parte(nome: String, z: PackedByteArray, n: int) -> void:
+func _parte(nome: String, z: PackedByteArray, n: int, visto: Dictionary) -> void:
 	var raw := z.decompress(n, FileAccess.COMPRESSION_GZIP)
-	parte_mundo.emit(nome, raw.get_string_from_utf8(), multiplayer.get_remote_sender_id())     # (o dono repassa sozinho: server_relay)
+	parte_mundo.emit(nome, raw.get_string_from_utf8(), multiplayer.get_remote_sender_id(), visto)     # (o dono repassa sozinho: server_relay)
 
 
 ## O convidado terminou de carregar: pede ao dono o mundo como está agora (o que

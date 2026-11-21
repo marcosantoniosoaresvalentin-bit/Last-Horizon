@@ -6514,10 +6514,11 @@ func _mp_start() -> void:
 		_rede.pedir_mundo_atual()
 		_sync_hash = {})            # manda tudo de novo (o que mudou enquanto estava fora)
 	_rede.voltou.connect(func(novo: int, antigo: int):
-		for nome in _sync_base:
-			if (_sync_base[nome] as Dictionary).has(antigo):
-				_sync_base[nome][novo] = _sync_base[nome][antigo]
-				(_sync_base[nome] as Dictionary).erase(antigo))
+		for dd in [_sync_snap, _sync_recv_h]:
+			for nome in dd:
+				if (dd[nome] as Dictionary).has(antigo):
+					dd[nome][novo] = dd[nome][antigo]
+					(dd[nome] as Dictionary).erase(antigo))
 	if _rede.modo == "dono":
 		# quem entra pede o mundo de agora: manda todas as partes de novo
 		_rede.pediram_mundo.connect(func():
@@ -6531,9 +6532,9 @@ func _mp_start() -> void:
 		# o mundo que foi para quem entrou: é a base para juntar o que ele mudar
 		_rede.hook_mandou = func(who: int) -> void:
 			for nome in SYNC_EVERY:
-				if not _sync_base.has(nome):
-					_sync_base[nome] = {}
-				_sync_base[nome][who] = JSON.parse_string(_sync_get(nome))
+				if not _sync_snap.has(nome):
+					_sync_snap[nome] = {}
+				_sync_snap[nome][who] = JSON.parse_string(_sync_get(nome))
 		_rede.hook_tempo = func() -> int: return int(sim.steps)
 		_show_toast("Mundo aberto no multiplayer: quem estiver na mesma Wi-Fi pode entrar.")
 	else:
@@ -7378,6 +7379,12 @@ func _sync_set(nome: String, txt: String) -> void:
 			_escav._changed(touched)
 			_update_holes()
 			return
+		"arvores":
+			var ja = JSON.parse_string(txt)
+			if ja is Dictionary:
+				_arv_apply(ja)
+			_act_check = 0.0
+			return
 	var mod = _sync_mod(nome)
 	if mod == null:
 		return
@@ -7409,6 +7416,116 @@ func _sync_set(nome: String, txt: String) -> void:
 		_:
 			mod._rebuild()
 	_act_check = 0.0
+
+
+## As árvores chegaram de outro jogador: muda só o que mudou, NOS MESMOS dados (quem
+## está cortando continua na mesma árvore/tora) e redesenha só o necessário: uma
+## machadada refaz só aquela árvore; tora mexida refaz só as toras. Tudo de novo só
+## quando uma árvore cai, nasce ou some (antes redesenhava o mundo todo a cada
+## machadada do outro: o jogo travava).
+func _arv_apply(d: Dictionary) -> void:
+	var A = _arvores
+	var full := false
+	var logs := false
+	var norm := func(v): return JSON.parse_string(JSON.stringify(v))
+	# árvores (pelo lugar)
+	var idx := {}
+	for p in A.plants:
+		idx["%.3f,%.3f" % [float(p[0]), float(p[1])]] = p
+	var seen := {}
+	for q in d.get("plantas", []):
+		if not q is Array or (q as Array).size() < 6:
+			continue
+		var k := "%.3f,%.3f" % [float(q[0]), float(q[1])]
+		seen[k] = true
+		if idx.has(k):
+			var p: Array = idx[k]
+			var pn = norm.call(p)
+			if pn == q:
+				continue
+			# só o corte da tora deitada mudou (os pedaços de trás): refaz as toras
+			var only_logs: bool = (pn as Array).size() >= 9 and q.size() >= 9 and int(q[5]) == Arvores.FALLEN and int(pn[5]) == Arvores.FALLEN
+			if only_logs:
+				for i in 9:
+					if pn[i] != q[i]:
+						only_logs = false
+						break
+			p.assign(q)
+			if only_logs:
+				logs = true
+			else:
+				full = true
+		else:
+			A.plants.append(q)
+			full = true
+	for k in idx:
+		if not seen.has(k):
+			A.plants.erase(idx[k])
+			full = true
+	# o dia
+	var nd := int(d.get("dia", A.last_day))
+	if _mp_client() and nd != A.last_day:
+		A.last_day = nd
+		full = true
+	# machadadas nas árvores em pé
+	var ncuts := {}
+	for c in d.get("cortes", []):
+		ncuts[Vector2(float(c[0]), float(c[1]))] = [int(c[2]), float(c[3])]
+	var redo := []
+	for k in ncuts:
+		if not A.cuts.has(k):
+			full = true                  # 1ª machadada: a árvore sai do desenho em grupo
+		elif str(A.cuts[k]) != str(ncuts[k]):
+			redo.append(k)
+	for k in A.cuts:
+		if not ncuts.has(k):
+			full = true
+	A.cuts = ncuts
+	# tocos e sementes
+	if norm.call(A.stumps) != d.get("tocos", []):
+		A.stumps = d.get("tocos", [])
+		full = true
+	var seeds_ch: bool = norm.call(A.seeds) != d.get("sementes", [])
+	if seeds_ch:
+		A.seeds = d.get("sementes", [])
+	# toras soltas: as mesmas (dicionários) continuam; muda dentro delas
+	var lidx := {}
+	for fl in A.free_logs:
+		lidx[_ident(norm.call(fl))] = fl
+	var nl := []
+	for q in d.get("toras", []):
+		if not q is Dictionary or not q.has("pos"):
+			continue
+		var k := _ident(q)
+		if lidx.has(k):
+			var fl: Dictionary = lidx[k]
+			if norm.call(fl) != q:
+				fl.clear()
+				fl.merge(q)
+				logs = true
+			nl.append(fl)
+			lidx.erase(k)
+		else:
+			nl.append(q)
+			logs = true
+	if not lidx.is_empty():
+		logs = true
+	if logs:
+		A.free_logs.clear()
+		A.free_logs.append_array(nl)
+	if full:
+		A._rebuild()
+		A._rebuild_logs()
+	else:
+		if logs:
+			A._rebuild_logs()
+		for k in redo:
+			for p in A.plants:
+				if A._cut_key(p) == k and int(p[5]) != Arvores.FALLEN:
+					A._rebuild_cut(p)
+					break
+		if seeds_ch:
+			A._rebuild_seeds()
 
 
 ## Os buritis chegaram de outro jogador (dicionários novos): quem está na escada ou
@@ -7447,35 +7564,58 @@ func _sync_baseline() -> void:
 		_sync_hash[nome] = txt.hash()
 		_sync_t[nome] = randf() * float(SYNC_EVERY[nome])
 		_sync_base0[nome] = JSON.parse_string(txt)
-		if not _sync_base.has(nome):
-			_sync_base[nome] = {}
-		if _mp_client():
-			_sync_base[nome][1] = _sync_base0[nome]      # o mundo veio do dono
 
 
 # ---- juntar as mudanças (em vez de um apagar a do outro) ----
 # Cada parte do mundo vai inteira. Antes, a que chegava por último substituía a daqui:
 # se os dois mexiam quase juntos, a mudança de um sumia (a tora pega voltava para o
 # chão e dava para pegar de novo; o que um fez o outro não via). Agora cada lado guarda
-# a última versão que recebeu de cada jogador (a base) e junta as três: o que mudou lá
-# (base -> recebido) entra aqui sem desfazer o que mudou aqui. Coisa apagada de um lado
-# fica apagada. Os dois mexeram no mesmo valor: vale o do dono (entre convidados, o de
-# id menor), igual nos dois lados.
+# as últimas versões que mandou; cada mensagem diz qual versão de cada jogador ela já
+# tem junta ("visto"). Quem recebe acha essa versão sua (o ponto comum, a base) e junta
+# as três: o que mudou lá (base -> recebido) entra aqui sem desfazer o que mudou aqui.
+# Coisa apagada de um lado fica apagada. Os dois mexeram no mesmo valor: vale o do
+# dono (entre convidados, o de id menor), igual nos dois lados.
 
-var _sync_base := {}               # parte -> {id do jogador -> última versão recebida dele}
-var _sync_base0 := {}              # parte -> versão do começo (base de quem ainda não mandou)
+var _sync_sent := {}               # parte -> [[hash, versão]] as últimas que mandei
+var _sync_recv_h := {}             # parte -> {id -> hash da última versão recebida dele}
+var _sync_snap := {}               # (dono) parte -> {id -> o mundo que foi para ele ao entrar}
+var _sync_base0 := {}              # parte -> versão do começo (quem entrou: o que baixou)
+const SYNC_GUARDA := 12
 
 
-func _sync_receive(nome: String, txt: String, quem := 1) -> void:
+## Manda a parte (com o que já tem junto de cada um) e guarda a versão mandada.
+func _sync_send(nome: String, txt: String) -> void:
+	if not _sync_sent.has(nome):
+		_sync_sent[nome] = []
+	var lst: Array = _sync_sent[nome]
+	lst.append([txt.hash(), JSON.parse_string(txt)])
+	while lst.size() > SYNC_GUARDA:
+		lst.pop_front()
+	_rede.mandar_parte(nome, txt, (_sync_recv_h.get(nome, {}) as Dictionary).duplicate())
+
+
+## A versão minha que quem mandou já tinha junta (o ponto comum).
+func _sync_base_for(nome: String, quem: int, visto: Dictionary):
+	var h = visto.get(_my_id(), visto.get(str(_my_id())))
+	if h != null:
+		for e in _sync_sent.get(nome, []):
+			if int(e[0]) == int(h):
+				return e[1]
+	if (_sync_snap.get(nome, {}) as Dictionary).has(quem):
+		return _sync_snap[nome][quem]
+	return _sync_base0.get(nome)
+
+
+func _sync_receive(nome: String, txt: String, quem := 1, visto := {}) -> void:
 	if not _ready_world or not SYNC_EVERY.has(nome):
 		return
 	var r = JSON.parse_string(txt)
 	if r == null:
 		return
-	if not _sync_base.has(nome):
-		_sync_base[nome] = {}
-	var base = (_sync_base[nome] as Dictionary).get(quem, _sync_base0.get(nome))
-	_sync_base[nome][quem] = r
+	if not _sync_recv_h.has(nome):
+		_sync_recv_h[nome] = {}
+	_sync_recv_h[nome][quem] = txt.hash()
+	var base = _sync_base_for(nome, quem, visto)
 	var l = JSON.parse_string(_sync_get(nome))
 	var m = r
 	if base != null and l != null:
@@ -7587,7 +7727,7 @@ func _sync_tick(delta: float) -> void:
 		var h := txt.hash()
 		if h != int(_sync_hash.get(nome, 0)):
 			_sync_hash[nome] = h
-			_rede.mandar_parte(nome, txt)
+			_sync_send(nome, txt)
 
 
 
