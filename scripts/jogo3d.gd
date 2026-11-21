@@ -458,6 +458,8 @@ var _balde_fill: MeshInstance3D = null
 var _pour_t := -1.0               # despejando o balde (segundos)
 var _split := {}                  # rachando a tora com cunhas (ver _split_begin)
 const TAB_L := 0.4                # comprimento da tábua pequena (m)
+const TOQ_L := 0.25               # o toquinho (pedaço redondo para rachar lenha no cepo)
+var _chop_cepo := -1              # rachando lenha no cepo (índice da tora fincada)
 const RIPAS_POR_TABUA := 4
 const BOARD_HITS := 4
 var _rede: Node = null            # multiplayer (ver rede.gd)
@@ -2480,7 +2482,10 @@ func _update_chop(delta: float) -> void:
 		_chop_btn.visible = true
 		_chop_btn.text = "Rachar tábua"
 	elif _mao == "machado" and _arvores != null and not _digging and not _air and _carry.is_empty() and _crouch_job == "":
-		if _bur_fell_ready():
+		if _cepo_near(1.4, true) >= 0:
+			_chop_btn.visible = true
+			_chop_btn.text = "Rachar lenha"
+		elif _bur_fell_ready():
 			_chop_btn.visible = true
 			_chop_btn.text = "Derrubar"
 		elif _arvores.nearest_standing(_player.position, 1.3) != null:
@@ -2500,7 +2505,13 @@ func _update_chop(delta: float) -> void:
 ## de cima delas ou recolher uma forquilha.
 func _update_ctx_btn() -> void:
 	_ctx_action = ""
-	if _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _reb.is_empty() and _constr and _maq.planta_near(_player.position, 2.0) < 0 and not _constr.reboco_spots(_player.position, 2.6).is_empty():
+	if not _carry.is_empty() and _carry.has("lenha") and not _drag and _crouch_job == "" and not _air and _cepo_near(1.6, false) >= 0:
+		_ctx_action = "por_cepo"
+		_ctx_btn.text = "Pôr no cepo"
+	elif not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1 and _crouch_job == "" and not _air:
+		_ctx_action = "guardar_lenha"
+		_ctx_btn.text = "Guardar lenha"
+	elif _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _reb.is_empty() and _constr and _maq.planta_near(_player.position, 2.0) < 0 and not _constr.reboco_spots(_player.position, 2.6).is_empty():
 		_ctx_action = "rebocar"
 		_ctx_btn.text = "Rebocar com barro"
 	elif _mao == "balde" and not _balde_carga.is_empty() and _crouch_job == "" and not _air and _pour_t < 0.0:
@@ -2655,6 +2666,30 @@ func _ctx_press() -> void:
 			return
 		"rebocar":
 			_reb_start()
+			return
+		"por_cepo":
+			var ci := _cepo_near(1.6, false)
+			if ci < 0 or _carry.is_empty():
+				return
+			if _arvores.free_log_length(_carry) > 0.4:
+				_show_toast("Comprido demais para rachar no cepo: corte um toquinho (25 cm) na tora apoiada nas forquilhas, com a serra.")
+				return
+			var pc: Dictionary = _carry
+			pc.erase("golpes")
+			_buracos.posts[ci]["lenha"] = pc
+			_soltar_carga()
+			_buracos._rebuild()
+			_face_to(_cepo_top(ci))
+			Sons.play_at(self, "baque", _cepo_top(ci), -10.0, 1.3)
+			_show_toast("Madeira em pé no cepo. Pegue o machado e toque em \"Rachar lenha\".")
+			_act_check = 0.0
+			return
+		"guardar_lenha":
+			_soltar_carga()
+			var caiu := add_item("lenha", 1)
+			_update_inventory()
+			_show_toast("+1 lenha na mochila" + (" (mochila cheia: caiu no chão)" if caiu > 0 else ""))
+			_act_check = 0.0
 			return
 		"encher_cabaca":
 			var cs := _cab_spot()
@@ -3395,6 +3430,7 @@ func _open_work_menu() -> void:
 		return
 	_choice_menu("TRABALHAR NA TORA", "Escolha o que fazer",
 		[["Cortar rodela", "Uma fatia fina da ponta da tora.\nÉ o fundo do balde.", func(): _work_choose("rodela")],
+		["Cortar toquinho", "Um pedaço redondo de 25 cm da\nponta (cai no chão). Rache no\ncepo para fazer lenha.", func(): _work_choose("toquinho")],
 		["Rachar ao meio", "Abre a tora no comprido com\n3 cunhas e a marreta: 2 bandas.", func(): _split_begin()]])
 
 
@@ -3485,7 +3521,7 @@ func _work_choose(modo: String) -> void:
 	if _apoios.rested[i].log.has("sec") and not is_tab:
 		_show_toast("Rodela só sai de tora inteira (redonda).")
 		return
-	_apoios.rested[i]["cut"] = TAB_L if is_tab else Apoios.SLICE
+	_apoios.rested[i]["cut"] = TAB_L if is_tab else (TOQ_L if modo == "toquinho" else Apoios.SLICE)
 	# a rodela é fina: só a serra de pedra corta (o machado racha a madeira)
 	if item_qtd("serra") <= 0:
 		_show_toast("Precisa de uma serra de pedra para serrar.")
@@ -3899,6 +3935,11 @@ func _saw_update(delta: float) -> void:
 			if rad > 0.0:
 				if str(_work.get("modo", "")) == "tabua":
 					_tabua_cortada(wi, end_before, dir * float(we))
+					_stop_saw()
+					_work = {}
+					return
+				if str(_work.get("modo", "")) == "toquinho":
+					_toquinho_cortado(wi, end_before, dir * float(we))
 					_stop_saw()
 					_work = {}
 					return
@@ -5015,6 +5056,24 @@ func _start_chop() -> void:
 			_chop_pose.ready_pose = true
 		_begin_swing()
 		return
+	var cj := _cepo_near(1.4, true)
+	if _mao == "machado" and cj >= 0:
+		if _digging:
+			_cancel_dig()
+		_chop_cepo = cj
+		_chop_tree = null
+		_chop_log = {}
+		_chop_branch = {}
+		_chopping = true
+		_swing_queued = false
+		_face_to(_cepo_top(cj))
+		_yaw = _face
+		_play("Idle", 0.5)
+		if _chop_pose:
+			_chop_pose.vertical = true       # machadada de cima para baixo
+			_chop_pose.ready_pose = true
+		_begin_swing()
+		return
 	var t = _arvores.nearest_standing(_player.position, 1.3)
 	_chop_log = {}
 	_chop_branch = {}
@@ -5060,6 +5119,9 @@ func _chop_hit() -> void:
 
 
 func _chop_hit_now() -> void:
+	if _chop_cepo >= 0:
+		_cepo_hit()
+		return
 	if not _chop_bur.is_empty():
 		_bur_chop_hit()
 		return
@@ -5188,6 +5250,7 @@ func _chips(at: Vector3) -> void:
 
 
 func _cancel_chop() -> void:
+	_chop_cepo = -1
 	_chop_bur = {}
 	_chopping = false
 	_swing_on = false
@@ -6891,6 +6954,115 @@ func _tabua_cortada(wi: int, end_before: Vector3, out_dir: Vector3) -> void:
 	_arvores._rebuild_logs()
 	Sons.play_at(self, "baque", end_before, -14.0, 1.4)
 	_show_toast("A tábua pequena caiu no chão. Rache ela com o machado para tirar as ripas, ou pegue e carregue." if n == 1 else "As duas tábuas pequenas caíram no chão.")
+
+
+## O toquinho (redondo, 25 cm) soltou da ponta da tora apoiada: cai no chão.
+func _toquinho_cortado(wi: int, end_before: Vector3, out_dir: Vector3) -> void:
+	var fl: Dictionary = _apoios.rested[wi].log
+	var flat := Vector3(out_dir.x, 0, out_dir.z).normalized()
+	var yaw := atan2(-flat.z, flat.x)
+	var e := 1 if out_dir.dot(_apoios.info(wi).dir) > 0.0 else -1
+	var r_end: float = _arvores.free_log_end_radius(fl, e)
+	var piece := {"cil": {"L": TOQ_L, "ra": r_end, "rb": r_end}, "sec": Arvores.circle_sec(), "v": int(fl.get("v", 0)), "s": float(fl.get("s", 1.0)),
+		"h0": 0.0, "h1": 1.0, "bot": {}, "top": {}, "pos": [0, 0, 0], "yaw": 0.0, "dia": int(fl.get("dia", _arvores.last_day)), "lenha": 0}
+	_arvores.drop_log(piece, end_before - out_dir * TOQ_L * 0.5 + flat * 0.1, yaw)
+	if _arvores.free_log_length(fl) < TOQ_L + 0.12:
+		var c: Vector3 = _apoios.info(wi).center
+		_arvores.drop_log(_apoios.take_rested(wi), c, yaw)
+	_arvores._rebuild_logs()
+	Sons.play_at(self, "baque", end_before, -12.0, 1.2)
+	_show_toast("O toquinho caiu no chão. Pegue, ponha em cima do cepo (uma tora baixa fincada no chão) e rache com o machado.")
+
+
+# ---------- o cepo: rachar lenha ----------
+# O cepo é uma tora fincada no chão, baixa (15 a 70 cm para fora) e grossa. Em cima
+# dele vai o toquinho em pé; com o machado ele racha no meio e os dois pedaços caem um
+# para cada lado. Os pedaços voltam para o cepo e racham de novo (em 4, em 8). Um
+# pedaço rachado na mão, longe do cepo: "Guardar lenha" (vai para a mochila).
+
+func _cepo_ok(i: int) -> bool:
+	if _buracos == null or i < 0 or i >= _buracos.posts.size():
+		return false
+	var po: Dictionary = _buracos.posts[i]
+	var h: float = _arvores.free_log_length(po.log) - float(po.d)
+	return h >= 0.15 and h <= 0.7 and _arvores.free_log_radius(po.log) >= 0.09
+
+
+## Cepo perto (ou -1); com_lenha: só o que tem madeira em cima (ou só o vazio, se false).
+func _cepo_near(reach: float, com_lenha: bool) -> int:
+	if _buracos == null:
+		return -1
+	var best := -1
+	var bd := reach
+	for i in _buracos.posts.size():
+		var po: Dictionary = _buracos.posts[i]
+		if not _cepo_ok(i) or po.has("lenha") != com_lenha:
+			continue
+		var d := Vector2(float(po.x) - _player.position.x, float(po.z) - _player.position.z).length()
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+func _cepo_top(i: int) -> Vector3:
+	var po: Dictionary = _buracos.posts[i]
+	return Vector3(float(po.x), _buracos.post_top(po), float(po.z))
+
+
+func _soltar_carga() -> void:
+	_carry = {}
+	if _carry_node:
+		_carry_node.queue_free()
+	_carry_node = null
+	_drag = false
+	if _chop_pose:
+		_chop_pose.log_node = null
+
+
+## Uma machadada na madeira em cima do cepo. Chega o bastante, racha no meio: os dois
+## pedaços caem um para cada lado.
+func _cepo_hit() -> void:
+	var ci := _chop_cepo
+	if not _cepo_ok(ci) or not _buracos.posts[ci].has("lenha"):
+		_cancel_chop()
+		return
+	var po: Dictionary = _buracos.posts[ci]
+	var fl: Dictionary = po.lenha
+	var top := _cepo_top(ci)
+	var Ll: float = _arvores.free_log_length(fl)
+	var at := top + Vector3.UP * Ll
+	_chips(at)
+	Sons.play_at(self, "machado", at, 0.0, 1.05)
+	var r: float = _arvores.free_log_radius(fl)
+	var need := 1 if teste else clampi(int(round(1.0 + r * 14.0)), 2, 5)
+	fl["golpes"] = int(fl.get("golpes", 0)) + 1
+	if int(fl.golpes) < need:
+		return
+	var nivel := int(fl.get("lenha", 0))
+	var sec: Dictionary = fl.sec if fl.has("sec") else Arvores.circle_sec()
+	var halves: Array = Arvores.split_sec(sec, nivel % 2 == 1)
+	# os dois lados: para a direita e para a esquerda de quem está rachando
+	var side := Vector3(cos(_face), 0, -sin(_face))
+	for k in 2:
+		var pc: Dictionary = fl.duplicate(true)
+		pc.erase("golpes")
+		pc["sec"] = halves[k]
+		pc["lenha"] = nivel + 1
+		var sg := 1.0 if k == 0 else -1.0
+		var land := top + side * sg * (0.3 + r * 1.2 + randf() * 0.12)    # cai do lado (longe do cepo)
+		pc.pos = [land.x, land.y, land.z]
+		pc.yaw = _face + randf_range(-0.6, 0.6)
+		var start := Transform3D(Basis(Quaternion(Vector3.RIGHT, Vector3.UP)), top + Vector3.UP * Ll * 0.5 + side * sg * 0.04)
+		_arvores.roll_log(pc, start)
+	po.erase("lenha")
+	_buracos._rebuild()
+	Sons.play_at(self, "estalo", at, -2.0, 1.1)
+	_cancel_chop()
+	if nivel + 1 >= 3:
+		_show_toast("Rachou! Essas achas já estão finas: pegue e guarde como lenha.")
+	else:
+		_show_toast("Rachou! Os pedaços caíram um para cada lado. Rache de novo no cepo ou pegue e guarde como lenha.")
 
 
 ## Um pedaço novo com a mesma seção (o mesmo formato) da madeira de origem.

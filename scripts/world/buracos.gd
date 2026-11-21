@@ -333,6 +333,14 @@ func _rebuild() -> void:
 		# em pé: o eixo da tora (que é +X) vira para cima; a ponta de baixo no fundo do buraco
 		n.transform = Transform3D(Basis(Vector3.UP, float(po.yaw)) * Basis(Quaternion(Vector3.RIGHT, Vector3.UP)),
 			Vector3(float(po.x), gy - float(po.d) + L * 0.5, float(po.z)))
+		# no cepo: o pedaço de madeira em pé em cima (para rachar)
+		if po.has("lenha") and po.lenha is Dictionary:
+			var ln: Node3D = _arv.free_log_node(po.lenha)
+			add_child(ln)
+			_nodes.append(ln)
+			var Ll: float = _arv.free_log_length(po.lenha)
+			ln.transform = Transform3D(Basis(Vector3.UP, float(po.yaw) + 0.7) * Basis(Quaternion(Vector3.RIGHT, Vector3.UP)),
+				Vector3(float(po.x), gy - float(po.d) + L + Ll * 0.5, float(po.z)))
 	if changed_hook.is_valid():
 		changed_hook.call()
 

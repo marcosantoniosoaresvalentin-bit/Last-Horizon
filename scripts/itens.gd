@@ -56,6 +56,8 @@ const ITENS := {
 		"desc": "Moringa com água da lagoa, rio ou nascente, SEM FILTRAR (uns 2 litros, 8 goles). Mata a sede, mas pode ter bactérias e sujeira: beber dela pode trazer doença. USAR bebe um gole."},
 	"moringa_limpa": {"nome": "Cabaça com Água Filtrada", "kg": 3.4, "cat": "Utensílios", "dur": 8,
 		"desc": "Moringa com água que passou pela peneira de água (pedrinhas, carvão e areia): limpa e segura para beber (uns 2 litros, 8 goles). USAR bebe um gole."},
+	"lenha": {"nome": "Lenha", "kg": 1.2, "cat": "Recursos",
+		"desc": "Acha de lenha rachada com o machado no cepo. Para a fogueira (e o carvão)."},
 	"tela_fibra": {"nome": "Tela de Fibra", "kg": 0.3, "cat": "Recursos",
 		"desc": "Peneira trançada de fibra de buriti. Vai por cima da areia na peneira de água: segura as folhas e a sujeira grossa."},
 	"carvao": {"nome": "Carvão", "kg": 0.2, "cat": "Recursos",

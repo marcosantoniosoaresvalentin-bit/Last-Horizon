@@ -281,6 +281,14 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95, true)
 		"acao_derrubar":
 			fell_icon(ci, c, s)
+		"lenha":
+			# duas achas rachadas (casca de um lado, madeira clara do outro)
+			for k in 2:
+				var o := Vector2(-10 + k * 18, -8 + k * 14)
+				var poly: PackedVector2Array = P.call([[o.x - 34, o.y + 10], [o.x + 30, o.y - 16], [o.x + 38, o.y - 4], [o.x - 26, o.y + 22]])
+				ci.draw_colored_polygon(poly, Color(0.78, 0.6, 0.38))
+				ci.draw_line(c + Vector2(o.x - 30, o.y + 18) * u, c + Vector2(o.x + 34, o.y - 8) * u, Color(0.36, 0.25, 0.15), 6 * u, true)
+				ci.draw_polyline(poly + PackedVector2Array([poly[0]]), ink, 2.0 * u, true)
 		"tela_fibra", "acao_tela":
 			# a tela quadrada trançada de fibra clara
 			var q0 := c + Vector2(-38, -38) * u
