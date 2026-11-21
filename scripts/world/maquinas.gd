@@ -1057,9 +1057,23 @@ func mesa_despejar(mi: int, f: float) -> void:
 	a.f = minf(1.2, float(a.f) + f)
 	var n := maxi(2, int(round(MESA_SUJEIRA * f)))
 	var r := _mesa_r(float(a.f))
+	var usados := []
 	for k in n:
-		var ang := rng.randf() * TAU
-		var d := sqrt(rng.randf()) * r * 0.8
+		# espalhadas (uma longe da outra, para dar para tocar em cada uma)
+		var ang := 0.0
+		var d := 0.0
+		for _t in 30:
+			ang = rng.randf() * TAU
+			d = sqrt(rng.randf()) * r * 0.85
+			var q := Vector2(cos(ang), sin(ang)) * d
+			var ok := true
+			for u in usados:
+				if (u as Vector2).distance_to(q) < 0.055:
+					ok = false
+					break
+			if ok:
+				break
+		usados.append(Vector2(cos(ang), sin(ang)) * d)
 		var kind: String = ["pedra", "pedra", "raiz", "folha", "graveto"][rng.randi() % 5]
 		(a.suj as Array).append([snappedf(0.06 + cos(ang) * d, 0.001), snappedf(sin(ang) * d, 0.001), kind, rng.randi() % 10000, snappedf(rng.randf() * TAU, 0.01)])
 	p["argila"] = a
@@ -1159,9 +1173,9 @@ func _draw_argila(p: Dictionary, root: Node3D) -> void:
 		_clay_mat = StandardMaterial3D.new()
 		_clay_mat.vertex_color_use_as_albedo = true
 		_clay_mat.vertex_color_is_srgb = true
-		_clay_mat.albedo_color = Color(0.58, 0.29, 0.16)
-		_clay_mat.roughness = 0.5
-		_clay_mat.metallic_specular = 0.25
+		_clay_mat.albedo_color = Color(0.3, 0.17, 0.11)          # argila molhada da lagoa (barrenta)
+		_clay_mat.roughness = 0.62
+		_clay_mat.metallic_specular = 0.14
 		var nt := NoiseTexture2D.new()
 		var tn := FastNoiseLite.new()
 		tn.frequency = 0.04
@@ -1185,7 +1199,7 @@ static func _suj_mat(kind: String) -> StandardMaterial3D:
 		var m := StandardMaterial3D.new()
 		m.roughness = 0.9
 		match kind:
-			"pedra": m.albedo_color = Color(0.42, 0.4, 0.36)
+			"pedra": m.albedo_color = Color(0.3, 0.29, 0.26)
 			"raiz": m.albedo_color = Color(0.36, 0.24, 0.13)
 			"graveto": m.albedo_color = Color(0.3, 0.22, 0.14)
 			_: m.albedo_color = Color(0.3, 0.2, 0.09)

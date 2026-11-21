@@ -9878,7 +9878,7 @@ func _mesa_start(mi: int) -> void:
 		_chop_pose.crouch = 1.0          # sentado no banquinho
 	if _skel:
 		(_skel.get_parent() as Node3D).visible = false
-	_pitch = 0.95
+	_pitch = 0.65
 	Sons.play_at(self, "baque", _player.position + Vector3.UP * 0.4, -14.0, 1.4)
 	_show_toast("Toque nos losangos para tirar a sujeira da argila.")
 
@@ -9902,7 +9902,7 @@ func _mesa_move(delta: float) -> void:
 		_chop_pose.moving = false
 	_play("Idle")
 	_fp_camera(delta, 0.0)
-	var eye: Vector3 = xf * Vector3(-0.6, 1.2, 0.0)
+	var eye: Vector3 = xf * Vector3(-0.45, 1.15, 0.0)       # debruçado sobre a mesa
 	_cam.global_transform = Transform3D(Basis.from_euler(Vector3(-_pitch, _yaw, 0.0)), eye)
 
 
