@@ -600,6 +600,31 @@ func add_barro(pc: Dictionary, u: float, k: int, sg: float) -> void:
 	_rebuild()
 
 
+## A madeira está toda coberta de barro? As duas faces largas (as de cima/de lado,
+## não a de baixo, que fica apoiada) com todos os pedaços rebocados. Aí o cupim não
+## come; se sobrou algum pedaço de madeira à vista, come.
+func coberta(pc: Dictionary) -> bool:
+	var done: Array = pc.get("barro", [])
+	if done.is_empty():
+		return false
+	var bx := piece_box(pc)
+	var b: Basis = bx.b
+	var h: Vector3 = bx.h
+	var n := _reboco_n(h)
+	var t := 1 if h.y <= h.z else 2          # a espessura: as faces largas olham para esse lado
+	for sg in [-1.0, 1.0]:
+		var nrm: Vector3 = (b[t] as Vector3) * sg
+		if nrm.y < -0.6:
+			continue                          # a de baixo (apoiada) não conta
+		var cnt := 0
+		for e in done:
+			if int(e[1]) == t and float(e[2]) == sg:
+				cnt += 1
+		if cnt < n:
+			return false
+	return true
+
+
 var _dia_barro := -1
 
 
@@ -620,38 +645,58 @@ static var _mud_mats := {}
 
 
 ## O barro em cada estágio: molhado (escuro, brilhando, liso), secando (mais claro,
-## fosco) e seco (claro, áspero, todo rachado).
+## fosco) e seco (claro, áspero, todo rachado). A cor de cada ponto (vértice) dá as
+## manchas, os sulcos da mão e as fibras de buriti aparecendo.
 static func _mud_material(stage: int) -> StandardMaterial3D:
 	if _mud_mats.has(stage):
 		return _mud_mats[stage]
 	var m := StandardMaterial3D.new()
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	var nt := NoiseTexture2D.new()
 	var tn := FastNoiseLite.new()
-	tn.frequency = 0.06
+	tn.frequency = 0.05
+	tn.fractal_octaves = 4
 	nt.noise = tn
-	nt.width = 128
-	nt.height = 128
+	nt.width = 256
+	nt.height = 256
 	nt.seamless = true
 	nt.as_normal_map = true
-	nt.bump_strength = 2.0 + stage * 2.0
+	nt.bump_strength = 3.0 + stage * 2.5
 	m.normal_enabled = true
 	m.normal_texture = nt
+	m.uv1_scale = Vector3(1.6, 1.6, 1.6)
+	# manchas e grãos (areia, pedrinha) do barro
+	var at := NoiseTexture2D.new()
+	var an := FastNoiseLite.new()
+	an.frequency = 0.07
+	an.fractal_octaves = 3
+	an.seed = 17
+	at.noise = an
+	at.width = 256
+	at.height = 256
+	at.seamless = true
+	var ag := Gradient.new()
+	ag.offsets = PackedFloat32Array([0.0, 0.45, 0.55, 1.0])
+	ag.colors = PackedColorArray([Color(0.78, 0.76, 0.74), Color(0.95, 0.94, 0.92), Color(1, 1, 1), Color(1.08, 1.06, 1.02)])
+	at.color_ramp = ag
+	m.albedo_texture = at
 	match stage:
 		0:
-			m.albedo_color = Color(0.15, 0.11, 0.08)
-			m.roughness = 0.45
-			m.metallic_specular = 0.3
+			m.albedo_color = Color(0.2, 0.15, 0.11)
+			m.roughness = 0.38
+			m.metallic_specular = 0.35
 		1:
-			m.albedo_color = Color(0.24, 0.19, 0.14)
-			m.roughness = 0.85
+			m.albedo_color = Color(0.3, 0.24, 0.18)
+			m.roughness = 0.8
 			m.metallic_specular = 0.15
 		2:
-			m.albedo_color = Color(0.25, 0.21, 0.16)
-			m.roughness = 1.0
-			m.metallic_specular = 0.05
+			m.albedo_color = Color(0.37, 0.31, 0.24)
+			m.roughness = 0.95
+			m.metallic_specular = 0.06
 		_:
-			# seco: as rachaduras (manchas de células com a borda escura)
+			# seco: claro e as rachaduras (placas de células com a borda escura e funda)
 			var ct := NoiseTexture2D.new()
 			var cn := FastNoiseLite.new()
 			cn.noise_type = FastNoiseLite.TYPE_CELLULAR
@@ -663,17 +708,27 @@ static func _mud_material(stage: int) -> StandardMaterial3D:
 			ct.height = 256
 			ct.seamless = true
 			var g := Gradient.new()
-			g.offsets = PackedFloat32Array([0.0, 0.09, 0.16, 0.5, 1.0])
-			g.colors = PackedColorArray([Color(0.04, 0.03, 0.02), Color(0.07, 0.05, 0.04), Color(0.3, 0.25, 0.19), Color(0.33, 0.28, 0.21), Color(0.36, 0.3, 0.23)])
+			g.offsets = PackedFloat32Array([0.0, 0.07, 0.14, 0.5, 1.0])
+			g.colors = PackedColorArray([Color(0.05, 0.04, 0.03), Color(0.1, 0.08, 0.06), Color(0.4, 0.34, 0.27), Color(0.44, 0.38, 0.3), Color(0.48, 0.41, 0.32)])
 			ct.color_ramp = g
 			m.albedo_texture = ct
+			var cnt := NoiseTexture2D.new()
+			cnt.noise = cn
+			cnt.width = 256
+			cnt.height = 256
+			cnt.seamless = true
+			cnt.as_normal_map = true
+			cnt.bump_strength = 14.0
+			m.normal_texture = cnt
 			m.roughness = 1.0
-			m.metallic_specular = 0.05
+			m.metallic_specular = 0.04
 	_mud_mats[stage] = m
 	return m
 
 
-## A placa de barro grudada na face: um pouco abaulada e irregular, cor de barro.
+## A placa de barro grudada na face: grossa e abaulada, com a beira irregular, os
+## sulcos da mão que espalhou e as fibras aparecendo. As placas vizinhas se encostam
+## e passam um pouco da quina (a madeira some debaixo do barro, como casa de taipa).
 func _mud_patch(pc: Dictionary, e: Array) -> Node3D:
 	var bx := piece_box(pc)
 	var b: Basis = bx.b
@@ -687,28 +742,62 @@ func _mud_patch(pc: Dictionary, e: Array) -> Node3D:
 	var nrm: Vector3 = (b[k] as Vector3) * sg
 	var along: Vector3 = b.x
 	var side: Vector3 = b[other]
-	var la := h.x * 2.0 / n * 0.54
-	var ls: float = h[other] * 0.98
+	var la := h.x * 2.0 / n * 0.62
+	var ls: float = h[other] * 1.05
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var seed := int(absf(u * 1000.0)) + k * 7 + int(sg) * 3 + int(absf(c.x * 13.0 + c.z * 7.0))
 	var nz := FastNoiseLite.new()
-	nz.seed = int(u * 100.0) + k * 7
-	nz.frequency = 9.0
-	var NA := 6
-	var NS := 4
+	nz.seed = seed
+	nz.frequency = 1.6
+	var nz2 := FastNoiseLite.new()
+	nz2.seed = seed + 11
+	nz2.frequency = 7.0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	var age := SECA_DIAS
+	if e.size() > 3:
+		age = int(_jogo.sim.elapsed_days()) - int(e[3])
+	var stage := 0 if age < 1 else (1 if age < 3 else (2 if age < SECA_DIAS else 3))
+	var NA := 12
+	var NS := 7
 	var base := c + along * (u * h.x) + nrm * h[k]
+	var sw := rng.randf_range(-0.8, 0.8)           # direção das passadas da mão
 	var grid := []
+	var cols := []
 	for i in NA + 1:
 		var row := []
+		var crow := []
 		for j in NS + 1:
 			var a := lerpf(-1.0, 1.0, float(i) / NA)
 			var bb := lerpf(-1.0, 1.0, float(j) / NS)
-			var bulge := (1.0 - a * a * 0.6) * (1.0 - bb * bb * 0.7) * 0.022 + nz.get_noise_2d(a * 3.0, bb * 3.0) * 0.006 + 0.004
-			row.append(base + along * (a * la) + side * (bb * ls) + nrm * bulge)
+			var ra := absf(a)
+			var rb := absf(bb)
+			var n1 := nz.get_noise_2d(a * 2.0 + u * 5.0, bb * 2.0)
+			var n2 := nz2.get_noise_2d(a * 3.0, bb * 3.0)
+			# beira irregular: a placa vai afinando até a madeira
+			var edge := 1.0 - smoothstep(0.62 + 0.25 * n1, 1.0, maxf(ra, rb * 0.9))
+			var stroke := sin((a * 2.4 + bb * sw) * 6.0 + n1 * 3.0) * 0.0035
+			var thick := 0.012 + 0.018 * (1.0 - a * a * 0.3) * (1.0 - bb * bb * 0.5) + n1 * 0.008 + n2 * 0.003 + stroke
+			thick = maxf(0.0015, thick * edge + 0.002)
+			var off := nrm * thick
+			# passando da quina: dobra para o lado (por cima do canto da madeira)
+			var sb := clampf(bb, -1.0, 1.0)
+			var pos := base + along * (a * la) + side * (sb * ls)
+			if rb > 0.92:
+				pos -= nrm * (rb - 0.92) * 0.35 * h[k] * 2.0
+			row.append(pos + off)
+			var tone := n2 * 0.18 + stroke * 18.0
+			var col := Color(1, 1, 1).darkened(clampf(-tone, 0.0, 0.3)).lightened(clampf(tone, 0.0, 0.15))
+			if stage >= 2:
+				col = col.lightened(0.08 * (1.0 - edge))       # a beira fina seca primeiro (mais clara)
+			crow.append(col)
 		grid.append(row)
+		cols.append(crow)
 	for i in NA:
 		for j in NS:
 			var q := [grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]]
+			var cq := [cols[i][j], cols[i + 1][j], cols[i + 1][j + 1], cols[i][j + 1]]
 			var uvq := [Vector2(i, j), Vector2(i + 1, j), Vector2(i + 1, j + 1), Vector2(i, j + 1)]
 			for tri in [[0, 1, 2], [0, 2, 3]]:
 				var A: Vector3 = q[tri[0]]
@@ -719,19 +808,30 @@ func _mud_patch(pc: Dictionary, e: Array) -> Node3D:
 					ord = [tri[0], tri[2], tri[1]]
 				for idx in ord:
 					var uvv: Vector2 = uvq[idx]
-					st.set_uv(Vector2(uvv.x * la * 2.0 / NA, uvv.y * ls * 2.0 / NS) * 0.9 + Vector2(u * 0.7, k * 0.3))
+					st.set_color(cq[idx])
+					st.set_uv(Vector2(uvv.x * la * 2.0 / NA, uvv.y * ls * 2.0 / NS) * 0.9 + Vector2(u * 0.7 + c.x * 0.13, k * 0.3 + c.z * 0.11))
 					st.add_vertex(q[idx])
+	# as fibras de buriti aparecendo no barro (fiapos claros, umas pontas soltas)
+	var fcol := Color(1.9, 1.75, 1.3) if stage < 3 else Color(2.0, 1.85, 1.45)
+	for f in 7:
+		var a0 := rng.randf_range(-0.75, 0.75)
+		var b0 := rng.randf_range(-0.7, 0.7)
+		var ang := rng.randf() * TAU
+		var L := rng.randf_range(0.25, 0.6)
+		var pa := base + along * (a0 * la) + side * (b0 * ls)
+		var dir := (along * cos(ang) + side * sin(ang)).normalized()
+		var p1 := pa + dir * L * minf(la, ls)
+		var lift: float = 0.012 + 0.018 * (1.0 - a0 * a0 * 0.3) * (1.0 - b0 * b0 * 0.5) + 0.004
+		var wv := dir.cross(nrm).normalized() * 0.0012
+		var o := nrm * lift
+		for v in [pa - wv + o, p1 - wv + o, p1 + wv + o, pa - wv + o, p1 + wv + o, pa + wv + o]:
+			st.set_color(fcol)
+			st.set_uv(Vector2(0.5, 0.5))
+			st.add_vertex(v)
 	st.generate_normals()
 	st.generate_tangents()
 	var mi := MeshInstance3D.new()
 	mi.mesh = st.commit()
-	# o estágio da cura: molhado, secando, quase seco, seco e rachado
-	var age := 0
-	if e.size() > 3:
-		age = int(_jogo.sim.elapsed_days()) - int(e[3])
-	else:
-		age = SECA_DIAS                 # barro de antes desta versão: já seco
-	var stage := 0 if age < 1 else (1 if age < 3 else (2 if age < SECA_DIAS else 3))
 	mi.material_override = _mud_material(stage)
 	return mi
 

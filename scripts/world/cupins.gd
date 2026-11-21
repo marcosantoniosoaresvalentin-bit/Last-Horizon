@@ -224,6 +224,8 @@ func _wood_list() -> Array:
 	var co = _jogo._constr
 	if co:
 		for pc in co.pieces:
+			if co.coberta(pc):
+				continue                  # rebocada com barro dos dois lados: o cupim não chega na madeira
 			out.append({"p": Vector2(float(pc.p[0]), float(pc.p[2])), "obj": pc.log, "kind": "estrutura", "soft": 0.5})
 	var gal = _jogo._galhos
 	if gal:

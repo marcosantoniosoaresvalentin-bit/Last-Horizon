@@ -281,6 +281,33 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95, true)
 		"acao_derrubar":
 			fell_icon(ci, c, s)
+		"acao_abrir", "acao_agua", "acao_misturar", "acao_pegar_barro", "acao_fibra":
+			# o monte de terra (barro, nos últimos passos) com a cova no meio
+			var mud := id in ["acao_misturar", "acao_pegar_barro"]
+			var mc := Color(0.33, 0.24, 0.16) if not mud else Color(0.27, 0.22, 0.17)
+			var mound := PackedVector2Array()
+			for i in 17:
+				var t := float(i) / 16.0
+				mound.append(c + Vector2(lerpf(-46, 46, t), 40 - sin(t * PI) * 30) * u)
+			ci.draw_colored_polygon(mound, mc)
+			ci.draw_polyline(mound, ink, 2.0 * u, true)
+			if id != "acao_pegar_barro":
+				ci.draw_colored_polygon(P.call([[-18, 14], [0, 18], [18, 14], [10, 10], [-10, 10]]), Color(0.16, 0.11, 0.07))
+			if id == "acao_agua":
+				ci.draw_colored_polygon(P.call([[-14, 13], [14, 13], [8, 16], [-8, 16]]), Color(0.35, 0.5, 0.62))
+				for k in 3:
+					var dx := -6.0 + k * 6.0
+					ci.draw_line(c + Vector2(dx + 8, -44) * u, c + Vector2(dx, 4) * u, Color(0.45, 0.65, 0.85), 3.5 * u, true)
+				ci.draw_line(c + Vector2(22, 16) * u, c + Vector2(36, 34) * u, Color(0.2, 0.14, 0.09), 3 * u, true)
+			elif id == "acao_fibra":
+				for k in 6:
+					ci.draw_line(c + Vector2(-26 + k * 4, -34 + k * 2) * u, c + Vector2(-8 + k * 5, 10) * u, Color(0.86, 0.78, 0.55), 2 * u, true)
+			elif id == "acao_pegar_barro":
+				balde(ci, c + Vector2(26, -14) * u, s * 0.55)
+			else:
+				# a enxada batendo
+				ci.draw_line(c + Vector2(40, -46) * u, c + Vector2(-2, 4) * u, Color(0.4, 0.26, 0.14), 6 * u, true)
+				flint(ci, P.call([[-14, -2], [6, 0], [8, 14], [-6, 18]]), Color(0.47, 0.43, 0.35), 37, u, [1])
 		"ponta_pedra", "furador":
 			if id == "furador":
 				ci.draw_line(c + Vector2(-44, 30) * u, c + Vector2(4, -4) * u, Color(0.55, 0.36, 0.2), 13 * u, true)

@@ -127,6 +127,46 @@ func dump(c: Vector3, vol: float, tipo := "terra") -> void:
 	_changed(touched)
 
 
+## Abre (depth > 0) ou fecha (depth < 0) uma cova no meio do monte em c: a terra do
+## ponto do meio vai para os 8 em volta (o mesmo volume). Devolve quanto desceu o meio.
+func crater(c: Vector3, depth: float) -> float:
+	var k0 := Vector2i(roundi(c.x / RES), roundi(c.z / RES))
+	var mv := depth
+	if depth > 0.0:
+		mv = minf(depth, maxf(0.0, _v(k0) * 0.75 - 0.004))
+	if absf(mv) < 0.0005:
+		return 0.0
+	var touched := {k0: true}
+	d[k0] = _v(k0) - mv
+	for ox in [-1, 0, 1]:
+		for oz in [-1, 0, 1]:
+			if ox == 0 and oz == 0:
+				continue
+			var k := k0 + Vector2i(ox, oz)
+			d[k] = _v(k) + mv / 8.0
+			touched[k] = true
+	_changed(touched)
+	return mv
+
+
+## Tira terra de um monte (o barro que foi para o balde): a parte que subiu, num raio
+## r de c, fica f vezes a altura (0 = o monte some).
+func scale_pile(c: Vector3, r: float, f: float) -> void:
+	var touched := {}
+	var n := int(ceil(r / RES)) + 1
+	var cx := roundi(c.x / RES)
+	var cz := roundi(c.z / RES)
+	for ix in range(cx - n, cx + n + 1):
+		for iz in range(cz - n, cz + n + 1):
+			var k := Vector2i(ix, iz)
+			if _v(k) <= 0.0 or Vector2(ix * RES - c.x, iz * RES - c.z).length() > r + RES * 0.5:
+				continue
+			d[k] = _v(k) * f
+			touched[k] = true
+	if not touched.is_empty():
+		_changed(touched)
+
+
 ## Terra solta escorre para os lados até ficar com uma inclinação que se segura.
 func _slump(touched: Dictionary) -> void:
 	var lim := REPOSE * RES

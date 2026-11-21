@@ -37,6 +37,7 @@ const Maquinas := preload("res://scripts/world/maquinas.gd")
 const Projetos := preload("res://scripts/ui/projetos.gd")
 const MINERAIS_ITENS := ["hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita", "lasca_silex"]
 const Escavacao := preload("res://scripts/world/escavacao.gd")
+const Barreiros := preload("res://scripts/world/barreiros.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
 const SAW_SPEED := 2.6            # quão rápido a serra acompanha o dedo (curso inteiro ≈ 0,8 s)
@@ -402,7 +403,8 @@ var _bur := {}                    # o que escolheu no menu do olho: {p, acao}
 var _chop_bur := {}               # derrubando um buriti
 var _drag := false                # arrastando a tora pesada (sozinho)
 var _swim := false                # nadando (rio fundo, lagoa funda ou mar)
-var _mix := {}                    # mexendo o barro na caixa com a enxada: {mi, sel, drag, anim, ui}
+var _mix := {}                    # mexendo o monte de barro com a enxada: {bi, modo (abrir/mexer), sel, drag, anim, ui}
+var _pour_bi := -1                # despejando a água na cova deste monte (meio balde)
 var _reb := {}                    # rebocando a construção com barro: {alvos, sel, ui, ...}
 var _swim_t := 0.0
 var _maq_pend := {}               # indo até o lugar na serra: {mi, papel}
@@ -431,6 +433,7 @@ const Arrasto := preload("res://scripts/ui/arrasto.gd")
 var _bld_pad: Control
 const BLD_MODES := ["girar", "inclinar", "virar", "mover", "altura"]
 var _escav: Node3D = null
+var _barr: Node3D = null           # montes de terra no chão virando barro
 var _escav_steps := 0
 var _escav_timer := 0.0
 var _pa_vol := 0.0                # quanta terra está na pá (m³)
@@ -1043,6 +1046,9 @@ func _on_world_ready() -> void:
 	_escav = Escavacao.new()
 	add_child(_escav)
 	_escav.build(self, _buracos._soil_mat, Mundos.dir(_world_id) + "/escavacao.json" if _world_id != "" else "")
+	_barr = Barreiros.new()
+	add_child(_barr)
+	_barr.build(self, _escav, _buracos._soil_mat, Mundos.dir(_world_id) + "/barreiros.json" if _world_id != "" else "")
 	_minerios = Minerios.new()
 	add_child(_minerios)
 	_minerios.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/minerios.json" if _world_id != "" else "")
@@ -1396,6 +1402,8 @@ func _process(delta: float) -> void:
 	_move_player(delta)
 	if _constr and Engine.get_process_frames() % 120 == 0:
 		_constr.dia(int(sim.elapsed_days()))      # o barro das paredes vai secando (em todos)
+	if _barr and Engine.get_process_frames() % 90 == 45:
+		_barr.check()                            # monte cavado embora com a pá some
 	if _drag:
 		_drag_update()
 	_update_grass()
@@ -1526,6 +1534,8 @@ func _save_world() -> void:
 		_apoios.save(Mundos.dir(_world_id) + "/apoios.json")
 	if _escav:
 		_escav.save(Mundos.dir(_world_id) + "/escavacao.json")
+	if _barr:
+		_barr.save(Mundos.dir(_world_id) + "/barreiros.json")
 	if _pedras:
 		_pedras.save(Mundos.dir(_world_id) + "/pedras.json")
 	Mundos.touch(_world_id, _game_date())
@@ -2395,10 +2405,10 @@ func _update_ctx_btn() -> void:
 	if _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _reb.is_empty() and _constr and _maq.planta_near(_player.position, 2.0) < 0 and not _constr.reboco_spots(_player.position, 2.6).is_empty():
 		_ctx_action = "rebocar"
 		_ctx_btn.text = "Rebocar com barro"
-	elif _mao == "balde" and not _balde_carga.is_empty() and _crouch_job == "" and not _air and _pour_t < 0.0 and not _near_caixa():
+	elif _mao == "balde" and not _balde_carga.is_empty() and _crouch_job == "" and not _air and _pour_t < 0.0:
 		_ctx_action = "despejar"
 		_ctx_btn.text = "Despejar no balde" if _bucket_ahead() >= 0 else "Despejar"
-	elif _mao == "balde" and _balde_carga.is_empty() and _crouch_job == "" and not _air and not _swim and not _near_caixa() and _water_spot() != Vector3.INF:
+	elif _mao == "balde" and _balde_carga.is_empty() and _crouch_job == "" and not _air and not _swim and _water_spot() != Vector3.INF:
 		_ctx_action = "pegar_agua"
 		_ctx_btn.text = "Pegar água"
 	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and _cupins.nearest_timbo(_player.position, 1.4) >= 0:
@@ -2487,7 +2497,7 @@ func _ctx_press() -> void:
 					_show_toast("+1 folha seca de buriti")
 				_act_check = 0.0
 			return
-		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar", "caixa_terra", "caixa_agua", "caixa_fibra", "caixa_mexer", "caixa_pegar":
+		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar":
 			_maq_ctx_press(_ctx_action)
 			return
 		"peca":
@@ -4610,9 +4620,25 @@ func _update_pour(delta: float) -> void:
 			var left := float(c.vol) - mv
 			_balde_carga = {} if left <= 0.0005 else {"tipo": c.tipo, "vol": left}
 		elif str(c.tipo) == "agua":
-			_balde_carga = {}           # a água escorre no chão
+			var bi2: int = _pour_bi if _pour_bi >= 0 and _pour_bi < _barr.montes.size() else _barr.near(to, 0.9)
+			if bi2 >= 0 and _barr.stage(bi2) == "agua":
+				# meio balde na cova do monte (se tem menos, vai o que tem)
+				var meio := minf(float(c.vol), BALDE_VOL * 0.5)
+				_barr.add_agua(bi2, meio / BALDE_VOL)
+				var left2 := float(c.vol) - meio
+				_balde_carga = {} if left2 <= 0.0005 else {"tipo": "agua", "vol": left2}
+				to = _barr.center(bi2)
+				var m2: Dictionary = _barr.montes[bi2]
+				if _barr.stage(bi2) == "agua":
+					_show_toast("Água na cova: escorre pela terra. Falta mais %s." % ("meio balde" if _barr.need_agua(m2) - float(m2.agua) <= 0.55 else "%.1f balde" % (_barr.need_agua(m2) - float(m2.agua))))
+				else:
+					_show_toast("Terra molhada! Agora ponha %d fibras de buriti (pelo olho no monte)." % _barr.fibras_need(m2))
+			else:
+				_balde_carga = {}           # a água escorre no chão
 		else:
 			_escav.dump(to, float(c.vol), str(c.tipo))
+			if str(c.tipo) in ["terra", "argila", "barro"]:
+				_barr.add(to, str(c.tipo), float(c.vol))
 			_dirt(to)
 			_balde_carga = {}
 		if str(c.tipo) == "agua":
@@ -4624,6 +4650,7 @@ func _update_pour(delta: float) -> void:
 		_update_inventory()
 	if _pour_t >= 1.5:
 		_pour_t = -1.0
+		_pour_bi = -1
 		if _chop_pose:
 			_chop_pose.pour = 0.0
 		_act_check = 0.0
@@ -7235,7 +7262,7 @@ func _bld_place() -> void:
 var _sync_hash := {}               # parte -> hash do que todos já têm
 var _sync_t := {}                  # parte -> tempo até conferir de novo
 const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
-	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0}
+	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4}
 const SYNC_ONLY_HOST := ["bacabas"]        # só o dono manda (os bichos comem os frutos); buritis: degraus e folhas cortadas vêm de todos
 
 
@@ -7294,6 +7321,7 @@ func _sync_mod(nome: String):
 		"buritis": return _buritis
 		"minerios": return _minerios
 		"maquinas": return _maq
+		"barreiros": return _barr
 	return null
 
 
@@ -7537,8 +7565,6 @@ func _maq_ctx() -> bool:
 	if mi < 0:
 		return false
 	var p: Dictionary = _maq.plantas[mi]
-	if _maq.pronta(mi) and str(p.tipo) == "caixa_barro":
-		return _caixa_ctx(mi)
 	if _maq.pronta(mi):
 		var role: String = _maq.role_at(mi, _player.position)
 		if role == "pedal" and _carry.is_empty():
@@ -7636,8 +7662,6 @@ func _maq_ctx_press(act: String) -> void:
 				_show_toast("Precisa de %s para cortar essa ponta." % ("uma serra (a peça está deitada)" if tool == "serra" else "um machado (a peça está em pé)"))
 				return
 			_trim_start(int(sb[0]), int(sb[1]), tool)
-		"caixa_terra", "caixa_agua", "caixa_fibra", "caixa_mexer", "caixa_pegar":
-			_caixa_press(mi, act)
 		"saida_pegar":
 			var pfl: Dictionary = _maq.take_saida(mi)
 			if not pfl.is_empty():
@@ -8912,98 +8936,87 @@ func _coop_end(drop: bool) -> void:
 	_act_check = 0.0
 
 
-# ================== CAIXA DE BARRO ==================
-# Com a caixa pronta: despeja 4 baldes de terra (pá -> balde -> caixa), 1 balde de
-# água e põe 5 fibras de buriti. Aí, com a enxada na mão, "Misturar": aparecem
-# losangos dentro da caixa; tocando num e passando o dedo PARA BAIXO, a enxada bate
-# na terra molhada e é puxada para perto (umas vezes em cada lugar). Tudo mexido, vira
-# barro com fibra: dá 4 baldes. Com o balde de barro, perto da construção, "Rebocar":
+# ================== BARRO NO MONTE DE TERRA ==================
+# Despeja o balde de terra no chão: vira um monte. Com a enxada na mão, perto dele,
+# aparece o olho no monte: "Abrir" (3 enxadadas fazem uma cova no meio). Aí "Jogar
+# água" (meio balde de cada vez; enche a cova e escorre pelos lados), "Pôr fibras" e
+# "Misturar": losangos no monte; tocando num e passando o dedo PARA BAIXO, a enxada
+# bate lá na frente e puxa a terra molhada (onde mexe vira barro). Pronto: "Pegar
+# barro" com o balde vazio. Com o balde de barro, perto da construção, "Rebocar":
 # losangos nas tábuas; tocando num, o personagem vai lá e passa o barro, e continua
 # sozinho nos pedaços seguintes enquanto tiver barro no balde.
 
-## Bem do lado de uma caixa de barro (as ações dela têm preferência).
-func _near_caixa() -> bool:
-	if _maq == null:
-		return false
-	var mi: int = _maq.planta_near(_player.position, 2.0)
-	return mi >= 0 and str(_maq.plantas[mi].tipo) == "caixa_barro" and _maq.pronta(mi)
+## O que dá para fazer no monte i: [[ação, nome]] (o olho só aparece se tiver algo).
+func _barr_opts(i: int) -> Array:
+	if _barr == null or i < 0 or i >= _barr.montes.size():
+		return []
+	var m: Dictionary = _barr.montes[i]
+	match _barr.stage(i):
+		"abrir":
+			return [["abrir", "Abrir"]] if _mao == "enxada" else []
+		"agua":
+			return [["agua", "Jogar água"]]
+		"fibra":
+			return [["fibra", "Pôr fibras"]]
+		"mexer":
+			return [["misturar", "Misturar"]]
+		"pronto":
+			return [["pegar_barro", "Pegar barro"]]
+	return []
 
 
-func _caixa_ctx(mi: int) -> bool:
-	var cc: Vector3 = _maq.xform(mi).origin
-	if Vector2(cc.x - _player.position.x, cc.z - _player.position.z).length() > 1.9:
-		return false               # bem do lado da caixa
-	var b: Dictionary = _maq.barro_of(mi)
-	var tipo := str(_balde_carga.get("tipo", ""))
-	var cheio := float(_balde_carga.get("vol", 0.0)) >= BALDE_VOL * 0.3
-	if bool(b.pronto):
-		if _mao == "balde" and _balde_carga.is_empty():
-			_ctx_action = "caixa_pegar"
-			_ctx_btn.text = "Pegar barro (%d)" % int(b.baldes)
-			return true
-		return false
-	if _mao == "balde" and tipo == "terra" and cheio and int(b.terra) < Maquinas.CAIXA_TERRA:
-		_ctx_action = "caixa_terra"
-		_ctx_btn.text = "Despejar terra na caixa (%d/%d)" % [int(b.terra) + 1, Maquinas.CAIXA_TERRA]
-		return true
-	if _mao == "balde" and tipo == "agua" and int(b.terra) >= Maquinas.CAIXA_TERRA and int(b.agua) == 0:
-		_ctx_action = "caixa_agua"
-		_ctx_btn.text = "Despejar água na caixa"
-		return true
-	if int(b.agua) > 0 and int(b.fibra) == 0 and _carry.is_empty():
-		_ctx_action = "caixa_fibra"
-		_ctx_btn.text = "Pôr 5 fibras de buriti"
-		return true
-	if int(b.fibra) > 0 and _mao == "enxada":
-		_ctx_action = "caixa_mexer"
-		_ctx_btn.text = "Misturar o barro"
-		return true
-	return false
-
-
-func _caixa_press(mi: int, act: String) -> void:
-	var b: Dictionary = _maq.barro_of(mi)
-	var at: Vector3 = _maq.xform(mi).origin + Vector3.UP * 0.2
-	match act:
-		"caixa_terra":
-			_balde_carga = {}
-			_update_balde_fill(_balde_fill, _balde_carga)
-			_maq.caixa_add(mi, "terra")
-			Sons.play_at(self, "cavar", at, -2.0, 0.8)
-			_dirt(at)
-			var falta := Maquinas.CAIXA_TERRA - int(b.terra)
-			_show_toast(("Terra na caixa (%d de %d). " % [int(b.terra), Maquinas.CAIXA_TERRA]) + ("Traga mais %d balde%s de terra." % [falta, "" if falta == 1 else "s"] if falta > 0 else "Agora despeje 1 balde de água."))
-		"caixa_agua":
-			_balde_carga = {}
-			_update_balde_fill(_balde_fill, _balde_carga)
-			_maq.caixa_add(mi, "agua")
-			Sons.play_at(self, "agua", at, 2.0, 1.0)
-			_show_toast("Água na terra. Agora ponha 5 fibras de buriti.")
-		"caixa_fibra":
-			if item_qtd("fibra_buriti") < Maquinas.CAIXA_FIBRA and not teste:
-				_show_toast("Precisa de %d fibras de buriti (tem %d). Faça na desfibradeira." % [Maquinas.CAIXA_FIBRA, item_qtd("fibra_buriti")])
+func _barr_pick(i: int, acao: String) -> void:
+	if i < 0 or i >= _barr.montes.size():
+		return
+	var m: Dictionary = _barr.montes[i]
+	var at: Vector3 = _barr.center(i)
+	match acao:
+		"abrir":
+			_mix_start(i, "abrir")
+		"agua":
+			if _mao != "balde" or str(_balde_carga.get("tipo", "")) != "agua":
+				_show_toast("Traga água no balde (pegue numa lagoa funda) e escolha Jogar água de novo.")
+				return
+			_face_to(at)
+			_yaw = _face
+			_pour_bi = i
+			_start_pour()
+		"fibra":
+			var nf: int = _barr.fibras_need(m)
+			if item_qtd("fibra_buriti") < nf and not teste:
+				_show_toast("Precisa de %d fibras de buriti (tem %d). Faça na desfibradeira." % [nf, item_qtd("fibra_buriti")])
 				return
 			if not teste:
-				remove_item("fibra_buriti", Maquinas.CAIXA_FIBRA)
+				remove_item("fibra_buriti", nf)
 				_update_inventory()
-			_maq.caixa_add(mi, "fibra")
+			_barr.add_fibra(i)
 			Sons.play_at(self, "folha_cai", at, -8.0, 1.6)
-			_show_toast("Fibras na caixa. Agora pegue a enxada e misture.")
-		"caixa_mexer":
-			_mix_start(mi)
-		"caixa_pegar":
-			if _maq.take_barro(mi):
-				_balde_carga = {"tipo": "barro", "vol": BALDE_KG / float(DENS.barro) * 0.98}
-				_update_balde_fill(_balde_fill, _balde_carga)
-				_update_inventory()
-				Sons.play_at(self, "cavar", at, -4.0, 0.7)
-				var left := int(_maq.barro_of(mi).get("baldes", 0)) if _maq.plantas[mi].has("barro") else 0
-				_show_toast("Balde de barro com fibra! Leve até a construção e toque em \"Rebocar com barro\"." + (" Ainda tem %d na caixa." % left if left > 0 else ""))
+			_show_toast("Fibras na terra molhada. Agora, com a enxada, escolha Misturar.")
+		"misturar":
+			if _mao != "enxada":
+				_show_toast("Ponha a enxada na mão (Mochila → Equipar) para misturar.")
+				return
+			_mix_start(i, "mexer")
+		"pegar_barro":
+			if _mao != "balde" or not _balde_carga.is_empty():
+				_show_toast("Pegue o balde vazio na mão para encher de barro.")
+				return
+			var b: float = _barr.take(i)
+			if b <= 0.0:
+				return
+			_balde_carga = {"tipo": "barro", "vol": BALDE_KG / float(DENS.barro) * 0.98 * b}
+			_update_balde_fill(_balde_fill, _balde_carga)
+			_update_inventory()
+			Sons.play_at(self, "cavar", at, -4.0, 0.7)
+			_dirt(at)
+			var left: int = _barr.near(at, 0.5)
+			_show_toast("Balde de barro com fibra! Leve até a construção e toque em \"Rebocar com barro\"." + (" Ainda tem barro no monte." if left >= 0 else ""))
+	_act_check = 0.0
 
 
-# ---------- misturar com a enxada ----------
+# ---------- abrir e misturar com a enxada ----------
 
-func _mix_start(mi: int) -> void:
+func _mix_start(bi: int, modo: String) -> void:
 	var ui := Control.new()
 	ui.set_anchors_preset(Control.PRESET_FULL_RECT)
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -9019,7 +9032,7 @@ func _mix_start(mi: int) -> void:
 	sair.offset_bottom = -30
 	sair.pressed.connect(_mix_end)
 	ui.add_child(sair)
-	_mix = {"mi": mi, "sel": -1, "drag": -1.0, "tid": -9, "anim": -1.0, "ui": ui, "sair": sair}
+	_mix = {"bi": bi, "modo": modo, "sel": -1, "drag": -1.0, "tid": -9, "anim": -1.0, "ui": ui, "sair": sair}
 	# a enxada nas mãos (desenhada aqui, para bater longe e puxar até perto)
 	var hoe := MeshInstance3D.new()
 	hoe.mesh = Corte.enxada_mesh()
@@ -9029,25 +9042,42 @@ func _mix_start(mi: int) -> void:
 	_mix.hoe = hoe
 	if _chop_pose:
 		_chop_pose.holding = false
-	# de frente para a caixa, olhando para dentro
-	var c: Vector3 = _maq.xform(mi).origin
+	# fica a uns 90 cm do meio do monte, de frente, olhando para a terra
+	var c: Vector3 = _barr.center(bi)
+	var away := Vector3(_player.position.x - c.x, 0, _player.position.z - c.z)
+	if away.length() < 0.1:
+		away = Vector3(0, 0, 1)
+	var want: Vector3 = c + away.normalized() * (_barr.radius(bi) * 0.5 + 0.75)
+	if Vector2(want.x - _player.position.x, want.z - _player.position.z).length() < 1.2:
+		_player.position = _ground_pos(Vector2(want.x, want.z))
 	var to := c - (_player.position + Vector3.UP * 1.6)
 	_yaw = atan2(-to.x, -to.z)
 	_face = _yaw
 	_pitch = clampf(asin(-to.normalized().y), 0.3, 1.0)
 	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn, _jump_btn]:
 		(b as Control).visible = false
-	_show_toast("Toque num losango e passe o dedo para baixo: a enxada bate e puxa a terra para você.")
+	if modo == "abrir":
+		_mix.sel = 0
+		_mix.anim = 0.0                 # abre sozinho: 3 enxadadas no meio
+		_show_toast("Abrindo uma cova no meio do monte...")
+	else:
+		_show_toast("Toque num losango e passe o dedo para baixo: a enxada bate e puxa a terra molhada.")
+
+
+func _mix_ok() -> bool:
+	return not _mix.is_empty() and int(_mix.bi) < _barr.montes.size()
 
 
 func _mix_points() -> Array:
-	if _mix.is_empty():
+	if not _mix_ok():
+		return []
+	if str(_mix.modo) == "abrir":
 		return []
 	var out := []
-	var b: Dictionary = _maq.barro_of(int(_mix.mi))
-	var sp: Array = _maq.mix_spots(int(_mix.mi))
+	var m: Dictionary = _barr.montes[int(_mix.bi)]
+	var sp: Array = _barr.mix_spots(int(_mix.bi))
 	for k in sp.size():
-		out.append([sp[k], int(b.mix[k]) >= Maquinas.MIX_HITS])
+		out.append([sp[k], int(m.mix[k]) >= Barreiros.MIX_HITS])
 	return out
 
 
@@ -9095,6 +9125,8 @@ func _mix_input(e: InputEvent) -> bool:
 		return false
 	if (_mix.sair as Control).get_global_rect().has_point(pos):
 		return false
+	if str(_mix.modo) == "abrir":
+		return true
 	if pressed:
 		var pts := _mix_points()
 		var best := -1
@@ -9122,41 +9154,59 @@ func _mix_input(e: InputEvent) -> bool:
 
 
 func _mix_tick(delta: float) -> void:
+	if not _mix_ok():
+		_mix_end()
+		return
 	(_mix.ui as Control).queue_redraw()
-	var mi := int(_mix.mi)
+	var bi := int(_mix.bi)
+	var abrir := str(_mix.modo) == "abrir"
 	var ph := -1.0
 	if float(_mix.anim) >= 0.0:
 		_mix.anim = float(_mix.anim) + delta
-		ph = clampf(float(_mix.anim) / 1.15, 0.0, 1.0)
+		ph = clampf(float(_mix.anim) / (0.95 if abrir else 1.15), 0.0, 1.0)
 	_hoe_pose(ph)
 	if ph < 0.0:
 		return
 	var k := int(_mix.sel)
-	var w: Vector3 = _maq.mix_spots(mi)[maxi(k, 0)]
+	var w: Vector3 = _mix_spot(k)
 	if ph >= 0.36 and not bool(_mix.get("bateu", false)):
 		_mix.bateu = true
 		Sons.play_at(self, "cavar", w, -2.0, 0.85)
-		Sons.play_at(self, "agua", w, -10.0, 1.4)
+		if not abrir:
+			Sons.play_at(self, "agua", w, -10.0, 1.4)
 		_dirt(w)
 	if ph >= 0.86 and not bool(_mix.get("hit", false)):
 		_mix.hit = true
 		wear("enxada")
-		var done: bool = _maq.mix_hit(mi, k)
-		if int(_maq.barro_of(mi).mix[k]) >= Maquinas.MIX_HITS:
-			_mix.sel = -1
-		if done:
-			_show_toast("Barro pronto! Dá 4 baldes. Pegue com o balde vazio.")
-			_mix_end()
-			return
-		_show_toast("Misturando: %d%%" % int(_maq.mix_progress(mi) * 100.0))
+		if abrir:
+			if _barr.abrir_hit(bi):
+				_show_toast("Cova aberta no meio do monte! Agora jogue água (meio balde de cada vez).")
+				_mix_end()
+				return
+		else:
+			var done: bool = _barr.mix_hit(bi, k)
+			if int(_barr.montes[bi].mix[k]) >= Barreiros.MIX_HITS:
+				_mix.sel = -1
+			if done:
+				var nb := float(_barr.montes[bi].baldes)
+				_show_toast("Barro pronto! Dá %s. Pegue com o balde vazio (pelo olho no monte)." % ("1 balde" if nb < 1.5 else "%d baldes" % roundi(nb)))
+				_mix_end()
+				return
+			_show_toast("Misturando: %d%%" % int(_barr.mix_progress(bi) * 100.0))
 	if ph >= 1.0:
-		_mix.anim = -1.0
+		_mix.anim = 0.0 if abrir else -1.0         # abrindo: continua sozinho
 		_mix.hit = false
 		_mix.bateu = false
 
 
+## Onde a enxada bate: o losango escolhido (ou o meio do monte, abrindo a cova).
+func _mix_spot(k: int) -> Vector3:
+	var sp: Array = _barr.mix_spots(int(_mix.bi))
+	return sp[clampi(k, 0, sp.size() - 1)]
+
+
 ## A enxada em primeira pessoa: parada na frente; no golpe sobe, bate LÁ NA FRENTE
-## do lugar escolhido e vem puxando a terra pela caixa até perto de quem mexe.
+## do lugar escolhido e vem puxando a terra do monte até perto de quem mexe.
 func _hoe_pose(ph: float) -> void:
 	if not _mix.has("hoe") or not is_instance_valid(_mix.hoe):
 		return
@@ -9168,11 +9218,10 @@ func _hoe_pose(ph: float) -> void:
 	var hand := eye + cf * 0.3 - cu * 0.38 + cr * 0.12
 	var rest := eye + cf * 0.95 - cu * 0.75 + cr * 0.05
 	var up := eye + cf * 0.85 + cu * 0.35
-	var mi := int(_mix.mi)
 	var k := int(_mix.sel)
 	var p := rest
-	if ph >= 0.0 and k >= 0:
-		var w: Vector3 = _maq.mix_spots(mi)[k]
+	if ph >= 0.0 and k >= 0 and _mix_ok():
+		var w: Vector3 = _mix_spot(k)
 		var away := Vector3(w.x - _player.position.x, 0, w.z - _player.position.z).normalized()
 		var far := w + away * 0.18
 		var near := w - away * 0.32
@@ -9335,7 +9384,7 @@ func _reb_tick(delta: float) -> void:
 		if _chop_pose:
 			_chop_pose.reach_on = false
 		if _balde_carga.is_empty():
-			_show_toast("Acabou o barro do balde. Pegue mais na caixa.")
+			_show_toast("Acabou o barro do balde. Pegue mais no monte de barro.")
 			_reb_end()
 			return
 		# continua sozinho no pedaço do lado (o mais perto que ainda falta, na mesma peça)
@@ -9730,7 +9779,7 @@ func _olho_free() -> bool:
 	return _desf.is_empty() and _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
 		and not _air and _bld.is_empty() and _proj.is_empty() and _buck_sel.is_empty() and _maq_op.is_empty() \
 		and _trim.is_empty() and _post_mark.is_empty() and _knap.is_empty() and _vine.is_empty() and not _walking \
-		and _coop.is_empty() and _bag_ui == null and _craft_ui == null
+		and _coop.is_empty() and _bag_ui == null and _craft_ui == null and _mix.is_empty() and _reb.is_empty() and _pour_t < 0.0
 
 
 ## Procura o buriti perto (a cada 1/4 s) e mantém o olho/escolha dele.
@@ -9752,10 +9801,14 @@ func _olho_tick() -> void:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
 		if mi >= 0 and str(_maq.plantas[mi].tipo) == "desfibradeira" and _maq.pronta(mi):
 			p = {"maq": mi}
+	if p.is_empty() and _barr:
+		var bi: int = _barr.near(_player.position, 2.6)
+		if bi >= 0 and Vector2(float(_barr.montes[bi].x) - _player.position.x, float(_barr.montes[bi].z) - _player.position.z).length() < _barr.radius(bi) + 1.1:
+			p = {"barreiro": bi}
 	if p.is_empty() or _olho_opts(p).is_empty():
 		_olho = {}
 		return
-	if _olho.is_empty() or not (_olho.p as Dictionary) == p or (not p.has("maq") and not _buritis.has_palm(_olho.p)):
+	if _olho.is_empty() or not (_olho.p as Dictionary) == p or (not p.has("maq") and not p.has("barreiro") and not _buritis.has_palm(_olho.p)):
 		_olho = {"p": p, "open": false}
 
 
@@ -9764,6 +9817,8 @@ func _olho_opts(p: Dictionary) -> Array:
 	var out := []
 	if p.has("maq"):
 		return [["trabalhar", "Trabalhar"]]
+	if p.has("barreiro"):
+		return _barr_opts(int(p.barreiro))
 	if p.has("caido"):
 		return [["cortar", "Cortar"]] if not _buritis.leaves_of(p).is_empty() else []
 	if _buritis.is_small(p):
@@ -9777,6 +9832,8 @@ func _olho_opts(p: Dictionary) -> Array:
 func _olho_world(p: Dictionary) -> Vector3:
 	if p.has("maq"):
 		return _maq.xform(int(p.maq)) * Vector3(0.05, 1.2, 0.0)
+	if p.has("barreiro"):
+		return _barr.center(int(p.barreiro)) + Vector3.UP * 0.45
 	if p.has("caido"):
 		var o: Vector3 = _buritis.crown_xf(p).origin
 		return Vector3(o.x, maxf(o.y, height_at(o.x, o.z) + 0.3) + 0.45, o.z)
@@ -9955,6 +10012,9 @@ func _bur_input(e: InputEvent) -> bool:
 func _olho_pick(acao: String) -> void:
 	var p: Dictionary = _olho.p
 	_olho.open = false
+	if p.has("barreiro"):
+		_barr_pick(int(p.barreiro), acao)
+		return
 	match acao:
 		"trabalhar":
 			_desf_start(int(p.maq))
