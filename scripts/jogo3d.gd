@@ -501,6 +501,7 @@ var _saw_p := 0.0                 # onde a serra está: 0 puxada, 1 empurrada
 var _saw_side := 0                # último fim de curso alcançado: 1 frente, -1 trás
 const SAW_CYCLE := 1.5            # segundos por ida e volta da serra (devagar)
 var _rodelas: Array = []          # formato de cada rodela da mochila (raios em volta)
+var _lenhas: Array = []           # cada lenha da mochila como foi rachada (a mesma peça vai para o fogo)
 var _dur := {}                    # durabilidade: id da ferramenta -> [usos que faltam de cada uma]
 var _walking := false             # o personagem indo sozinho até um lugar
 var _walk_target := Vector3.ZERO
@@ -1608,7 +1609,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja, "vida": _vida, "fome": _fome, "sede": _sede, "frutos_dia": _frutos_dia}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja, "vida": _vida, "fome": _fome, "sede": _sede, "frutos_dia": _frutos_dia, "lenhas": _lenhas}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1663,6 +1664,7 @@ func _load_player() -> void:
 	_fome = float(d.get("fome", 100.0))
 	_sede = float(d.get("sede", 100.0))
 	_frutos_dia = d.get("frutos_dia", {})
+	_lenhas = d.get("lenhas", [])
 	var bc = d.get("balde_carga", {})
 	_balde_carga = bc if bc is Dictionary and bc.has("vol") else {}
 	equip(str(d.get("mao", "")))
@@ -1712,6 +1714,24 @@ static func _rodela_diam(pf: Array) -> float:
 
 
 ## Formatos das rodelas da mochila (uma por rodela; as que vieram sem formato ganham uma redonda).
+## As lenhas da mochila (as achas de verdade) acompanham a quantidade: sobrou acha da
+## lenha que foi embora, sai; lenha sem acha (veio de outro jeito), ganha uma acha comum.
+func _lenha_fix() -> void:
+	var q := item_qtd("lenha")
+	while _lenhas.size() > q:
+		_lenhas.pop_back()
+	while _lenhas.size() < q:
+		_lenhas.append(_lenha_padrao())
+
+
+## Uma acha comum: um quarto de um toquinho de 25 cm.
+func _lenha_padrao() -> Dictionary:
+	var meia: Array = Arvores.split_sec(Arvores.circle_sec(), false)
+	var quarto: Array = Arvores.split_sec(meia[0], true)
+	return {"cil": {"L": TOQ_L, "ra": 0.12, "rb": 0.12}, "sec": quarto[0], "v": 0, "s": 1.0, "h0": 0.0, "h1": 1.0,
+		"bot": {}, "top": {}, "dia": int(_arvores.last_day) if _arvores else 0, "lenha": 2}
+
+
 func _rodelas_fix() -> Array:
 	var q := int(_itens.get("rodela", 0))
 	while _rodelas.size() < q:
@@ -2885,8 +2905,14 @@ func _ctx_press() -> void:
 			_act_check = 0.0
 			return
 		"guardar_lenha":
+			var acha: Dictionary = _carry.duplicate(true)
+			for k in ["pos", "yaw", "golpes", "em_pe"]:
+				acha.erase(k)
 			_soltar_carga()
+			_lenha_fix()
 			var caiu := add_item("lenha", 1)
+			if caiu == 0:
+				_lenhas.append(acha)              # a mesma acha (formato, grossura, casca)
 			_update_inventory()
 			_show_toast("+1 lenha na mochila" + (" (mochila cheia: caiu no chão)" if caiu > 0 else ""))
 			_act_check = 0.0
@@ -10379,10 +10405,12 @@ func _fogueira_pick(i: int, acao: String) -> void:
 			if item_qtd("lenha") <= 0:
 				_show_toast("Precisa de lenha: rache um toquinho no cepo com o machado.")
 				return
+			_lenha_fix()
+			var acha2: Dictionary = _lenhas.pop_back() if not _lenhas.is_empty() else _lenha_padrao()
 			remove_item("lenha", 1)
 			_update_inventory()
 			var acesa: bool = _fogos.acesa(i)
-			_fogos.por_lenha(i)
+			_fogos.por_lenha(i, acha2)
 			_face_to(c)
 			Sons.play_at(self, "baque", c, -14.0, 1.3)
 			if acesa:

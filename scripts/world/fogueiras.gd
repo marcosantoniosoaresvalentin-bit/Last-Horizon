@@ -131,8 +131,14 @@ func reacender(i: int) -> void:
 
 
 ## Põe uma lenha: queimando, o fogo cresce; fria ou só brasa, fica esperando o fogo.
-func por_lenha(i: int) -> void:
+func por_lenha(i: int, acha := {}) -> void:
 	var it: Dictionary = items[i]
+	if not acha.is_empty():
+		if not it.has("achas"):
+			it["achas"] = []
+		(it.achas as Array).append(acha)       # a mesma acha que o jogador rachou
+		while (it.achas as Array).size() > 12:
+			(it.achas as Array).pop_front()
 	if acesa(i):
 		it.f0 = minf(fogo(i) + 1.0, MAX_F)
 		it.t0 = _agora()
@@ -202,7 +208,7 @@ static func _mat(k: String) -> StandardMaterial3D:
 			m.albedo_color = Color(0.05, 0.05, 0.05)
 			m.roughness = 0.8
 		"cinza":
-			m.albedo_color = Color(0.32, 0.31, 0.3)
+			m.albedo_color = Color(0.16, 0.15, 0.14)       # cinza e chão queimado
 			m.roughness = 1.0
 		"brasa":
 			m.albedo_color = Color(0.2, 0.05, 0.02)
@@ -240,42 +246,39 @@ func _fogueira_node(i: int) -> Dictionary:
 	root.position = center(i)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(absf(float(f.x) * 31.0 + float(f.z) * 17.0))
-	# a roda de pedras
-	for k in 9:
-		var a := TAU * k / 9.0 + rng.randf() * 0.2
-		var sm := SphereMesh.new()
-		var r := rng.randf_range(0.06, 0.09)
-		sm.radius = r
-		sm.height = r * 1.3
-		sm.radial_segments = 8
-		sm.rings = 4
-		var n := MeshInstance3D.new()
-		n.mesh = sm
-		n.material_override = _mat("pedra")
-		n.position = Vector3(cos(a) * 0.36, r * 0.35, sin(a) * 0.36)
-		root.add_child(n)
 	# a cinza no meio
 	var cm := CylinderMesh.new()
-	cm.top_radius = 0.26
+	cm.top_radius = 0.2
 	cm.bottom_radius = 0.3
-	cm.height = 0.02
+	cm.height = 0.012
 	var cz := MeshInstance3D.new()
 	cz.mesh = cm
 	cz.material_override = _mat("cinza")
 	cz.position.y = 0.005
 	root.add_child(cz)
-	# as achas de lenha em cone (as que ainda não queimaram de todo)
-	var nl := mini(8, int(ceil(fogo(i))) + int(f.get("pendente", 0)))
+	# as achas (as mesmas que o jogador rachou e pôs): deitadas em volta, com a ponta de
+	# dentro (a que vai no fogo) um pouco levantada em cima do meio
 	var lenhas := Node3D.new()
 	root.add_child(lenhas)
-	for k in maxi(nl, 0):
-		var a2 := TAU * k / maxf(nl, 1) + 0.3
-		var bm := BoxMesh.new()
-		bm.size = Vector3(0.06, 0.4, 0.05)
-		var ln := MeshInstance3D.new()
-		ln.mesh = bm
-		ln.material_override = _mat("lenha")
-		ln.transform = Transform3D(Basis(Vector3(-sin(a2), 0, cos(a2)), -0.55), Vector3(cos(a2) * 0.1, 0.16, sin(a2) * 0.1))
+	var achas: Array = f.get("achas", [])
+	var nl := _n_achas(i)
+	var arv = _jogo._arvores
+	for k in nl:
+		var acha: Dictionary = achas[achas.size() - nl + k] if achas.size() >= nl else {}
+		if acha.is_empty() or arv == null:
+			continue
+		var ln: Node3D = arv.free_log_node(acha)
+		var L: float = arv.free_log_length(acha)
+		var r: float = arv.free_log_radius(acha)
+		var a2 := TAU * k / maxf(nl, 1) + 0.35 + (0.25 if k % 2 == 1 else 0.0)
+		var fora := Vector3(cos(a2), 0, sin(a2))
+		var p_in := fora * 0.05 + Vector3.UP * (0.1 + r * 0.6)          # a ponta do fogo, levantada
+		var horiz := sqrt(maxf(L * L - pow(p_in.y - r * 0.8, 2.0), 0.01))
+		var p_out := fora * (0.05 + horiz) + Vector3.UP * (r * 0.8)        # a outra ponta no chão
+		var x := (p_in - p_out).normalized()
+		var zz := x.cross(Vector3.UP).normalized()
+		var yy := zz.cross(x).normalized()
+		ln.transform = Transform3D(Basis(x, yy, zz) * Basis(Vector3.RIGHT, float(k) * 1.3), (p_in + p_out) * 0.5)
 		lenhas.add_child(ln)
 	# carvão na cinza (apagada)
 	var carv := Node3D.new()
@@ -359,7 +362,15 @@ func _fogueira_node(i: int) -> Dictionary:
 	fumaca.color_ramp = g2
 	fumaca.position.y = 0.75
 	root.add_child(fumaca)
-	return {"root": root, "fogo": chama, "luz": luz, "fumaca": fumaca, "brasa": br, "lenhas": lenhas, "carv": carv}
+	return {"root": root, "fogo": chama, "luz": luz, "fumaca": fumaca, "brasa": br, "lenhas": lenhas, "carv": carv, "n": nl}
+
+
+## Quantas achas aparecem: as que ainda estão queimando (ou as postas esperando o fogo).
+func _n_achas(i: int) -> int:
+	var f: Dictionary = items[i]
+	var n := int(ceil(fogo(i) - 0.15)) if acesa(i) else 0
+	n += int(f.get("pendente", 0))
+	return clampi(n, 0, mini(8, (f.get("achas", []) as Array).size()))
 
 
 ## O fogo conforme o relógio (chamada sempre: barata): o tamanho da chama e a luz vão
@@ -369,6 +380,9 @@ func atualizar() -> void:
 		if i >= items.size():
 			continue
 		var nd: Dictionary = _nodes[i]
+		if int(nd.get("n", -1)) != _n_achas(i):
+			_rebuild()                        # uma acha acabou de queimar (ou entrou mais uma)
+			return
 		var f := fogo(i)
 		var on := f > 0.001
 		var br := brasa(i)
