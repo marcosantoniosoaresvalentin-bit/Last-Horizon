@@ -2131,6 +2131,70 @@ func _water_spot() -> Vector3:
 	return Vector3.INF
 
 
+# ---------- a cabaça de barro (moringa) com água ----------
+# Enche na beira de água doce (lagoa, rio, nascente; uns 12 cm de fundo já dá), nunca
+# no mar. Cheia, é o item "moringa_agua" com 8 goles (os goles de cada uma ficam
+# na mesma lista da durabilidade). USAR na mochila bebe um gole; acabou, vira a cabaça
+# vazia de novo. (A sede vem depois: por enquanto só bebe.)
+const CABACA_FUNDO := 0.12
+
+## Água doce na frente, funda o bastante para mergulhar a boca da cabaça.
+func _cab_spot() -> Vector3:
+	for d in [0.6, 0.9, 1.3, 1.7, 0.35]:
+		var w := _front(d)
+		var lv := _water_surface(w.x, w.z)
+		if lv > -1e8 and lv - height_at(w.x, w.z) >= CABACA_FUNDO and not _is_sea(w.x, w.z):
+			return Vector3(w.x, lv, w.z)
+	return Vector3.INF
+
+
+## Alguma cabaça com água não está cheia?
+func _cab_falta() -> bool:
+	for v in _dur_fix("moringa_agua"):
+		if int(v) < Itens.dur_max("moringa_agua"):
+			return true
+	return false
+
+
+func _encher_cabaca() -> void:
+	var mx := Itens.dur_max("moringa_agua")
+	var l := _dur_fix("moringa_agua")
+	# primeiro completa a que já tem um pouco
+	for i in l.size():
+		if int(l[i]) < mx:
+			l[i] = mx
+			_dur["moringa_agua"] = l
+			_update_inventory()
+			_show_toast("Cabaça cheia de novo (uns 2 litros de água).")
+			return
+	if item_qtd("moringa_barro") > 0:
+		remove_item("moringa_barro", 1)
+		add_item("moringa_agua", 1)
+		_dur_fix("moringa_agua")
+		_update_inventory()
+		_show_toast("Cabaça cheia de água (uns 2 litros, 8 goles). Para beber: Mochila → USAR.")
+
+
+## Bebe um gole da cabaça (a primeira). Devolve a mensagem.
+func beber_cabaca() -> String:
+	var l := _dur_fix("moringa_agua")
+	if l.is_empty():
+		return "Não tem cabaça com água."
+	l[0] = int(l[0]) - 1
+	Sons.play_at(self, "agua", _player.position + Vector3.UP * 1.5, -14.0, 1.9)
+	if int(l[0]) <= 0:
+		l.pop_front()
+		_dur["moringa_agua"] = l
+		remove_item("moringa_agua", 1)
+		add_item("moringa_barro", 1)
+		_dur_fix("moringa_agua")
+		_update_inventory()
+		return "Você bebeu o último gole. A cabaça ficou vazia: encha de novo numa lagoa ou nascente."
+	_dur["moringa_agua"] = l
+	_update_inventory()
+	return "Você bebeu um gole de água fresquinha (ainda tem %d gole%s nessa cabaça)." % [int(l[0]), "" if int(l[0]) == 1 else "s"]
+
+
 ## O jogador mexeu no controle neste quadro?
 func moved_now(p: Vector3) -> bool:
 	return Vector2(p.x - _player.position.x, p.z - _player.position.z).length() > 0.002
@@ -2425,6 +2489,9 @@ func _update_ctx_btn() -> void:
 	elif _mao == "balde" and _balde_carga.is_empty() and _crouch_job == "" and not _air and not _swim and _water_spot() != Vector3.INF:
 		_ctx_action = "pegar_agua"
 		_ctx_btn.text = "Pegar água"
+	elif (item_qtd("moringa_barro") > 0 or _cab_falta()) and _crouch_job == "" and not _chopping and not _air and not _swim and _carry.is_empty() and _cab_spot() != Vector3.INF:
+		_ctx_action = "encher_cabaca"
+		_ctx_btn.text = "Encher a cabaça"
 	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and _cupins.nearest_timbo(_player.position, 1.4) >= 0:
 		_ctx_action = "timbo"
 		_ctx_btn.text = "Colher timbó"
@@ -2569,6 +2636,13 @@ func _ctx_press() -> void:
 		"rebocar":
 			_reb_start()
 			return
+		"encher_cabaca":
+			var cs := _cab_spot()
+			if cs == Vector3.INF:
+				return
+			_face_to(cs)
+			_crouch_target = {"agua": cs}
+			_crouch_job = "cabaca"
 		"pegar_agua":
 			var ws := _water_spot()
 			if ws == Vector3.INF:
@@ -3058,6 +3132,9 @@ func _update_crouch(delta: float) -> void:
 			Sons.play_at(self, "agua", _crouch_target.agua, 0.0, 1.2)
 			_update_inventory()
 			_show_toast("Balde cheio de água (uns %d litros, %d kg)." % [roundi(BALDE_VOL * 0.92 * 1000.0), roundi(BALDE_VOL * 0.92 * 1000.0)])
+		elif _crouch_job == "cabaca":
+			_encher_cabaca()
+			Sons.play_at(self, "agua", _crouch_target.agua, -4.0, 1.5)
 		elif _crouch_job == "galho":
 			_galhos.take(int(_crouch_target.galho))
 			var dropped := add_item("galho", 1)

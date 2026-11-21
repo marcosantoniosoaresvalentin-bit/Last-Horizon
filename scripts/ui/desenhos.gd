@@ -283,6 +283,12 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			fell_icon(ci, c, s)
 		"vasilha_barro", "garrafa_barro", "moringa_barro", "bacia_barro", "filtro_barro":
 			load("res://scripts/world/olaria.gd").icone(ci, id, c, s)
+		"moringa_agua", "acao_encher_cabaca":
+			load("res://scripts/world/olaria.gd").icone(ci, "moringa_barro", c + Vector2(-6, 2) * u, s * 0.92)
+			# a gota de água
+			var gc := c + Vector2(30, -18) * u
+			ci.draw_colored_polygon(PackedVector2Array([gc + Vector2(0, -16) * u, gc + Vector2(9, 2) * u, gc + Vector2(6, 9) * u, gc + Vector2(0, 11) * u, gc + Vector2(-6, 9) * u, gc + Vector2(-9, 2) * u]), Color(0.35, 0.62, 0.92))
+			ci.draw_circle(gc + Vector2(-2.5, 3) * u, 2.5 * u, Color(0.8, 0.92, 1.0))
 		"acao_modelar":
 			# a mesa redonda do torno e o pote em cima
 			ci.draw_colored_polygon(P.call([[-44, 22], [44, 22], [40, 32], [-40, 32]]), Color(0.6, 0.42, 0.25))

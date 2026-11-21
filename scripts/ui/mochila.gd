@@ -422,7 +422,7 @@ func _select(i: int) -> void:
 	elif Itens.ITENS.has(str(it.id)) and it.id != "argila":
 		var dur := ""
 		if _game and Itens.dur_max(str(it.id)) > 0:
-			dur = " · Durabilidade %d%%" % int(round(float(_game.tool_dur(str(it.id))) * 100.0))
+			dur = (" · Água %d%%" if it.id == "moringa_agua" else " · Durabilidade %d%%") % int(round(float(_game.tool_dur(str(it.id))) * 100.0))
 		var each: float = float(it.kg) / maxf(float(it.get("qtd", 1)), 1.0) if it.has("perfil") else Itens.kg(str(it.id))
 		_say("%s · %s kg%s · %s" % [it.nome, Itens.kg_txt(each), dur, Itens.ITENS[it.id].desc])
 	else:
@@ -463,6 +463,13 @@ func _use() -> void:
 			fechar()
 		else:
 			_say("Largue a tora antes de colocar %s." % Itens.nome(str(it.id)).to_lower())
+		return
+	if it.id == "moringa_agua" and _game:
+		_say(_game.beber_cabaca())
+		_refresh()
+		return
+	if it.id == "moringa_barro":
+		_say("A cabaça está vazia. Chegue na beira de uma lagoa, rio ou nascente e toque em \"Encher a cabaça\".")
 		return
 	if it.id == "semente" and _game:
 		if _game.put_seed_from_bag(true):
