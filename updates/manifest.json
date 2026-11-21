@@ -1,9 +1,9 @@
 {
-  "version": 153,
-  "file": "update_153.zip",
-  "size": 4869748,
-  "sha256": "4fed155e189e7a5bd6f63f6552d0a364e0c615bb9fa7ca955633d4055379083d",
+  "version": 154,
+  "file": "update_154.zip",
+  "size": 4870870,
+  "sha256": "116ac5362ce456a1c0f8f8bab8700d1df701679304fd2f86794bf11217085a25",
   "min_build": 1,
-  "notes": "Torno de oleiro: pedal no ritmo, como máquina de costura (pise quando o pino estiver no verde)",
+  "notes": "Cabaça de barro: encher de água nas lagoas, rios e nascentes (no mar não) e beber pela mochila",
   "date": "2026-11-21"
 }
