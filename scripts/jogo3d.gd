@@ -40,6 +40,7 @@ const Escavacao := preload("res://scripts/world/escavacao.gd")
 const Barreiros := preload("res://scripts/world/barreiros.gd")
 const Desenhos := preload("res://scripts/ui/desenhos.gd")
 const Olaria := preload("res://scripts/world/olaria.gd")
+const Vitais := preload("res://scripts/ui/vitais.gd")
 const Capins := preload("res://scripts/world/capins.gd")
 const Fogueiras := preload("res://scripts/world/fogueiras.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
@@ -323,6 +324,14 @@ var _dig_btn: Button
 var _dig_bar: ProgressBar
 var _inv_label: Label
 var _toast: Label
+# ---- vida, fome e sede (0 a 100) ----
+var _vida := 100.0
+var _fome := 100.0                 # 100 = barriga cheia
+var _sede := 100.0                 # 100 = sem sede
+var _vitais: Control = null
+var _dano_ui: Control = null       # a beirada vermelha da tela com pouca vida
+var _morto := -1.0                 # desmaiou: segundos até acordar de novo
+var _frutos_dia := {}              # palmeira ("b:x,z") -> dia em que já pegou os frutos caídos
 var _toast_t := 0.0
 var _dig_check := 0.0
 var _digging := false
@@ -613,9 +622,24 @@ func _build_hud() -> void:
 	_toast = _hud_label(Vector2(0, 0), 22)
 	_toast.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	_toast.offset_top = 90
-	_toast.offset_left = -400
-	_toast.offset_right = 400
+	_toast.offset_left = -330
+	_toast.offset_right = 330
 	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_toast.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART     # não passa por cima das barras
+
+	# vida, fome e sede: o cartão com as três barras no canto de cima, à direita
+	_vitais = Vitais.new()
+	_vitais.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_vitais.offset_left = -320
+	_vitais.offset_right = -20
+	_vitais.offset_top = 82
+	_vitais.offset_bottom = 82 + 136
+	_hud.add_child(_vitais)
+	_dano_ui = Control.new()
+	_dano_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_dano_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dano_ui.draw.connect(_draw_dano)
+	_hud.add_child(_dano_ui)
 
 	_dig_btn = Icones.IconButton.new()
 	_dig_btn.text = "Pegar argila"
@@ -1484,6 +1508,7 @@ func _process(delta: float) -> void:
 		# a informação do solo não aparece mais na tela
 	_update_dig(delta)
 	_update_pour(delta)
+	_vitais_tick(delta)
 	_dig_ring_tick()
 	_filtro_tick(delta)
 	_mp_tick(delta)
@@ -1583,7 +1608,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja, "vida": _vida, "fome": _fome, "sede": _sede, "frutos_dia": _frutos_dia}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1634,6 +1659,10 @@ func _load_player() -> void:
 	_pa_full = bool(d.get("pa_cheia", false))
 	_pa_tipo = str(d.get("pa_tipo", "terra"))
 	_agua_suja = int(d.get("agua_suja", 0))
+	_vida = float(d.get("vida", 100.0))
+	_fome = float(d.get("fome", 100.0))
+	_sede = float(d.get("sede", 100.0))
+	_frutos_dia = d.get("frutos_dia", {})
 	var bc = d.get("balde_carga", {})
 	_balde_carga = bc if bc is Dictionary and bc.has("vol") else {}
 	equip(str(d.get("mao", "")))
@@ -2212,6 +2241,7 @@ func beber_cabaca(id := "moringa_agua") -> String:
 	var suja := id == "moringa_agua"
 	if suja:
 		_agua_suja += 1
+	_sede = minf(100.0, _sede + 12.0)                # um gole
 	l[0] = int(l[0]) - 1
 	Sons.play_at(self, "agua", _player.position + Vector3.UP * 1.5, -14.0, 1.9)
 	var aviso := " Água sem filtrar: pode ter bactérias e fazer mal (filtre na peneira de água)." if suja else ""
@@ -2238,6 +2268,141 @@ func _praia(at: Vector3) -> bool:
 		if _is_sea(at.x + o.x, at.z + o.y):
 			return true
 	return false
+
+
+# ================== VIDA, FOME E SEDE ==================
+# Vão caindo devagar (nada de correr atrás de água o tempo todo): a sede zera em uns
+# 2 dias e meio do jogo (uns 20 min), a fome em uns 5 dias (uns 40 min); trabalhando ou
+# andando, um pouco mais rápido. Com fome ou sede zerada, a vida cai (some em uns 8 min);
+# bem alimentado e sem sede, a vida volta aos poucos. Vida zerada: desmaia e acorda no
+# começo do mapa (com o que tinha na mochila). A água sem filtrar fica contada (a doença
+# vem com a cobra e as plantas, depois).
+const SEDE_S := 20.0 * 60.0        # segundos de 100 até 0
+const FOME_S := 40.0 * 60.0
+const MORRE_S := 8.0 * 60.0        # com fome ou sede zerada, a vida some nesse tempo
+const CURA_S := 10.0 * 60.0        # bem, a vida enche nesse tempo
+
+func _vitais_tick(delta: float) -> void:
+	if _vitais == null or not _ready_world:
+		return
+	if _morto >= 0.0:
+		_morto -= delta
+		if _morto < 0.0:
+			_acordar()
+		_vitais_mostrar()
+		return
+	var esforco := 1.0
+	if _chopping or _sawing or not _carry.is_empty() or not _torno.is_empty() or not _arco.is_empty():
+		esforco = 1.35
+	elif _walking or (_chop_pose and bool(_chop_pose.moving)):
+		esforco = 1.15
+	_sede = maxf(0.0, _sede - 100.0 / SEDE_S * delta * esforco)
+	_fome = maxf(0.0, _fome - 100.0 / FOME_S * delta * esforco)
+	if _sede <= 0.0 or _fome <= 0.0:
+		var n := (1.0 if _sede <= 0.0 else 0.0) + (1.0 if _fome <= 0.0 else 0.0)
+		_vida = maxf(0.0, _vida - 100.0 / MORRE_S * delta * n)
+	elif _sede > 40.0 and _fome > 40.0:
+		_vida = minf(100.0, _vida + 100.0 / CURA_S * delta)
+	if _vida <= 0.0:
+		if teste:
+			_vida = 1.0                     # modo de teste: não morre
+		else:
+			_morrer()
+	_vitais_mostrar()
+
+
+func _vitais_mostrar() -> void:
+	_vitais.vida = _vida
+	_vitais.fome = _fome
+	_vitais.sede = _sede
+	if _dano_ui:
+		_dano_ui.queue_redraw()
+
+
+## Pouca vida: a beirada da tela fica vermelha e pulsa (mais forte quanto menos vida).
+func _draw_dano() -> void:
+	var a := 0.0
+	if _morto >= 0.0:
+		a = 0.85
+	elif _vida < 30.0:
+		a = (30.0 - _vida) / 30.0 * (0.35 + 0.15 * sin(Time.get_ticks_msec() / 220.0))
+	if a <= 0.01:
+		return
+	var s := _dano_ui.size
+	var col := Color(0.55, 0.0, 0.02, a)
+	var clear := Color(0.55, 0.0, 0.02, 0.0)
+	var b := minf(s.x, s.y) * 0.22
+	_dano_ui.draw_polygon(PackedVector2Array([Vector2(0, 0), Vector2(s.x, 0), Vector2(s.x - b, b), Vector2(b, b)]), PackedColorArray([col, col, clear, clear]))
+	_dano_ui.draw_polygon(PackedVector2Array([Vector2(0, s.y), Vector2(b, s.y - b), Vector2(s.x - b, s.y - b), Vector2(s.x, s.y)]), PackedColorArray([col, clear, clear, col]))
+	_dano_ui.draw_polygon(PackedVector2Array([Vector2(0, 0), Vector2(b, b), Vector2(b, s.y - b), Vector2(0, s.y)]), PackedColorArray([col, clear, clear, col]))
+	_dano_ui.draw_polygon(PackedVector2Array([Vector2(s.x, 0), Vector2(s.x, s.y), Vector2(s.x - b, s.y - b), Vector2(s.x - b, b)]), PackedColorArray([col, col, clear, clear]))
+	if _morto >= 0.0:
+		_dano_ui.draw_rect(Rect2(Vector2.ZERO, s), Color(0, 0, 0, 0.55))
+		var font := ThemeDB.fallback_font
+		var t := "Você desmaiou..."
+		var w := font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 44).x
+		_dano_ui.draw_string(font, Vector2((s.x - w) * 0.5, s.y * 0.45), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 44, Color(1, 0.85, 0.8))
+
+
+func _morrer() -> void:
+	_morto = 4.0
+	_cancel_chop()
+	for fn in [_mix_end, _reb_end, _desf_end, _mesa_end, _torno_end, _arco_end]:
+		fn.call()
+	if not _carry.is_empty():
+		_arvores.drop_log(_carry, _player.position + Vector3(0.8, 0, 0), _face)
+		_soltar_carga()
+	Sons.play_at(self, "baque", _player.position, -4.0, 0.7)
+	_show_toast("A " + ("sede" if _sede <= 0.0 else "fome") + " foi demais: você desmaiou.")
+
+
+## Acorda no começo do mapa, fraco (mas com o que tinha na mochila).
+func _acordar() -> void:
+	_morto = -1.0
+	_vida = 45.0
+	_fome = maxf(_fome, 45.0)
+	_sede = maxf(_sede, 45.0)
+	_player.position = _ground_pos(Vector2((sim.spawn.x + 0.5) * CELL, (sim.spawn.y + 0.5) * CELL))
+	_show_toast("Você acordou fraco, longe de onde estava. Coma e beba água.")
+
+
+## Come (USAR na mochila). Devolve a mensagem.
+func comer(id: String) -> String:
+	var it: Dictionary = Itens.ITENS.get(id, {})
+	if not it.has("fome") or item_qtd(id) <= 0:
+		return "Isso não dá para comer."
+	if _fome >= 99.5:
+		return "Você está de barriga cheia."
+	remove_item(id, 1)
+	_update_inventory()
+	_fome = minf(100.0, _fome + float(it.fome))
+	_sede = minf(100.0, _sede + float(it.get("sede", 0.0)))
+	Sons.play_at(self, "folha_cai", _player.position + Vector3.UP * 1.5, -16.0, 0.8)
+	return "Você comeu %s. (fome %d de 100)" % [Itens.nome(id).to_lower(), roundi(_fome)]
+
+
+## Frutos maduros caídos no pé de uma palmeira perto (bacaba: outubro a dezembro; buriti:
+## mais nas chuvas, de dezembro a junho, e uns poucos no resto do ano). Um pé por dia.
+## {key, id, n, pos} ou {}.
+func _frutos_perto() -> Dictionary:
+	var day := int(sim.elapsed_days())
+	if _bacabas and Bacabas.ripe_season(day):
+		for p in _bacabas.palms:
+			if not _bacabas.is_adult(p):
+				continue
+			var d := Vector2(float(p.x) - _player.position.x, float(p.z) - _player.position.z).length()
+			if d < 2.0:
+				var key := "b:%.1f,%.1f" % [float(p.x), float(p.z)]
+				if int(_frutos_dia.get(key, -1)) != day:
+					return {"key": key, "id": "fruto_bacaba", "n": 4, "pos": Vector3(float(p.x), height_at(float(p.x), float(p.z)), float(p.z))}
+	if _buritis:
+		var bp: Dictionary = _buritis.palm_near(_player.position, 2.4)
+		if not bp.is_empty() and _buritis.is_adult(bp) and not bp.has("toco"):
+			var key2 := "u:%.1f,%.1f" % [float(bp.x), float(bp.z)]
+			if int(_frutos_dia.get(key2, -1)) != day:
+				var n := 4 if _buritis.fruit_season(day) else 1
+				return {"key": key2, "id": "fruto_buriti", "n": n, "pos": Vector3(float(bp.x), height_at(float(bp.x), float(bp.z)), float(bp.z))}
+	return {}
 
 
 ## O jogador mexeu no controle neste quadro?
@@ -2546,12 +2711,18 @@ func _update_ctx_btn() -> void:
 	elif _mao == "balde" and _balde_carga.is_empty() and _crouch_job == "" and not _air and not _swim and _water_spot() != Vector3.INF:
 		_ctx_action = "pegar_agua"
 		_ctx_btn.text = "Pegar água"
+	elif _crouch_job == "" and not _air and not _swim and _carry.is_empty() and not _frutos_perto().is_empty():
+		_ctx_action = "frutos"
+		_ctx_btn.text = "Pegar frutos caídos"
 	elif _capins and _crouch_job == "" and not _air and not _swim and _carry.is_empty() and _capins.colhivel(_capins.nearest(_player.position, 1.3)):
 		_ctx_action = "capim"
 		_ctx_btn.text = "Colher capim seco"
 	elif (item_qtd("moringa_barro") > 0 or _cab_falta()) and _crouch_job == "" and not _chopping and not _air and not _swim and _carry.is_empty() and _cab_spot() != Vector3.INF:
 		_ctx_action = "encher_cabaca"
 		_ctx_btn.text = "Encher a cabaça"
+	elif _sede < 96.0 and _crouch_job == "" and not _chopping and not _air and not _swim and _carry.is_empty() and _mao != "balde" and _cab_spot() != Vector3.INF:
+		_ctx_action = "beber_rio"
+		_ctx_btn.text = "Beber água"
 	elif _cupins and _crouch_job == "" and not _chopping and not _air and _carry.is_empty() and _cupins.nearest_timbo(_player.position, 1.4) >= 0:
 		_ctx_action = "timbo"
 		_ctx_btn.text = "Colher timbó"
@@ -2720,6 +2891,20 @@ func _ctx_press() -> void:
 			_show_toast("+1 lenha na mochila" + (" (mochila cheia: caiu no chão)" if caiu > 0 else ""))
 			_act_check = 0.0
 			return
+		"frutos":
+			var fr := _frutos_perto()
+			if fr.is_empty():
+				return
+			_face_to(fr.pos)
+			_crouch_target = fr
+			_crouch_job = "frutos"
+		"beber_rio":
+			var bs := _cab_spot()
+			if bs == Vector3.INF:
+				return
+			_face_to(bs)
+			_crouch_target = {"agua": bs}
+			_crouch_job = "beber"
 		"capim":
 			var ci: int = _capins.nearest(_player.position, 1.3)
 			if not _capins.colhivel(ci):
@@ -3223,6 +3408,18 @@ func _update_crouch(delta: float) -> void:
 			Sons.play_at(self, "agua", _crouch_target.agua, 0.0, 1.2)
 			_update_inventory()
 			_show_toast("Balde cheio de água (uns %d litros, %d kg)." % [roundi(BALDE_VOL * 0.92 * 1000.0), roundi(BALDE_VOL * 0.92 * 1000.0)])
+		elif _crouch_job == "frutos":
+			var fr2: Dictionary = _crouch_target
+			_frutos_dia[str(fr2.key)] = int(sim.elapsed_days())
+			var caiu := add_item(str(fr2.id), int(fr2.n))
+			_update_inventory()
+			Sons.play_at(self, "folha_cai", fr2.pos, -10.0, 1.4)
+			_show_toast("+%d %s (Mochila → USAR para comer)" % [int(fr2.n), Itens.nome(str(fr2.id)).to_lower()] + (" (mochila cheia: caiu no chão)" if caiu > 0 else ""))
+		elif _crouch_job == "beber":
+			_sede = minf(100.0, _sede + 22.0)
+			_agua_suja += 1
+			Sons.play_at(self, "agua", _crouch_target.agua, -6.0, 1.6)
+			_show_toast("Você bebeu água do rio com a mão (mata a sede, mas sem filtrar pode fazer mal).")
 		elif _crouch_job == "capim":
 			var ck := int(_crouch_target.capim)
 			if _capins.colhivel(ck):

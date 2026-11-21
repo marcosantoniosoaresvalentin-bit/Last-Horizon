@@ -464,6 +464,10 @@ func _use() -> void:
 		else:
 			_say("Largue a tora antes de colocar %s." % Itens.nome(str(it.id)).to_lower())
 		return
+	if Itens.ITENS.get(str(it.id), {}).has("fome") and _game:
+		_say(_game.comer(str(it.id)))
+		_refresh()
+		return
 	if it.id == "arco_fogo" and _game:
 		var msg: String = _game.fogo_start()
 		if msg == "":

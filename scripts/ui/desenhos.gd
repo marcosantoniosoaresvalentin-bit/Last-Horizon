@@ -281,6 +281,26 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95, true)
 		"acao_derrubar":
 			fell_icon(ci, c, s)
+		"fruto_buriti":
+			# fruto oval com a casca de escamas vermelho-escuras
+			for q in [[-14, 8, 1.0], [14, 4, 0.9], [0, -14, 0.95]]:
+				var cc := c + Vector2(q[0], q[1]) * u
+				var rr := 20.0 * float(q[2]) * u
+				var pts := PackedVector2Array()
+				for i in 24:
+					var a := TAU * i / 24.0
+					pts.append(cc + Vector2(cos(a) * rr * 0.85, sin(a) * rr))
+				ci.draw_colored_polygon(pts, Color(0.55, 0.16, 0.08))
+				for k in 6:
+					var o := Vector2(cos(k * 1.1) * rr * 0.45, sin(k * 1.7) * rr * 0.55)
+					ci.draw_arc(cc + o, rr * 0.22, PI * 0.1, PI * 0.9, 6, Color(0.82, 0.32, 0.14), 1.6 * u, true)
+				ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 1.6 * u, true)
+		"fruto_bacaba":
+			# um punhado de frutinhos roxos quase pretos
+			for q in [[-18, 10], [0, 14], [18, 8], [-10, -6], [10, -8], [0, -22], [-24, -10], [24, -12]]:
+				var cc2 := c + Vector2(q[0], q[1]) * u
+				ci.draw_circle(cc2, 10.5 * u, Color(0.2, 0.08, 0.16))
+				ci.draw_circle(cc2 + Vector2(-3, -3) * u, 3.0 * u, Color(0.55, 0.4, 0.55))
 		"capim_seco":
 			# um maço de capim seco amarrado no meio
 			for k in 16:
