@@ -1,9 +1,9 @@
 {
-  "version": 160,
-  "file": "update_160.zip",
-  "size": 4899102,
-  "sha256": "daaee0b752a879be48ae79c48a1a50d2ec242e6181ccc23e2070cfdf5bd4ac1d",
+  "version": 161,
+  "file": "update_161.zip",
+  "size": 4901356,
+  "sha256": "733d3c010b079bebb6e4f0a51ec45ebd7c2e446614acfb5369839cd84baab2fd",
   "min_build": 1,
-  "notes": "Fogueira com as mesmas lenhas rachadas pelo jogador, deitadas com a ponta levantada; sem pedras em volta",
+  "notes": "Rachar lenha no cepo do tamanho que quiser: risco vermelho no topo da madeira",
   "date": "2026-11-21"
 }
