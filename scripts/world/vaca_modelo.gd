@@ -203,10 +203,25 @@ static func pose(root: Node3D, modo: String, _fase: float, t: float) -> void:
 		alvo = 0.3
 	var b := move_toward(float(root.get_meta("baixa")), alvo, dt * 1.2)
 	root.set_meta("baixa", b)
+	_cascos(sk)
 	if b > 0.001:
 		_dobra(sk, "Shoulders", 0.85 * b)
 		_dobra(sk, "Neck", 1.15 * b + sin(t * 2.1) * 0.03 * b)
 		_dobra(sk, "Head", 0.45 * b + sin(t * 6.0) * 0.05 * b)   # arrancando o capim
+
+
+## Os cascos presos na ponta da canela (no modelo eles eram alvos soltos de IK, presos no
+## chão: a perna andava e o casco ficava, esticando a malha como uma mão).
+const PES := [["FrontFoot_R", "FrontLowLeg_R"], ["FrontFoot_L", "FrontLowLeg_L"], ["BackFoot_R", "BackLowLeg_R"], ["BackFoot_L", "BackLowLeg_L"]]
+
+static func _cascos(sk: Skeleton3D) -> void:
+	for par in PES:
+		var fi := sk.find_bone(par[0])
+		var li := sk.find_bone(par[1])
+		if fi < 0 or li < 0:
+			continue
+		var rel: Transform3D = sk.get_bone_global_rest(li).affine_inverse() * sk.get_bone_global_rest(fi)
+		sk.set_bone_global_pose(fi, sk.get_bone_global_pose(li) * rel)
 
 
 ## Dobra o osso para baixo (gira em volta do eixo de lado do esqueleto) por cima da animação.
