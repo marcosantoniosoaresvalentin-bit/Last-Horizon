@@ -2845,7 +2845,10 @@ func _update_ctx_btn() -> void:
 	elif _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _forno_precisa_barro() >= 0:
 		var fmi := _forno_precisa_barro()
 		_ctx_action = "forno_barro"
-		_ctx_btn.text = "Rebocar o forno (%d/%d)" % [int(_maq.plantas[fmi].get("bar", 0)) + 1, int(Maquinas.TIPOS.forno.forno.barro)]
+		if _maq.forno_etapa(fmi) == "porta":
+			_ctx_btn.text = "Fazer a porta de barro"
+		else:
+			_ctx_btn.text = "Levantar a parede de barro (%d/%d)" % [int(_maq.plantas[fmi].get("bar", 0)) + 1, int(Maquinas.TIPOS.forno.forno.barro)]
 	elif _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _reb.is_empty() and _constr and _maq.planta_near(_player.position, 2.0) < 0 and not _constr.reboco_spots(_player.position, 2.6).is_empty():
 		_ctx_action = "rebocar"
 		_ctx_btn.text = "Rebocar com barro"
@@ -8934,13 +8937,9 @@ func _maq_ctx() -> bool:
 		return false
 	var fz: Dictionary = Maquinas.TIPOS[p.tipo].get("forno", {})
 	if not fz.is_empty() and _carry.is_empty():
-		if int(p.get("ped", 0)) < int(fz.pedras) and (item_qtd("pedra") > 0 or teste):
+		if _maq.forno_etapa(mi) == "pedra" and (item_qtd("pedra") > 0 or teste):
 			_ctx_action = "forno_pedra"
-			_ctx_btn.text = "Pôr pedra (%d/%d)" % [int(p.get("ped", 0)) + 1, int(fz.pedras)]
-			return true
-		if int(p.get("ped", 0)) >= int(fz.pedras) and int(p.get("bar", 0)) < int(fz.barro) and _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro":
-			_ctx_action = "forno_barro"
-			_ctx_btn.text = "Rebocar com barro (%d/%d)" % [int(p.get("bar", 0)) + 1, int(fz.barro)]
+			_ctx_btn.text = "Encaixar pedra (%d/%d)" % [int(p.get("ped", 0)) + 1, int(fz.pedras)]
 			return true
 	if not _carry.is_empty():
 		_ctx_action = "planta_peca"
@@ -8974,17 +8973,23 @@ func _maq_ctx_press(act: String) -> void:
 			Sons.play_at(self, "pedra_bate", _maq.xform(mi).origin + Vector3.UP * 0.4, -6.0, 1.1)
 			var fz2: Dictionary = Maquinas.TIPOS.forno.forno
 			var pp: Dictionary = _maq.plantas[mi]
-			_show_toast(("Pedra assentada (%d de %d)." % [int(pp.ped), int(fz2.pedras)]) + (" Agora reboque com barro por cima (balde de barro na mão)." if int(pp.ped) >= int(fz2.pedras) else ""))
+			_show_toast(("Pedra encaixada no barro (%d de %d)." % [int(pp.ped), int(fz2.pedras)]) + (" Agora faça a porta de barro (mais um balde de barro)." if int(pp.ped) >= int(fz2.pedras) else ""))
 			return
 		"forno_barro":
+			var etapa: String = _maq.forno_etapa(mi)
+			if not etapa in ["barro", "porta"]:
+				return
 			_balde_carga = {}
 			_update_balde_fill(_balde_fill, _balde_carga)
 			_update_inventory()
-			_maq.forno_por(mi, "barro")
+			_maq.forno_por(mi, etapa)
 			Sons.play_at(self, "cavar", _maq.xform(mi).origin + Vector3.UP * 0.5, -4.0, 1.3)
 			var fz3: Dictionary = Maquinas.TIPOS.forno.forno
 			var pq: Dictionary = _maq.plantas[mi]
-			_show_toast(("Barro por cima das pedras (%d de %d baldes)." % [int(pq.bar), int(fz3.barro)]) + (" Falta a porta: 2 tábuas." if int(pq.bar) >= int(fz3.barro) and not _maq.pronta(mi) else (" O forno está pronto!" if _maq.pronta(mi) else "")))
+			if etapa == "porta":
+				_show_toast("Porta de barro pronta! O forno está pronto: encha de lenha pelo olho.")
+			else:
+				_show_toast(("Parede de barro subindo (%d de %d baldes)." % [int(pq.bar), int(fz3.barro)]) + (" Agora encaixe as pedras do chão no barro." if int(pq.bar) >= int(fz3.barro) else ""))
 			return
 		"planta_peca":
 			var pw: Dictionary = _maq.pending_work(mi)
@@ -11241,9 +11246,7 @@ func _forno_precisa_barro() -> int:
 	var mi: int = _maq.planta_near(_player.position, 2.2)
 	if mi < 0 or str(_maq.plantas[mi].tipo) != "forno":
 		return -1
-	var p: Dictionary = _maq.plantas[mi]
-	var fz: Dictionary = Maquinas.TIPOS.forno.forno
-	if int(p.get("ped", 0)) >= int(fz.pedras) and int(p.get("bar", 0)) < int(fz.barro):
+	if _maq.forno_etapa(mi) in ["barro", "porta"]:
 		return mi
 	return -1
 # Pelo olho do forno pronto: "Pôr lenha" (as achas rachadas no cepo, até 12), cheio:
@@ -11301,7 +11304,7 @@ func _forno_pick(mi: int, acao: String) -> void:
 		"forno_fechar":
 			_maq.forno_porta(mi, true)
 			Sons.play_at(self, "baque", boca, -6.0, 0.8)
-			_show_toast("Porta fechada: a lenha vai queimando devagar, sem ar, e virando carvão. Veja o relógio em cima do forno.")
+			_show_toast("Boca tampada com a porta de barro: a lenha vai queimando devagar, sem ar, e virando carvão. De perto dá para ver o relógio.")
 		"forno_abrir":
 			_maq.forno_porta(mi, false)
 			Sons.play_at(self, "baque", boca, -8.0, 1.0)
@@ -11330,8 +11333,9 @@ func _draw_fornos() -> void:
 		if fl < 0.0:
 			continue
 		var w: Vector3 = _maq.xform(mi) * Vector3(-0.1, 1.45, 0.0)
-		if w.distance_to(_player.position) > 8.0 or _cam.is_position_behind(w):
-			continue
+		var o: Vector3 = _maq.xform(mi).origin
+		if Vector2(o.x - _player.position.x, o.z - _player.position.z).length() > 3.0 or _cam.is_position_behind(w):
+			continue                     # só bem de perto (como o olho)
 		var c := _cam.unproject_position(w)
 		var R := 34.0
 		_sub_ui.draw_circle(c, R + 6.0, Color(0.04, 0.035, 0.03, 0.8))

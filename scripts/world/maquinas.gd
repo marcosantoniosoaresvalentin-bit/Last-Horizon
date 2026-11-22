@@ -190,19 +190,17 @@ const TIPOS := {
 		"area": Rect2(-0.45, -0.45, 0.9, 0.9),
 		"filtro": true,
 	},
-	# Forno de carvão: um domo de pedras do chão rebocado de barro por cima, com uma boca
-	# na frente (a porta: duas tábuas em pé de lado, que abrem e fecham) e o suspiro em
-	# cima, atrás. Enche de lenha, acende, fecha a porta: a lenha vira carvão.
+	# Forno de carvão: um domo de barro grosso (batido com a mão) com as pedras do chão
+	# encaixadas nele (umas aparecendo por fora), uma boca na frente com a porta de barro
+	# (uma placa grossa que tampa a boca) e o suspiro em cima, atrás. Enche de lenha,
+	# acende, tampa a boca: a lenha vira carvão.
 	"forno": {
 		"nome": "Forno de Carvão",
-		"desc": "Domo de pedras do chão coberto de barro, com uma porta de tábuas e o suspiro em cima. Encha de lenha, acenda com o arco de fogo e feche a porta: a lenha queima devagar, sem ar, e vira carvão.",
-		"pecas": [
-			["tabua", 0.52, Vector3(0.6, 0.15, 0.0), "z_lado", 0.14],    # 0 porta: tábua de baixo
-			["tabua", 0.52, Vector3(0.6, 0.41, 0.0), "z_lado", 0.14],    # 1 porta: tábua de cima
-		],
+		"desc": "Domo de barro com pedras do chão encaixadas, uma porta de barro e o suspiro em cima. Primeiro levante as paredes de barro, depois encaixe as pedras e por último faça a porta de barro. Encha de lenha, acenda com o arco de fogo e tampe a boca: a lenha queima devagar, sem ar, e vira carvão.",
+		"pecas": [],
 		"pinos": [],
 		"area": Rect2(-0.95, -0.9, 1.75, 1.8),
-		"forno": {"pedras": 16, "barro": 4},
+		"forno": {"barro": 4, "pedras": 16, "porta": 1},
 	},
 }
 
@@ -281,7 +279,7 @@ static func needs(tipo: String) -> Dictionary:
 	out["lamina_item"] = str(t.get("lamina_item", "lamina_serra"))
 	var fz: Dictionary = t.get("forno", {})
 	out["pedra"] = int(fz.get("pedras", 0))
-	out["barro"] = int(fz.get("barro", 0))
+	out["barro"] = int(fz.get("barro", 0)) + int(fz.get("porta", 0))
 	return out
 
 
@@ -336,6 +334,7 @@ func complete(mi: int) -> void:
 	if not fz.is_empty():
 		p["ped"] = int(fz.pedras)
 		p["bar"] = int(fz.barro)
+		p["porta"] = int(fz.porta)
 	_rebuild()
 
 
@@ -421,7 +420,7 @@ func done_count(mi: int) -> int:
 func pronta(mi: int) -> bool:
 	var p: Dictionary = plantas[mi]
 	var fz: Dictionary = TIPOS[p.tipo].get("forno", {})
-	if not fz.is_empty() and (int(p.get("ped", 0)) < int(fz.pedras) or int(p.get("bar", 0)) < int(fz.barro)):
+	if not fz.is_empty() and (int(p.get("ped", 0)) < int(fz.pedras) or int(p.get("bar", 0)) < int(fz.barro) or int(p.get("porta", 0)) < int(fz.porta)):
 		return false
 	if lamina_count(mi) < lamina_need(str(p.tipo)):
 		return false
@@ -1467,12 +1466,27 @@ func forno_fumando(mi: int) -> bool:
 ## Construindo: pedra ou barro postos.
 func forno_por(mi: int, what: String) -> void:
 	var p: Dictionary = plantas[mi]
-	var k := "ped" if what == "pedra" else "bar"
 	var fz: Dictionary = TIPOS[p.tipo].forno
-	p[k] = mini(int(p.get(k, 0)) + 1, int(fz.pedras if what == "pedra" else fz.barro))
-	if what == "barro":
-		p["bar_dia"] = int(_jogo.sim.elapsed_days())
+	match what:
+		"pedra": p["ped"] = mini(int(p.get("ped", 0)) + 1, int(fz.pedras))
+		"barro":
+			p["bar"] = mini(int(p.get("bar", 0)) + 1, int(fz.barro))
+			p["bar_dia"] = int(_jogo.sim.elapsed_days())
+		"porta": p["porta"] = 1
 	_rebuild()
+
+
+## O que falta agora, na ordem: "barro" (as paredes), "pedra" (encaixar), "porta", "".
+func forno_etapa(mi: int) -> String:
+	var p: Dictionary = plantas[mi]
+	var fz: Dictionary = TIPOS[p.tipo].forno
+	if int(p.get("bar", 0)) < int(fz.barro):
+		return "barro"
+	if int(p.get("ped", 0)) < int(fz.pedras):
+		return "pedra"
+	if int(p.get("porta", 0)) < int(fz.porta):
+		return "porta"
+	return ""
 
 
 func forno_lenha(mi: int, acha: Dictionary) -> void:
@@ -1581,63 +1595,60 @@ func _draw_forno(mi: int, root: Node3D, nd: Dictionary) -> void:
 	var fbar := float(p.get("bar", 0)) / float(fz.barro)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = mi * 71 + 3
-	# as pedras: em fileiras de baixo para cima (até a altura do que já foi posto)
-	if fbar < 1.0:
-		var fileiras := 7
-		for fi in fileiras:
-			var ph := (float(fi) + 0.5) / fileiras * PI * 0.47
-			if float(fi) / fileiras >= fped:
-				break
-			var n := int(18.0 * cos(ph)) + 3
-			for k in n:
-				var th := TAU * (float(k) + 0.5 * (fi % 2)) / n
-				var pt := _domo(th, ph)
-				if _na_boca(pt) or (pt.x >= FORNO_FRENTE - 0.001 and fi > 4):
-					continue
-				var sm := SphereMesh.new()
-				var r := rng.randf_range(0.07, 0.1)
-				sm.radius = r
-				sm.height = r * 1.3
-				sm.radial_segments = 7
-				sm.rings = 4
-				var sn := MeshInstance3D.new()
-				sn.mesh = sm
-				sn.material_override = _fzm("pedra")
-				sn.position = pt
-				sn.rotation = Vector3(rng.randf(), rng.randf() * 3.0, 0)
-				root.add_child(sn)
-	# o barro: a casca do domo até a altura rebocada
+	var nz := FastNoiseLite.new()
+	nz.seed = mi + 5
+	nz.frequency = 1.6
+	var nz2 := FastNoiseLite.new()
+	nz2.seed = mi + 19
+	nz2.frequency = 7.0
+	# a superfície do barro: grossa embaixo, ondulada (montes de barro batidos com a mão)
+	var sup := func(th: float, ph: float) -> Vector3:
+		var v := _domo(th, ph)
+		var nrm := Vector3(v.x + 0.1, v.y * 0.6, v.z).normalized()
+		if v.x >= FORNO_FRENTE - 0.001:
+			nrm = Vector3.RIGHT
+		var bojo := 0.05 * (1.0 - ph / (PI * 0.5)) + 0.02          # a base mais grossa
+		var onda := nz.get_noise_3d(v.x * 2.0, v.y * 2.0, v.z * 2.0) * 0.035 + nz2.get_noise_3d(v.x * 3.0, v.y * 3.0, v.z * 3.0) * 0.012
+		var tapa := sin(th * 9.0 + ph * 5.0) * 0.006                # as marcas da mão
+		return v + nrm * (bojo + onda + tapa)
 	if fbar > 0.0:
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		var NT := 36
-		var NP := 12
+		var NT := 48
+		var NP := 16
 		var lim := fbar * PI * 0.5 + 0.001
-		var nz := FastNoiseLite.new()
-		nz.seed = mi + 5
-		nz.frequency = 3.0
 		for i in NP:
 			var ph0 := float(i) / NP * PI * 0.5
-			var ph1 := float(i + 1) / NP * PI * 0.5
+			var ph1 := minf(float(i + 1) / NP * PI * 0.5, lim)
 			if ph0 > lim:
 				break
 			for k in NT:
 				var th0 := TAU * k / NT
 				var th1 := TAU * (k + 1) / NT
-				var q := [_domo(th0, ph0), _domo(th1, ph0), _domo(th1, minf(ph1, lim)), _domo(th0, minf(ph1, lim))]
+				var tq := [th0, th1, th1, th0]
+				var pq := [ph0, ph0, ph1, ph1]
+				var q := []
+				for j in 4:
+					q.append(_domo(float(tq[j]), float(pq[j])))
 				if _na_boca(q[0]) and _na_boca(q[1]) and _na_boca(q[2]) and _na_boca(q[3]):
 					continue
-				var tq := [th0, th1, th1, th0]
-				var pq := [ph0, ph0, minf(ph1, lim), minf(ph1, lim)]
 				for idx in [0, 2, 1, 0, 3, 2]:
-					var v: Vector3 = q[idx]
-					var bump := 0.02 + nz.get_noise_3d(v.x * 3.0, v.y * 3.0, v.z * 3.0) * 0.015
-					var nrm := Vector3(v.x + 0.1, v.y * 0.6, v.z).normalized()
-					if v.x >= FORNO_FRENTE - 0.001:
-						nrm = Vector3.RIGHT
-					st.set_normal(nrm)                    # liso (sem os quadradinhos)
-					st.set_uv(Vector2(float(tq[idx]) * 0.9, float(pq[idx]) * 1.8))
-					st.add_vertex(v + nrm * bump)
+					var th := float(tq[idx])
+					var ph := float(pq[idx])
+					var v: Vector3 = sup.call(th, ph)
+					var da: Vector3 = sup.call(th + 0.01, ph) - sup.call(th - 0.01, ph)
+					var db: Vector3 = sup.call(th, ph + 0.01) - sup.call(th, ph - 0.01)
+					var nrm: Vector3 = da.cross(db).normalized()
+					if nrm.dot(Vector3(v.x + 0.1, v.y, v.z)) < 0.0:
+						nrm = -nrm
+					# cor: manchas mais claras (secou mais) e escuras (mais úmido), a base suja
+					var tone := nz2.get_noise_3d(v.x * 6.0, v.y * 6.0, v.z * 6.0)
+					var col := Color(1, 1, 1).darkened(clampf(-tone * 0.35, 0.0, 0.3)).lightened(clampf(tone * 0.25, 0.0, 0.2))
+					col = col.darkened(0.25 * (1.0 - smoothstep(0.0, 0.18, v.y)))
+					st.set_color(col)
+					st.set_normal(nrm)
+					st.set_uv(Vector2(th * 0.9, ph * 1.8))
+					st.add_vertex(v)
 		st.generate_tangents()
 		var mi2 := MeshInstance3D.new()
 		mi2.mesh = st.commit()
@@ -1645,7 +1656,59 @@ func _draw_forno(mi: int, root: Node3D, nd: Dictionary) -> void:
 		var stage := 1 if age < 3 else (2 if age < 6 else 3)       # (grosso: já começa meio seco)
 		mi2.material_override = load("res://scripts/world/construcao.gd")._mud_material(stage)
 		root.add_child(mi2)
-	if fped <= 0.0:
+	# as pedras encaixadas no barro (umas aparecendo, meio enterradas na parede)
+	var npos := 34
+	var mostra := int(round(fped * npos))
+	for k in mostra:
+		var th := rng.randf() * TAU
+		var ph := rng.randf_range(0.05, 1.25)
+		var pt := _domo(th, ph)
+		if _na_boca(pt) or pt.x >= FORNO_FRENTE - 0.02:
+			continue
+		var surf: Vector3 = sup.call(th, ph)
+		var nrm2 := (surf - Vector3(-0.1, 0, 0)).normalized()
+		var sm := SphereMesh.new()
+		var r := rng.randf_range(0.055, 0.095)
+		sm.radius = r
+		sm.height = r * rng.randf_range(1.1, 1.5)
+		sm.radial_segments = 7
+		sm.rings = 4
+		var sn := MeshInstance3D.new()
+		sn.mesh = sm
+		sn.material_override = _fzm("pedra")
+		sn.position = surf - nrm2 * r * 0.45                       # metade dentro do barro
+		sn.rotation = Vector3(rng.randf() * 3.0, rng.randf() * 3.0, rng.randf() * 3.0)
+		sn.scale = Vector3(1.0, rng.randf_range(0.7, 1.0), rng.randf_range(0.8, 1.2))
+		root.add_child(sn)
+	# a porta de barro: uma placa grossa e arredondada
+	if int(p.get("porta", 0)) >= 1:
+		var ps := SurfaceTool.new()
+		ps.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var W := 0.3
+		var Hh := 0.3
+		var T := 0.07
+		var N := 10
+		for face in [1.0, -1.0]:
+			for i in N:
+				for j in N:
+					var qd := []
+					for e in [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]]:
+						var u := lerpf(-1.0, 1.0, float(e[0]) / N)
+						var w := lerpf(-1.0, 1.0, float(e[1]) / N)
+						var round_ := 1.0 - u * u * 0.15 - w * w * 0.15
+						var bump := nz.get_noise_2d(u * 3.0 + face, w * 3.0) * 0.012
+						qd.append(Vector3(face * (T * 0.5 * round_ + bump), w * Hh, u * W))
+					for idx in ([0, 1, 2, 0, 2, 3] if face > 0.0 else [0, 2, 1, 0, 3, 2]):
+						ps.set_uv(Vector2((qd[idx] as Vector3).z, (qd[idx] as Vector3).y) * 2.0)
+						ps.add_vertex(qd[idx])
+		ps.generate_normals()
+		ps.generate_tangents()
+		var porta := MeshInstance3D.new()
+		porta.mesh = ps.commit()
+		porta.material_override = load("res://scripts/world/construcao.gd")._mud_material(2)
+		root.add_child(porta)
+		nd["porta"] = porta
+	if fbar <= 0.0:
 		return
 	# por dentro, escuro (a boca)
 	var bm := BoxMesh.new()
@@ -1780,11 +1843,13 @@ func forno_visual(mi: int, nd := {}) -> void:
 		return
 	var f := forno_st(mi)
 	var aberta := str(f.porta) == "aberta"
-	var hinge := Vector3(0.6, 0.0, -0.27)
-	var ang := 1.75 if aberta else 0.0
-	for si in [0, 1]:
-		if nd.has("p_%d" % si) and is_instance_valid(nd["p_%d" % si]):
-			(nd["p_%d" % si] as Node3D).transform = Transform3D(Basis(Vector3.UP, -ang), hinge) * Transform3D(Basis(), -hinge) * (nd["t_%d" % si] as Transform3D)
+	if nd.has("porta") and is_instance_valid(nd.porta):
+		if aberta:
+			# a placa encostada na parede, do lado da boca
+			(nd.porta as Node3D).transform = Transform3D(Basis(Vector3.UP, 0.35) * Basis(Vector3.BACK, -0.25), Vector3(FORNO_FRENTE + 0.12, 0.29, 0.5))
+		else:
+			# tampando a boca
+			(nd.porta as Node3D).transform = Transform3D(Basis(), Vector3(FORNO_FRENTE + 0.04, 0.29, 0.0))
 	var fum := forno_fumando(mi)
 	if nd.has("fumaca") and is_instance_valid(nd.fumaca):
 		(nd.fumaca as CPUParticles3D).emitting = fum
@@ -2181,6 +2246,17 @@ func _load(path: String) -> bool:
 	plantas = d.get("plantas", [])
 	# a caixa de barro saiu do jogo (o barro agora é feito no monte de terra no chão)
 	plantas = plantas.filter(func(q): return str(q.get("tipo", "")) != "caixa_barro")
+	# forno da versão de antes (porta de tábuas): a porta vira de barro
+	for q in plantas:
+		if str(q.get("tipo", "")) == "forno" and (q.get("pecas", []) as Array).size() > 0:
+			var tinha := true
+			for b in q.pecas:
+				if not bool(b):
+					tinha = false
+			q.pecas = []
+			q.sobra = []
+			q.erase("madeiras")
+			q["porta"] = 1 if tinha else 0
 	# mesa de argila das versões antigas (tábuas em cima do pé redondo; travessas de
 	# tora): vira a nova (travessas de tábua), montada se estava montada
 	for q in plantas:

@@ -219,8 +219,8 @@ func _draw_plan() -> void:
 		_draw.draw_polyline(pts, C_INK, 2.0)
 		_draw.draw_rect(Rect2(P.call(-0.45, 1.05), P.call(-0.33, 0.85) - P.call(-0.45, 1.05)), C_INK, false, 2.0)
 		_draw.draw_string(font, P.call(-0.95, 1.15), "SUSPIRO", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
-		_draw.draw_string(font, P.call(-0.6, 0.45), "PEDRAS + BARRO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
-		_draw.draw_string(font, P.call(0.62, 0.3), "PORTA", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
+		_draw.draw_string(font, P.call(-0.7, 0.45), "1º BARRO, 2º PEDRAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
+		_draw.draw_string(font, P.call(0.62, 0.3), "PORTA DE BARRO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
 		return
 	if t.has("filtro"):
 		_draw.draw_string(font, P.call(0.32, 1.0), "TELA DE FIBRA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
