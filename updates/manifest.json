@@ -1,9 +1,9 @@
 {
-  "version": 194,
-  "file": "update_194.zip",
-  "size": 5476015,
-  "sha256": "752e026c00ea0e8dad24bd647bb4ea3146564a5169f692359268cc8a1827a083",
+  "version": 195,
+  "file": "update_195.zip",
+  "size": 5488861,
+  "sha256": "daeaca560de0adb2fd4d68f5eed7618d2b964a2e2804bf4a88b7a47b23683084",
   "min_build": 1,
-  "notes": "Boi: sem buraco na barriga",
+  "notes": "Arco e flecha: caça com dano por parte do corpo, carcaça e sangue",
   "date": "2026-11-22"
 }
