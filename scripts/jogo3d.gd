@@ -10679,8 +10679,10 @@ func _couro_passa(cr: Dictionary, d: Vector2, at: Vector2) -> void:
 		if best > 110.0:
 			_couro.cortando = false               # o dedo saiu da linha
 			return
-		if tp <= t0:
+		if tp <= t0 and t0 < 0.95:
 			return
+		if maxf(tp, t0) >= 0.95:
+			tp = 1.0
 		if item_qtd("faca") <= 0 and not teste:
 			_couro.cortando = false
 			return
@@ -10986,9 +10988,9 @@ func _evis_input(e: InputEvent) -> bool:
 		if tp < 0.0:
 			_evis.cortando = false
 			return true
-		if tp <= t0:
+		if tp <= t0 and t0 < 0.95:
 			return true
-		var t1 := minf(1.0, tp)
+		var t1 := 1.0 if maxf(tp, t0) >= 0.95 else minf(1.0, tp)
 		ev[fase] = t1
 		if int(t1 * 6.0) != int(t0 * 6.0):
 			Sons.play_at(self, "fibra_puxa", _cam.global_position - _cam.global_transform.basis.z * 1.5, -13.0, 1.8)
