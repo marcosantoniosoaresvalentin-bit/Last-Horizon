@@ -180,7 +180,8 @@ static func build(s := 1.0, cor := "branca", touro := false, _seed := 1) -> Node
 				_preso(sk0, "Head", _chifre_mesh(tm, sd, curva), _mat_chifre(), Vector3(sd * 0.0034, -0.0405, 0.0492))
 	# o boi: o saco entre as pernas de trás e o prepúcio na barriga
 	if touro:
-		var pele := _material(cor, 0 if cor != "malhada" else 1, true)
+		var pele: StandardMaterial3D = _material(cor, 0 if cor != "malhada" else 1, true).duplicate()
+		pele.cull_mode = BaseMaterial3D.CULL_DISABLED        # (nunca transparente)
 		_preso(sk0, "Body", _saco_mesh(), pele, Vector3(0, 0.0255, 0.0222))
 		_preso(sk0, "Body", _prepucio_mesh(), pele, Vector3(0, 0.009, 0.0206))
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
@@ -332,6 +333,12 @@ static func _volume(aneis: Array, lados := 7) -> ArrayMesh:
 			var q := [rows[i][k], rows[i + 1][k], rows[i + 1][(k + 1) % lados], rows[i][(k + 1) % lados]]
 			for j in [0, 2, 1, 0, 3, 2]:          # (faces viradas para fora)
 				st.add_vertex(q[j])
+	# fecha em cima (fica dentro do corpo, mas sem buraco se aparecer)
+	var first: Array = rows[0]
+	var topo: Vector3 = (aneis[0][0] as Vector3) + Vector3(0, 0, 0.0006)
+	for k in lados:
+		for v in [first[k], topo, first[(k + 1) % lados]]:
+			st.add_vertex(v)
 	# fecha embaixo
 	var last: Array = rows[rows.size() - 1]
 	var fundo: Vector3 = (aneis[aneis.size() - 1][0] as Vector3) + Vector3(0, 0, -0.0004)
@@ -345,6 +352,7 @@ static func _volume(aneis: Array, lados := 7) -> ArrayMesh:
 ## O saco: um volume pequeno e redondo entre as coxas, colado no corpo.
 static func _saco_mesh() -> ArrayMesh:
 	return _volume([
+		[Vector3(0, 0, 0.0045), 0.0012, 0.0014],
 		[Vector3(0, 0, 0.0015), 0.0016, 0.0018],
 		[Vector3(0, -0.0002, -0.0012), 0.0021, 0.0022],
 		[Vector3(0, -0.0004, -0.0032), 0.0019, 0.0020],
@@ -357,6 +365,7 @@ static func _saco_mesh() -> ArrayMesh:
 ## barriga, antes das coxas.
 static func _prepucio_mesh() -> ArrayMesh:
 	return _volume([
+		[Vector3(0, 0, 0.0055), 0.0020, 0.0060],
 		[Vector3(0, 0, 0.0018), 0.0030, 0.0080],
 		[Vector3(0, -0.0008, -0.0006), 0.0030, 0.0068],
 		[Vector3(0, -0.0018, -0.0024), 0.0024, 0.0045],
