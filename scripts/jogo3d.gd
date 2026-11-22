@@ -844,6 +844,7 @@ void fragment() {
 	_couro_btns = [mk.call("Força", -290, -146, _couro_forca), mk.call("Parar", -480, -146, _couro_end)]
 	_mach_btns = [mk.call("Parar", -480, -146, _mach_end)]
 	_evis_btns = [mk.call("Força", -290, -146, _evis_forca), mk.call("Parar", -480, -146, _evis_end)]
+	_quarto_btns = [mk.call("Parar", -480, -146, _quarto_end)]
 	_banda_btns = [mk.call("Cabeça à esquerda", -640, -286, func(): _banda_escolhe(true)), mk.call("Cabeça à direita", -290, -286, func(): _banda_escolhe(false)), mk.call("Parar", -480, -146, _banda_end)]
 	(_evis_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	(_couro_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
@@ -3126,7 +3127,7 @@ func _update_chop(delta: float) -> void:
 ## de cima delas ou recolher uma forquilha.
 func _update_ctx_btn() -> void:
 	_ctx_action = ""
-	if not _couro.is_empty() or not _mach.is_empty() or not _evis.is_empty() or not _banda.is_empty():
+	if not _couro.is_empty() or not _mach.is_empty() or not _evis.is_empty() or not _banda.is_empty() or not _quarto.is_empty():
 		_ctx_btn.visible = false
 		return
 	if _empurra >= 0:
@@ -6135,6 +6136,9 @@ func _move_player(delta: float) -> void:
 	if not _banda.is_empty():
 		_banda_move(delta)
 		return
+	if not _quarto.is_empty():
+		_quarto_move(delta)
+		return
 	if not _mesa.is_empty():
 		_mesa_move(delta)
 		return
@@ -6522,6 +6526,8 @@ func _input(e: InputEvent) -> void:
 		return
 	if not _banda.is_empty() and _banda_input(e):
 		return
+	if not _quarto.is_empty() and _quarto_input(e):
+		return
 	if not _mix.is_empty() and _mix_input(e):
 		return
 	if not _reb.is_empty() and _reb_input(e):
@@ -6548,7 +6554,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _mach_btns + _evis_btns + _banda_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _mach_btns + _evis_btns + _banda_btns + _quarto_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -10068,6 +10074,12 @@ func _tri_ctx(mi: int) -> bool:
 	var est: Vector3 = _maq.tri_estaca(mi)
 	var perto_estaca := Vector2(_player.position.x - est.x, _player.position.z - est.z).length() < 1.6
 	if bool(ic.get("fixo", false)):
+		var ql := _quarto_lado(mi)
+		if not ql.is_empty() and ((item_qtd("faca") > 0 and item_qtd("machado") > 0) or teste) and not perto_estaca:
+			var qq: Dictionary = _caca.quarto_de(str(ql[0]), str(ql[1]))
+			_ctx_action = "tri_quarto"
+			_ctx_btn.text = "Continuar a banda" if float(qq.get("faca", 0.0)) > 0.0 else "Partir a banda"
+			return true
 		if (item_qtd("machado") > 0 or teste) and _banda_pode(mi) != "" and not perto_estaca:
 			var cb: Dictionary = _caca.couro_de(str(ic.uid))
 			_ctx_action = "tri_banda"
@@ -10172,6 +10184,10 @@ func _tri_press(act: String) -> void:
 			_tri = {"mi": mi, "fase": "puxa", "forca": 0.8 if act == "tri_desestaca" else 0.6}
 			_tri_ajusta_corda(mi)
 			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -8.0, 1.0)
+		"tri_quarto":
+			var ql2 := _quarto_lado(mi)
+			if not ql2.is_empty():
+				_quarto_start(mi, str(ql2[0]), str(ql2[1]))
 		"tri_banda":
 			var uid5 := _banda_pode(mi)
 			if uid5 != "":
@@ -11326,6 +11342,258 @@ func _banda_draw() -> void:
 		ui.draw_arc(pp, 30.0 + pul * 6.0, 0, TAU, 32, Color(0, 0, 0, 0.45), 6.0, true)
 		ui.draw_arc(pp, 30.0 + pul * 6.0, 0, TAU, 32, Color(1, 0.95, 0.7, 0.95), 3.0, true)
 		ui.draw_line(pp + Vector2(-10, 0), pp + Vector2(10, 0), Color(1, 1, 1, 0.8), 2.0, true)
+
+
+# ================== PARTIR A BANDA (FACA E MACHADO) ==================
+# Com a vaca partida ao meio, cada banda pendurada pode ser partida de novo: "Partir a
+# banda" (a mais perto). Com a faca, passando o dedo na linha em volta da banda (entre os
+# fios de costela, da barriga até a espinha) a carne é cortada; depois o machado na
+# espinha (a marca). O pedaço de baixo cai: num carrinho de mão posto embaixo fica limpo;
+# na terra, suja.
+
+var _quarto := {}                 # {mi, uid, lado, fase ("faca"/"machado"), drag, cortando, anim, treme, fim}
+var _quarto_btns: Array = []      # [Parar]
+
+
+## A banda pendurada mais perto do jogador que ainda não foi partida ("" se nenhuma).
+func _quarto_lado(mi: int) -> Array:
+	var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+	if ic.is_empty() or not bool(ic.get("fixo", false)) or _caca == null:
+		return []
+	var uid := str(ic.uid)
+	var c: Dictionary = _caca.couro_de(uid)
+	if c.is_empty() or not bool((c.get("banda", {}) as Dictionary).get("feito", false)):
+		return []
+	var best := ""
+	var bd := 2.8
+	for ld in ["e", "d"]:
+		var q: Dictionary = _caca.quarto_de(uid, ld)
+		if bool(q.get("caiu", false)):
+			continue
+		var lin: Array = _caca.quarto_linha(uid, ld, 3)
+		if lin.is_empty():
+			continue
+		var w: Vector3 = lin[1]
+		var d := Vector2(w.x - _player.position.x, w.z - _player.position.z).length()
+		if d < bd:
+			bd = d
+			best = ld
+	return [] if best == "" else [uid, best]
+
+
+func _quarto_start(mi: int, uid: String, lado: String) -> void:
+	if _mao != "":
+		equip("")
+	var q: Dictionary = _caca.quarto_de(uid, lado)
+	_quarto = {"mi": mi, "uid": uid, "lado": lado, "fase": "faca" if float(q.get("faca", 0.0)) < 1.0 else "machado",
+		"drag": -9, "cortando": false, "anim": -1.0, "treme": 0.0, "fim": -1.0}
+	_olho = {}
+	_bur = {}
+	_jump_btn.visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false
+	if _mach_axe == null:
+		_mach_axe = MeshInstance3D.new()
+		_mach_axe.mesh = Corte.axe_mesh()
+		_mach_axe.material_override = Corte.axe_material()
+		_mach_axe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_cam.add_child(_mach_axe)
+	_mach_axe.visible = str(_quarto.fase) == "machado"
+	_act_check = 0.0
+
+
+func _quarto_end() -> void:
+	if _quarto.is_empty():
+		return
+	_quarto = {}
+	for b in _quarto_btns:
+		(b as Control).visible = false
+	if _mach_axe:
+		_mach_axe.visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
+func _quarto_move(delta: float) -> void:
+	var uid := str(_quarto.uid)
+	var lado := str(_quarto.lado)
+	var mi := int(_quarto.mi)
+	if _caca == null or _caca.couro_de(uid).is_empty() or mi >= _maq.plantas.size() or (_maq.plantas[mi].get("ice", {}) as Dictionary).is_empty():
+		_quarto_end()
+		return
+	var lin: Array = _caca.quarto_linha(uid, lado, 9)
+	if lin.is_empty():
+		_quarto_end()
+		return
+	var meio: Vector3 = lin[4]
+	var fr: Vector3 = _caca.banda_fora(uid, lado)
+	fr.y = 0.0
+	fr = fr.normalized() if fr.length() > 0.1 else Vector3.RIGHT
+	var eye := _vista_livre(mi, meio, fr, 1.8)
+	_player.position = Vector3(eye.x, ground_at(eye.x, eye.z), eye.z)
+	_air = false
+	_vy = 0.0
+	var olha := meio - eye
+	_face = atan2(-olha.x, -olha.z)
+	_yaw = _face
+	_player.rotation.y = _face
+	_play("Idle")
+	var tr := float(_quarto.treme)
+	_quarto.treme = maxf(0.0, tr - delta * 6.0)
+	var sacode := Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.012 * tr
+	_cam.global_transform = Transform3D(Basis.looking_at(olha, Vector3.UP), eye + sacode)
+	var a := float(_quarto.anim)
+	var th := 0.35
+	if a >= 0.0:
+		a += delta
+		if a < 0.13:
+			th = lerpf(0.35, 1.25, a / 0.13)
+		elif a < 0.24:
+			th = lerpf(1.25, -1.35, (a - 0.13) / 0.11)
+		else:
+			th = lerpf(-1.35, 0.35, clampf((a - 0.24) / 0.3, 0.0, 1.0))
+		if float(_quarto.anim) < 0.24 and a >= 0.24:
+			_quarto.treme = 1.0
+			if wear("machado", 1):
+				_update_inventory()
+			if _caca.quarto_golpe(uid, lado):
+				_quarto.fim = 0.0
+		_quarto.anim = a if a < 0.56 else -1.0
+	if _mach_axe:
+		_mach_axe.visible = str(_quarto.fase) == "machado"
+		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25), Vector3(0.3, -0.5, -0.6))
+	if float(_quarto.fim) >= 0.0:
+		_quarto.fim = float(_quarto.fim) + delta
+		if float(_quarto.fim) > 2.2:
+			_quarto_end()
+			return
+	(_quarto_btns[0] as Control).visible = true
+	_jump_btn.visible = false
+	_ctx_btn.visible = false
+	if _sub_ui:
+		_sub_ui.queue_redraw()
+
+
+func _quarto_tela(t: float) -> Vector2:
+	var lin: Array = _caca.quarto_linha(str(_quarto.uid), str(_quarto.lado), 16)
+	var f := clampf(t, 0.0, 1.0) * 15.0
+	var i := mini(int(f), 14)
+	return _cam.unproject_position((lin[i] as Vector3).lerp(lin[i + 1], f - i))
+
+
+func _quarto_input(e: InputEvent) -> bool:
+	if _quarto.is_empty():
+		return false
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var uid := str(_quarto.uid)
+	var lado := str(_quarto.lado)
+	var q: Dictionary = _caca.quarto_de(uid, lado)
+	var pos := Vector2.INF
+	var idx := -9
+	var pressed := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		idx = e.index
+		pressed = e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		idx = -1
+		pressed = e.pressed
+	if pos != Vector2.INF:
+		for b in _quarto_btns:
+			if (b as Control).visible and (b as Control).get_global_rect().has_point(pos):
+				return false
+		if str(_quarto.fase) == "machado":
+			if pressed and float(_quarto.anim) < 0.0 and float(_quarto.fim) < 0.0 and (item_qtd("machado") > 0 or teste):
+				if pos.distance_to(_quarto_tela(1.0)) < 100.0:
+					_quarto.anim = 0.0
+			return true
+		if pressed:
+			_quarto.drag = idx
+			_quarto.cortando = pos.distance_to(_quarto_tela(float(q.get("faca", 0.0)))) < 110.0
+		elif int(_quarto.drag) == idx:
+			_quarto.drag = -9
+			_quarto.cortando = false
+		return true
+	var at := Vector2.ZERO
+	if e is InputEventScreenDrag and e.index == int(_quarto.drag):
+		at = e.position
+	elif e is InputEventMouseMotion and int(_quarto.drag) == -1:
+		at = e.position
+	else:
+		return e is InputEventScreenDrag or e is InputEventMouseMotion
+	if str(_quarto.fase) != "faca" or not bool(_quarto.cortando) or (item_qtd("faca") <= 0 and not teste):
+		return true
+	var t0 := float(q.get("faca", 0.0))
+	var tp := _traca(_caca.quarto_linha(uid, lado, 24), t0, at)
+	if tp < 0.0:
+		_quarto.cortando = false
+		return true
+	if tp <= t0 and t0 < 0.95:
+		return true
+	var t1 := 1.0 if maxf(tp, t0) >= 0.95 else minf(1.0, tp)
+	q.faca = t1
+	if int(t1 * 6.0) != int(t0 * 6.0):
+		Sons.play_at(self, "fibra_puxa", _cam.global_position - _cam.global_transform.basis.z * 1.5, -12.0, 1.8)
+		if wear("faca", 1):
+			_update_inventory()
+	_caca.quarto_visual(uid, lado)
+	if t1 >= 1.0:
+		_quarto.fase = "machado"
+		_quarto.cortando = false
+	return true
+
+
+func _quarto_draw() -> void:
+	if _quarto.is_empty() or _caca == null:
+		return
+	var ui := _sub_ui
+	var q: Dictionary = _caca.quarto_de(str(_quarto.uid), str(_quarto.lado))
+	if str(_quarto.fase) == "faca":
+		var t0 := float(q.get("faca", 0.0))
+		var n := 20
+		for k in n:
+			var a := t0 + (1.0 - t0) * float(k) / n
+			var b := t0 + (1.0 - t0) * (float(k) + 0.5) / n
+			ui.draw_line(_quarto_tela(a), _quarto_tela(b), Color(1, 1, 1, 0.75), 3.0, true)
+		var tip := _quarto_tela(t0)
+		var pulso := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 160.0)
+		ui.draw_arc(tip, 22.0 + pulso * 6.0, 0, TAU, 28, Color(1, 0.95, 0.6, 0.85), 3.0, true)
+		var dn := (_quarto_tela(t0 + 0.08) - tip).normalized()
+		if dn.length() < 0.5:
+			dn = Vector2.RIGHT
+		var lt := Vector2(-dn.y, dn.x)
+		var pc := tip + lt * 6.0
+		ui.draw_colored_polygon(PackedVector2Array([pc + dn * 4.0, pc - dn * 34.0 + lt * 8.0, pc - dn * 34.0 - lt * 4.0]), Color(0.55, 0.55, 0.52))
+		ui.draw_line(pc - dn * 34.0, pc - dn * 70.0, Color(0.38, 0.26, 0.14), 9.0, true)
+	elif float(_quarto.fim) < 0.0:
+		var pp := _quarto_tela(1.0)
+		var pul := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0)
+		ui.draw_arc(pp, 30.0 + pul * 6.0, 0, TAU, 32, Color(0, 0, 0, 0.45), 6.0, true)
+		ui.draw_arc(pp, 30.0 + pul * 6.0, 0, TAU, 32, Color(1, 0.95, 0.7, 0.95), 3.0, true)
+		var f := float(q.get("golpes", 0)) / float(_caca.QUARTO_GOLPES)
+		if f > 0.0:
+			ui.draw_arc(pp, 42.0, -PI * 0.5, -PI * 0.5 + TAU * f, 32, Color(0.85, 0.15, 0.1, 0.95), 5.0, true)
+
+
+## O quarto caindo: tem um carrinho de mão pronto embaixo? Então vai para dentro dele.
+func quarto_no_carrinho(p: Vector3, uid: String, lado: String) -> bool:
+	if _maq == null:
+		return false
+	for mi in _maq.plantas.size():
+		if str(_maq.plantas[mi].tipo) != "carrinho" or not _maq.pronta(mi):
+			continue
+		var l: Vector3 = _maq.xform(mi).affine_inverse() * p
+		if l.x > -0.45 and l.x < 0.55 and absf(l.z) < 0.34 and l.y < 0.75 and l.y > -0.2:
+			_maq.car_por_item(mi, "quarto_vaca", 1)
+			var q: Dictionary = _caca.quarto_de(uid, lado)
+			q["onde"] = "carrinho"
+			Sons.play_at(self, "baque", p, 0.0, 0.8)
+			return true
+	return false
 
 
 # ================== PATAS E CABEÇA (MACHADO) ==================
@@ -15722,6 +15990,7 @@ func _draw_bur_ui() -> void:
 	_mach_draw()
 	_evis_draw()
 	_banda_draw()
+	_quarto_draw()
 	if _mao == "arco" and _morto < 0.0:
 		# a mira: um círculo pequeno no meio da tela (fecha quando a corda está puxada)
 		var mc := _sub_ui.size * 0.5

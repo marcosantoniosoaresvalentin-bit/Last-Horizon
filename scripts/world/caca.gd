@@ -1042,6 +1042,167 @@ func despendurar(uid: String, base: Dictionary) -> void:
 		couro_visual(uid)
 
 
+# ---------- partir a banda (faca e machado) ----------
+# Cada banda pendurada é partida no meio: com a faca, entre os fios de costela (onde a
+# carne é mole), corta a carne em volta da banda até a espinha; com o machado, a espinha.
+# O pedaço de baixo cai: num carrinho de mão posto embaixo fica limpo (vai para ele); na
+# terra, suja e fica impróprio para comer. c.quartos = {"e"/"d": {faca, golpes, caiu, onde}}.
+
+const QUARTO_U := 0.58          # onde parte (entre as costelas de trás)
+const QUARTO_GOLPES := 4
+static var _largura := {}
+
+
+## A banda ("e" a esquerda = a carcaça; "d" a direita = o segundo desenho).
+func banda_no(uid: String, lado: String) -> Node3D:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty():
+		return null
+	if lado == "d":
+		return nd.get("n2", null)
+	return nd.node
+
+
+func quarto_de(uid: String, lado: String) -> Dictionary:
+	var c: Dictionary = couro_de(uid)
+	if c.is_empty():
+		return {}
+	if not c.has("quartos"):
+		c["quartos"] = {}
+	if not (c.quartos as Dictionary).has(lado):
+		c.quartos[lado] = {"faca": 0.0, "golpes": 0, "caiu": false}
+	return c.quartos[lado]
+
+
+## A metade da largura do corpo na altura y (na malha).
+static func _meia_largura(mi: MeshInstance3D, y: float) -> float:
+	var k := int(round(y / 0.002))
+	if _largura.has(k):
+		return _largura[k]
+	var mx := 0.004
+	var vs: PackedVector3Array = mi.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	for v in vs:
+		if absf(v.y - y) < 0.0025 and v.z > 0.012:
+			mx = maxf(mx, absf(v.x))
+	_largura[k] = mx
+	return mx
+
+
+## A linha da faca em volta da banda (da barriga até a espinha), no mundo.
+func quarto_linha(uid: String, lado: String, n_pts := 16) -> Array:
+	var n := banda_no(uid, lado)
+	if n == null or not is_instance_valid(n):
+		return []
+	var rf := _couro_ref(n)
+	var mi: MeshInstance3D = rf.mi
+	var y := lerpf(float(rf.y_rabo), float(rf.y_pescoco), QUARTO_U)
+	var zb := _barriga_z(mi, y)
+	var zt := _costas_z(mi, y)
+	var zc := (zb + zt) * 0.5
+	var rz := (zt - zb) * 0.5
+	var wx := _meia_largura(mi, y) + 0.0004
+	var sd := 1.0 if lado == "e" else -1.0
+	var out := []
+	for i in n_pts:
+		var th := lerpf(-PI * 0.5, PI * 0.5, float(i) / (n_pts - 1))
+		out.append(mi.global_transform * Vector3(sd * wx * cos(th), y, zc + rz * sin(th)))
+	return out
+
+
+## Para onde o lado de fora da banda olha (no mundo).
+func banda_fora(uid: String, lado: String) -> Vector3:
+	var n := banda_no(uid, lado)
+	if n == null or not is_instance_valid(n):
+		return Vector3.FORWARD
+	var mi := _malha(n)
+	return (mi.global_transform.basis.x * (1.0 if lado == "e" else -1.0)).normalized()
+
+
+## O desenho da banda conforme o corte (a faca andando; partida: só a parte de cima).
+func quarto_visual(uid: String, lado: String) -> void:
+	var n := banda_no(uid, lado)
+	if n == null or not is_instance_valid(n):
+		return
+	var mi := _malha(n)
+	var sm: ShaderMaterial = mi.material_override as ShaderMaterial
+	if sm == null:
+		return
+	var q := quarto_de(uid, lado)
+	sm.set_shader_parameter("q_faca", float(q.get("faca", 0.0)) * 1.05)
+	sm.set_shader_parameter("q_parte", 1.0 if bool(q.get("caiu", false)) else 0.0)
+
+
+## Uma machadada na espinha da banda; no último golpe o pedaço de baixo solta e cai.
+func quarto_golpe(uid: String, lado: String) -> bool:
+	var q := quarto_de(uid, lado)
+	var lin := quarto_linha(uid, lado, 16)
+	var w: Vector3 = lin[15] if not lin.is_empty() else Vector3.ZERO
+	q.golpes = int(q.get("golpes", 0)) + 1
+	_pinga(w)
+	if int(q.golpes) < QUARTO_GOLPES:
+		Sons.play_at(_jogo, "machado_osso", w, 0.0, _rng.randf_range(0.95, 1.12))
+		return false
+	Sons.play_at(_jogo, "osso_quebra", w, 2.0, 1.05)
+	q.caiu = true
+	quarto_visual(uid, lado)
+	var pc := _quarto_no(uid, lado, [], false)
+	if pc:
+		_caindo.append({"node": pc, "vel": Vector3.DOWN * 0.3, "ang": Vector3(_rng.randf_range(-1, 1), 0, _rng.randf_range(-1, 1)).normalized() * 0.6,
+			"uid": uid, "tipo": "quarto_" + lado, "chao": 0.0, "r": 0.3, "low": pc.get_meta("low")})
+	return true
+
+
+## O pedaço de baixo da banda (o quarto que caiu): um desenho da vaca mostrando só ele.
+func _quarto_no(uid: String, lado: String, xf_salvo: Array, sujo: bool) -> Node3D:
+	var nd: Dictionary = _nodes.get(uid, {})
+	var bn := banda_no(uid, lado)
+	if nd.is_empty() or bn == null or not is_instance_valid(bn):
+		return null
+	var c: Dictionary = nd.c
+	var p: Dictionary = c.get("p", {})
+	var pc: Node3D = VacaModelo.build(float(p.get("s", 1.0)), str(p.get("cor", "branca")), bool(p.get("touro", false)), int(p.get("seed", 1)))
+	add_child(pc)
+	var mi2 := _malha(pc)
+	if mi2:
+		mi2.mesh = VacaModelo.malha_sem_ubere(mi2.mesh)
+	var sk2: Skeleton3D = pc.get_meta("sk")
+	_pose_pendurada(sk2)
+	_cortes_escala(sk2, c)
+	VacaModelo._cascos(sk2)
+	for ba in pc.find_children("*", "BoneAttachment3D", true, false):
+		(ba as Node3D).visible = false
+	for nm in ["saco", "prepucio"]:
+		for ch in pc.find_children(nm, "MeshInstance3D", true, false):
+			ch.queue_free()
+	pc.global_transform = bn.global_transform
+	var bd: Dictionary = c.get("banda", {})
+	var cab_e := str(bd.get("cab", "e")) == "e"
+	var com_cab: bool = cab_e if lado == "e" else not cab_e
+	var sm := _banda_mat(pc, c, 1.0 if lado == "e" else -1.0, false)
+	sm.set_shader_parameter("com_rabo", 0.0 if com_cab else 1.0)
+	sm.set_shader_parameter("q_parte", 2.0)
+	sm.set_shader_parameter("sujo", 1.0 if sujo else 0.0)
+	mi2.material_override = sm
+	# os pontos de baixo do pedaço (para saber quando encosta no chão)
+	var inv := pc.global_transform.affine_inverse()
+	var low := []
+	for nm2 in ["BackFoot_R", "BackFoot_L", "Tail4", "Hips", "BackUpLeg_R", "BackUpLeg_L", "Back"]:
+		low.append(inv * (sk2.global_transform * sk2.get_bone_global_pose(sk2.find_bone(nm2)).origin))
+	pc.set_meta("low", low)
+	pc.set_meta("uid", uid)
+	pc.set_meta("tipo", "quarto_" + lado)
+	if xf_salvo.size() >= 12:
+		pc.global_transform = _xf_de(xf_salvo)
+	return pc
+
+
+## Sujou (caiu na terra).
+static func quarto_sujar(pc: Node3D) -> void:
+	var mi := _malha(pc)
+	if mi and mi.material_override is ShaderMaterial:
+		(mi.material_override as ShaderMaterial).set_shader_parameter("sujo", 1.0)
+
+
 # ---------- partir ao meio (com o machado) ----------
 # Aberta e pendurada (cada pata da frente amarrada na sua ponta da corda), a vaca é
 # partida ao meio pela espinha com o machado, de cima para baixo. Antes, o jogador escolhe
@@ -1071,6 +1232,13 @@ uniform vec3 rabo4;
 uniform vec3 rabo5;
 uniform float r_rabo;
 uniform float com_rabo;
+uniform float corte_q;
+uniform float q_faca;
+uniform float q_parte;
+uniform float q_w;
+uniform float zb;
+uniform float zt;
+uniform float sujo;
 varying vec3 p;
 varying vec3 nn;
 void vertex() { p = VERTEX; nn = NORMAL; }
@@ -1091,6 +1259,9 @@ void fragment() {
 	float dr = min(min(seg(p, rabo1, rabo2), seg(p, rabo2, rabo3)), min(seg(p, rabo3, rabo4), seg(p, rabo4, rabo5)));
 	dr = min(dr, seg(p, rabo0, rabo1) + r_rabo * 0.35);
 	bool rabo = dr < r_rabo;
+	// a banda partida no meio: em cima (pendurada) ou o pedaço de baixo (que caiu)
+	if (q_parte > 0.5 && q_parte < 1.5 && (u < corte_q || rabo)) { discard; }
+	if (q_parte > 1.5 && u >= corte_q) { discard; }
 	if (rabo) {
 		if (com_rabo < 0.5) { discard; }      // o rabo inteiro fica numa banda só
 	} else if (cab) {
@@ -1121,6 +1292,17 @@ void fragment() {
 		float gord = smoothstep(0.7, 0.85, n2 * 0.7 + n3 * 0.3);
 		ALBEDO = mix(carne, vec3(0.74, 0.66, 0.55), gord * 0.45);
 		ROUGHNESS = 0.55;
+	}
+	// o corte da faca em volta da banda (entre as costelas, até a espinha)
+	if (q_parte < 0.5 && FRONT_FACING && abs(u - corte_q) < q_w && (p.z - zb) / max(zt - zb, 1e-6) < q_faca) {
+		ALBEDO = vec3(0.3, 0.015, 0.015);
+	}
+	// caiu na terra: sujo de barro
+	if (sujo > 0.5) {
+		float t = ruido(q * 9.0 + vec3(1.3, 4.1, 2.2));
+		float t2 = ruido(q * 31.0);
+		ALBEDO = mix(ALBEDO, vec3(0.3, 0.22, 0.13), smoothstep(0.35, 0.6, t * 0.7 + t2 * 0.3) * 0.85);
+		ROUGHNESS = 0.9;
 	}
 	SPECULAR = 0.25;
 }
@@ -1228,6 +1410,14 @@ func _banda_mat(n: Node3D, c: Dictionary, lado: float, cab: bool) -> ShaderMater
 	sm.set_shader_parameter("rabo5", (rb[4] as Vector3) + ((rb[4] as Vector3) - (rb[3] as Vector3)) * 1.2)
 	sm.set_shader_parameter("r_rabo", 0.075 / m_por_u)
 	sm.set_shader_parameter("com_rabo", 0.0 if cab else 1.0)     # o rabo vai com a banda sem a cabeça
+	var yq := lerpf(float(rf.y_rabo), float(rf.y_pescoco), QUARTO_U)
+	sm.set_shader_parameter("corte_q", QUARTO_U)
+	sm.set_shader_parameter("q_w", 0.014 / ((float(rf.y_rabo) - float(rf.y_pescoco)) * m_por_u))
+	sm.set_shader_parameter("zb", _barriga_z(mi, yq))
+	sm.set_shader_parameter("zt", _costas_z(mi, yq))
+	sm.set_shader_parameter("q_faca", 0.0)
+	sm.set_shader_parameter("q_parte", 0.0)
+	sm.set_shader_parameter("sujo", 0.0)
 	return sm
 
 
@@ -1274,6 +1464,9 @@ func partir_monta(uid: String) -> void:
 				ch.queue_free()
 	n.remove_meta("couro_mat")
 	_partir_afasta(uid)
+	for ld in ["e", "d"]:
+		if (c.get("quartos", {}) as Dictionary).has(ld):
+			quarto_visual(uid, ld)
 
 
 ## As bandas penduradas cada uma pela sua pata: um pouco afastadas para os lados.
@@ -1835,6 +2028,8 @@ func _partes_monta(uid: String) -> void:
 		if ch.has_meta("tipo") and str(ch.get_meta("uid", "")) == uid:
 			ch.queue_free()
 	for e in nd.c.get("partes", []):
+		if str(e.tipo).begins_with("quarto_"):
+			continue                             # (montados depois das bandas)
 		if str(e.tipo) == "buchada":
 			var p: Dictionary = nd.c.get("p", {})
 			var vn := visceras_no(float(p.get("s", 1.0)) * 0.62, not bool(p.get("touro", false)), int(p.get("seed", 1)))
@@ -1848,6 +2043,9 @@ func _partes_monta(uid: String) -> void:
 	if is_instance_valid(nd.node):
 		_evis_aplica(nd.node, nd.c)
 	partir_monta(uid)
+	for e in nd.c.get("partes", []):
+		if str(e.tipo).begins_with("quarto_"):
+			_quarto_no(uid, str(e.tipo).substr(7), e.xf, bool(e.get("sujo", false)))
 
 
 ## Onde a parte vai ser cortada, no mundo (para o machado mirar).
@@ -1918,20 +2116,36 @@ func _caindo_tick(delta: float) -> void:
 		# o ponto mais baixo (os cantos da caixa da malha)
 		var low := 1e9
 		var lowp := p
-		for ch in nd.find_children("*", "MeshInstance3D", true, false):
-			if (ch as MeshInstance3D).mesh:
-				var bx: AABB = (ch as MeshInstance3D).get_aabb()
-				for i in 8:
-					var wpt: Vector3 = (ch as MeshInstance3D).global_transform * bx.get_endpoint(i)
-					if wpt.y < low:
-						low = wpt.y
-						lowp = wpt
+		if f.has("low"):
+			for lp in f.low:
+				var wpt0: Vector3 = nd.global_transform * (lp as Vector3)
+				if wpt0.y < low:
+					low = wpt0.y
+					lowp = wpt0
+		else:
+			for ch in nd.find_children("*", "MeshInstance3D", true, false):
+				if (ch as MeshInstance3D).mesh:
+					var bx: AABB = (ch as MeshInstance3D).get_aabb()
+					for i in 8:
+						var wpt: Vector3 = (ch as MeshInstance3D).global_transform * bx.get_endpoint(i)
+						if wpt.y < low:
+							low = wpt.y
+							lowp = wpt
+		# o quarto caindo num carrinho de mão (posto embaixo): vai para dentro dele, limpo
+		if str(f.tipo).begins_with("quarto_") and _jogo.has_method("quarto_no_carrinho"):
+			if _jogo.quarto_no_carrinho(lowp, str(f.uid), str(f.tipo).substr(7)):
+				_caindo.erase(f)
+				nd.queue_free()
+				continue
 		var gy: float = _jogo.ground_at(lowp.x, lowp.z)
 		if low < gy:
 			nd.global_position.y += gy - low
 			if vel.y < -1.2:
 				Sons.play_at(_jogo, "baque", lowp, -10.0 + minf(-vel.y, 5.0), 1.3 if str(f.tipo) != "cabeca" else 0.85)
 				_respingo(Vector3(lowp.x, 0, lowp.z), _rng.randf_range(0.08, 0.16), "gota")
+			if str(f.tipo).begins_with("quarto_") and not bool(f.get("sujou", false)):
+				f["sujou"] = true
+				quarto_sujar(nd)                    # caiu na terra: sujou
 			vel.y = -vel.y * 0.22 if vel.y < -0.6 else 0.0
 			vel.x *= 0.55
 			vel.z *= 0.55
@@ -1945,7 +2159,10 @@ func _caindo_tick(delta: float) -> void:
 			if not cc.is_empty():
 				if not cc.has("partes"):
 					cc["partes"] = []
-				(cc.partes as Array).append({"tipo": str(f.tipo), "xf": _xf_json(nd.global_transform)})
+				var e := {"tipo": str(f.tipo), "xf": _xf_json(nd.global_transform)}
+				if str(f.tipo).begins_with("quarto_"):
+					e["sujo"] = true
+				(cc.partes as Array).append(e)
 
 
 # ---------- o couro ----------
@@ -2346,6 +2563,11 @@ func _rebuild() -> void:
 			_nodes[uid].c = cv
 			if mudou:
 				couro_visual(str(uid))
+			var qmud: bool = JSON.stringify(cv.get("quartos", {})) != JSON.stringify((_nodes[uid].c as Dictionary).get("quartos", {}))
+			if qmud:
+				_nodes[uid].c = cv
+				for ld in ["e", "d"]:
+					quarto_visual(str(uid), ld)
 			if bool((cv.get("banda", {}) as Dictionary).get("feito", false)) and not _nodes[uid].has("n2"):
 				partir_monta(str(uid))
 			elif (cv.get("banda", {}) as Dictionary).has("corte"):

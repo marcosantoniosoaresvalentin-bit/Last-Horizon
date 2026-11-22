@@ -2057,6 +2057,17 @@ func _draw_carrinho(mi: int, root: Node3D, nd: Dictionary) -> void:
 		var cam := k / 4
 		an2.transform = Transform3D(Basis(Vector3.UP, 0.05 * float((k * 7) % 5 - 2)), Vector3(0.04, CAR_FUNDO + 0.05 + cam * 0.09, -0.18 + fila * 0.12))
 	var it: Dictionary = c.itens
+	if it.has("quarto_vaca") or it.has("quarto_vaca_sujo"):
+		# o quarto de vaca deitado na caixa (carne vermelha com a gordura)
+		var qm := MeshInstance3D.new()
+		var sq := SphereMesh.new()
+		sq.radius = 0.2
+		sq.height = 0.3
+		qm.mesh = sq
+		qm.scale = Vector3(1.7, 1.0, 1.0)
+		qm.material_override = _fmat("quarto", Color(0.42, 0.06, 0.05), 0.5)
+		qm.position = Vector3(0.04, CAR_FUNDO + 0.14, 0.0)
+		root.add_child(qm)
 	if not it.is_empty():
 		# o que veio da mochila: uma trouxa no canto da caixa
 		var tr := MeshInstance3D.new()
