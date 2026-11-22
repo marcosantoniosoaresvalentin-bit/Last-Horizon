@@ -1,9 +1,9 @@
 {
-  "version": 183,
-  "file": "update_183.zip",
-  "size": 5083878,
-  "sha256": "02957f78bee929144ed8a336acc222776d1a5e4ee292b786727a7ea6acd12d25",
+  "version": 184,
+  "file": "update_184.zip",
+  "size": 5085018,
+  "sha256": "7d38d9a8596a6e726d8cc8f15ec567fd44b859a32fd4da546fe040b0713ba97e",
   "min_build": 1,
-  "notes": "Carrinho: roda bem visível",
+  "notes": "Carrinho: pinos, tábuas sem fresta, caçamba vira, roda com física",
   "date": "2026-11-22"
 }
