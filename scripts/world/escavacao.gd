@@ -459,8 +459,13 @@ func _level_for(b: Dictionary, vol: float) -> float:
 		var nxt: float = g[i + 1] if i + 1 < n else 1e9
 		var L := (t + pre) / float(i + 1)
 		if L <= nxt:
-			return minf(L, float(b.rim))
-	return float(b.rim)
+			return minf(L, _topo(b))
+	return _topo(b)
+
+
+## Até onde a água sobe: a borda mais baixa (aberto na lagoa: a borda seca, longe da beira).
+func _topo(b: Dictionary) -> float:
+	return float(b.get("topo", b.rim))
 
 
 func _vol_at(b: Dictionary, level: float) -> float:
@@ -487,7 +492,6 @@ func water_tick(hours: float, rain_mmh: float, evap_mmh: float) -> void:
 		var b: Dictionary = _basins[key]
 		var area := float((b.pts as Array).size()) * RES * RES
 		var vol := float(water.get(key, 0.0))
-		var full := _vol_at(b, float(b.rim))
 		vol += rain_mmh / 1000.0 * hours * area * 2.5        # a chuva em volta escorre para dentro
 		var lvl := _level_for(b, vol)
 		var wet_area := 0.0
@@ -519,7 +523,7 @@ func water_tick(hours: float, rain_mmh: float, evap_mmh: float) -> void:
 			b.murk_d = mk
 			redraw = true
 		b.murk = mk
-		vol = clampf(vol, 0.0, full)
+		vol = clampf(vol, 0.0, _vol_at(b, _topo(b)))
 		water[key] = vol
 		var nl: float = _level_for(b, vol) if vol > 0.0005 else -1e9
 		if absf(nl - float(b.level)) > 0.004:
@@ -539,17 +543,32 @@ func _agua_do_rio(b: Dictionary, vol: float, hours: float) -> float:
 	var rim_seco := 1e9
 	var boca := Vector2.ZERO          # onde o buraco encosta na água do rio/lagoa
 	var secos := []
+	var molhados := []
 	for k in b.borda:
 		var x := float(k.x) * RES
 		var z := float(k.y) * RES
 		var lv: float = rio_fn.call(x, z)
-		if lv > _gk(k) + 0.01:
+		# (água funda demais na beirada não é a beira desta lagoa: é o mapa grosso da água
+		# vendo um riacho de mais acima no morro)
+		if lv > _gk(k) + 0.01 and lv < _gk(k) + 1.5:
+			molhados.append(Vector2(x, z))
 			if lv > Lr:
 				Lr = lv
 				boca = Vector2(x, z)
 		else:
-			rim_seco = minf(rim_seco, _gk(k))
 			secos.append(k)
+	# a beirada perto da água e mais baixa que ela também é lagoa (o mapa da água é de
+	# quadrados de 5 m e não vê a beira fina): não conta como borda por onde a água sai
+	for k in secos:
+		var pk := Vector2(float(k.x) * RES, float(k.y) * RES)
+		var na_beira := false
+		if _gk(k) < Lr:
+			for m in molhados:
+				if pk.distance_to(m) < 6.0:
+					na_beira = true
+					break
+		if not na_beira:
+			rim_seco = minf(rim_seco, _gk(k))
 	if Lr < -1e8:
 		# cavado dentro do próprio rio
 		var kl := _basin_low_k(b)
@@ -559,8 +578,9 @@ func _agua_do_rio(b: Dictionary, vol: float, hours: float) -> float:
 			boca = Vector2(kl.x, kl.y) * RES
 	if Lr > float(b.low):
 		b.fonte = "rio"
-		var alvo := _vol_at(b, minf(Lr, rim_seco))
-		var novo := vol + (alvo - vol) * (1.0 - exp(-hours / RIO_TAU))
+		b.topo = maxf(rim_seco if rim_seco < 1e8 else Lr, float(b.rim))
+		var alvo := _vol_at(b, minf(Lr, _topo(b)))
+		var novo := minf(vol + (alvo - vol) * (1.0 - exp(-hours / RIO_TAU)), _vol_at(b, _topo(b)))
 		var tirou := novo - vol           # o que entrou no buraco saiu da lagoa (e volta se sair)
 		# a borda seca mais baixa ficou abaixo da água: transborda por ali e escorre morro
 		# abaixo (a lagoa vai escoando pela valeta até o nível dessa borda)
@@ -569,7 +589,12 @@ func _agua_do_rio(b: Dictionary, vol: float, hours: float) -> float:
 		var ps := Vector2.ZERO
 		for k in secos:
 			var pk := Vector2(float(k.x) * RES, float(k.y) * RES)
-			if pk.distance_to(boca) > 4.0 and _gk(k) < saida:
+			var perto := false
+			for m in molhados:
+				if pk.distance_to(m) < 6.0:
+					perto = true
+					break
+			if not perto and _gk(k) < saida:
 				saida = _gk(k)
 				ps = pk
 		var vaza := 0.0
@@ -597,6 +622,7 @@ func _agua_do_rio(b: Dictionary, vol: float, hours: float) -> float:
 			if lv3 > -1e8:
 				wt = maxf(wt, lv3 - dist * LENCOL_CAI)
 	b.fonte = ""
+	b.erase("topo")
 	if wt > float(b.low):
 		b.fonte = "lencol"
 		var alvo2 := _vol_at(b, minf(wt, float(b.rim)))
