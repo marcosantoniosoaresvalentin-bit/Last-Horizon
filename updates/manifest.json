@@ -1,9 +1,9 @@
 {
-  "version": 209,
-  "file": "update_209.zip",
-  "size": 5619113,
-  "sha256": "23f604bf4478f38863e60bbc711d026d829b69012ae9d202381c0d52988aa509",
+  "version": 210,
+  "file": "update_210.zip",
+  "size": 5620666,
+  "sha256": "4af86cbca4a3725ffefc4cb3dd56fbcc3f8c5d8af6346fbc0d906a7e5ffe4b8e",
   "min_build": 1,
-  "notes": "Carne: pegar, levar, pôr no carrinho e na mesa; cortar em pedaços na mesa",
+  "notes": "Mesa de carne: tirar patas e cabeça antes de cortar; soltar a banda",
   "date": "2026-11-22"
 }
