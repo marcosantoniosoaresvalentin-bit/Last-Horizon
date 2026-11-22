@@ -1352,6 +1352,52 @@ static func fio_cipo(st: SurfaceTool, pts: Array, r: float, tom := 0.0) -> void:
 				st.add_vertex(qq[j])
 
 
+## Corda torcida ao longo de um caminho: três pernas de cipó enroladas bem juntas em
+## espiral (encostando uma na outra, sem fresta) e um miolo por dentro.
+## r: raio de cada perna; passo: comprimento de uma volta; fase: gira as pernas.
+static func corda_tubo(st: SurfaceTool, caminho: Array, r: float, passo: float, fase := 0.0) -> void:
+	if caminho.size() < 2:
+		return
+	# reamostra o caminho em passos curtos (a espiral fica lisa)
+	var pts := []
+	var dmax := passo / 18.0
+	for i in caminho.size() - 1:
+		var a: Vector3 = caminho[i]
+		var b: Vector3 = caminho[i + 1]
+		var n := maxi(1, int(ceil(a.distance_to(b) / dmax)))
+		for k in n:
+			pts.append(a.lerp(b, float(k) / n))
+	pts.append(caminho[caminho.size() - 1])
+	var rr := r * 1.12                       # as pernas encostam (sobrepõem um tico)
+	var ref := Vector3(0.31, 0.77, 0.55).normalized()
+	var esq := []
+	var sacum := 0.0
+	var fr_a := Vector3.ZERO
+	for i in pts.size():
+		var p: Vector3 = pts[i]
+		if i > 0:
+			sacum += p.distance_to(pts[i - 1])
+		var d := ((pts[mini(i + 1, pts.size() - 1)] as Vector3) - (pts[maxi(i - 1, 0)] as Vector3)).normalized()
+		var a2: Vector3
+		if fr_a == Vector3.ZERO:
+			a2 = d.cross(ref).normalized()
+		else:
+			a2 = (fr_a - d * d.dot(fr_a)).normalized()          # o quadro gira junto, sem torcer
+		fr_a = a2
+		var b2 := d.cross(a2).normalized()
+		esq.append([p, a2, b2, sacum])
+	for k in 3:
+		var fio := []
+		for e in esq:
+			var th := float(e[3]) / passo * TAU + TAU * k / 3.0 + fase
+			fio.append((e[0] as Vector3) + ((e[1] as Vector3) * cos(th) + (e[2] as Vector3) * sin(th)) * rr)
+		fio_cipo(st, fio, r, 0.15 + k * 0.3)
+	var miolo := []
+	for e in esq:
+		miolo.append(e[0])
+	fio_cipo(st, miolo, rr * 0.95, 0.9)
+
+
 ## A amarração de um cruzamento: voltas de cipó apertadas em volta da vara de cima (dos
 ## dois lados das pernas) e voltas em X passando pelo cruzamento das pernas.
 static func amarra_mesh(cheia: bool) -> ArrayMesh:
@@ -1442,24 +1488,29 @@ static func tranca_mesh(fase: float, lado: int, movendo: float, com_fios: bool) 
 	var a := 0.018
 	var b := 0.012
 	if com_fios:
+		var r := 0.0125
+		var ps := 0.1
+		var corpo := []
+		for j in 2:
+			corpo.append(Vector3(0, lerpf(topo, fim, float(j)), 0))
+		corda_tubo(st, corpo, r, ps, fase * 0.25 / ps * TAU)
+		# embaixo as três pernas soltas, abrindo (a que está passando vem para o meio)
+		var giro := fase * 0.25 / ps * TAU + (topo - fim) / ps * TAU
 		for i in 3:
-			var pts := []
-			var n := 60
-			for j in n + 1:
-				var u := float(j) / n
-				var y := lerpf(topo, fim, u)
-				var th := (topo - y) / passo * PI * 0.5 + fase * PI * 0.5 + TAU * i / 3.0
-				pts.append(Vector3(sin(th) * a * 2.0, y, sin(th * 2.0) * b))
-			# o fio solto descendo (cada um para o seu lado)
-			var pf: Vector3 = pts[pts.size() - 1]
+			var th := giro + TAU * i / 3.0
+			var pf := Vector3(cos(th), fim, sin(th)) * Vector3(r * 1.12, 1, r * 1.12)
 			var lado_i: float = [-1.0, 0.0, 1.0][i]
 			var ponta := Vector3(lado_i * 0.13, fim - 0.32, 0.06)
 			if lado != -1 and ((lado == 0 and i == 0) or (lado == 1 and i == 2)):
 				ponta = ponta.lerp(Vector3(0, fim - 0.3, 0.1), movendo)
-			for j in 10:
-				var u2 := float(j + 1) / 10.0
-				pts.append(pf.lerp(ponta, u2) + Vector3(0, 0, sin(u2 * PI) * 0.03))
-			fio_cipo(st, pts, 0.011, float(i) * 0.35)
+			var pts := []
+			for j in 13:
+				var u2 := float(j) / 12.0
+				# a perna ainda torcida no começo, depois solta
+				var tw := (1.0 - u2) * 0.6
+				var pp := pf.lerp(ponta, u2) + Vector3(sin(th + tw) * 0.004, 0, sin(u2 * PI) * 0.03)
+				pts.append(pp)
+			fio_cipo(st, pts, r, float(i) * 0.35)
 	# o nó no alto da vara
 	var no := []
 	for j in 13:
@@ -1476,15 +1527,20 @@ static func rolo_mesh(metros: float) -> ArrayMesh:
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var voltas := clampi(int(round(metros * 0.6)) + 2, 3, 34)
 	var R := clampf(0.1 + metros * 0.002, 0.1, 0.2)
+	var r := 0.0075
+	var esp := r * 2.3 * 1.12                # grossura da corda
 	var pts := []
-	var n := voltas * 18
+	var n := voltas * 20
+	var por_camada := 6
 	for i in n + 1:
 		var u := float(i) / n
 		var a := u * TAU * voltas
-		var camada: float = floor(u * voltas / 6.0)
-		var rr: float = R + 0.012 * fmod(u * voltas, 6.0) / 6.0
-		pts.append(Vector3(cos(a) * rr, 0.012 + camada * 0.022, sin(a) * rr))
-	fio_cipo(st, pts, 0.011, 0.3)
+		var v := u * voltas
+		var camada: float = floor(v / por_camada)
+		var dentro := fmod(v, por_camada) / por_camada
+		var rr: float = R - esp * 0.5 + esp * dentro * por_camada * 0.18
+		pts.append(Vector3(cos(a) * rr, esp * 0.5 + camada * esp * 0.95, sin(a) * rr))
+	corda_tubo(st, pts, r, 0.07)
 	st.generate_normals()
 	return st.commit()
 
