@@ -182,7 +182,7 @@ static func build(s := 1.0, cor := "branca", touro := false, _seed := 1) -> Node
 	if touro:
 		var pele := _material(cor, 0 if cor != "malhada" else 1, true)
 		_preso(sk0, "Body", _saco_mesh(), pele, Vector3(0, 0.0255, 0.0232))
-		_preso(sk0, "Body", _prepucio_mesh(), pele, Vector3(0, -0.004, 0.0205))
+		_preso(sk0, "Body", _prepucio_mesh(), pele, Vector3(0, 0.022, 0.0212))
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	var ap: AnimationPlayer = m.find_children("*", "AnimationPlayer", true, false)[0]
 	ap.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
@@ -335,37 +335,25 @@ static func _saco_mesh() -> ArrayMesh:
 	return st.commit()
 
 
-## A bainha do órgão (prepúcio) do zebu: uma prega larga de pele pendurada no meio da
-## barriga, comprida ao longo do corpo onde gruda e afinando para baixo até a ponta
-## arredondada (inclinada um pouco para a frente).
+## A bainha do órgão (prepúcio): um cordão de pele colado embaixo da barriga, que sai
+## de trás (do saco, entre as coxas) e corre para a frente até a ponta, que pende um
+## pouco antes do meio da barriga. Coordenadas a partir do saco (y para a cabeça é -).
 static func _prepucio_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var n := 7
-	var lados := 10
-	var rows := []
+	var pts := []
+	var rs := []
+	var cs := []
+	var n := 10
 	for i in n + 1:
-		var u := float(i) / n                     # 0 colado na barriga, 1 a ponta
-		var c := Vector3(0, -0.0035 * u * u, 0.0004 - 0.0062 * u)
-		var ly := lerpf(0.0075, 0.0016, pow(u, 0.8))     # comprida ao longo do corpo
-		var lx := lerpf(0.0022, 0.0013, u)               # estreita de lado
-		if u > 0.85:
-			var e := sqrt(maxf(0.0, 1.0 - (u - 0.85) / 0.15)) * 0.9 + 0.1
-			ly *= e
-			lx *= e
-		var row := []
-		for k in lados:
-			var t := TAU * k / lados
-			row.append(c + Vector3(cos(t) * lx, sin(t) * ly, 0))
-		rows.append(row)
-	for i in n:
-		for k in lados:
-			var q := [rows[i][k], rows[i + 1][k], rows[i + 1][(k + 1) % lados], rows[i][(k + 1) % lados]]
-			for j in [0, 1, 2, 0, 2, 3]:
-				st.add_vertex(q[j])
-	# a ponta fechada, com o tufo de pelo
-	var tip: Vector3 = Vector3(0, -0.0035, -0.0058)
-	_bola(st, tip, Vector3(0.0012, 0.0014, 0.0008), 3, 6)
+		var u := float(i) / n                       # 0 no saco, 1 na ponta
+		var y := -0.015 * u
+		var z := 0.0004 - 0.0004 * sin(u * PI) - 0.0022 * smoothstep(0.7, 1.0, u)
+		pts.append(Vector3(0, y, z))
+		rs.append(lerpf(0.0016, 0.0015, u) * (1.0 - 0.45 * smoothstep(0.9, 1.0, u)))
+		cs.append(Color.WHITE)
+	_tubo(st, pts, rs, cs, 8)
+	_bola(st, Vector3(0, -0.015, -0.0021), Vector3(0.0009, 0.0011, 0.0009), 3, 6)
 	st.generate_normals()
 	return st.commit()
 
