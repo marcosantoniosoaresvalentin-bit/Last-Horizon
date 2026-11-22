@@ -495,7 +495,7 @@ var _split_rng := RandomNumberGenerator.new()
 const BALDE_VOL := 0.024          # cabe uns 24 litros
 const BALDE_KG := 25.0            # mais que isso não dá para carregar pela alça
 const PAZADA := 0.006             # uma pazada: uns 6 litros
-const DENS := {"terra": 1500.0, "argila": 1800.0, "agua": 1000.0, "barro": 1700.0, "areia": 1600.0}
+const DENS := {"terra": 1500.0, "argila": 1800.0, "agua": 1000.0, "barro": 1700.0, "areia": 1600.0, "carvao": 250.0}
 const REBOCOS_POR_BALDE := 8      # um balde de barro reboca uns 8 pedaços de tábua
 const SWIM_DEPTH := 1.25          # água mais funda que isso: nada (os pés não acham o fundo)
 const SWIM_SINK := 1.32           # nadando: os pés ficam isso abaixo da superfície (cabeça para fora)
@@ -1581,6 +1581,7 @@ func _process(delta: float) -> void:
 	_update_dig(delta)
 	_update_pour(delta)
 	_vitais_tick(delta)
+	_car_tick(delta)
 	_dig_ring_tick()
 	_filtro_tick(delta)
 	if not _racha.is_empty() and (_mao != "machado" or _cepo_near(1.8, true) != int(_racha.ci)):
@@ -3021,12 +3022,13 @@ func _update_chop(delta: float) -> void:
 ## de cima delas ou recolher uma forquilha.
 func _update_ctx_btn() -> void:
 	_ctx_action = ""
-	if not _carry.is_empty() and _carry.has("lenha") and not _drag and _crouch_job == "" and not _air and _cepo_near(1.6, false) >= 0:
+	if _empurra >= 0:
+		_car_ctx()
+	elif not _carry.is_empty() and _carry.has("lenha") and not _drag and _crouch_job == "" and not _air and _cepo_near(1.6, false) >= 0:
 		_ctx_action = "por_cepo"
 		_ctx_btn.text = "Pôr no cepo"
-	elif not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1 and _crouch_job == "" and not _air:
-		_ctx_action = "guardar_lenha"
-		_ctx_btn.text = "Guardar lenha"
+	elif _maq and _car_ctx():
+		pass
 	elif _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _forno_precisa_barro() >= 0:
 		var fmi := _forno_precisa_barro()
 		_ctx_action = "forno_barro"
@@ -3150,8 +3152,11 @@ func _ctx_press() -> void:
 					_show_toast("+1 folha seca de buriti")
 				_act_check = 0.0
 			return
-		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar", "forno_pedra", "forno_barro":
+		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar", "forno_pedra", "forno_barro", "car_eixo", "car_roda", "car_cipo":
 			_maq_ctx_press(_ctx_action)
+			return
+		"car_soltar", "car_lenha", "car_balde", "car_encher", "car_empurrar":
+			_car_press(_ctx_action)
 			return
 		"peca":
 			var pc := _aimed_piece()
@@ -5267,6 +5272,8 @@ func _update_balde_fill(mi: MeshInstance3D, c: Dictionary) -> void:
 	var base := Color(0.62, 0.3, 0.16) if clay else Color(0.36, 0.25, 0.16)
 	if str(c.tipo) == "areia":
 		base = Color(0.8, 0.7, 0.52)               # areia da praia
+	if str(c.tipo) == "carvao":
+		base = Color(0.07, 0.07, 0.075)            # pedaços de carvão
 	if mud:
 		base = Color(0.2, 0.15, 0.11)             # barro com fibra (molhado)
 	var rng := RandomNumberGenerator.new()
@@ -5420,6 +5427,9 @@ func _update_pour(delta: float) -> void:
 					_show_toast("Terra molhada! Agora ponha %d maços de capim seco (pelo olho no monte)." % _barr.fibras_need(m2))
 			else:
 				_balde_carga = {}           # a água escorre no chão
+		elif str(c.tipo) == "carvao":
+			_add_ground("carvao", maxi(1, int(c.get("n", roundi(float(c.vol) / CARVAO_L)))), to.x, to.z)
+			_balde_carga = {}
 		else:
 			_escav.dump(to, float(c.vol), str(c.tipo))
 			if str(c.tipo) in ["terra", "argila", "barro"]:
@@ -6040,10 +6050,12 @@ func _move_player(delta: float) -> void:
 		var fwd := Vector3(-sin(_yaw), 0, -cos(_yaw))
 		var right := Vector3(cos(_yaw), 0, -sin(_yaw))
 		var move := (right * dir.x - fwd * dir.y).normalized()
-		var running := amount > 0.85 and _carry.is_empty()
+		var running := amount > 0.85 and _carry.is_empty() and _empurra < 0
 		if _mao == "balde" and not _balde_carga.is_empty() and float(_balde_carga.vol) * float(DENS.get(_balde_carga.tipo, 1500.0)) >= 8.0:
 			running = false      # com balde pesado não dá para correr
 		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow * _doente_lento()
+		if _empurra >= 0:
+			sp *= 0.85                 # empurrando o carrinho: passo firme
 		if _swim:
 			sp = SWIM_SPEED          # nadando: braçada (sem correr)
 		if not _carry.is_empty():
@@ -8680,7 +8692,13 @@ func _sync_set(nome: String, txt: String) -> void:
 	var keep_day: int = int(mod.last_day) if has_day else 0
 	if has_day:
 		mod.last_day = 1 << 30
+	var sig0: String = _maq.assinatura() if nome == "maquinas" and _maq else ""
+	var n0: int = _maq.plantas.size() if nome == "maquinas" and _maq else -1
 	mod._load(tmp)
+	if nome == "maquinas" and n0 == _maq.plantas.size() and sig0 == _maq.assinatura() and _maq._nodes.size() == n0:
+		_maq.reposicionar()            # só um carrinho andou: move, sem refazer tudo
+		_act_check = 0.0
+		return
 	if has_day and not _mp_client():
 		mod.last_day = maxi(keep_day, int(mod.last_day))
 	match nome:
@@ -9130,6 +9148,246 @@ func _proj_place() -> void:
 
 
 ## Decide o botão de contexto perto de uma planta/máquina. true se pôs algum.
+# ================== CARRINHO DE MÃO ==================
+# Pronto, o carrinho carrega terra, argila, barro, areia e carvão (despejados do balde),
+# achas de lenha (na mão: "Pôr no carrinho") e qualquer coisa da mochila (SOLTAR perto
+# dele). Atrás dele, nas alças: "Empurrar" (as alças sobem, a roda vai girando); pelo
+# olho: despejar tudo, pegar uma lenha, tirar da trouxa.
+
+const CARVAO_L := 0.0015          # m³ de cada pedaço de carvão (no balde cabem uns 16)
+var _empurra := -1                # o carrinho que este jogador está empurrando
+
+
+## O carrinho pronto mais perto (o meio dele), ou -1.
+## Quantos pedaços de carvão tem no balde.
+func _carvao_n() -> int:
+	if str(_balde_carga.get("tipo", "")) != "carvao":
+		return 0
+	return int(_balde_carga.get("n", roundi(float(_balde_carga.get("vol", 0.0)) / CARVAO_L)))
+
+
+func _car_perto(reach := 2.2) -> int:
+	if _maq == null:
+		return -1
+	var best := -1
+	var bd := reach
+	for mi in _maq.plantas.size():
+		if str(_maq.plantas[mi].tipo) != "carrinho" or not _maq.pronta(mi):
+			continue
+		var o: Vector3 = _maq.xform(mi) * Vector3(-0.1, 0, 0)
+		var d := Vector2(o.x - _player.position.x, o.z - _player.position.z).length()
+		if d < bd:
+			bd = d
+			best = mi
+	return best
+
+
+## O botão do lugar perto do carrinho pronto (devolve se achou alguma coisa).
+func _car_ctx() -> bool:
+	if _empurra >= 0:
+		_ctx_action = "car_soltar"
+		_ctx_btn.text = "Soltar o carrinho"
+		return true
+	if _crouch_job != "" or _air or _swim:
+		return false
+	var mi := _car_perto(2.0)
+	if mi < 0:
+		return false
+	var lp: Vector3 = _maq.xform(mi).affine_inverse() * _player.position
+	if not _carry.is_empty() and _carry.has("lenha"):
+		_ctx_action = "car_lenha"
+		_ctx_btn.text = "Pôr no carrinho"
+		return true
+	var cg: Dictionary = _maq.car_of(mi).carga
+	if _mao == "balde" and not _balde_carga.is_empty() and str(_balde_carga.tipo) in Maquinas.CAR_MATS and _maq.car_cabe(mi, str(_balde_carga.tipo)) > 0.0005:
+		_ctx_action = "car_balde"
+		_ctx_btn.text = "Despejar no carrinho"
+		return true
+	if _mao == "balde" and _balde_carga.is_empty() and float(cg.get("vol", 0.0)) > 0.0005:
+		_ctx_action = "car_encher"
+		_ctx_btn.text = "Encher o balde"
+		return true
+	if _carry.is_empty() and lp.x < -0.5:
+		_ctx_action = "car_empurrar"
+		_ctx_btn.text = "Empurrar"
+		return true
+	return false
+
+
+func _car_press(act: String) -> void:
+	if act == "car_soltar":
+		_car_soltar()
+		return
+	var mi := _car_perto(2.0)
+	if mi < 0:
+		return
+	var meio: Vector3 = _maq.xform(mi) * Vector3(0.05, Maquinas.CAR_FUNDO, 0)
+	match act:
+		"car_lenha":
+			var acha: Dictionary = _carry.duplicate(true)
+			for k in ["pos", "yaw", "golpes", "em_pe"]:
+				acha.erase(k)
+			if _maq.car_por_lenha(mi, acha):
+				_soltar_carga()
+				Sons.play_at(self, "baque", meio, -10.0, 1.3)
+		"car_balde":
+			var c := _balde_carga
+			var mv: float = _maq.car_por_carga(mi, str(c.tipo), float(c.vol))
+			if mv > 0.0:
+				var left := float(c.vol) - mv
+				_balde_carga = {} if left <= 0.0005 else {"tipo": c.tipo, "vol": left}
+				if str(c.tipo) == "carvao" and not _balde_carga.is_empty():
+					_balde_carga["n"] = roundi(left / CARVAO_L)
+				_falling_lumps(_balde_fill.global_position + Vector3.UP * 0.05 if _balde_fill else meio + Vector3.UP * 0.5, meio, str(c.tipo))
+				Sons.play_at(self, "cavar" if str(c.tipo) != "carvao" else "pedra_bate", meio, -4.0, 0.9)
+				_update_balde_fill(_balde_fill, _balde_carga)
+				_update_inventory()
+		"car_encher":
+			var cg: Dictionary = _maq.car_of(mi).carga
+			var tipo := str(cg.get("tipo", "terra"))
+			var cap := minf(BALDE_VOL, BALDE_KG / float(DENS.get(tipo, 1500.0)))
+			var got: Dictionary = _maq.car_tirar_carga(mi, cap)
+			if not got.is_empty():
+				_balde_carga = {"tipo": got.tipo, "vol": float(got.vol)}
+				if str(got.tipo) == "carvao":
+					_balde_carga["n"] = roundi(float(got.vol) / CARVAO_L)
+				Sons.play_at(self, "cavar", meio, -6.0, 1.1)
+				_update_balde_fill(_balde_fill, _balde_carga)
+				_update_inventory()
+		"car_empurrar":
+			_empurra = mi
+			_maq.empurrando = mi
+			_maq.plantas[mi]["emp"] = true      # os outros jogadores veem as alças levantadas
+			_car_tick(0.0)
+	_act_check = 0.0
+
+
+func _car_soltar() -> void:
+	var mi := _empurra
+	_empurra = -1
+	if _maq:
+		_maq.empurrando = -1
+		if mi >= 0 and mi < _maq.plantas.size():
+			_maq.plantas[mi].erase("emp")
+			_maq.carrinho_pose(mi, false)
+			Sons.play_at(self, "baque", _maq.xform(mi).origin, -14.0, 1.2)
+	_act_check = 0.0
+
+
+## Empurrando: o carrinho vai na frente do jogador, com a roda no chão.
+func _car_tick(_delta: float) -> void:
+	if _empurra < 0 or _maq == null:
+		return
+	if _empurra >= _maq.plantas.size() or str(_maq.plantas[_empurra].tipo) != "carrinho" or not _carry.is_empty() or _swim or _morto >= 0.0:
+		_car_soltar()
+		return
+	var fwd := Vector3(-sin(_face), 0, -cos(_face))
+	var pos := _player.position + fwd * 1.06
+	pos.y = ground_at(pos.x, pos.z)
+	var p: Dictionary = _maq.plantas[_empurra]
+	var antes := Vector3(float(p.x), 0, float(p.z))
+	var andou := Vector2(pos.x - antes.x, pos.z - antes.z).dot(Vector2(fwd.x, fwd.z))
+	_maq.carrinho_mover(_empurra, pos, _face + PI * 0.5, andou)
+
+
+## Olho do carrinho: o que dá para fazer com o que está dentro.
+func _car_opts(mi: int) -> Array:
+	var c: Dictionary = _maq.car_of(mi)
+	var op := []
+	if float((c.carga as Dictionary).get("vol", 0.0)) > 0.0005 or not (c.lenhas as Array).is_empty() or not (c.itens as Dictionary).is_empty():
+		op.append(["car_despejar", "Despejar"])
+	if not (c.lenhas as Array).is_empty() and _carry.is_empty():
+		op.append(["car_pegar_lenha", "Pegar lenha"])
+	if not (c.itens as Dictionary).is_empty():
+		op.append(["car_tirar_itens", "Tirar da trouxa"])
+	return op
+
+
+func _car_pick(mi: int, acao: String) -> void:
+	var xf: Transform3D = _maq.xform(mi)
+	match acao:
+		"car_despejar":
+			# vira a caixa para a frente: tudo cai na frente da roda
+			var frente: Vector3 = xf * Vector3(1.15, 0, 0)
+			var c: Dictionary = _maq.car_of(mi)
+			var cg: Dictionary = _maq.car_tirar_carga(mi, 1e9)
+			if not cg.is_empty():
+				if str(cg.tipo) == "carvao":
+					_add_ground("carvao", maxi(1, roundi(float(cg.vol) / CARVAO_L)), frente.x, frente.z)
+				else:
+					# o monte cai espalhado um pouco (em três montes encostados)
+					for k in 3:
+						var q: Vector3 = xf * Vector3(1.05 + 0.25 * float(k % 2), 0, -0.22 + 0.22 * k)
+						_escav.dump(q, float(cg.vol) / 3.0, str(cg.tipo))
+						if str(cg.tipo) in ["terra", "argila", "barro"]:
+							_barr.add(q, str(cg.tipo), float(cg.vol) / 3.0)
+					_dirt(frente)
+				Sons.play_at(self, "cavar", frente, 0.0, 0.7)
+			var ln: Array = (c.lenhas as Array).duplicate()
+			for k in ln.size():
+				var a: Dictionary = _maq.car_tirar_lenha(mi)
+				if a.is_empty():
+					break
+				var q2: Vector3 = xf * Vector3(1.0 + 0.12 * float(k % 3), 0.2, -0.3 + 0.2 * float(k % 4))
+				_arvores.drop_log(a, q2, _face + randf_range(-0.6, 0.6))
+			if not ln.is_empty():
+				Sons.play_at(self, "baque", frente, -4.0, 1.1)
+			var it: Dictionary = _maq.car_tirar_itens(mi)
+			var k3 := 0
+			for id in it:
+				var q3: Vector3 = xf * Vector3(1.0 + 0.15 * float(k3 % 3), 0, -0.25 + 0.25 * float(k3 % 3))
+				if str(id) == "pedra" and _pedras:
+					for j in int(it[id]):
+						_pedras.add(q3.x + randf_range(-0.2, 0.2), q3.z + randf_range(-0.2, 0.2), randf() * TAU, 0.15, randi())
+					_pedras._rebuild_all()
+				else:
+					_add_ground(str(id), int(it[id]), q3.x, q3.z)
+				k3 += 1
+		"car_pegar_lenha":
+			if not _carry.is_empty():
+				return
+			var a2: Dictionary = _maq.car_tirar_lenha(mi)
+			if not a2.is_empty():
+				_hold_log(a2)
+				Sons.play_at(self, "baque", xf.origin + Vector3.UP * 0.4, -14.0, 1.4)
+		"car_tirar_itens":
+			var it2: Dictionary = _maq.car_tirar_itens(mi)
+			for id in it2:
+				var caiu := 0
+				if str(id) == "lenha":
+					caiu = int(it2[id])            # lenha da mochila antiga: cai no chão
+				else:
+					caiu = add_item(str(id), int(it2[id]))
+				if caiu > 0:
+					_add_ground(str(id), caiu, xf.origin.x + randf_range(-0.4, 0.4), xf.origin.z + randf_range(-0.4, 0.4))
+			_update_inventory()
+	_act_check = 0.0
+
+
+## SOLTAR na mochila perto do carrinho pronto: vai para dentro dele (as ferramentas e
+## as coisas com desgaste vão para o chão, como sempre). Devolve se foi para o carrinho.
+func soltar_no_carrinho(id: String, n: int) -> bool:
+	var mi := _car_perto(2.4)
+	if mi < 0 or id in ["rodela", "semente", "balde"] or Itens.dur_max(id) > 0:
+		return false
+	n = mini(n, item_qtd(id))
+	if n <= 0:
+		return false
+	if id == "lenha":
+		_lenha_fix()
+		for k in n:
+			var acha: Dictionary = _lenhas.pop_back() if not _lenhas.is_empty() else _lenha_padrao()
+			if not _maq.car_por_lenha(mi, acha):
+				return false
+			remove_item("lenha", 1)
+		_update_inventory()
+		return true
+	remove_item(id, n)
+	_maq.car_por_item(mi, id, n)
+	_update_inventory()
+	return true
+
+
 func _maq_ctx() -> bool:
 	var mi: int = _maq.planta_near(_player.position, 5.0)     # a serra tem 6 m: as pontas ficam longe do meio
 	if mi < 0:
@@ -9162,6 +9420,23 @@ func _maq_ctx() -> bool:
 			_ctx_action = "forno_pedra"
 			_ctx_btn.text = "Encaixar pedra (%d/%d)" % [int(p.get("ped", 0)) + 1, int(fz.pedras)]
 			return true
+	if Maquinas.TIPOS[p.tipo].has("carrinho") and _carry.is_empty():
+		match _maq.carrinho_etapa(mi):
+			"eixo":
+				if item_qtd("galho") > 0 or teste:
+					_ctx_action = "car_eixo"
+					_ctx_btn.text = "Pôr o eixo"
+					return true
+			"roda":
+				if item_qtd("rodela") > 0 or teste:
+					_ctx_action = "car_roda"
+					_ctx_btn.text = "Pôr a roda"
+					return true
+			"cipo":
+				if item_qtd("cipo") > 0 or teste:
+					_ctx_action = "car_cipo"
+					_ctx_btn.text = "Amarrar com cipó (%d/%d)" % [int(p.get("amarras", 0)) + 1, int(Maquinas.TIPOS.carrinho.carrinho.cipo)]
+					return true
 	if not _carry.is_empty():
 		_ctx_action = "planta_peca"
 		_ctx_btn.text = "Pôr na planta"
@@ -9186,6 +9461,33 @@ func _maq_ctx_press(act: String) -> void:
 	if mi < 0:
 		return
 	match act:
+		"car_eixo", "car_roda", "car_cipo":
+			var at: Vector3 = _maq.xform(mi) * Maquinas.CAR_EIXO
+			if act == "car_eixo":
+				if not teste:
+					remove_item("galho", 1)
+				_maq.carrinho_por(mi, "eixo")
+				Sons.play_at(self, "baque", at, -10.0, 1.4)
+			elif act == "car_roda":
+				var raio := 0.2
+				if item_qtd("rodela") > 0:
+					var rl := _rodelas_fix()
+					var perf: Array = rl[rl.size() - 1]
+					var soma := 0.0
+					for v in perf:
+						soma += float(v)
+					raio = soma / maxf(1.0, float(perf.size()))
+					remove_item("rodela", 1)
+				_maq.carrinho_por(mi, "roda", raio)
+				Sons.play_at(self, "baque", at, -8.0, 1.0)
+			else:
+				if not teste:
+					remove_item("cipo", 1)
+				_maq.carrinho_por(mi, "cipo")
+				Sons.play_at(self, "fibra_puxa", at, -6.0, 1.0)
+			_update_inventory()
+			_act_check = 0.0
+			return
 		"forno_pedra":
 			if not teste:
 				remove_item("pedra", 1)
@@ -11041,12 +11343,18 @@ func _fogueira_pick(i: int, acao: String) -> void:
 	var c: Vector3 = _fogos.center(i)
 	match acao:
 		"por_lenha":
-			if item_qtd("lenha") <= 0:
-				_show_toast("Precisa de lenha: rache um toquinho no cepo com o machado.")
+			var acha2: Dictionary = {}
+			if not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1:
+				acha2 = _carry.duplicate(true)            # a acha que está na mão
+				for k in ["pos", "yaw", "golpes", "em_pe"]:
+					acha2.erase(k)
+				_soltar_carga()
+			elif item_qtd("lenha") > 0:
+				_lenha_fix()
+				acha2 = _lenhas.pop_back() if not _lenhas.is_empty() else _lenha_padrao()
+				remove_item("lenha", 1)
+			else:
 				return
-			_lenha_fix()
-			var acha2: Dictionary = _lenhas.pop_back() if not _lenhas.is_empty() else _lenha_padrao()
-			remove_item("lenha", 1)
 			_update_inventory()
 			var acesa: bool = _fogos.acesa(i)
 			_fogos.por_lenha(i, acha2)
@@ -11499,7 +11807,10 @@ func _forno_opts(mi: int) -> Array:
 	var n := (f.lenha as Array).size()
 	var op := []
 	if int(f.carvao) > 0 and str(f.porta) == "aberta":
-		return [["forno_carvao", "Pegar carvão"]]
+		# o carvão sai com o balde (vazio ou já com carvão e com espaço)
+		if _mao == "balde" and (_balde_carga.is_empty() or (str(_balde_carga.tipo) == "carvao" and float(_balde_carga.vol) < BALDE_VOL - CARVAO_L * 0.5)):
+			return [["forno_carvao", "Pegar carvão"]]
+		return []
 	if bool(f.aceso):
 		if str(f.porta) == "aberta":
 			return [["forno_fechar", "Fechar a porta"]]
@@ -11521,8 +11832,18 @@ func _forno_pick(mi: int, acao: String) -> void:
 		"forno_lenha":
 			var f: Dictionary = _maq.forno_st(mi)
 			var cabe: int = Maquinas.FORNO_CAP - (f.lenha as Array).size()
+			if not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1 and cabe > 0:
+				# a acha que está na mão
+				var am: Dictionary = _carry.duplicate(true)
+				for k in ["pos", "yaw", "golpes", "em_pe"]:
+					am.erase(k)
+				_soltar_carga()
+				_maq.forno_lenha(mi, am)
+				_face_to(boca)
+				Sons.play_at(self, "baque", boca, -10.0, 1.2)
+				_act_check = 0.0
+				return
 			if item_qtd("lenha") <= 0:
-				_show_toast("Precisa de lenha: rache toquinhos no cepo com o machado.")
 				return
 			_lenha_fix()
 			var n := mini(cabe, item_qtd("lenha"))
@@ -11551,9 +11872,14 @@ func _forno_pick(mi: int, acao: String) -> void:
 			var c: int = int(_maq.forno_st(mi).carvao)
 			_show_toast("Porta aberta." + (" A lenha virou %d carvões!" % c if c > 0 else ""))
 		"forno_carvao":
-			var nc: int = _maq.forno_tirar(mi)
+			if _mao != "balde" or (not _balde_carga.is_empty() and str(_balde_carga.tipo) != "carvao"):
+				return
+			var tem := _carvao_n()
+			var cabe := int(floor((BALDE_VOL - float(_balde_carga.get("vol", 0.0))) / CARVAO_L + 0.001))
+			var nc: int = _maq.forno_tirar(mi, cabe)
 			if nc > 0:
-				add_item("carvao", nc)
+				_balde_carga = {"tipo": "carvao", "vol": (tem + nc) * CARVAO_L, "n": tem + nc}
+				_update_balde_fill(_balde_fill, _balde_carga)
 				_update_inventory()
 				Sons.play_at(self, "pedra_bate", boca, -10.0, 1.6)
 				_show_toast("+%d carvão." % nc)
@@ -11652,6 +11978,16 @@ func _filtro_pick(mi: int, acao: String) -> void:
 		"carvao":
 			var tem2 := item_qtd("carvao")
 			var falta2 := Maquinas.FILTRO_CARVAO - int(f.carvao)
+			if _mao == "balde" and str(_balde_carga.get("tipo", "")) == "carvao" and _carvao_n() > 0:
+				# do balde direto para a caixa
+				var nb := mini(falta2, _carvao_n())
+				var sobra := _carvao_n() - nb
+				_balde_carga = {} if sobra <= 0 else {"tipo": "carvao", "vol": sobra * CARVAO_L, "n": sobra}
+				_update_balde_fill(_balde_fill, _balde_carga)
+				_maq.filtro_por(mi, "carvao", nb)
+				Sons.play_at(self, "pedra_bate", at, -12.0, 1.8)
+				_update_inventory()
+				return
 			if tem2 <= 0 and not teste:
 				_show_toast("Precisa de carvão (faltam %d). O carvão sai da fogueira (vem em breve)." % falta2)
 				return
@@ -12702,7 +13038,7 @@ func _olho_tick() -> void:
 		cands.append([cp, pp.distance_to(Vector2(co.x, co.z))])
 	if _maq:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
-		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno"] and _maq.pronta(mi):
+		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho"] and _maq.pronta(mi) and mi != _empurra:
 			var mo: Vector3 = _maq.xform(mi).origin
 			cands.append([{"maq": mi}, maxf(0.0, pp.distance_to(Vector2(mo.x, mo.z)) - 0.8)])
 	if _fogos:
@@ -12735,6 +13071,8 @@ func _olho_opts(p: Dictionary) -> Array:
 	if p.has("maq"):
 		if str(_maq.plantas[int(p.maq)].tipo) == "forno":
 			return _forno_opts(int(p.maq))
+		if str(_maq.plantas[int(p.maq)].tipo) == "carrinho":
+			return _car_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "filtro_agua":
 			return _filtro_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "torno_ceramica":
@@ -12975,6 +13313,9 @@ func _olho_pick(acao: String) -> void:
 			return
 		"forno_lenha", "forno_acender", "forno_fechar", "forno_abrir", "forno_carvao":
 			_forno_pick(int(p.maq), acao)
+			return
+		"car_despejar", "car_pegar_lenha", "car_tirar_itens":
+			_car_pick(int(p.maq), acao)
 			return
 		"pedrinhas", "carvao", "areia", "tela", "vasilha", "agua_filtro", "encher_limpa":
 			_filtro_pick(int(p.maq), acao)

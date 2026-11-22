@@ -518,7 +518,8 @@ func _drop() -> void:
 		_say("Você soltou 1 %s no chão." % str(it.nome).to_lower())
 		return
 	elif _game and it.id != "semente":
-		_game.drop_item(str(it.id), 1)
+		if not _game.soltar_no_carrinho(str(it.id), 1):    # perto do carrinho: vai para dentro dele
+			_game.drop_item(str(it.id), 1)
 		_selected = -1
 		_refresh()
 		_say("Você soltou 1 %s no chão." % str(it.nome).to_lower())

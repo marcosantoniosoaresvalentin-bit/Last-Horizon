@@ -194,6 +194,29 @@ const TIPOS := {
 	# encaixadas nele (umas aparecendo por fora), uma boca na frente com a porta de barro
 	# (uma placa grossa que tampa a boca) e o suspiro em cima, atrás. Enche de lenha,
 	# acende, tampa a boca: a lenha vira carvão.
+	# Carrinho de mão: caixa de tábuas serradas (fundo, laterais, frente e trás) em cima de
+	# dois braços compridos de tábua que viram as alças atrás; na frente, a roda (uma
+	# rodela de tora) num eixo de galho que passa pela ponta dos braços; atrás, dois pés
+	# de tábua. Tudo amarrado com cipó.
+	"carrinho": {
+		"nome": "Carrinho de Mão",
+		"desc": "Carrinho de mão de tábuas: carrega terra, barro, argila, areia, carvão, lenha e qualquer coisa da mochila.",
+		"pecas": [
+			["tabua", 1.62, Vector3(-0.12, 0.22, 0.24), "x", 0.07],     # 0 braço (vira a alça atrás)
+			["tabua", 1.62, Vector3(-0.12, 0.22, -0.24), "x", 0.07],    # 1 braço
+			["tabua", 0.86, Vector3(0.05, 0.27, 0.12), "x", 0.12],      # 2 fundo
+			["tabua", 0.86, Vector3(0.05, 0.27, -0.12), "x", 0.12],     # 3 fundo
+			["tabua", 0.86, Vector3(0.05, 0.4, 0.27), "x_lado", 0.12],  # 4 lateral
+			["tabua", 0.86, Vector3(0.05, 0.4, -0.27), "x_lado", 0.12], # 5 lateral
+			["tabua", 0.58, Vector3(0.46, 0.4, 0.0), "z_lado", 0.12],   # 6 frente
+			["tabua", 0.58, Vector3(-0.36, 0.4, 0.0), "z_lado", 0.12],  # 7 trás
+			["tabua", 0.24, Vector3(-0.6, 0.1, 0.24), "y", 0.06],       # 8 pé
+			["tabua", 0.24, Vector3(-0.6, 0.1, -0.24), "y", 0.06],      # 9 pé
+		],
+		"pinos": [],
+		"area": Rect2(-0.95, -0.32, 1.85, 0.64),
+		"carrinho": {"eixo": 1, "roda": 1, "cipo": 4},
+	},
 	"forno": {
 		"nome": "Forno de Carvão",
 		"desc": "Domo de barro com pedras do chão encaixadas, uma porta de barro e o suspiro em cima. Primeiro levante as paredes de barro, depois encaixe as pedras e por último faça a porta de barro. Encha de lenha, acenda com o arco de fogo e tampe a boca: a lenha queima devagar, sem ar, e vira carvão.",
@@ -235,6 +258,7 @@ var _mark_mat: StandardMaterial3D
 var _lash_mat: StandardMaterial3D
 var _steel_mat: StandardMaterial3D
 var _bob := 0.0
+var empurrando := -1             # o carrinho que este jogador está empurrando
 
 
 func build(jogo: Node, arvores: Node, save_path := "") -> void:
@@ -259,6 +283,8 @@ func build(jogo: Node, arvores: Node, save_path := "") -> void:
 	_steel_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	if save_path != "":
 		_load(save_path)
+		for q in plantas:
+			q.erase("emp")             # ninguém está empurrando quando o mundo abre
 	_rebuild()
 
 
@@ -278,6 +304,10 @@ static func needs(tipo: String) -> Dictionary:
 	out["lamina"] = lamina_need(tipo)
 	out["lamina_item"] = str(t.get("lamina_item", "lamina_serra"))
 	var fz: Dictionary = t.get("forno", {})
+	var ca: Dictionary = t.get("carrinho", {})
+	out["galho"] = int(ca.get("eixo", 0))
+	out["rodela"] = int(ca.get("roda", 0))
+	out["cipo"] = int(ca.get("cipo", 0))
 	out["pedra"] = int(fz.get("pedras", 0))
 	out["barro"] = int(fz.get("barro", 0)) + int(fz.get("porta", 0))
 	return out
@@ -330,6 +360,11 @@ func complete(mi: int) -> void:
 	for j in (p.pinos as Array).size():
 		p.pinos[j] = 2
 	p.lamina = lamina_need(str(p.tipo))
+	if TIPOS[p.tipo].has("carrinho"):
+		p["eixo"] = true
+		if (p.get("roda", {}) as Dictionary).is_empty():
+			p["roda"] = {"r": 0.2}
+		p["amarras"] = int(TIPOS[p.tipo].carrinho.cipo)
 	var fz: Dictionary = TIPOS[p.tipo].get("forno", {})
 	if not fz.is_empty():
 		p["ped"] = int(fz.pedras)
@@ -423,6 +458,8 @@ func pronta(mi: int) -> bool:
 	if not fz.is_empty() and (int(p.get("ped", 0)) < int(fz.pedras) or int(p.get("bar", 0)) < int(fz.barro) or int(p.get("porta", 0)) < int(fz.porta)):
 		return false
 	if lamina_count(mi) < lamina_need(str(p.tipo)):
+		return false
+	if TIPOS[p.tipo].has("carrinho") and carrinho_etapa(mi) != "":
 		return false
 	for b in p.pecas:
 		if not bool(b):
@@ -979,7 +1016,7 @@ static func _clip(poly: Array, v: float, s: float, ctype := 1) -> Array:
 
 func push_out(p: Vector3) -> Vector3:
 	for mi in plantas.size():
-		if done_count(mi) < 3:
+		if done_count(mi) < 3 or mi == empurrando:
 			continue
 		var t: Dictionary = TIPOS[plantas[mi].tipo]
 		var ar: Rect2 = t.area
@@ -1081,6 +1118,11 @@ func _rebuild() -> void:
 		if t.has("forno"):
 			_draw_forno(mi, root, nd)
 			_nodes[mi] = nd
+			continue
+		if t.has("carrinho"):
+			_draw_carrinho(mi, root, nd)
+			_nodes[mi] = nd
+			carrinho_pose(mi, mi == empurrando)
 			continue
 		if bool(t.get("torno", false)):
 			if pronta(mi):
@@ -1192,6 +1234,331 @@ func _animate(mi: int, dy: float) -> void:
 		var butt := Vector3(-2.0, 2.66, 0.0)
 		var ph := asin(clampf(dy / 2.0, -0.9, 0.9))
 		(nd.p_5 as Node3D).transform = Transform3D(Basis(Vector3.BACK, ph), butt) * Transform3D(Basis(), -butt) * (nd.t_5 as Transform3D)
+
+
+# ---------- carrinho de mão ----------
+
+const CAR_EIXO := Vector3(0.62, 0.2, 0.0)   # o eixo da roda (na ponta dos braços)
+const CAR_PE := Vector3(-0.6, 0.0, 0.0)     # onde os pés encostam no chão
+const CAR_VOL := 0.11            # m³ de terra/barro/areia/carvão que cabem na caixa (uns 4,5 baldes)
+const CAR_LENHA := 12            # achas de lenha que cabem
+const CAR_FUNDO := 0.3           # em cima das tábuas do fundo
+const CAR_MATS := ["terra", "argila", "barro", "areia", "carvao"]
+
+
+## Falta o quê para o carrinho ficar pronto: "tabuas", "eixo", "roda", "cipo" ou "".
+func carrinho_etapa(mi: int) -> String:
+	var p: Dictionary = plantas[mi]
+	var ca: Dictionary = TIPOS[p.tipo].get("carrinho", {})
+	if ca.is_empty():
+		return ""
+	for b in p.pecas:
+		if not bool(b):
+			return "tabuas"
+	if not bool(p.get("eixo", false)):
+		return "eixo"
+	if (p.get("roda", {}) as Dictionary).is_empty():
+		return "roda"
+	if int(p.get("amarras", 0)) < int(ca.cipo):
+		return "cipo"
+	return ""
+
+
+## Põe o eixo (galho), a roda (rodela, com o raio dela) ou uma amarra de cipó.
+func carrinho_por(mi: int, what: String, raio := 0.2) -> void:
+	var p: Dictionary = plantas[mi]
+	match what:
+		"eixo": p["eixo"] = true
+		"roda": p["roda"] = {"r": snappedf(clampf(raio, 0.12, 0.32), 0.001)}
+		"cipo": p["amarras"] = int(p.get("amarras", 0)) + 1
+	_rebuild()
+
+
+## O que tem dentro: {carga: {tipo, vol}, lenhas: [achas], itens: {id: n}}
+func car_of(mi: int) -> Dictionary:
+	var p: Dictionary = plantas[mi]
+	if not p.has("car") or not p.car is Dictionary:
+		p["car"] = {"carga": {}, "lenhas": [], "itens": {}}
+	var c: Dictionary = p.car
+	if not c.has("carga"): c["carga"] = {}
+	if not c.has("lenhas"): c["lenhas"] = []
+	if not c.has("itens"): c["itens"] = {}
+	return c
+
+
+func car_vazio(mi: int) -> bool:
+	var c := car_of(mi)
+	return float((c.carga as Dictionary).get("vol", 0.0)) <= 0.0005 and (c.lenhas as Array).is_empty() and (c.itens as Dictionary).is_empty()
+
+
+## Cabe quanto mais desse material (m³)? (não mistura: terra com terra, barro com barro)
+func car_cabe(mi: int, tipo: String) -> float:
+	var c := car_of(mi)
+	var cg: Dictionary = c.carga
+	if not cg.is_empty() and float(cg.get("vol", 0.0)) > 0.0005 and str(cg.tipo) != tipo:
+		return 0.0
+	if not (c.lenhas as Array).is_empty():
+		return 0.0                      # com lenha dentro não dá para jogar terra em cima
+	return maxf(0.0, CAR_VOL - float(cg.get("vol", 0.0)))
+
+
+func car_por_carga(mi: int, tipo: String, vol: float) -> float:
+	var mv := minf(vol, car_cabe(mi, tipo))
+	if mv <= 0.0:
+		return 0.0
+	var c := car_of(mi)
+	c.carga = {"tipo": tipo, "vol": float((c.carga as Dictionary).get("vol", 0.0)) + mv}
+	_rebuild()
+	return mv
+
+
+## Tira até vol m³ do material (para o balde, ou tudo para despejar). Devolve {tipo, vol}.
+func car_tirar_carga(mi: int, vol: float) -> Dictionary:
+	var c := car_of(mi)
+	var cg: Dictionary = c.carga
+	if cg.is_empty() or float(cg.get("vol", 0.0)) <= 0.0005:
+		return {}
+	var mv := minf(vol, float(cg.vol))
+	var left := float(cg.vol) - mv
+	c.carga = {} if left <= 0.0005 else {"tipo": cg.tipo, "vol": left}
+	_rebuild()
+	return {"tipo": cg.tipo, "vol": mv}
+
+
+func car_por_lenha(mi: int, acha: Dictionary) -> bool:
+	var c := car_of(mi)
+	if (c.lenhas as Array).size() >= CAR_LENHA or float((c.carga as Dictionary).get("vol", 0.0)) > 0.0005:
+		return false
+	(c.lenhas as Array).append(acha)
+	_rebuild()
+	return true
+
+
+func car_tirar_lenha(mi: int) -> Dictionary:
+	var c := car_of(mi)
+	if (c.lenhas as Array).is_empty():
+		return {}
+	var a: Dictionary = (c.lenhas as Array).pop_back()
+	_rebuild()
+	return a
+
+
+func car_por_item(mi: int, id: String, n: int) -> void:
+	var c := car_of(mi)
+	c.itens[id] = int((c.itens as Dictionary).get(id, 0)) + n
+	_rebuild()
+
+
+func car_tirar_itens(mi: int) -> Dictionary:
+	var c := car_of(mi)
+	var it: Dictionary = c.itens
+	c.itens = {}
+	_rebuild()
+	return it
+
+
+## Tudo das plantas menos onde os carrinhos estão (para saber se, no multiplayer, só um
+## carrinho andou: aí não precisa refazer o desenho de tudo, só mover).
+func assinatura() -> String:
+	var out := []
+	for p in plantas:
+		var c: Dictionary = {}
+		for k in p:
+			if str(k).begins_with("_"):
+				continue
+			if str(p.get("tipo", "")) == "carrinho" and str(k) in ["x", "y", "z", "yaw"]:
+				continue
+			c[k] = p[k]
+		out.append(c)
+	return JSON.stringify(out)
+
+
+## Só os carrinhos mudaram de lugar: move os desenhos deles.
+func reposicionar() -> void:
+	for mi in plantas.size():
+		if str(plantas[mi].get("tipo", "")) == "carrinho":
+			carrinho_pose(mi, mi == empurrando)
+
+
+## Onde o carrinho fica com os pés no chão (parado) ou com as alças levantadas (sendo
+## empurrado, só a roda no chão).
+func carrinho_pose(mi: int, empurrado: bool) -> void:
+	var nd: Dictionary = _nodes.get(mi, {})
+	if nd.is_empty() or not is_instance_valid(nd.root):
+		return
+	var p: Dictionary = plantas[mi]
+	empurrado = empurrado or bool(p.get("emp", false))       # (outro jogador empurrando)
+	var R := float((p.get("roda", {}) as Dictionary).get("r", CAR_EIXO.y))
+	var local := Transform3D()
+	if empurrado:
+		# a roda no chão (o eixo na altura do raio) e as alças levantadas: gira em volta do eixo
+		var ax := Vector3(CAR_EIXO.x, R, 0.0)
+		local = Transform3D(Basis(), Vector3(0, R - CAR_EIXO.y, 0))
+		local = Transform3D(Basis(), ax) * Transform3D(Basis(Vector3.BACK, 0.2), Vector3.ZERO) * Transform3D(Basis(), -ax) * local
+	else:
+		# parado: os pés e a roda no chão (roda maior: a frente fica mais alta)
+		var a := atan2(R - CAR_EIXO.y, CAR_EIXO.x - CAR_PE.x)
+		local = Transform3D(Basis(), CAR_PE) * Transform3D(Basis(Vector3.BACK, a), Vector3.ZERO) * Transform3D(Basis(), -CAR_PE)
+	(nd.root as Node3D).transform = xform(mi) * local
+
+
+## Move o carrinho (empurrando): só a posição, sem refazer o desenho; a roda gira.
+func carrinho_mover(mi: int, pos: Vector3, yaw: float, andou: float) -> void:
+	var p: Dictionary = plantas[mi]
+	p.x = snappedf(pos.x, 0.001)
+	p.y = snappedf(pos.y, 0.001)
+	p.z = snappedf(pos.z, 0.001)
+	p.yaw = snappedf(yaw, 0.0001)
+	carrinho_pose(mi, mi == empurrando)
+	var nd: Dictionary = _nodes.get(mi, {})
+	if nd.has("roda") and is_instance_valid(nd.roda):
+		var R := float((p.get("roda", {}) as Dictionary).get("r", 0.2))
+		p["_giro"] = float(p.get("_giro", 0.0)) - andou / maxf(R, 0.05)
+		(nd.roda as Node3D).transform = Transform3D(Basis(Vector3.BACK, float(p._giro)), CAR_EIXO)
+
+
+## O eixo, a roda, as amarras de cipó e o que está dentro.
+func _draw_carrinho(mi: int, root: Node3D, nd: Dictionary) -> void:
+	var p: Dictionary = plantas[mi]
+	var etapa := carrinho_etapa(mi)
+	var R := float((p.get("roda", {}) as Dictionary).get("r", 0.2))
+	# o eixo: um galho atravessado na ponta dos braços
+	if bool(p.get("eixo", false)):
+		root.add_child(_stick(CAR_EIXO + Vector3(0, 0, -0.31), CAR_EIXO + Vector3(0, 0, 0.31), 0.022))
+	elif etapa == "eixo":
+		var ge := MeshInstance3D.new()
+		var gm := CylinderMesh.new()
+		gm.top_radius = 0.022
+		gm.bottom_radius = 0.022
+		gm.height = 0.62
+		ge.mesh = gm
+		ge.material_override = _ghost_mat
+		ge.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), CAR_EIXO)
+		root.add_child(ge)
+	# a roda: a rodela de tora em pé (casca em volta, os anéis nas caras), girando no eixo
+	var roda := Node3D.new()
+	roda.transform = Transform3D(Basis(Vector3.BACK, float(p.get("_giro", 0.0))), CAR_EIXO)
+	root.add_child(roda)
+	if not (p.get("roda", {}) as Dictionary).is_empty():
+		var cil := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = R
+		cm.bottom_radius = R
+		cm.height = 0.07
+		cm.radial_segments = 22
+		cil.mesh = cm
+		cil.material_override = _fmat("roda_casca", Color(0.3, 0.21, 0.13), 0.95)
+		cil.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3.ZERO)
+		roda.add_child(cil)
+		for sg in [-1.0, 1.0]:
+			var face := MeshInstance3D.new()
+			var fm := CylinderMesh.new()
+			fm.top_radius = R - 0.014
+			fm.bottom_radius = R - 0.014
+			fm.height = 0.004
+			fm.radial_segments = 22
+			face.mesh = fm
+			face.material_override = _fmat("roda_cara", Color(0.74, 0.58, 0.38), 0.85)
+			face.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0, sg * 0.036))
+			roda.add_child(face)
+			for k in 3:
+				var an := MeshInstance3D.new()
+				var tm := TorusMesh.new()
+				var rr := (R - 0.014) * (0.3 + 0.22 * k)
+				tm.inner_radius = rr - 0.004
+				tm.outer_radius = rr
+				tm.rings = 22
+				tm.ring_segments = 4
+				an.mesh = tm
+				an.material_override = _fmat("roda_anel", Color(0.52, 0.37, 0.22), 0.9)
+				an.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0, sg * 0.039))
+				roda.add_child(an)
+		nd["roda"] = roda
+	elif etapa == "roda":
+		var gr := MeshInstance3D.new()
+		var gc := CylinderMesh.new()
+		gc.top_radius = 0.2
+		gc.bottom_radius = 0.2
+		gc.height = 0.07
+		gr.mesh = gc
+		gr.material_override = _ghost_mat
+		gr.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3.ZERO)
+		roda.add_child(gr)
+	# as amarras de cipó: onde o fundo cruza os braços
+	var pts := [Vector3(0.4, 0.245, 0.24), Vector3(0.4, 0.245, -0.24), Vector3(-0.3, 0.245, 0.24), Vector3(-0.3, 0.245, -0.24)]
+	var na := int(p.get("amarras", 0))
+	for k in mini(na, pts.size()):
+		var am := MeshInstance3D.new()
+		am.mesh = _lash_mesh()
+		am.material_override = _lash_mat
+		am.scale = Vector3(0.38, 0.38, 0.38)
+		am.position = pts[k]
+		root.add_child(am)
+	if etapa != "":
+		return
+	# o que está dentro da caixa
+	var c := car_of(mi)
+	var cg: Dictionary = c.carga
+	if not cg.is_empty() and float(cg.get("vol", 0.0)) > 0.0005:
+		var f := clampf(float(cg.vol) / CAR_VOL, 0.0, 1.0)
+		var cores := {"terra": Color(0.36, 0.25, 0.16), "argila": Color(0.62, 0.3, 0.16), "barro": Color(0.42, 0.27, 0.15),
+			"areia": Color(0.85, 0.76, 0.52), "carvao": Color(0.08, 0.08, 0.085)}
+		var monte := MeshInstance3D.new()
+		monte.mesh = _car_monte_mesh(f, str(cg.tipo))
+		monte.material_override = _fmat("car_" + str(cg.tipo), cores.get(str(cg.tipo), Color(0.4, 0.3, 0.2)), 0.95 if str(cg.tipo) != "carvao" else 0.7)
+		root.add_child(monte)
+	var ln: Array = c.lenhas
+	for k in ln.size():
+		var an2: Node3D = _arv.free_log_node(ln[k])
+		root.add_child(an2)
+		var fila := k % 4
+		var cam := k / 4
+		an2.transform = Transform3D(Basis(Vector3.UP, 0.05 * float((k * 7) % 5 - 2)), Vector3(0.05, CAR_FUNDO + 0.05 + cam * 0.09, -0.18 + fila * 0.12))
+	var it: Dictionary = c.itens
+	if not it.is_empty():
+		# o que veio da mochila: uma trouxa no canto da caixa
+		var tr := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.12
+		sm.height = 0.18
+		tr.mesh = sm
+		tr.material_override = _fmat("trouxa", Color(0.55, 0.47, 0.32), 0.95)
+		tr.position = Vector3(-0.22, CAR_FUNDO + 0.08, 0.1)
+		root.add_child(tr)
+
+
+## O monte de material na caixa: liso em cima, com um morrinho no meio quando enche.
+func _car_monte_mesh(f: float, tipo: String) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var nx := 10
+	var nz := 7
+	var h := 0.02 + f * 0.2
+	var nzl := FastNoiseLite.new()
+	nzl.seed = hash(tipo)
+	nzl.frequency = 6.0 if tipo != "carvao" else 18.0
+	var grid := []
+	for i in nx + 1:
+		var row := []
+		for j in nz + 1:
+			var u := float(i) / nx
+			var v := float(j) / nz
+			var x := lerpf(-0.33, 0.43, u)
+			var z := lerpf(-0.235, 0.235, v)
+			var borda := minf(minf(u, 1.0 - u), minf(v, 1.0 - v))
+			var y := CAR_FUNDO + h + f * 0.06 * smoothstep(0.0, 0.5, borda) + nzl.get_noise_2d(x * 10.0, z * 10.0) * (0.012 if tipo != "carvao" else 0.025)
+			row.append(Vector3(x, y, z))
+		grid.append(row)
+	for i in nx:
+		for j in nz:
+			var a: Vector3 = grid[i][j]
+			var b: Vector3 = grid[i + 1][j]
+			var c2: Vector3 = grid[i + 1][j + 1]
+			var d: Vector3 = grid[i][j + 1]
+			for v in [a, b, c2, a, c2, d]:
+				st.add_vertex(v)
+	st.generate_normals()
+	return st.commit()
 
 
 # ---------- peneira de água ----------
@@ -1516,10 +1883,10 @@ func forno_porta(mi: int, fechar: bool) -> void:
 	_rebuild()
 
 
-func forno_tirar(mi: int) -> int:
+func forno_tirar(mi: int, max_n := 1000) -> int:
 	var f := forno_st(mi)
-	var n := int(f.carvao)
-	f.carvao = 0
+	var n := mini(int(f.carvao), max_n)
+	f.carvao = int(f.carvao) - n
 	_rebuild()
 	return n
 

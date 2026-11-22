@@ -168,6 +168,12 @@ func _select(tipo: String) -> void:
 		partes.append("%d pinos de madeira" % int(n.pino))
 	if int(n.get("pedra", 0)) > 0:
 		partes.append("%d pedras do chão" % int(n.pedra))
+	if int(n.get("rodela", 0)) > 0:
+		partes.append("%d rodela de tora (a roda)" % int(n.rodela))
+	if int(n.get("galho", 0)) > 0:
+		partes.append("%d galho (o eixo)" % int(n.galho))
+	if int(n.get("cipo", 0)) > 0:
+		partes.append("%d cipós" % int(n.cipo))
 	if int(n.get("barro", 0)) > 0:
 		partes.append("%d baldes de barro" % int(n.barro))
 	var nl := int(n.lamina)
@@ -185,11 +191,11 @@ func _draw_plan() -> void:
 	var s := _draw.size
 	var sc := minf(s.x / 6.6, s.y / 3.2)
 	var o := Vector2(s.x * 0.5, s.y - 18)
-	if t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno"):
+	if t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho"):
 		sc = minf(s.x / 2.8, s.y / 1.25)          # máquina pequena: desenho maior
 	var P := func(x: float, y: float) -> Vector2:
 		return o + Vector2(x * sc, -y * sc)
-	var small := t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno")
+	var small := t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho")
 	_draw.draw_line(P.call(-3.2 if not small else -1.2, 0), P.call(3.2 if not small else 0.9, 0), C_DIM, 1.5)
 	for pc in t.pecas:
 		var c: Vector3 = pc[2]
@@ -221,6 +227,15 @@ func _draw_plan() -> void:
 		_draw.draw_string(font, P.call(-0.95, 1.15), "SUSPIRO", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
 		_draw.draw_string(font, P.call(-0.7, 0.45), "BARRO E PEDRAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
 		_draw.draw_string(font, P.call(0.62, 0.3), "PORTA DE BARRO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
+		return
+	if t.has("carrinho"):
+		# a roda (rodela) no eixo, na ponta dos braços
+		_draw.draw_arc(P.call(0.62, 0.2), 0.2 * sc, 0, TAU, 32, C_HI, 2.0)
+		_draw.draw_circle(P.call(0.62, 0.2), 0.025 * sc, C_HI)
+		_draw.draw_string(font, P.call(0.45, -0.12), "RODA (RODELA)", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
+		_draw.draw_string(font, P.call(0.62, 0.62), "EIXO DE GALHO", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_DIM)
+		_draw.draw_string(font, P.call(-0.4, 0.7), "CAIXA DE TÁBUAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
+		_draw.draw_string(font, P.call(-1.05, 0.38), "ALÇAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_DIM)
 		return
 	if t.has("filtro"):
 		_draw.draw_string(font, P.call(0.32, 1.0), "TELA DE FIBRA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
