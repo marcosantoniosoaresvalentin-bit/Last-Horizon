@@ -1,9 +1,9 @@
 {
-  "version": 204,
-  "file": "update_204.zip",
-  "size": 5603101,
-  "sha256": "b83fb2ec83fb67ff6602c81f723ee5ca4106dc1341976a97f29621f7b4d7985a",
+  "version": 205,
+  "file": "update_205.zip",
+  "size": 5610486,
+  "sha256": "cfe6e5a51d0ca1d535c3c196d8f490d784cc2d039bdf27d226eb26fc996e1c81",
   "min_build": 1,
-  "notes": "Partir a vaca ao meio com o machado; partir a banda com a faca e o machado (no carrinho fica limpo, na terra suja)",
+  "notes": "Babaçu (pindovas, palmeiras, cocos e folhas secas); menu de projetos rolando",
   "date": "2026-11-22"
 }
