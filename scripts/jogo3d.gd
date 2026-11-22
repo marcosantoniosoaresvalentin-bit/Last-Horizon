@@ -839,7 +839,7 @@ void fragment() {
 	_sub_btns = [mk.call("Sair", -430, -146, _bur_sair)]
 	_desf_btns = [mk.call("Puxar", -290, -146, _desf_puxar), mk.call("Levantar", -430, -146, _desf_end)]
 	_tranca_btns = [mk.call("Parar", -290, -146, _tranca_end)]
-	_laco_btns = [mk.call("Laçar", -290, -146, _laco_lancar), mk.call("Força", -170, -170, _laco_forca), mk.call("Soltar", -430, -146, _laco_soltar)]
+	_laco_btns = [mk.call("Laçar", -290, -146, _laco_lancar), mk.call("Força", -290, -146, _laco_forca), mk.call("Soltar", -480, -146, _laco_soltar)]
 	(_laco_btns[1] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_sub_ui = Control.new()
 	_sub_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -9623,13 +9623,38 @@ func _laco_mira() -> Dictionary:
 	return {"pos": at, "id": -1}
 
 
+const LACO_VERDE := 0.07          # o topo verde da barrinha (pequeno: é difícil)
+const LACO_VEL := 1.9             # quantas vezes por segundo o marcador vai de um lado ao outro
+
+## 1º toque: começa a girar o laço (o marcador sobe e desce na barrinha); 2º toque: joga.
 func _laco_lancar() -> void:
-	if not _laco.is_empty() or not _mao.begins_with("laco"):
+	if not _mao.begins_with("laco"):
 		return
+	if _laco.is_empty():
+		_laco = {"gira": true, "t": randf() * 0.5, "item": _mao}
+		return
+	if not _laco.has("gira"):
+		return
+	var v := _laco_marcador()
 	var m := _laco_mira()
 	var de := _cam.global_position + _cam.global_transform.basis * Vector3(0.2, -0.3, -0.4)
-	_laco = {"voa": true, "de": de, "para": m.pos, "t": 0.0, "id": int(m.id), "item": _mao}
+	var para: Vector3 = m.pos
+	var id := int(m.id)
+	if v < 1.0 - LACO_VERDE:
+		# fora do verde: sai fraco e cai antes (quanto mais baixo, mais perto)
+		var k := clampf(v, 0.08, 0.92)
+		var pp := _player.position
+		var q := Vector3(pp.x + (para.x - pp.x) * k * 0.85, 0, pp.z + (para.z - pp.z) * k * 0.85)
+		para = Vector3(q.x, ground_at(q.x, q.z), q.z)
+		id = -1
+	# vai para onde a cabeça está AGORA: se a vaca andar enquanto ele voa, erra
+	_laco = {"voa": true, "de": de, "para": para, "t": 0.0, "id": id, "item": _laco.item, "forca_jogo": v}
 	Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP * 1.5, -6.0, 1.3)
+
+
+## O marcador da barrinha: 0 embaixo, 1 no topo (vai e volta, rápido).
+func _laco_marcador() -> float:
+	return absf(fmod(float(_laco.get("t", 0.0)) * LACO_VEL, 2.0) - 1.0)
 
 
 func _laco_soltar() -> void:
@@ -9644,7 +9669,7 @@ func _laco_soltar() -> void:
 
 
 func _laco_forca() -> void:
-	if _laco.is_empty() or _laco.has("voa"):
+	if not _laco.has("L"):
 		return
 	_laco.forca = minf(1.0, float(_laco.forca) + 0.1)
 
@@ -9687,9 +9712,9 @@ func _laco_tick(delta: float) -> void:
 	var com := _mao.begins_with("laco") and _morto < 0.0 and not _swim and _carry.is_empty()
 	if not com and not _laco.is_empty() and not _laco.has("voa"):
 		_laco_soltar()
-	var laçada := not _laco.is_empty() and not _laco.has("voa")
+	var laçada := _laco.has("L")
 	if _laco_btns.size() == 3:
-		(_laco_btns[0] as Control).visible = com and _laco.is_empty()
+		(_laco_btns[0] as Control).visible = com and (_laco.is_empty() or _laco.has("gira"))
 		(_laco_btns[1] as Control).visible = laçada
 		(_laco_btns[2] as Control).visible = laçada
 		if laçada and _jump_btn:
@@ -9710,7 +9735,7 @@ func _laco_tick(delta: float) -> void:
 		_laco_ring.material_override = m
 		_laco_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(_laco_ring)
-	_laco_ring.visible = com and _laco.is_empty() and _bag_ui == null and _craft_ui == null
+	_laco_ring.visible = com and (_laco.is_empty() or _laco.has("gira")) and _bag_ui == null and _craft_ui == null
 	if _laco_ring.visible:
 		var mira := _laco_mira()
 		var at: Vector3 = mira.pos
@@ -9732,6 +9757,23 @@ func _laco_tick(delta: float) -> void:
 		if _laco_corda:
 			_laco_corda.visible = false
 		return
+	if _laco.has("gira"):
+		if not com:
+			_laco = {}
+			return
+		_laco.t = float(_laco.t) + delta
+		if _laco_corda == null:
+			_laco_corda = MeshInstance3D.new()
+			_laco_corda.material_override = Maquinas.cipo_mat()
+			_laco_corda.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(_laco_corda)
+		var mao0 := _cam.global_position + _cam.global_transform.basis * Vector3(0.3, -0.2, -1.1)
+		var ang := float(_laco.t) * TAU * 2.2
+		var centro := mao0 + Vector3.UP * 0.4 + Vector3(cos(ang), 0, sin(ang)) * 0.15
+		_laco_desenha(mao0, centro, true, 0.32)
+		if _sub_ui:
+			_sub_ui.queue_redraw()
+		return
 	if _laco_corda == null:
 		_laco_corda = MeshInstance3D.new()
 		_laco_corda.material_override = Maquinas.cipo_mat()
@@ -9741,18 +9783,15 @@ func _laco_tick(delta: float) -> void:
 	# voando: a laçada abre e vai em arco
 	if _laco.has("voa"):
 		_laco.t = float(_laco.t) + delta
-		var k := clampf(float(_laco.t) / 0.5, 0.0, 1.0)
 		var para: Vector3 = _laco.para
-		if int(_laco.id) >= 0:
-			var c2: Vector3 = _vacas.cabeca(int(_laco.id)) if _vacas else Vector3.INF
-			if c2 != Vector3.INF:
-				para = c2
+		var dur := 0.25 + (_laco.de as Vector3).distance_to(para) * 0.06
+		var k := clampf(float(_laco.t) / dur, 0.0, 1.0)
 		var p: Vector3 = (_laco.de as Vector3).lerp(para, k) + Vector3.UP * sin(k * PI) * 1.0
 		_laco_desenha(mao, p, true, 0.28 * (0.4 + 0.6 * sin(k * PI * 0.5)))
 		if k >= 1.0:
 			var id := int(_laco.id)
 			var it := str(_laco.item)
-			if id >= 0 and _vacas and _vacas._agents.has(id) and _vacas.cabeca(id).distance_to(para) < 0.6:
+			if id >= 0 and _vacas and _vacas._agents.has(id) and _vacas.cabeca(id).distance_to(para) < 0.42:
 				var d := Vector2(para.x - _player.position.x, para.z - _player.position.z).length()
 				_laco = {"id": id, "L": clampf(d + 0.3, 1.6, float(LACO_CORDA.get(it, 5.0))), "forca": 0.7, "tensao": 0.0, "mult": 1.0, "item": it, "puxa": 0.0}
 				_vacas.laco_id = id
@@ -9887,7 +9926,22 @@ func _laco_desenha(a: Vector3, b: Vector3, voando: bool, roda := 0.0, barriga :=
 
 ## A barra de força do laço: a força, o risco do quanto precisa e a corda esticando.
 func _laco_draw() -> void:
-	if _laco.is_empty() or _laco.has("voa") or _laco_btns.size() < 3:
+	if _laco_btns.size() < 3:
+		return
+	if _laco.has("gira"):
+		# a barrinha do arremesso: o topo verde (estreito) e o marcador correndo
+		var ui0 := _sub_ui
+		var b0: Control = _laco_btns[0]
+		var r0 := Rect2(b0.get_global_rect().position - ui0.get_global_rect().position + Vector2(-44, -20), Vector2(26, b0.size.y + 20))
+		ui0.draw_rect(r0.grow(3), Color(0.04, 0.04, 0.03, 0.85))
+		var gr := r0.size.y * LACO_VERDE
+		ui0.draw_rect(Rect2(r0.position, Vector2(r0.size.x, gr)), Color(0.25, 0.9, 0.3))
+		ui0.draw_rect(Rect2(r0.position + Vector2(0, gr), Vector2(r0.size.x, r0.size.y - gr)), Color(0.75, 0.55, 0.2, 0.35))
+		var my := r0.end.y - r0.size.y * _laco_marcador()
+		ui0.draw_rect(Rect2(Vector2(r0.position.x - 6, my - 3), Vector2(r0.size.x + 12, 6)), Color(1, 1, 1))
+		ui0.draw_rect(r0, Color(1, 1, 1, 0.7), false, 2.0)
+		return
+	if _laco.is_empty() or _laco.has("voa"):
 		return
 	var ui := _sub_ui
 	var btn: Control = _laco_btns[1]
