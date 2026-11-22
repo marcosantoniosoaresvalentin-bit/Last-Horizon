@@ -1,9 +1,9 @@
 {
-  "version": 208,
-  "file": "update_208.zip",
-  "size": 5612674,
-  "sha256": "2d47ae76ea91bfef03e7509514d636f13bc9c800129fb06ea1b2b16a3df0ea16",
+  "version": 209,
+  "file": "update_209.zip",
+  "size": 5619113,
+  "sha256": "23f604bf4478f38863e60bbc711d026d829b69012ae9d202381c0d52988aa509",
   "min_build": 1,
-  "notes": "Planta nova: Mesa de Carne",
+  "notes": "Carne: pegar, levar, pôr no carrinho e na mesa; cortar em pedaços na mesa",
   "date": "2026-11-22"
 }
