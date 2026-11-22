@@ -100,10 +100,20 @@ func _build() -> void:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 26)
 	h.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	h.clip_contents = true
 	v.add_child(h)
+	# a lista das plantas rola (são muitas: não estica o menu)
+	var rola := ScrollContainer.new()
+	rola.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	rola.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	rola.scroll_deadzone = 10
+	rola.custom_minimum_size = Vector2(330, 0)
+	rola.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	h.add_child(rola)
 	_list = VBoxContainer.new()
 	_list.add_theme_constant_override("separation", 10)
-	h.add_child(_list)
+	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rola.add_child(_list)
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.add_theme_constant_override("separation", 10)
@@ -114,7 +124,7 @@ func _build() -> void:
 	right.add_child(_name)
 	_draw = Control.new()
 	_draw.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_draw.custom_minimum_size = Vector2(0, 220)
+	_draw.custom_minimum_size = Vector2(0, 160)
 	_draw.draw.connect(_draw_plan)
 	right.add_child(_draw)
 	_desc = Label.new()

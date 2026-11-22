@@ -44,6 +44,7 @@ const Vitais := preload("res://scripts/ui/vitais.gd")
 const Cobras := preload("res://scripts/world/cobras.gd")
 const Taias := preload("res://scripts/world/taias.gd")
 const Goiabeiras := preload("res://scripts/world/goiabeiras.gd")
+const Babacus := preload("res://scripts/world/babacus.gd")
 const Vacas := preload("res://scripts/world/vacas.gd")
 const Caca := preload("res://scripts/world/caca.gd")
 const Capins := preload("res://scripts/world/capins.gd")
@@ -423,6 +424,7 @@ var _tamanduas: Node3D = null
 var _cobras: Node3D = null         # jararacas (de tocaia nas moitas)
 var _taias: Node3D = null          # jararaca-taia (a planta do remédio)
 var _goiab: Node3D = null          # goiabeiras (goiaba e o chá das folhas)
+var _babacu: Node3D = null         # babaçu (pindovas, palmeiras, cocos e folhas secas)
 var _vacas: Node3D = null          # vacas selvagens (e o pasto que elas comem)
 var _caca: Node3D = null           # flechas voando, bichos feridos e carcaças
 var _tiro_btn: Button
@@ -1220,6 +1222,10 @@ func _on_world_ready() -> void:
 	_goiab = Goiabeiras.new()
 	add_child(_goiab)
 	_goiab.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/goiabeiras.json" if _world_id != "" else "")
+	_babacu = Babacus.new()
+	add_child(_babacu)
+	_babacu.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/babacus.json" if _world_id != "" else "")
+	print("babaçus: %d" % _babacu.palms.size())
 	_vacas = Vacas.new()
 	add_child(_vacas)
 	_vacas.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/vacas.json" if _world_id != "" else "")
@@ -1600,6 +1606,8 @@ func _process(delta: float) -> void:
 			_bacabas.tick()
 		if _buritis:
 			_buritis.tick()
+		if _babacu:
+			_babacu.tick()
 		if _minerios:
 			_minerios.tick()
 		if _cupins:
@@ -1727,6 +1735,8 @@ func _save_world() -> void:
 		_taias.save(Mundos.dir(_world_id) + "/taias.json")
 	if _goiab:
 		_goiab.save(Mundos.dir(_world_id) + "/goiabeiras.json")
+	if _babacu:
+		_babacu.save(Mundos.dir(_world_id) + "/babacus.json")
 	if _vacas:
 		_vacas.save(Mundos.dir(_world_id) + "/vacas.json")
 	if _caca:
@@ -3198,6 +3208,12 @@ func _update_ctx_btn() -> void:
 	elif _buritis and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _buritis.seca_near(_player.position, 1.5) >= 0:
 		_ctx_action = "folha_seca"
 		_ctx_btn.text = "Pegar folha seca"
+	elif _babacu and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _babacu.seca_near(_player.position, 1.8) >= 0:
+		_ctx_action = "babacu_seca"
+		_ctx_btn.text = "Pegar folha seca de babaçu"
+	elif _babacu and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _babacu.coco_near(_player.position, 1.2) >= 0:
+		_ctx_action = "babacu_coco"
+		_ctx_btn.text = "Pegar coco de babaçu"
 	elif _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _trim.is_empty() and item_qtd("marreta") > 0 and not _pin_targets().is_empty():
 		_ctx_action = "pinos"
 		_ctx_btn.text = "Furar e pinos (%d)" % _pin_targets().size()
@@ -3250,6 +3266,19 @@ func _ctx_press() -> void:
 			return
 		"pinos":
 			_pin_start()
+			return
+		"babacu_seca", "babacu_coco":
+			var id_b := "folha_babacu_seca" if _ctx_action == "babacu_seca" else "coco_babacu"
+			var bi: int = _babacu.seca_near(_player.position, 1.8) if _ctx_action == "babacu_seca" else _babacu.coco_near(_player.position, 1.2)
+			if bi >= 0 and _bag_total() + Itens.kg(id_b) <= BAG_MAX:
+				if _ctx_action == "babacu_seca":
+					_babacu.take_seca(bi)
+				else:
+					_babacu.take_coco(bi)
+				add_item(id_b, 1)
+				_update_inventory()
+				Sons.play_at(self, "folha_cai" if _ctx_action == "babacu_seca" else "baque", _player.position + Vector3.UP * 0.3, -10.0, 1.2)
+			_act_check = 0.0
 			return
 		"folha_seca":
 			var si: int = _buritis.seca_near(_player.position, 1.5)
@@ -6272,6 +6301,8 @@ func _move_player(delta: float) -> void:
 		p = _bacabas.push_out(p)          # nem o tronco das palmeiras
 	if _buritis:
 		p = _buritis.push_out(p)
+	if _babacu:
+		p = _babacu.push_out(p)          # nem o tronco do babaçu
 	if _goiab:
 		p = _goiab.push_out(p)            # nem o tronco da goiabeira
 	if _apoios:
@@ -8663,7 +8694,7 @@ func _bld_place() -> void:
 var _sync_hash := {}               # parte -> hash do que todos já têm
 var _sync_t := {}                  # parte -> tempo até conferir de novo
 const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
-	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0, "goiabeiras": 1.0, "vacas": 2.0, "caca": 0.6}
+	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0, "goiabeiras": 1.0, "vacas": 2.0, "caca": 0.6, "babacus": 1.5}
 const SYNC_ONLY_HOST := ["bacabas", "cobras", "vacas"]        # só o dono manda (os bichos comem os frutos); buritis: degraus e folhas cortadas vêm de todos
 
 
@@ -8780,6 +8811,7 @@ func _sync_mod(nome: String):
 		"cobras": return _cobras
 		"taias": return _taias
 		"goiabeiras": return _goiab
+		"babacus": return _babacu
 		"vacas": return _vacas
 		"caca": return _caca
 	return null
