@@ -1,9 +1,9 @@
 {
-  "version": 164,
-  "file": "update_164.zip",
-  "size": 5001921,
-  "sha256": "0ff9ba458ba7439476f6938872de513efb33adad771fb96c0fbe982eda6e454f",
+  "version": 165,
+  "file": "update_165.zip",
+  "size": 5001987,
+  "sha256": "477debb5284ac01fcdbce775b16acbce9a304418557589612d49995250d6ad65",
   "min_build": 1,
-  "notes": "Barras de vida, fome e sede lisas com porcentagem",
-  "date": "2026-11-21"
+  "notes": "Tela de carregamento limpa, sem os botões do jogo",
+  "date": "2026-11-22"
 }
