@@ -146,7 +146,7 @@ static func build(s := 1.0, cor := "branca", touro := false, _seed := 1) -> Node
 	if touro:
 		mi.mesh = _malha_boi(mi.mesh)               # sem o úbere
 	for k in mi.mesh.get_surface_count():
-		mi.set_surface_override_material(k, _material(cor, k, touro))
+		mi.set_surface_override_material(k, _material(cor, k if k < 3 else (0 if cor != "malhada" else 1), touro))
 	var sk0: Skeleton3D = m.find_children("*", "Skeleton3D", true, false)[0]
 	var rng := RandomNumberGenerator.new()
 	rng.seed = _seed * 7919 + 13
@@ -182,7 +182,7 @@ static func build(s := 1.0, cor := "branca", touro := false, _seed := 1) -> Node
 	if touro:
 		var pele: StandardMaterial3D = _material(cor, 0 if cor != "malhada" else 1, true).duplicate()
 		pele.cull_mode = BaseMaterial3D.CULL_DISABLED        # (nunca transparente)
-		_preso(sk0, "Body", _saco_mesh(), pele, Vector3(0, 0.0255, 0.0222))
+		_preso(sk0, "Body", _saco_mesh(), pele, Vector3(0, 0.0272, 0.0215))
 		_preso(sk0, "Body", _prepucio_mesh(), pele, Vector3(0, 0.009, 0.0206))
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	var ap: AnimationPlayer = m.find_children("*", "AnimationPlayer", true, false)[0]
@@ -204,23 +204,39 @@ static var _boi_mesh: ArrayMesh = null
 static func _malha_boi(src: Mesh) -> ArrayMesh:
 	if _boi_mesh != null:
 		return _boi_mesh
+	# o corpo fica inteiro (sem buraco); o úbere é achatado contra a barriga e vira
+	# uma parte separada (a 4ª), pintada com a cor do couro
 	var out := ArrayMesh.new()
+	var ubere_arr: Array = []
 	for si in src.get_surface_count():
 		var arr: Array = src.surface_get_arrays(si)
+		var flags: int = src.surface_get_format(si) & (Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS)
 		if si == 2:
 			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 			var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
 			if not idx.is_empty():
-				var novo := PackedInt32Array()
+				var foc := PackedInt32Array()
+				var ub := PackedInt32Array()
 				for f in idx.size() / 3:
 					var c := (vs[idx[f * 3]] + vs[idx[f * 3 + 1]] + vs[idx[f * 3 + 2]]) / 3.0
 					if c.y > -0.02:
-						continue                          # o úbere (o focinho fica)
-					novo.append_array([idx[f * 3], idx[f * 3 + 1], idx[f * 3 + 2]])
-				arr[Mesh.ARRAY_INDEX] = novo
-		var flags: int = src.surface_get_format(si) & (Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS)
+						ub.append_array([idx[f * 3], idx[f * 3 + 1], idx[f * 3 + 2]])
+					else:
+						foc.append_array([idx[f * 3], idx[f * 3 + 1], idx[f * 3 + 2]])
+				# o úbere achatado: todos os pontos sobem até a barriga (z 0.0212)
+				var vs2 := vs.duplicate()
+				for i in vs2.size():
+					if vs2[i].y > -0.02:
+						vs2[i].z = maxf(vs2[i].z, 0.0212)
+				var ua: Array = arr.duplicate()
+				ua[Mesh.ARRAY_VERTEX] = vs2
+				ua[Mesh.ARRAY_INDEX] = ub
+				ubere_arr = [ua, flags]
+				arr[Mesh.ARRAY_INDEX] = foc
 		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr, [], {}, flags)
 		out.surface_set_material(si, src.surface_get_material(si))
+	if not ubere_arr.is_empty():
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, ubere_arr[0], [], {}, ubere_arr[1])
 	_boi_mesh = out
 	return out
 
@@ -352,12 +368,12 @@ static func _volume(aneis: Array, lados := 7) -> ArrayMesh:
 ## O saco: um volume pequeno e redondo entre as coxas, colado no corpo.
 static func _saco_mesh() -> ArrayMesh:
 	return _volume([
-		[Vector3(0, 0, 0.0045), 0.0012, 0.0014],
-		[Vector3(0, 0, 0.0015), 0.0016, 0.0018],
-		[Vector3(0, -0.0002, -0.0012), 0.0021, 0.0022],
-		[Vector3(0, -0.0004, -0.0032), 0.0019, 0.0020],
-		[Vector3(0, -0.0005, -0.0045), 0.0010, 0.0011],
-	], 7)
+		[Vector3(0, 0, 0.0035), 0.0040, 0.0034],
+		[Vector3(0, 0.0002, 0.0005), 0.0047, 0.0036],
+		[Vector3(0, 0.0004, -0.0025), 0.0040, 0.0032],
+		[Vector3(0, 0.0005, -0.0048), 0.0028, 0.0024],
+		[Vector3(0, 0.0005, -0.0060), 0.0012, 0.0011],
+	], 9)
 
 
 ## A bainha (o "umbigo" do zebu): a barriga desce num volume liso de pele, largo onde
