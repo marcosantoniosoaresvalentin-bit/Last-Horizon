@@ -1,9 +1,9 @@
 {
-  "version": 179,
-  "file": "update_179.zip",
-  "size": 5074772,
-  "sha256": "c9348bf743ba9485ae1719002fb37dec5f02a00cfb7e9bdf05958346c35ac450",
+  "version": 180,
+  "file": "update_180.zip",
+  "size": 5076122,
+  "sha256": "5da81b030af94f55591c91928ef15d6475ef8df0ee668f586723305d960d6a86",
   "min_build": 1,
-  "notes": "Água de verdade nos buracos: valeta leva a água do rio, poço perto do rio mina água",
+  "notes": "Valeta tira água da lagoa; valeta morro abaixo escoa a lagoa",
   "date": "2026-11-22"
 }
