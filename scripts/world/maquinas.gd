@@ -202,8 +202,8 @@ const TIPOS := {
 		"nome": "Carrinho de Mão",
 		"desc": "Carrinho de mão de tábuas: carrega terra, barro, argila, areia, carvão, lenha e qualquer coisa da mochila.",
 		"pecas": [
-			["tabua", 1.62, Vector3(-0.12, 0.22, 0.24), "x", 0.07],     # 0 braço (vira a alça atrás)
-			["tabua", 1.62, Vector3(-0.12, 0.22, -0.24), "x", 0.07],    # 1 braço
+			["tabua", 1.72, Vector3(-0.07, 0.22, 0.24), "x", 0.07],     # 0 braço (vira a alça atrás)
+			["tabua", 1.72, Vector3(-0.07, 0.22, -0.24), "x", 0.07],    # 1 braço
 			["tabua", 0.86, Vector3(0.05, 0.27, 0.12), "x", 0.12],      # 2 fundo
 			["tabua", 0.86, Vector3(0.05, 0.27, -0.12), "x", 0.12],     # 3 fundo
 			["tabua", 0.86, Vector3(0.05, 0.4, 0.27), "x_lado", 0.12],  # 4 lateral
@@ -214,7 +214,7 @@ const TIPOS := {
 			["tabua", 0.24, Vector3(-0.6, 0.1, -0.24), "y", 0.06],      # 9 pé
 		],
 		"pinos": [],
-		"area": Rect2(-0.95, -0.32, 1.85, 0.64),
+		"area": Rect2(-0.95, -0.32, 1.95, 0.64),
 		"carrinho": {"eixo": 1, "roda": 1, "cipo": 4},
 	},
 	"forno": {
@@ -1238,7 +1238,7 @@ func _animate(mi: int, dy: float) -> void:
 
 # ---------- carrinho de mão ----------
 
-const CAR_EIXO := Vector3(0.62, 0.2, 0.0)   # o eixo da roda (na ponta dos braços)
+const CAR_EIXO := Vector3(0.72, 0.2, 0.0)   # o eixo da roda (na ponta dos braços)
 const CAR_PE := Vector3(-0.6, 0.0, 0.0)     # onde os pés encostam no chão
 const CAR_VOL := 0.11            # m³ de terra/barro/areia/carvão que cabem na caixa (uns 4,5 baldes)
 const CAR_LENHA := 12            # achas de lenha que cabem
@@ -1269,7 +1269,7 @@ func carrinho_por(mi: int, what: String, raio := 0.2) -> void:
 	var p: Dictionary = plantas[mi]
 	match what:
 		"eixo": p["eixo"] = true
-		"roda": p["roda"] = {"r": snappedf(clampf(raio, 0.12, 0.32), 0.001)}
+		"roda": p["roda"] = {"r": snappedf(clampf(raio, 0.18, 0.32), 0.001)}
 		"cipo": p["amarras"] = int(p.get("amarras", 0)) + 1
 	_rebuild()
 
@@ -1444,34 +1444,34 @@ func _draw_carrinho(mi: int, root: Node3D, nd: Dictionary) -> void:
 		var cm := CylinderMesh.new()
 		cm.top_radius = R
 		cm.bottom_radius = R
-		cm.height = 0.07
-		cm.radial_segments = 22
+		cm.height = 0.09
+		cm.radial_segments = 26
 		cil.mesh = cm
-		cil.material_override = _fmat("roda_casca", Color(0.3, 0.21, 0.13), 0.95)
+		cil.material_override = _fmat("roda_casca", Color(0.2, 0.14, 0.09), 0.95)
 		cil.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3.ZERO)
 		roda.add_child(cil)
 		for sg in [-1.0, 1.0]:
 			var face := MeshInstance3D.new()
 			var fm := CylinderMesh.new()
-			fm.top_radius = R - 0.014
-			fm.bottom_radius = R - 0.014
+			fm.top_radius = R - 0.025
+			fm.bottom_radius = R - 0.025
 			fm.height = 0.004
-			fm.radial_segments = 22
+			fm.radial_segments = 26
 			face.mesh = fm
-			face.material_override = _fmat("roda_cara", Color(0.74, 0.58, 0.38), 0.85)
-			face.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0, sg * 0.036))
+			face.material_override = _fmat("roda_cara", Color(0.6, 0.42, 0.26), 0.85)
+			face.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0, sg * 0.046))
 			roda.add_child(face)
 			for k in 3:
 				var an := MeshInstance3D.new()
 				var tm := TorusMesh.new()
-				var rr := (R - 0.014) * (0.3 + 0.22 * k)
+				var rr := (R - 0.025) * (0.3 + 0.22 * k)
 				tm.inner_radius = rr - 0.004
 				tm.outer_radius = rr
 				tm.rings = 22
 				tm.ring_segments = 4
 				an.mesh = tm
-				an.material_override = _fmat("roda_anel", Color(0.52, 0.37, 0.22), 0.9)
-				an.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0, sg * 0.039))
+				an.material_override = _fmat("roda_anel", Color(0.38, 0.25, 0.14), 0.9)
+				an.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0, sg * 0.049))
 				roda.add_child(an)
 		nd["roda"] = roda
 	elif etapa == "roda":

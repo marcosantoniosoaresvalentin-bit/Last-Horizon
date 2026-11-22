@@ -230,8 +230,8 @@ func _draw_plan() -> void:
 		return
 	if t.has("carrinho"):
 		# a roda (rodela) no eixo, na ponta dos braços
-		_draw.draw_arc(P.call(0.62, 0.2), 0.2 * sc, 0, TAU, 32, C_HI, 2.0)
-		_draw.draw_circle(P.call(0.62, 0.2), 0.025 * sc, C_HI)
+		_draw.draw_arc(P.call(0.72, 0.2), 0.2 * sc, 0, TAU, 32, C_HI, 2.0)
+		_draw.draw_circle(P.call(0.72, 0.2), 0.025 * sc, C_HI)
 		_draw.draw_string(font, P.call(0.45, -0.12), "RODA (RODELA)", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
 		_draw.draw_string(font, P.call(0.62, 0.62), "EIXO DE GALHO", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_DIM)
 		_draw.draw_string(font, P.call(-0.4, 0.7), "CAIXA DE TÁBUAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
