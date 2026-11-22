@@ -1,9 +1,9 @@
 {
-  "version": 201,
-  "file": "update_201.zip",
-  "size": 5532041,
-  "sha256": "2e0d029083b8d8874530682bc5c40110650e9a8b477605f490ec04f0547c3f02",
+  "version": 202,
+  "file": "update_202.zip",
+  "size": 5540186,
+  "sha256": "10b920c74412019237a6d80caa297a01f92351fe2c83ea04eb73c89c622e983a",
   "min_build": 1,
-  "notes": "Som novo do laço arrebentando",
+  "notes": "Tripé de içar: levantar a vaca morta pelos pés com a roldana",
   "date": "2026-11-22"
 }
