@@ -430,9 +430,9 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				ci.draw_line(c + Vector2(-24, yy) * u, c + Vector2(24, yy + 2) * u, Color(0.8, 0.62, 0.55), 1.4 * u, true)
 			pel.append(pel[0])
 			ci.draw_polyline(pel, ink, 2.0 * u, true)
-		"folha_babacu_seca":
-			# a folha penada seca: a raque marrom e os folíolos dos dois lados
-			var raq := Color(0.42, 0.32, 0.18)
+		"folha_babacu":
+			# a folha penada verde: a raque e os folíolos dos dois lados
+			var raq := Color(0.24, 0.36, 0.14)
 			ci.draw_line(c + Vector2(-44, 36) * u, c + Vector2(44, -36) * u, ink, 5.0 * u, true)
 			ci.draw_line(c + Vector2(-44, 36) * u, c + Vector2(44, -36) * u, raq, 3.0 * u, true)
 			for k in 16:
@@ -441,7 +441,7 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				var comp := 18.0 * sin(PI * (0.1 + t * 0.9)) + 5.0
 				for sd in [-1.0, 1.0]:
 					var dd: Vector2 = Vector2(0.5, 0.8).normalized() * sd
-					ci.draw_line(p0, p0 + (dd + Vector2(0.4, -0.3)).normalized() * comp * u, Color(0.6, 0.46, 0.26).darkened(0.1 * (k % 2)), 2.2 * u, true)
+					ci.draw_line(p0, p0 + (dd + Vector2(0.4, -0.3)).normalized() * comp * u, Color(0.32, 0.55, 0.2).darkened(0.1 * (k % 2)), 2.2 * u, true)
 		"coco_babacu":
 			# o coco oval de casca marrom, com a pontinha
 			for k in 3:

@@ -3210,7 +3210,10 @@ func _update_ctx_btn() -> void:
 		_ctx_btn.text = "Pegar folha seca"
 	elif _babacu and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _babacu.seca_near(_player.position, 1.8) >= 0:
 		_ctx_action = "babacu_seca"
-		_ctx_btn.text = "Pegar folha seca de babaçu"
+		_ctx_btn.text = "Pegar folha de babaçu"
+	elif _babacu and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and (item_qtd("machado") > 0 or teste) and _pindova_cortavel():
+		_ctx_action = "babacu_cortar"
+		_ctx_btn.text = "Cortar folha de babaçu"
 	elif _babacu and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _babacu.coco_near(_player.position, 1.2) >= 0:
 		_ctx_action = "babacu_coco"
 		_ctx_btn.text = "Pegar coco de babaçu"
@@ -3267,8 +3270,21 @@ func _ctx_press() -> void:
 		"pinos":
 			_pin_start()
 			return
+		"babacu_cortar":
+			var pb: Dictionary = _babacu.pindova_near(_player.position, 2.4)
+			if pb.is_empty():
+				return
+			var at := Vector3(float(pb.x), _player.position.y + 0.6, float(pb.z))
+			Sons.play_at(self, "machado", at, -4.0, 1.25)
+			if wear("machado", 1):
+				_update_inventory()
+			if _babacu.golpe_folha(pb, _player.position):
+				Sons.play_at(self, "talo_corte", at, 0.0, 1.0)
+				Sons.play_at(self, "folha_cai", at, 0.0, 0.9)
+			_act_check = 0.0
+			return
 		"babacu_seca", "babacu_coco":
-			var id_b := "folha_babacu_seca" if _ctx_action == "babacu_seca" else "coco_babacu"
+			var id_b := "folha_babacu" if _ctx_action == "babacu_seca" else "coco_babacu"
 			var bi: int = _babacu.seca_near(_player.position, 1.8) if _ctx_action == "babacu_seca" else _babacu.coco_near(_player.position, 1.2)
 			if bi >= 0 and _bag_total() + Itens.kg(id_b) <= BAG_MAX:
 				if _ctx_action == "babacu_seca":
@@ -10150,6 +10166,12 @@ func _tri_livre(uid: String) -> bool:
 		if str((q.get("ice", {}) as Dictionary).get("uid", "")) == uid:
 			return false
 	return true
+
+
+## Tem uma pindova de babaçu perto com folha para cortar (fica pelo menos com 2)?
+func _pindova_cortavel() -> bool:
+	var pb: Dictionary = _babacu.pindova_near(_player.position, 2.4)
+	return not pb.is_empty() and _babacu.folhas_de(pb) > 2
 
 
 ## O tripé pronto com a estaca do lado do jogador (a estaca fica longe do meio), ou -1.

@@ -7,8 +7,9 @@ extends Node3D
 ##   erguidas e arqueadas; floresce de janeiro a abril e os cachos de coco crescem verdes
 ##   (junho a setembro) e amadurecem marrons (outubro a dezembro); os cocos maduros caem
 ##   de outubro a março e ficam no chão.
-## - As folhas velhas secam e caem (das adultas e das pindovas): ficam no chão, marrons,
-##   e dão para pegar (forrar o chão, cobrir).
+## - As folhas verdes são cortadas da pindova com o machado (cada uma leva duas
+##   machadadas): caem inteiras no chão e dão para pegar (forrar o chão, cobrir). A pindova
+##   fica com uma folha a menos e solta outra nova com o tempo.
 
 const MundoSim := preload("res://scripts/mundo_sim.gd")
 const START_PALMS := 240
@@ -27,14 +28,17 @@ const COCO_DAYS := 300             # o coco no chão dura uns 10 meses
 const COCO_MAX := 900
 
 var palms: Array = []              # {x, z, nasc, hmax, vig, var, rot}
-var secas: Array = []              # folhas secas no chão: [x, z, giro, escala, dia, variante]
+var secas: Array = []              # folhas verdes cortadas no chão: [x, z, giro, escala, dia]
 var cocos: Array = []              # cocos no chão: [x, z, giro, dia]
 var last_day := 0
 var _jogo: Node
 var _arv: Node
 var _rng := RandomNumberGenerator.new()
 var _crowns: Array = []            # copas das adultas (variantes)
-var _pindovas: Array = []          # pindovas (variantes)
+var _pindovas: Array = []          # pindovas: [variante][quantas folhas] -> malha
+const PIND_FOLHAS := [6, 7, 8]     # folhas de uma pindova inteira (por variante)
+const FOLHA_DIAS := 45             # a pindova solta uma folha nova a cada mês e meio
+const VERDE_DIAS := 60             # a folha cortada no chão seca e some em uns 2 meses
 var _seca_mesh: ArrayMesh
 var _trunk_mesh: ArrayMesh
 var _cacho_verde: ArrayMesh
@@ -162,14 +166,9 @@ func _generate() -> void:
 		palms.append(_new_palm(x, z, last_day - age))
 	# já tem folha seca e coco pelo chão
 	for p in palms:
-		if is_adult(p):
-			for k in _rng.randi_range(1, 3):
-				_soltar_seca(p, last_day - _rng.randi_range(0, SECA_DAYS - 10))
-			if queda(last_day):
-				for k in _rng.randi_range(0, 8):
-					_soltar_coco(p, last_day - _rng.randi_range(0, 60))
-		elif _rng.randf() < 0.35:
-			_soltar_seca(p, last_day - _rng.randi_range(0, SECA_DAYS - 10))
+		if is_adult(p) and queda(last_day):
+			for k in _rng.randi_range(0, 8):
+				_soltar_coco(p, last_day - _rng.randi_range(0, 60))
 
 
 func _soltar_seca(p: Dictionary, day: int) -> void:
@@ -192,25 +191,64 @@ func _soltar_coco(p: Dictionary, day: int) -> void:
 
 
 func _process_day(day: int) -> void:
-	secas = secas.filter(func(s): return day - int(s[4]) < SECA_DAYS)
+	secas = secas.filter(func(s): return day - int(s[4]) < VERDE_DIAS)
 	cocos = cocos.filter(func(c): return day - int(c[3]) < COCO_DAYS)
 	var cai := queda(day) and cacho_de(day) != 1
 	var novas := []
 	for p in palms:
 		if is_adult(p, day):
-			if _rng.randf() < SECA_CHANCE:
-				_soltar_seca(p, day)
 			if cai and _rng.randf() < 0.35:
 				for k in _rng.randi_range(1, 4):
 					_soltar_coco(p, day)
-		elif _rng.randf() < SECA_PIND * pindova_scale(p, day):
-			_soltar_seca(p, day)
+		elif p.has("folhas") and int(p.folhas) < folhas_max(p) and _rng.randf() < 1.0 / FOLHA_DIAS:
+			p.folhas = int(p.folhas) + 1
 	# um coco que ficou no chão às vezes brota (vira pindova)
 	if palms.size() < MAX_PALMS and not cocos.is_empty() and _rng.randf() < 0.02:
 		var c: Array = cocos[_rng.randi() % cocos.size()]
 		if _spot_ok(float(c[0]), float(c[1])):
 			novas.append(_new_palm(float(c[0]), float(c[1]), day))
 	palms.append_array(novas)
+
+
+# ================== CORTAR E PEGAR ==================
+
+func folhas_max(p: Dictionary) -> int:
+	return int(PIND_FOLHAS[int(p.var)])
+
+
+func folhas_de(p: Dictionary) -> int:
+	return int(p.get("folhas", folhas_max(p)))
+
+
+## A pindova (sem tronco, já grandinha) mais perto, com folha para cortar, ou {}.
+func pindova_near(pos: Vector3, reach: float) -> Dictionary:
+	var best := {}
+	var bd := reach
+	for p in palms:
+		if is_adult(p) or pindova_scale(p) < 0.35:
+			continue
+		var d := Vector2(float(p.x) - pos.x, float(p.z) - pos.z).length()
+		if d < bd:
+			bd = d
+			best = p
+	return best
+
+
+## Uma machadada no talo da folha; na segunda a folha cai inteira no chão (devolve true).
+func golpe_folha(p: Dictionary, de: Vector3) -> bool:
+	p["golpes"] = int(p.get("golpes", 0)) + 1
+	if int(p.golpes) < 2:
+		return false
+	p.golpes = 0
+	p["folhas"] = folhas_de(p) - 1
+	# a folha cai deitada para o lado de quem cortou
+	var dir := Vector2(de.x - float(p.x), de.z - float(p.z))
+	var a := dir.angle() + _rng.randf_range(-0.7, 0.7) if dir.length() > 0.1 else _rng.randf() * TAU
+	var L := 2.2 * pindova_scale(p)
+	secas.append([snappedf(float(p.x) + cos(a) * L, 0.01), snappedf(float(p.z) + sin(a) * L, 0.01), snappedf(a, 0.01),
+		snappedf(clampf(pindova_scale(p) * 0.95, 0.5, 1.0), 0.01), last_day])
+	_rebuild()
+	return true
 
 
 # ================== PEGAR ==================
@@ -254,7 +292,7 @@ func take_coco(i: int) -> void:
 
 ## Pôr uma folha seca no chão (largada da mochila).
 func put_seca(x: float, z: float, giro: float) -> void:
-	secas.append([snappedf(x, 0.01), snappedf(z, 0.01), snappedf(giro, 0.01), 0.9, last_day, _rng.randi() % VARIANTS])
+	secas.append([snappedf(x, 0.01), snappedf(z, 0.01), snappedf(giro, 0.01), 0.9, last_day])
 	_rebuild()
 
 
@@ -284,7 +322,10 @@ func _rebuild() -> void:
 	var pinds := []
 	for v in VARIANTS:
 		crowns.append([])
-		pinds.append([])
+		var porq := []
+		for k in int(PIND_FOLHAS[v]) + 1:
+			porq.append([])
+		pinds.append(porq)
 	var trunks := []
 	var cv := []
 	var cm := []
@@ -311,10 +352,12 @@ func _rebuild() -> void:
 			_grid[k2].append(Vector3(x, z, TRUNK_R + 0.25))
 		else:
 			var ps := pindova_scale(p)
-			pinds[int(p.var)].append(Transform3D(rot.scaled(Vector3.ONE * ps), Vector3(x, gy - 0.05, z)))
+			var nf := clampi(folhas_de(p), 0, folhas_max(p))
+			pinds[int(p.var)][nf].append(Transform3D(rot.scaled(Vector3.ONE * ps), Vector3(x, gy - 0.05, z)))
 	for v in VARIANTS:
 		_add_mm(_crowns[v], crowns[v], VIEW, true)
-		_add_mm(_pindovas[v], pinds[v], VIEW * 0.6, true)
+		for k in range(1, (pinds[v] as Array).size()):
+			_add_mm(_pindovas[v][k], pinds[v][k], VIEW * 0.6, true)
 	_add_mm(_trunk_mesh, trunks, VIEW, true)
 	_add_mm(_cacho_verde, cv, 120.0, true)
 	_add_mm(_cacho_maduro, cm, 120.0, true)
@@ -361,8 +404,11 @@ func _make_assets() -> void:
 	for v in VARIANTS:
 		rng.seed = 900 + v * 31
 		_crowns.append(_coroa(rng, 15 + v, 6.2))
-		rng.seed = 1900 + v * 17
-		_pindovas.append(_pindova(rng, 6 + v))
+		var porq := [null]
+		for k in range(1, int(PIND_FOLHAS[v]) + 1):
+			rng.seed = 1900 + v * 17
+			porq.append(_pindova(rng, int(PIND_FOLHAS[v]), k))
+		_pindovas.append(porq)
 	rng.seed = 77
 	_seca_mesh = _folha_seca(rng)
 	_trunk_mesh = _tronco()
@@ -450,7 +496,8 @@ func _coroa(rng: RandomNumberGenerator, n: int, L: float) -> ArrayMesh:
 	return st.commit()
 
 
-func _pindova(rng: RandomNumberGenerator, n: int) -> ArrayMesh:
+## A pindova com "tem" das suas n folhas (as cortadas faltam; a de dentro fica).
+func _pindova(rng: RandomNumberGenerator, n: int, tem: int) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var verde := Color(0.26, 0.45, 0.17)
@@ -458,7 +505,11 @@ func _pindova(rng: RandomNumberGenerator, n: int) -> ArrayMesh:
 		var az := TAU * i / n + rng.randf_range(-0.3, 0.3)
 		var dir := Vector3(cos(az), 0, sin(az))
 		var elev := rng.randf_range(1.15, 1.42)
-		_folha(st, dir * 0.05, dir, elev, rng.randf_range(3.2, 4.6), verde.darkened(rng.randf_range(0.0, 0.15)), rng)
+		var L := rng.randf_range(3.2, 4.6)
+		var tom := rng.randf_range(0.0, 0.15)
+		if i >= tem:
+			continue
+		_folha(st, dir * 0.05, dir, elev, L, verde.darkened(tom), rng)
 	st.generate_normals()
 	return st.commit()
 
@@ -466,7 +517,7 @@ func _pindova(rng: RandomNumberGenerator, n: int) -> ArrayMesh:
 func _folha_seca(rng: RandomNumberGenerator) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_folha(st, Vector3(-2.2, 0, 0), Vector3.RIGHT, 0.0, 4.4, Color(0.5, 0.4, 0.24), rng, true, true)
+	_folha(st, Vector3(-2.2, 0, 0), Vector3.RIGHT, 0.0, 4.4, Color(0.17, 0.3, 0.1), rng, false, true)
 	st.generate_normals()
 	return st.commit()
 
