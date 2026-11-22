@@ -11108,8 +11108,8 @@ func _evis_draw() -> void:
 
 # ================== PARTIR AO MEIO (MACHADO) ==================
 # Aberta e pendurada (cada pata da frente na sua ponta da corda), com o machado: "Partir
-# ao meio". Primeiro escolhe em qual banda ficam a cabeça e o pescoço (a da esquerda ou a
-# da direita, como se vê na tela). De costas para a vaca, a marca fica na espinha: cada
+# ao meio". O jogo escolhe em qual banda ficam a cabeça e o pescoço (o rabo vai com a
+# outra). De costas para a vaca, a marca fica na espinha: cada
 # toque nela é uma machadada e o corte vai descendo, das patas da frente até o rabo.
 # Partida, as duas bandas ficam penduradas, cada uma pela sua pata.
 
@@ -11138,8 +11138,10 @@ func _banda_start(mi: int, uid: String) -> void:
 	if _mao != "":
 		equip("")
 	var c: Dictionary = _caca.couro_de(uid)
-	var ja := (c.get("banda", {}) as Dictionary).has("cab")
-	_banda = {"mi": mi, "uid": uid, "fase": "corte" if ja else "escolha", "anim": -1.0, "treme": 0.0, "fim": -1.0}
+	if not (c.get("banda", {}) as Dictionary).has("cab"):
+		# o jogo escolhe em qual banda ficam a cabeça e o pescoço (sorteado, fixo para essa vaca)
+		c["banda"] = {"cab": "e" if hash(uid) % 2 == 0 else "d", "corte": 0.0}
+	_banda = {"mi": mi, "uid": uid, "fase": "corte", "anim": -1.0, "treme": 0.0, "fim": -1.0}
 	_olho = {}
 	_bur = {}
 	_jump_btn.visible = false
@@ -11241,9 +11243,8 @@ func _banda_move(delta: float) -> void:
 		if float(_banda.fim) > 1.8:
 			_banda_end()
 			return
-	var esc := str(_banda.fase) == "escolha"
-	(_banda_btns[0] as Control).visible = esc
-	(_banda_btns[1] as Control).visible = esc
+	(_banda_btns[0] as Control).visible = false
+	(_banda_btns[1] as Control).visible = false
 	(_banda_btns[2] as Control).visible = true
 	_jump_btn.visible = false
 	_ctx_btn.visible = false
