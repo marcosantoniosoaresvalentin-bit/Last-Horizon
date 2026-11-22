@@ -123,6 +123,10 @@ static func kind_for(text: String) -> String:
 		return "semente"
 	if t.begins_with("atirar"):
 		return "atirar"
+	if t.begins_with("laçar"):
+		return "lacar"
+	if t.begins_with("força"):
+		return "forca"
 	if t.begins_with("pular"):
 		return "pular"
 	if t.begins_with("craft"):
@@ -151,6 +155,29 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 		return out
 	var ink: Color = col.call(INK)
 	match k:
+		"lacar":
+			# a laçada aberta girando no ar, com a corda descendo
+			var lp := PackedVector2Array()
+			for i in 33:
+				var a := TAU * i / 32.0
+				lp.append(c + Vector2(cos(a) * 34, -12 + sin(a) * 18) * u)
+			ci.draw_polyline(lp, ink, 9 * u, true)
+			ci.draw_polyline(lp, col.call(Color(0.72, 0.6, 0.32)), 6 * u, true)
+			ci.draw_line(c + Vector2(20, 2) * u, c + Vector2(30, 44) * u, ink, 9 * u, true)
+			ci.draw_line(c + Vector2(20, 2) * u, c + Vector2(30, 44) * u, col.call(Color(0.72, 0.6, 0.32)), 6 * u, true)
+			if not shadow:
+				for k2 in 3:
+					var a2 := -0.6 + k2 * 0.6
+					ci.draw_arc(c + Vector2(0, -12) * u, 44 * u, a2 - 0.2, a2, 8, Color(1, 1, 1, 0.5), 2.5 * u, true)
+		"forca":
+			# o braço dobrado fazendo força (o bíceps) puxando a corda
+			var braco: PackedVector2Array = P.call([[-38, 34], [-30, 6], [-14, -12], [6, -30], [22, -36], [30, -26], [18, -12], [4, -2], [-6, 18], [-12, 38]])
+			ci.draw_colored_polygon(braco, col.call(Color(0.86, 0.66, 0.5)))
+			ci.draw_polyline(braco + PackedVector2Array([braco[0]]), ink, 2.5 * u, true)
+			ci.draw_circle(c + Vector2(-12, 0) * u, 15 * u, col.call(Color(0.9, 0.7, 0.54)))
+			ci.draw_arc(c + Vector2(-12, 0) * u, 15 * u, PI * 1.05, PI * 1.95, 12, ink, 2.5 * u, true)
+			ci.draw_line(c + Vector2(26, -30) * u, c + Vector2(46, 40) * u, ink, 8 * u, true)
+			ci.draw_line(c + Vector2(26, -30) * u, c + Vector2(46, 40) * u, col.call(Color(0.72, 0.6, 0.32)), 5 * u, true)
 		"atirar":
 			# o arco com a flecha no ponto de soltar
 			var pa := PackedVector2Array()

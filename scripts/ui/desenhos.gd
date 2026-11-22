@@ -419,6 +419,23 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			# a ponta solta saindo do rolo
 			ci.draw_line(c + Vector2(30, 10) * u, c + Vector2(46, 36) * u, Color(0.22, 0.16, 0.07), 8.0 * u, true)
 			ci.draw_line(c + Vector2(30, 10) * u, c + Vector2(46, 36) * u, cor, 5.5 * u, true)
+		"laco_5", "laco_10":
+			# a corda enrolada na mão e a laçada aberta na ponta
+			var cor2 := Color(0.55, 0.45, 0.22)
+			for k in 4:
+				var pts2 := PackedVector2Array()
+				for i in 25:
+					var a4 := TAU * i / 24.0
+					pts2.append(c + Vector2(-18 + cos(a4) * (22 - k * 2), 10 + sin(a4) * (16 - k * 1.5)) * u)
+				ci.draw_polyline(pts2, Color(0.22, 0.16, 0.07), 7.5 * u, true)
+				ci.draw_polyline(pts2, cor2, 5.0 * u, true)
+			var lp := PackedVector2Array()
+			for i in 29:
+				var a5 := TAU * i / 28.0
+				lp.append(c + Vector2(24 + cos(a5) * 20, -18 + sin(a5) * 24) * u)
+			ci.draw_polyline(lp, Color(0.22, 0.16, 0.07), 7.5 * u, true)
+			ci.draw_polyline(lp, cor2.lightened(0.1), 5.0 * u, true)
+			ci.draw_line(c + Vector2(2, 0) * u, c + Vector2(14, 2) * u, cor2, 5.0 * u, true)
 		"arco", "acao_atirar":
 			# o arco envergado (vareta) com a corda de cipó trançado
 			var pa := PackedVector2Array()

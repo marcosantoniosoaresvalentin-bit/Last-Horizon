@@ -839,6 +839,8 @@ void fragment() {
 	_sub_btns = [mk.call("Sair", -430, -146, _bur_sair)]
 	_desf_btns = [mk.call("Puxar", -290, -146, _desf_puxar), mk.call("Levantar", -430, -146, _desf_end)]
 	_tranca_btns = [mk.call("Parar", -290, -146, _tranca_end)]
+	_laco_btns = [mk.call("Laçar", -290, -146, _laco_lancar), mk.call("Força", -170, -170, _laco_forca), mk.call("Soltar", -430, -146, _laco_soltar)]
+	(_laco_btns[1] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_sub_ui = Control.new()
 	_sub_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_sub_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1634,6 +1636,7 @@ func _process(delta: float) -> void:
 	_vitais_tick(delta)
 	_car_tick(delta)
 	_flecha_tick(delta)
+	_laco_tick(delta)
 	if _caca:
 		_caca.update(delta)
 		if Engine.get_process_frames() % 120 == 90:
@@ -6151,6 +6154,8 @@ func _move_player(delta: float) -> void:
 		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow * _doente_lento()
 		if _empurra >= 0:
 			sp *= 0.85                 # empurrando o carrinho: passo firme
+		if not _laco.is_empty() and not _laco.has("voa"):
+			sp *= float(_laco.get("mult", 1.0)) * 0.6 if bool(_laco.get("tenso", false)) else 0.8
 		if _swim:
 			sp = SWIM_SPEED          # nadando: braçada (sem correr)
 		if not _carry.is_empty():
@@ -6508,7 +6513,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop] + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -6533,6 +6538,9 @@ func _input(e: InputEvent) -> void:
 		elif e.index == _look_id:
 			var d: Vector2 = e.position - _look_last
 			_look_last = e.position
+			if not _laco.is_empty() and not _laco.has("voa") and d.y > 0.0 and d.y > absf(d.x):
+				_laco_encurta(d.y)          # dedo para baixo: recolhe a corda
+				return
 			_yaw -= d.x * 0.006
 			_pitch = clampf(_pitch + d.y * 0.004, -1.3, 1.35)
 
@@ -9551,6 +9559,357 @@ func _tranca_draw() -> void:
 	var tx := "%.1f / %d m" % [float(cd.feito), int(cd.alvo)]
 	var tw := font.get_string_size(tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x
 	ui.draw_string(font, Vector2(s.x * 0.5 - tw * 0.5, r.position.y - 10), tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 0.95, 0.85))
+
+
+# ================== LAÇO ==================
+# Com o laço na mão (Mochila → EQUIPAR): o círculo da mira (como o da pá) vai para onde
+# a câmera olha, até 6 m (laço de 5 m) ou 11 m (de 10 m); em cima da cabeça de uma vaca
+# viva ele fica verde. "Laçar": o laço voa e, se pegar a cabeça, fecha no pescoço.
+# Laçada, a vaca quer fugir: tocando várias vezes em "Força" o jogador segura (a barra
+# mostra a força e o risco da força que precisa: mais longe, mais força). Com força
+# sobrando ele anda (joystick) e arrasta a vaca; passando o dedo para baixo na tela ele
+# recolhe a corda e a vaca vem mais perto (precisa de menos força). Pouca força: a corda
+# vai esticando e arrebenta: a vaca foge e o laço fica perdido com ela.
+
+const LACO_ALCANCE := {"laco_5": 6.0, "laco_10": 11.0}
+const LACO_CORDA := {"laco_5": 5.0, "laco_10": 10.0}
+var _laco := {}                   # laçada: {id, L, forca, tensao, mult, item}; voando: {voa, de, para, t, id}
+var _laco_btns: Array = []        # [Laçar, Força, Soltar]
+var _laco_ring: MeshInstance3D = null
+var _laco_corda: MeshInstance3D = null
+var _laco_alca: Node3D = null      # a laçada no pescoço
+
+
+## Para onde o laço vai: {pos, id (vaca, ou -1)}.
+func _laco_mira() -> Dictionary:
+	var R: float = LACO_ALCANCE.get(_mao, 6.0)
+	var vs := get_viewport().get_visible_rect().size
+	var o := _cam.project_ray_origin(vs * 0.5)
+	var dir := _cam.project_ray_normal(vs * 0.5)
+	# uma cabeça de vaca perto da linha da mira
+	if _vacas:
+		var best := -1
+		var bd := 0.5
+		var bp := Vector3.ZERO
+		for id in _vacas._agents:
+			var c: Vector3 = _vacas.cabeca(int(id))
+			if c == Vector3.INF or c.distance_to(_player.position) > R:
+				continue
+			var t := (c - o).dot(dir)
+			if t < 0.0:
+				continue
+			var d := (o + dir * t).distance_to(c)
+			if d < bd:
+				bd = d
+				best = int(id)
+				bp = c
+		if best >= 0:
+			return {"pos": bp, "id": best}
+	var hit := Vector3.INF
+	var t2 := 0.3
+	while t2 < R + 3.0:
+		var p := o + dir * t2
+		if p.y <= ground_at(p.x, p.z):
+			hit = p
+			break
+		t2 += 0.1
+	if hit == Vector3.INF:
+		hit = _front(R)
+	var off := Vector2(hit.x - _player.position.x, hit.z - _player.position.z)
+	if off.length() > R:
+		off = off.normalized() * R
+	var at := Vector3(_player.position.x + off.x, 0, _player.position.z + off.y)
+	at.y = ground_at(at.x, at.z)
+	return {"pos": at, "id": -1}
+
+
+func _laco_lancar() -> void:
+	if not _laco.is_empty() or not _mao.begins_with("laco"):
+		return
+	var m := _laco_mira()
+	var de := _cam.global_position + _cam.global_transform.basis * Vector3(0.2, -0.3, -0.4)
+	_laco = {"voa": true, "de": de, "para": m.pos, "t": 0.0, "id": int(m.id), "item": _mao}
+	Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP * 1.5, -6.0, 1.3)
+
+
+func _laco_soltar() -> void:
+	if _laco.is_empty() or _laco.has("voa"):
+		return
+	var id := int(_laco.id)
+	_laco_fim()
+	if _vacas:
+		var v: Dictionary = _vacas._find(id)
+		if not v.is_empty():
+			_vacas._assusta(int(v.reb), _player.position)
+
+
+func _laco_forca() -> void:
+	if _laco.is_empty() or _laco.has("voa"):
+		return
+	_laco.forca = minf(1.0, float(_laco.forca) + 0.1)
+
+
+## Quanto de força precisa para segurar: mais longe, mais força.
+func _laco_precisa() -> float:
+	var L := float(_laco.get("L", 3.0))
+	return clampf(0.22 + L * 0.06, 0.25, 0.92)
+
+
+## Recolher a corda (dedo para baixo na tela).
+func _laco_encurta(dy: float) -> void:
+	if _laco.is_empty() or _laco.has("voa"):
+		return
+	if float(_laco.forca) < _laco_precisa() * 0.8:
+		return                              # sem força a corda não vem
+	_laco.L = maxf(1.6, float(_laco.L) - dy * 0.006)
+
+
+func _laco_fim(arrebentou := false) -> void:
+	if _vacas:
+		_vacas.laco_id = -1
+	if is_instance_valid(_laco_alca):
+		_laco_alca.queue_free()
+	_laco_alca = null
+	if _laco_corda:
+		_laco_corda.visible = false
+	if arrebentou:
+		var it := str(_laco.get("item", _mao))
+		if item_qtd(it) > 0:
+			remove_item(it, 1)
+			_update_inventory()
+			if _mao == it and item_qtd(it) <= 0:
+				equip("")
+		Sons.play_at(self, "estalo", _player.position + Vector3.UP * 1.2, 0.0, 1.4)
+	_laco = {}
+
+
+func _laco_tick(delta: float) -> void:
+	var com := _mao.begins_with("laco") and _morto < 0.0 and not _swim and _carry.is_empty()
+	if not com and not _laco.is_empty() and not _laco.has("voa"):
+		_laco_soltar()
+	var laçada := not _laco.is_empty() and not _laco.has("voa")
+	if _laco_btns.size() == 3:
+		(_laco_btns[0] as Control).visible = com and _laco.is_empty()
+		(_laco_btns[1] as Control).visible = laçada
+		(_laco_btns[2] as Control).visible = laçada
+		if laçada and _jump_btn:
+			_jump_btn.visible = false            # segurando a vaca não pula
+		if com and _chop_btn:
+			_chop_btn.visible = false
+	# a mira
+	if _laco_ring == null:
+		_laco_ring = MeshInstance3D.new()
+		_laco_ring.mesh = ImmediateMesh.new()
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.vertex_color_use_as_albedo = true
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.no_depth_test = true
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.render_priority = 2
+		_laco_ring.material_override = m
+		_laco_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_laco_ring)
+	_laco_ring.visible = com and _laco.is_empty() and _bag_ui == null and _craft_ui == null
+	if _laco_ring.visible:
+		var mira := _laco_mira()
+		var at: Vector3 = mira.pos
+		var na_vaca := int(mira.id) >= 0
+		var cor := Color(0.35, 1.0, 0.4, 0.95) if na_vaca else Color(1, 1, 1, 0.9)
+		var im: ImmediateMesh = _laco_ring.mesh
+		im.clear_surfaces()
+		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+		var r := 0.32 if na_vaca else 0.4
+		for i in 49:
+			var a := TAU * i / 48.0
+			for rr in [r - 0.025, r + 0.025]:
+				var x: float = at.x + cos(a) * rr
+				var z: float = at.z + sin(a) * rr
+				im.surface_set_color(cor)
+				im.surface_add_vertex(Vector3(x, (at.y if na_vaca else ground_at(x, z) + 0.03), z))
+		im.surface_end()
+	if _laco.is_empty():
+		if _laco_corda:
+			_laco_corda.visible = false
+		return
+	if _laco_corda == null:
+		_laco_corda = MeshInstance3D.new()
+		_laco_corda.material_override = Maquinas.cipo_mat()
+		_laco_corda.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_laco_corda)
+	var mao := _cam.global_position + _cam.global_transform.basis * Vector3(0.18, -0.32, -0.35)
+	# voando: a laçada abre e vai em arco
+	if _laco.has("voa"):
+		_laco.t = float(_laco.t) + delta
+		var k := clampf(float(_laco.t) / 0.5, 0.0, 1.0)
+		var para: Vector3 = _laco.para
+		if int(_laco.id) >= 0:
+			var c2: Vector3 = _vacas.cabeca(int(_laco.id)) if _vacas else Vector3.INF
+			if c2 != Vector3.INF:
+				para = c2
+		var p: Vector3 = (_laco.de as Vector3).lerp(para, k) + Vector3.UP * sin(k * PI) * 1.0
+		_laco_desenha(mao, p, true, 0.28 * (0.4 + 0.6 * sin(k * PI * 0.5)))
+		if k >= 1.0:
+			var id := int(_laco.id)
+			var it := str(_laco.item)
+			if id >= 0 and _vacas and _vacas._agents.has(id) and _vacas.cabeca(id).distance_to(para) < 0.6:
+				var d := Vector2(para.x - _player.position.x, para.z - _player.position.z).length()
+				_laco = {"id": id, "L": clampf(d + 0.3, 1.6, float(LACO_CORDA.get(it, 5.0))), "forca": 0.7, "tensao": 0.0, "mult": 1.0, "item": it, "puxa": 0.0}
+				_vacas.laco_id = id
+				_laco_prende(id)
+				Sons.play_at(self, "baque", para, -8.0, 1.2)
+			else:
+				_laco = {}
+				_laco_corda.visible = false
+		return
+	# laçada
+	var id2 := int(_laco.id)
+	if _vacas == null or not _vacas._agents.has(id2):
+		_laco_fim()
+		return
+	var v: Dictionary = _vacas._find(id2)
+	var a: Dictionary = _vacas._agents[id2]
+	var n: Node3D = a.node
+	_laco.forca = maxf(0.0, float(_laco.forca) - delta * 0.32)
+	var precisa := _laco_precisa()
+	var pp := _player.position
+	var cp := Vector3(float(v.x), 0, float(v.z))
+	var fora := Vector3(cp.x - pp.x, 0, cp.z - pp.z)
+	var dist := fora.length()
+	fora = fora / maxf(dist, 0.01)
+	var L := float(_laco.L)
+	# a vaca puxa para fugir
+	var anda := 0.0
+	var quer := fora.rotated(Vector3.UP, sin(float(a.t) * 0.7) * 0.6)
+	var np := cp + quer * 1.8 * delta
+	if _vacas._pode_andar(np):
+		anda = np.distance_to(cp)
+		cp = np
+	dist = Vector2(cp.x - pp.x, cp.z - pp.z).length()
+	var tenso := dist >= L - 0.05
+	_laco.tenso = tenso
+	if tenso:
+		var sobra := float(_laco.forca) - precisa
+		if sobra >= 0.0:
+			_laco.tensao = maxf(0.0, float(_laco.tensao) - delta * 0.4)
+			_laco.mult = clampf(sobra / 0.25, 0.25, 1.0)
+		else:
+			# não aguenta: a vaca arrasta o jogador e a corda vai esticando
+			_laco.tensao = float(_laco.tensao) + delta * (0.12 + (-sobra) * 0.9)
+			_laco.mult = 0.0
+			var arrasto := Vector3(cp.x - pp.x, 0, cp.z - pp.z).normalized() * 1.4 * clampf(-sobra * 3.0, 0.2, 1.0) * delta
+			var q := pp + arrasto
+			_player.position = Vector3(q.x, ground_at(q.x, q.z), q.z)
+			pp = _player.position
+		# a vaca fica no comprimento da corda (é puxada junto se o jogador anda)
+		var dd := Vector3(cp.x - pp.x, 0, cp.z - pp.z)
+		if dd.length() > L:
+			cp = pp + dd.normalized() * L
+	else:
+		_laco.tensao = maxf(0.0, float(_laco.tensao) - delta * 0.6)
+		_laco.mult = 1.0
+	if float(_laco.tensao) >= 1.0:
+		var id3 := id2
+		_laco_fim(true)
+		var v3: Dictionary = _vacas._find(id3)
+		if not v3.is_empty():
+			_vacas._assusta(int(v3.reb), _player.position)
+		return
+	var mov := Vector2(cp.x - float(v.x), cp.z - float(v.z))
+	v.x = cp.x
+	v.z = cp.z
+	n.position = Vector3(cp.x, ground_at(cp.x, cp.z), cp.z)
+	if mov.length() > 0.001:
+		a.yaw = atan2(-mov.y, mov.x)
+		a.fase = float(a.fase) + mov.length() / 0.55 * PI
+	n.rotation.y = lerp_angle(n.rotation.y, float(a.yaw), minf(1.0, delta * 4.0))
+	a.t = float(a.t) + delta
+	var vel := mov.length() / maxf(delta, 0.001)
+	_vacas.Modelo.pose(n, "correr" if vel > 1.6 else ("andar" if vel > 0.15 else "parado"), float(a.fase), float(a.t))
+	# a corda da mão até o pescoço: frouxa faz barriga, esticada fica reta
+	var pes: Vector3 = _vacas.pescoco(id2)
+	var folga := clampf((L - dist) / maxf(L, 0.1), 0.0, 1.0)
+	_laco_desenha(mao, pes, false, 0.0, folga * minf(L, 4.0) * 0.35)
+	if _sub_ui:
+		_sub_ui.queue_redraw()
+
+
+## A laçada fechada no pescoço da vaca (presa no osso: acompanha a cabeça).
+func _laco_prende(id: int) -> void:
+	var n: Node3D = _vacas._agents[id].node
+	if not n.has_meta("sk"):
+		return
+	var sk: Skeleton3D = n.get_meta("sk")
+	var ba := BoneAttachment3D.new()
+	ba.bone_name = "Neck"
+	sk.add_child(ba)
+	var mi := MeshInstance3D.new()
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pts := []
+	for i in 33:
+		var a := TAU * i / 32.0
+		pts.append(Vector3(cos(a) * 0.17, 0, sin(a) * 0.15))
+	Maquinas.corda_tubo(st, pts, 0.008, 0.06)
+	st.generate_normals()
+	mi.mesh = st.commit()
+	mi.material_override = Maquinas.cipo_mat()
+	ba.add_child(mi)
+	var bi := sk.find_bone("Neck")
+	var bp: Transform3D = sk.global_transform * sk.get_bone_global_pose(bi)
+	mi.global_transform = Transform3D(Basis(), bp.origin)
+	_laco_alca = ba
+
+
+## A corda (ou a laçada voando): de a até b, com barriga (curva para baixo).
+func _laco_desenha(a: Vector3, b: Vector3, voando: bool, roda := 0.0, barriga := 0.0) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pts := []
+	var n := 24
+	for i in n + 1:
+		var u := float(i) / n
+		var p := a.lerp(b, u) + Vector3.DOWN * sin(u * PI) * barriga
+		var gy := ground_at(p.x, p.z) + 0.03
+		p.y = maxf(p.y, gy)
+		pts.append(p)
+	Maquinas.fio_cipo(st, pts, 0.012, 0.3)
+	if voando:
+		var roda_pts := []
+		for i in 25:
+			var ang := TAU * i / 24.0
+			roda_pts.append(b + Vector3(cos(ang) * roda, sin(ang * 2.0) * 0.03, sin(ang) * roda))
+		Maquinas.fio_cipo(st, roda_pts, 0.012, 0.5)
+	st.generate_normals()
+	_laco_corda.mesh = st.commit()
+	_laco_corda.visible = true
+
+
+## A barra de força do laço: a força, o risco do quanto precisa e a corda esticando.
+func _laco_draw() -> void:
+	if _laco.is_empty() or _laco.has("voa") or _laco_btns.size() < 3:
+		return
+	var ui := _sub_ui
+	var btn: Control = _laco_btns[1]
+	var r := Rect2(btn.get_global_rect().position - ui.get_global_rect().position + Vector2(-44, 0), Vector2(28, btn.size.y))
+	ui.draw_rect(r.grow(3), Color(0.04, 0.04, 0.03, 0.85))
+	var v := float(_laco.forca)
+	var cols := [Color(0.25, 0.55, 0.95), Color(0.25, 0.85, 0.3), Color(0.95, 0.88, 0.2), Color(1.0, 0.55, 0.12), Color(0.95, 0.18, 0.12)]
+	var f := v * (cols.size() - 1)
+	var i := mini(int(f), cols.size() - 2)
+	var col: Color = (cols[i] as Color).lerp(cols[i + 1], f - i)
+	var h := r.size.y * v
+	ui.draw_rect(Rect2(Vector2(r.position.x, r.end.y - h), Vector2(r.size.x, h)), col)
+	var ny := r.end.y - r.size.y * _laco_precisa()
+	ui.draw_line(Vector2(r.position.x - 8, ny), Vector2(r.end.x + 8, ny), Color(1, 1, 1, 0.95), 3.0)
+	ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
+	# a corda esticando (vermelha piscando perto de arrebentar)
+	var t := float(_laco.tensao)
+	if t > 0.02:
+		var pisca := 0.5 + 0.5 * sin(Time.get_ticks_msec() / (60.0 + 200.0 * (1.0 - t)))
+		var rb := Rect2(Vector2(ui.size.x * 0.5 - 160, 40), Vector2(320, 12))
+		ui.draw_rect(rb.grow(3), Color(0.04, 0.04, 0.03, 0.8))
+		ui.draw_rect(Rect2(rb.position, Vector2(rb.size.x * clampf(t, 0.0, 1.0), rb.size.y)), Color(0.95, 0.2, 0.12, 0.6 + 0.4 * pisca))
 
 
 # ================== ARCO E FLECHA ==================
@@ -13732,6 +14091,7 @@ func _olho_layout() -> Dictionary:
 func _draw_bur_ui() -> void:
 	_draw_fornos()
 	_tranca_draw()
+	_laco_draw()
 	if _mao == "arco" and _morto < 0.0:
 		# a mira: um círculo pequeno no meio da tela (fecha quando a corda está puxada)
 		var mc := _sub_ui.size * 0.5

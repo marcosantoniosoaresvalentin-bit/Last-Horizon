@@ -61,6 +61,7 @@ var _img: Image
 var tex: ImageTexture
 var _tex_sujo := false
 var _gerar := false
+var laco_id := -1                 # a vaca que está no laço do jogador (-1 nenhuma)
 
 
 func build(jogo: Node, seed_: int, save_path := "") -> void:
@@ -448,6 +449,8 @@ func _spawn(v: Dictionary) -> void:
 func _step(v: Dictionary, a: Dictionary, pp: Vector3, h: float, delta: float) -> void:
 	var node: Node3D = a.node
 	a.t = float(a.t) + delta
+	if int(v.id) == laco_id:
+		return                               # laçada: quem mexe nela é o laço
 	if _jogo._mp_client():
 		# convidado: quem decide é o dono do mundo; aqui ela só vai até onde ele diz
 		var alvo := Vector3(float(v.x), _jogo.ground_at(float(v.x), float(v.z)), float(v.z))
@@ -603,6 +606,8 @@ func _assusta(reb: int, pp: Vector3) -> void:
 	for v in vacas:
 		if int(v.reb) != reb or not _agents.has(int(v.id)):
 			continue
+		if int(v.id) == laco_id:
+			continue
 		var a: Dictionary = _agents[int(v.id)]
 		var pos := Vector3(float(v.x), 0, float(v.z))
 		var away := Vector3(pos.x - pp.x, 0, pos.z - pp.z)
@@ -612,6 +617,28 @@ func _assusta(reb: int, pp: Vector3) -> void:
 		var lado := Vector3(-away.z, 0, away.x) * _rng.randf_range(-0.4, 0.4)
 		a.alvo = pos + (away + lado).normalized() * _rng.randf_range(20.0, 30.0)
 		a.modo = "fugir"
+
+
+## A cabeça e o pescoço da vaca agora (pelos ossos do modelo).
+func cabeca(id: int) -> Vector3:
+	return _osso(id, "Head", Vector3(0.85, 1.25, 0), 0.011)
+
+
+func pescoco(id: int) -> Vector3:
+	return _osso(id, "Neck", Vector3(0.62, 1.15, 0), 0.0)
+
+
+func _osso(id: int, nome: String, falta: Vector3, sobe: float) -> Vector3:
+	if not _agents.has(id):
+		return Vector3.INF
+	var n: Node3D = _agents[id].node
+	if n.has_meta("sk"):
+		var sk: Skeleton3D = n.get_meta("sk")
+		var bi := sk.find_bone(nome)
+		if bi >= 0:
+			var bp: Transform3D = sk.get_bone_global_pose(bi)
+			return sk.global_transform * (bp.origin + bp.basis.y * sobe)
+	return n.global_transform * falta
 
 
 func _pode_andar(p: Vector3) -> bool:
