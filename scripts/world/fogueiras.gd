@@ -333,35 +333,15 @@ func _fogueira_node(i: int) -> Dictionary:
 	luz.omni_range = 6.0
 	luz.position.y = 0.5
 	root.add_child(luz)
-	var fumaca := CPUParticles3D.new()
-	var qm2 := QuadMesh.new()
-	qm2.size = Vector2(0.3, 0.3)
-	fumaca.mesh = qm2
-	var fm := StandardMaterial3D.new()
-	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA       # com luz: o fogo clareia a fumaça por baixo
-	fm.roughness = 1.0
-	fm.disable_fog = true
-	fm.emission_enabled = true
-	fm.emission = Color(0.22, 0.21, 0.2)       # nunca fica preta (de noite, cinza escura)
-	fm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	fm.vertex_color_use_as_albedo = true
-	fm.albedo_texture = soft_tex()
-	fumaca.material_override = fm
-	fumaca.amount = 14
-	fumaca.lifetime = 3.0
-	fumaca.direction = Vector3.UP
-	fumaca.spread = 15.0
-	fumaca.gravity = Vector3(0.15, 0.5, 0)
-	fumaca.initial_velocity_min = 0.5
-	fumaca.initial_velocity_max = 0.8
-	fumaca.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	fumaca.emission_sphere_radius = 0.15
-	fumaca.scale_amount_min = 1.0
-	fumaca.scale_amount_max = 2.5
-	var g2 := Gradient.new()
-	g2.offsets = PackedFloat32Array([0.0, 0.15, 1.0])
-	g2.colors = PackedColorArray([Color(0.75, 0.75, 0.75, 0.0), Color(0.75, 0.75, 0.75, 0.3), Color(0.8, 0.8, 0.8, 0.0)])
-	fumaca.color_ramp = g2
+	var fumaca: Node3D = load("res://scripts/world/fumaca.gd").new()
+	fumaca.n = 14
+	fumaca.vida = 3.0
+	fumaca.tam0 = 0.3
+	fumaca.tam1 = 0.9
+	fumaca.subida = 0.65
+	fumaca.vento = Vector3(0.15, 0.0, 0.0)
+	fumaca.cor = Color(0.72, 0.72, 0.71)
+	fumaca.alfa = 0.35
 	fumaca.position.y = 0.75
 	root.add_child(fumaca)
 	return {"root": root, "fogo": chama, "luz": luz, "fumaca": fumaca, "brasa": br, "lenhas": lenhas, "carv": carv, "n": nl}
@@ -392,7 +372,8 @@ func atualizar() -> void:
 		if nd.get("est", "") != est:
 			nd.est = est
 			(nd.fogo as CPUParticles3D).emitting = on
-			(nd.fumaca as CPUParticles3D).emitting = on or br
+			(nd.fogo as CPUParticles3D).visible = on      # sem partícula parada no ar no celular
+			nd.fumaca.set_emitting(on or br)
 			(nd.lenhas as Node3D).visible = on or int(items[i].get("pendente", 0)) > 0
 			(nd.carv as Node3D).visible = est == "fria" and carvao(i) > 0
 			(nd.brasa as Node3D).visible = on or br

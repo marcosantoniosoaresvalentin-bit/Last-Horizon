@@ -1833,6 +1833,7 @@ func forno_visual(mi: int, nd := {}) -> void:
 	var fogo_aberto := bool(f.aceso) and aberta and float(f.t0) < 0.0
 	if nd.has("chama") and is_instance_valid(nd.chama):
 		(nd.chama as CPUParticles3D).emitting = fogo_aberto
+		(nd.chama as CPUParticles3D).visible = fogo_aberto
 	if nd.has("luz") and is_instance_valid(nd.luz):
 		(nd.luz as OmniLight3D).visible = fogo_aberto
 

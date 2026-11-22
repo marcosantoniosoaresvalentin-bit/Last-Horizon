@@ -5746,6 +5746,7 @@ func _update_sky(delta: float) -> void:
 	_grass_mat.set_shader_parameter("wind", lerpf(0.1, 0.28, _rain_amount))
 	_water_mat.set_shader_parameter("rain", _rain_amount)
 	_rain.emitting = _rain_amount > 0.3
+	_rain.visible = _rain.emitting          # sem gota parada no ar quando a chuva para (celular)
 	if _player:
 		_rain.global_position = _player.global_position + Vector3(0, 12, 0)
 
