@@ -11520,28 +11520,39 @@ func _quarto_input(e: InputEvent) -> bool:
 			return true
 		if pressed:
 			_quarto.drag = idx
-			_quarto.cortando = pos.distance_to(_quarto_tela(float(q.get("faca", 0.0)))) < 110.0
+			_quarto.cortando = pos.distance_to(_quarto_tela(float(q.get("faca", 0.0)))) < 140.0
 		elif int(_quarto.drag) == idx:
 			_quarto.drag = -9
 			_quarto.cortando = false
 		return true
-	var at := Vector2.ZERO
+	var d := Vector2.ZERO
 	if e is InputEventScreenDrag and e.index == int(_quarto.drag):
-		at = e.position
+		d = e.relative
 	elif e is InputEventMouseMotion and int(_quarto.drag) == -1:
-		at = e.position
+		d = e.relative
 	else:
 		return e is InputEventScreenDrag or e is InputEventMouseMotion
 	if str(_quarto.fase) != "faca" or not bool(_quarto.cortando) or (item_qtd("faca") <= 0 and not teste):
 		return true
+	# o dedo arrastando no sentido da linha (a linha dá a volta na banda e some atrás dela:
+	# conta o quanto o dedo andou para a frente na direção dela)
 	var t0 := float(q.get("faca", 0.0))
-	var tp := _traca(_caca.quarto_linha(uid, lado, 24), t0, at)
-	if tp < 0.0:
-		_quarto.cortando = false
+	var a0 := _quarto_tela(t0)
+	var dir := (_quarto_tela(minf(1.0, t0 + 0.2)) - a0)
+	if dir.length() < 12.0:
+		dir = _quarto_tela(1.0) - _quarto_tela(0.0)
+	if dir.length() < 1.0:
+		dir = Vector2.RIGHT
+	dir = dir.normalized()
+	var anda := d.dot(dir)
+	if anda <= 0.0:
 		return true
-	if tp <= t0 and t0 < 0.95:
-		return true
-	var t1 := 1.0 if maxf(tp, t0) >= 0.95 else minf(1.0, tp)
+	var tot := 0.0
+	for k in 8:
+		tot += _quarto_tela(k / 8.0).distance_to(_quarto_tela((k + 1) / 8.0))
+	var t1 := minf(1.0, t0 + anda / maxf(tot, 260.0))
+	if t1 >= 0.97:
+		t1 = 1.0
 	q.faca = t1
 	if int(t1 * 6.0) != int(t0 * 6.0):
 		Sons.play_at(self, "fibra_puxa", _cam.global_position - _cam.global_transform.basis.z * 1.5, -12.0, 1.8)
