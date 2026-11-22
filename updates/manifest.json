@@ -1,9 +1,9 @@
 {
-  "version": 167,
-  "file": "update_167.zip",
-  "size": 5002792,
-  "sha256": "2a44f4c86094e3d20c9e2c3d0313b77d7f28ecd266fa6e449e1b0b21739215c2",
+  "version": 168,
+  "file": "update_168.zip",
+  "size": 5002862,
+  "sha256": "69d69e06001495db01cf55a0704e5667aafdde8df2fb4449cdb111bde9e6e737",
   "min_build": 1,
-  "notes": "Abrir a cova do barro com o losango; o barro se mistura a cada puxada da enxada",
+  "notes": "Lenha rachada não dá mais para fazer ripa",
   "date": "2026-11-22"
 }
