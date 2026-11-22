@@ -1,9 +1,9 @@
 {
-  "version": 199,
-  "file": "update_199.zip",
-  "size": 5503980,
-  "sha256": "8bd592d32f950225a506ac1b00bf8825e1293124691709e5e62fb55a8164bbdc",
+  "version": 200,
+  "file": "update_200.zip",
+  "size": 5504618,
+  "sha256": "bf4dd23969ce15aa165cb594b58281396158819ee2c529cc5d3791a538fb9c0c",
   "min_build": 1,
-  "notes": "Laço para laçar e puxar a vaca",
+  "notes": "Laço: barrinha de força no arremesso; botão Força não fica mais em cima do Pular",
   "date": "2026-11-22"
 }
