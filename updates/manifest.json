@@ -1,9 +1,9 @@
 {
-  "version": 184,
-  "file": "update_184.zip",
-  "size": 5085018,
-  "sha256": "7d38d9a8596a6e726d8cc8f15ec567fd44b859a32fd4da546fe040b0713ba97e",
+  "version": 185,
+  "file": "update_185.zip",
+  "size": 5284199,
+  "sha256": "650d4816a9db86ae1ab8d6721ebb5fa89f9e5463a89a8935250f5d5879aa60df",
   "min_build": 1,
-  "notes": "Carrinho: pinos, tábuas sem fresta, caçamba vira, roda com física",
+  "notes": "Vacas selvagens comendo o pasto e o capim",
   "date": "2026-11-22"
 }
