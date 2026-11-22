@@ -1,9 +1,9 @@
 {
-  "version": 175,
-  "file": "update_175.zip",
-  "size": 5012977,
-  "sha256": "805da5c97a18af9ee98202fe4db49a326a1cb895c3c300b5403175be71607fe5",
+  "version": 176,
+  "file": "update_176.zip",
+  "size": 5012895,
+  "sha256": "de1bcbc54c32dde6c5248809de3f85dd796e45cf72ebc33f46fe7b3fae894ad1",
   "min_build": 1,
-  "notes": "Bolas verdes paradas no ar corrigidas (forno, fogueira, chamas, chuva)",
+  "notes": "Sem mensagens de ajuda nem dicas: o jogador aprende sozinho",
   "date": "2026-11-22"
 }
