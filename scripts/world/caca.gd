@@ -2149,9 +2149,12 @@ func _caindo_tick(delta: float) -> void:
 			if vel.y < -1.2:
 				Sons.play_at(_jogo, "baque", lowp, -10.0 + minf(-vel.y, 5.0), 1.3 if str(f.tipo) != "cabeca" else 0.85)
 				_respingo(Vector3(lowp.x, 0, lowp.z), _rng.randf_range(0.08, 0.16), "gota")
-			if str(f.tipo).begins_with("quarto_") and not bool(f.get("sujou", false)):
-				f["sujou"] = true
-				quarto_sujar(nd)                    # caiu na terra: sujou
+			if str(f.tipo).begins_with("quarto_") and not bool(f.get("sujou", false)) and not bool(f.get("limpo", false)):
+				if _jogo._maq and _jogo._maq.no_forro(lowp):
+					f["limpo"] = true                 # caiu no forro de folhas: limpo
+				else:
+					f["sujou"] = true
+					quarto_sujar(nd)                  # caiu na terra: sujou
 			vel.y = -vel.y * 0.22 if vel.y < -0.6 else 0.0
 			vel.x *= 0.55
 			vel.z *= 0.55
@@ -2167,7 +2170,7 @@ func _caindo_tick(delta: float) -> void:
 					cc["partes"] = []
 				var e := {"tipo": str(f.tipo), "xf": _xf_json(nd.global_transform)}
 				if str(f.tipo).begins_with("quarto_"):
-					e["sujo"] = true
+					e["sujo"] = not bool(f.get("limpo", false))
 				(cc.partes as Array).append(e)
 
 

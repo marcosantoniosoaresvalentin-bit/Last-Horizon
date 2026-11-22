@@ -266,7 +266,8 @@ const TIPOS := {
 		"area": Rect2(-2.0, -2.0, 4.0, 4.0),
 		"sem_colisao": true,
 		"amarrar": {"n": 3, "nos": [Vector3(0.0, 4.0, 0.0)]},
-		"tripe": {"roldana": 1, "cordinha": 1, "corda": 5},
+		"tripe": {"roldana": 1, "cordinha": 1, "corda": 5, "forro": 8},
+		"versao": 2,                    # (a partir da 2 o chão tem que ser forrado)
 	},
 	"forno": {
 		"nome": "Forno de Carvão",
@@ -291,6 +292,8 @@ const FORNO_R := 0.82            # raio do domo
 const FORNO_H := 0.95            # altura do domo
 const FORNO_FRENTE := 0.55       # a parede da frente (reta, com a boca)
 
+static var _forro_mesh: ArrayMesh = null
+const Babacus := preload("res://scripts/world/babacus.gd")
 const TRI_R := 1.9               # raio dos pés do tripé
 const TRI_H := 4.0              # altura do cruzamento das pernas
 const TRI_L := 4.7               # comprimento das pernas
@@ -374,6 +377,7 @@ static func needs(tipo: String) -> Dictionary:
 	out["roldana"] = int(tp.get("roldana", 0))
 	out["cipo_trancado"] = int(tp.get("cordinha", 0))
 	out["corda"] = int(tp.get("corda", 0))
+	out["folha_babacu"] = int(tp.get("forro", 0))
 	out["pedra"] = int(fz.get("pedras", 0))
 	out["barro"] = int(fz.get("barro", 0)) + int(fz.get("porta", 0))
 	return out
@@ -436,6 +440,7 @@ func complete(mi: int) -> void:
 	if TIPOS[p.tipo].has("tripe"):
 		p["roldana"] = true
 		p["corda_m"] = 5
+		p["forro"] = int(TIPOS[p.tipo].tripe.forro)
 	var fz: Dictionary = TIPOS[p.tipo].get("forno", {})
 	if not fz.is_empty():
 		p["ped"] = int(fz.pedras)
@@ -556,7 +561,7 @@ func pronta(mi: int) -> bool:
 		return false
 	if TIPOS[p.tipo].has("carrinho") and carrinho_etapa(mi) != "":
 		return false
-	if TIPOS[p.tipo].has("tripe") and (not bool(p.get("roldana", false)) or int(p.get("corda_m", 0)) <= 0):
+	if TIPOS[p.tipo].has("tripe") and (not bool(p.get("roldana", false)) or int(p.get("corda_m", 0)) <= 0 or forro_falta(mi) > 0):
 		return false
 	if int(p.get("amarras", 0)) < int((TIPOS[p.tipo].get("amarrar", {}) as Dictionary).get("n", 0)):
 		return false
@@ -1624,6 +1629,8 @@ func tripe_etapa(mi: int) -> String:
 			return "pecas"
 	if amarras_falta(mi) > 0:
 		return "amarrar"
+	if forro_falta(mi) > 0:
+		return "forro"
 	if not bool(p.get("roldana", false)):
 		return "roldana"
 	if int(p.get("corda_m", 0)) <= 0:
@@ -1631,8 +1638,30 @@ func tripe_etapa(mi: int) -> String:
 	return ""
 
 
+## Quantas folhas de babaçu ainda faltam no forro do chão (tripé novo).
+func forro_falta(mi: int) -> int:
+	var p: Dictionary = plantas[mi]
+	if str(p.tipo) != "tripe" or int(p.get("versao", 1)) < 2:
+		return 0
+	return maxi(0, int(TIPOS.tripe.tripe.forro) - int(p.get("forro", 0)))
+
+
+## O ponto está em cima do forro de algum tripé (forrado de todo)?
+func no_forro(pos: Vector3) -> bool:
+	for mi in plantas.size():
+		var p: Dictionary = plantas[mi]
+		if str(p.tipo) != "tripe" or int(p.get("forro", 0)) <= 0:
+			continue
+		var l := xform(mi).affine_inverse() * pos
+		var raio := 2.3 * clampf(float(p.forro) / float(TIPOS.tripe.tripe.forro), 0.0, 1.0)
+		if Vector2(l.x, l.z).length() < raio:
+			return true
+	return false
+
+
 func tripe_por(mi: int, what: String, metros := 0) -> void:
 	match what:
+		"forro": plantas[mi]["forro"] = int(plantas[mi].get("forro", 0)) + 1
 		"roldana": plantas[mi]["roldana"] = true
 		"corda": plantas[mi]["corda_m"] = metros
 	_rebuild()
@@ -1696,6 +1725,31 @@ static func tripe_amarra_mesh(k: int) -> ArrayMesh:
 
 func _draw_tripe(mi: int, root: Node3D, nd: Dictionary) -> void:
 	var p: Dictionary = plantas[mi]
+	# o forro: as folhas de babaçu deitadas no chão, em roda, cobrindo onde a carne cai
+	var nf := int(p.get("forro", 0))
+	if nf > 0:
+		if _forro_mesh == null:
+			var stf := SurfaceTool.new()
+			stf.begin(Mesh.PRIMITIVE_TRIANGLES)
+			var rng := RandomNumberGenerator.new()
+			rng.seed = 4242
+			Babacus._folha(stf, Vector3(-2.2, 0, 0), Vector3.RIGHT, 0.0, 4.4, Color(0.13, 0.22, 0.08), rng, false, true)
+			stf.generate_normals()
+			_forro_mesh = stf.commit()
+		var fm := StandardMaterial3D.new()
+		fm.vertex_color_use_as_albedo = true
+		fm.vertex_color_is_srgb = true
+		fm.roughness = 0.85
+		fm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		for i in nf:
+			var a := TAU * i / 8.0 + 0.2
+			var lf := MeshInstance3D.new()
+			lf.mesh = _forro_mesh
+			lf.material_override = fm
+			var c := Vector3(cos(a), 0, sin(a)) * 0.95
+			lf.transform = Transform3D(Basis(Vector3.UP, -a).scaled(Vector3(0.62, 1.0, 1.15)), c + Vector3.UP * (0.03 + i * 0.004))
+			lf.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			root.add_child(lf)
 	var k := int(p.get("amarras", 0))
 	if k > 0:
 		var m := MeshInstance3D.new()

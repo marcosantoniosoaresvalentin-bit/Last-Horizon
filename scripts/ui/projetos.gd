@@ -190,6 +190,8 @@ func _select(tipo: String) -> void:
 		partes.append("%d cipó trançado (a cordinha)" % int(n.cipo_trancado))
 	if int(n.get("corda", 0)) > 0:
 		partes.append("1 corda de %d m ou mais" % int(n.corda))
+	if int(n.get("folha_babacu", 0)) > 0:
+		partes.append("%d folhas de babaçu (o forro do chão)" % int(n.folha_babacu))
 	if int(n.get("barro", 0)) > 0:
 		partes.append("%d baldes de barro" % int(n.barro))
 	var nl := int(n.lamina)
@@ -238,6 +240,11 @@ func _draw_plan() -> void:
 		_draw.draw_line(P.call(rc.x + Maquinas.TRI_RR, rc.y), P.call(e.x, e.y), C_DIM, 1.5)
 		_draw.draw_line(P.call(rc.x - Maquinas.TRI_RR, rc.y), P.call(rc.x - Maquinas.TRI_RR, 0.5), C_DIM, 1.5)
 		_draw.draw_string(fnt, P.call(1.9, 2.3), "CORDA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_DIM)
+		# o forro de folhas no chão, embaixo
+		for i in 9:
+			var x0 := -1.9 + i * 0.42
+			_draw.draw_line(P.call(x0, 0.03), P.call(x0 + 0.5, 0.03), C_HI, 3.0)
+		_draw.draw_string(fnt, P.call(-1.9, -0.25), "FORRO DE FOLHA DE BABAÇU", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
 		return
 	var small := t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho") or t.has("amarrar")
 	_draw.draw_line(P.call(-3.2 if not small else -1.2, 0), P.call(3.2 if not small else 0.9, 0), C_DIM, 1.5)

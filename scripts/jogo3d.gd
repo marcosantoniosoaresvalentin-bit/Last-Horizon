@@ -10086,6 +10086,12 @@ func _tri_ctx(mi: int) -> bool:
 	if not _carry.is_empty():
 		return false
 	match _maq.tripe_etapa(mi):
+		"forro":
+			if item_qtd("folha_babacu") > 0 or teste:
+				_ctx_action = "tri_forro"
+				_ctx_btn.text = "Forrar o chão com folha de babaçu (%d/%d)" % [int(p.get("forro", 0)) + 1, int(Maquinas.TIPOS.tripe.tripe.forro)]
+				return true
+			return false
 		"roldana":
 			if (item_qtd("roldana") > 0 and item_qtd("cipo_trancado") > 0) or teste:
 				_ctx_action = "tri_roldana"
@@ -10198,6 +10204,12 @@ func _tri_press(act: String) -> void:
 	var p: Dictionary = _maq.plantas[mi]
 	var xf: Transform3D = _maq.xform(mi)
 	match act:
+		"tri_forro":
+			if not teste:
+				remove_item("folha_babacu", 1)
+				_update_inventory()
+			_maq.tripe_por(mi, "forro")
+			Sons.play_at(self, "folha_cai", xf.origin + Vector3.UP * 0.2, 0.0, 0.9)
 		"tri_roldana":
 			if not teste:
 				remove_item("roldana", 1)
@@ -12284,7 +12296,7 @@ func _maq_ctx() -> bool:
 	if mi < 0:
 		return false
 	var p: Dictionary = _maq.plantas[mi]
-	if Maquinas.TIPOS[p.tipo].has("tripe") and _maq.tripe_etapa(mi) in ["roldana", "corda", ""]:
+	if Maquinas.TIPOS[p.tipo].has("tripe") and _maq.tripe_etapa(mi) in ["forro", "roldana", "corda", ""]:
 		return _tri_ctx(mi)
 	if _maq.pronta(mi):
 		var role: String = _maq.role_at(mi, _player.position)
