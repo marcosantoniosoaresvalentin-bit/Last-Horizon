@@ -35,8 +35,10 @@ func build(jogo: Node, save_path := "") -> void:
 	_rebuild()
 
 
+## O relógio do fogo: em sextos de segundo de verdade (o fogo queima o mesmo tempo de
+## dia ou de noite, mesmo com o relógio do jogo andando em ritmos diferentes).
 func _agora() -> int:
-	return int(_jogo.sim.steps)
+	return int(_jogo.sim.real_s(float(_jogo.sim.steps)) * PASSOS_S)
 
 
 func _min_desde(t0: int) -> float:

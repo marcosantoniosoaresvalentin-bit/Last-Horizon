@@ -28,7 +28,7 @@ const NEST_DAYS := 90
 const STARVE_DAYS := 25
 const VIEW := 280.0               # até onde aparecem (voando dá para ver longe)
 const SPEED := 12.0               # m/s voando (uns 45 km/h)
-const REAL_S_PER_HOUR := 20.0     # 1 hora do jogo = 20 s de verdade (dia de 8 min)
+# (quanto tempo de verdade dura uma hora do jogo: sim.real_s_por_hora())
 const CRUISE := 16.0              # quanto voam acima das copas (m)
 
 ## Ave: {id, nasc (dia), sexo ("f"/"m"), par (id do par ou -1)}
@@ -555,7 +555,7 @@ func _unit_state(u: Dictionary, h: float) -> Dictionary:
 		var prev: Dictionary = stops[i - 1][1]
 		var nxt: Dictionary = stops[i][1]
 		var dist: float = (nxt.pos as Vector3).distance_to(prev.pos)
-		var dur := dist / SPEED / REAL_S_PER_HOUR + 0.02
+		var dur := dist / SPEED / float(_jogo.sim.real_s_por_hora()) + 0.002
 		if h < t0:
 			break
 		if h < t0 + dur:

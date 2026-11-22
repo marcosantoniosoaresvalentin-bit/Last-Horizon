@@ -37,7 +37,13 @@ var island := false
 var converted := false      # o mundo salvo era antigo (sem mar) e acabou de virar ilha             # o mapa já virou ilha (mundos antigos são convertidos)
 const STEPS_PER_SEC := 6.0
 const STEP_MULT := 5.0
-const STEPS_DAY := 2880           # um dia de jogo = 8 minutos
+const STEPS_DAY := 2880           # um dia de jogo = 24 horas do jogo (2880 passos de 30 s do jogo)
+## Quanto dura de verdade: o claro (6h às 18h) leva 2 horas; a noite (18h às 6h), 30 minutos.
+## O relógio do jogo anda mais devagar de dia e mais depressa de noite.
+const DIA_REAL_S := 7200.0
+const NOITE_REAL_S := 1800.0
+const DIA_DE := 6.0
+const DIA_ATE := 18.0
 const START_HOUR := 7.0
 # Calendário de verdade: meses de 28 a 31 dias, anos bissextos e dias da semana certos.
 # Todo mundo novo começa em 1º de janeiro de 2000 (um sábado); depois 2001, 2002...
@@ -232,6 +238,43 @@ func _load_state() -> bool:
 ## Hora do dia (0 a 24).
 func hour() -> float:
 	return fmod(START_HOUR + float(steps) / STEPS_DAY * 24.0, 24.0)
+
+
+## Passos do relógio por segundo de verdade agora (devagar de dia, depressa de noite).
+func passos_por_s() -> float:
+	var h := hour()
+	var passos_12h := STEPS_DAY * 0.5
+	if h >= DIA_DE and h < DIA_ATE:
+		return passos_12h / DIA_REAL_S
+	return passos_12h / NOITE_REAL_S
+
+
+## Segundos de verdade que uma hora do jogo leva agora.
+func real_s_por_hora() -> float:
+	var h := hour()
+	return DIA_REAL_S / 12.0 if h >= DIA_DE and h < DIA_ATE else NOITE_REAL_S / 12.0
+
+
+## Segundos de verdade desde o começo do mundo até o passo st (o mesmo em todos os
+## jogadores: sai só do relógio do jogo). Serve para o que tem de durar tempo de
+## verdade (o fogo queimando, a água passando no filtro).
+static func real_s(st: float) -> float:
+	return _real_h(START_HOUR + st / STEPS_DAY * 24.0) - _real_h(START_HOUR)
+
+
+static func _real_h(H: float) -> float:
+	var dias := floorf(H / 24.0)
+	var hh := H - dias * 24.0
+	var noite_h := NOITE_REAL_S / 12.0
+	var dia_h := DIA_REAL_S / 12.0
+	var r := dias * (DIA_REAL_S + NOITE_REAL_S)
+	if hh < DIA_DE:
+		r += hh * noite_h
+	elif hh < DIA_ATE:
+		r += DIA_DE * noite_h + (hh - DIA_DE) * dia_h
+	else:
+		r += DIA_DE * noite_h + DIA_REAL_S + (hh - DIA_ATE) * noite_h
+	return r
 
 
 ## Força do sol agora (0 à noite, 1 ao meio-dia).
@@ -431,7 +474,7 @@ func _sim_loop() -> void:
 	var loops := 0
 	while not _quit:
 		var now := Time.get_ticks_usec()
-		acc += (now - t_last) / 1000000.0 * steps_per_sec
+		acc += (now - t_last) / 1000000.0 * steps_per_sec / STEPS_PER_SEC * passos_por_s()
 		t_last = now
 		var n := mini(int(acc), 4)
 		acc = minf(acc - n, 4.0)

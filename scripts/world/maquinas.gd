@@ -1199,7 +1199,7 @@ func filtro_por(mi: int, what: String, n := 1.0) -> void:
 func filtro_agora(mi: int) -> Array:
 	var f := filtro_of(mi)
 	var cap: float = POTE_L.get(str(f.pote), 0.0)
-	var dt := maxf(0.0, float(int(_jogo.sim.steps) - int(f.get("t0", 0))))
+	var dt := maxf(0.0, (_jogo.sim.real_s(float(_jogo.sim.steps)) - _jogo.sim.real_s(float(f.get("t0", 0)))) * 6.0)   # em sextos de segundo de verdade
 	var mv := 0.0
 	if str(f.pote) != "":
 		mv = clampf(minf(float(f.cima), FILTRO_VAZAO * dt), 0.0, maxf(0.0, cap - float(f.pote_l)))
