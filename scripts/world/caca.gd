@@ -31,7 +31,9 @@ var _jogo: Node
 var _voando: Array = []           # flechas no ar: {pos, vel, node, t, forca}
 var _nodes := {}                  # uid -> {node, t (caindo), anim}
 var _poças: Array = []            # {node, r, alvo} poças crescendo
-var _pingos: Array = []           # bichos feridos pingando: {node, t, resto}
+var _fontes: Array = []           # ferimentos sangrando: {pai, local, dn_local, ate, t, ritmo}
+var _gotas: Array = []            # gotas caindo: {node, vel}
+var _fios: Array = []             # filetes escorrendo pelo couro: {node, L, alvo, vel}
 var _rng := RandomNumberGenerator.new()
 static var _mats := {}
 static var _flecha_mesh: ArrayMesh
@@ -91,30 +93,20 @@ func update(delta: float) -> void:
 			continue
 		f.pos = b
 		_aponta(f.node, b, vel)
-	# carcaças caindo e a vaca morrendo
+	# o bicho com o tiro fatal correndo até cair, e as carcaças caindo
 	for uid in _nodes:
 		var nd: Dictionary = _nodes[uid]
-		if nd.has("cai"):
+		if nd.has("corre"):
+			_correr(nd, delta)
+		elif nd.has("cai"):
 			_cair(nd, delta)
+	_sangue_tick(delta)
 	# poças de sangue crescendo
 	for p in _poças.duplicate():
 		p.r = move_toward(float(p.r), float(p.alvo), delta * 0.03)
 		(p.node as Node3D).scale = Vector3(float(p.r), 1.0, float(p.r))
 		if float(p.r) >= float(p.alvo):
 			_poças.erase(p)
-	# o bicho ferido pingando sangue no chão enquanto foge
-	for pg in _pingos.duplicate():
-		if not is_instance_valid(pg.node):
-			_pingos.erase(pg)
-			continue
-		pg.t = float(pg.t) - delta
-		pg.resto = float(pg.resto) - delta
-		if float(pg.t) <= 0.0:
-			pg.t = _rng.randf_range(0.25, 0.7)
-			var q: Vector3 = (pg.node as Node3D).global_position + Vector3(_rng.randf_range(-0.15, 0.15), 0, _rng.randf_range(-0.15, 0.15))
-			_mancha_chao(q, _rng.randf_range(0.03, 0.07), false)
-		if float(pg.resto) <= 0.0:
-			_pingos.erase(pg)
 
 
 ## Uma vez por dia: as carcaças velhas apodrecem e somem.
@@ -162,7 +154,7 @@ func _alvos() -> Array:
 			var vida: float = VIDA[esp]
 			out.append({"esp": "vaca", "tipo": esp, "id": int(id), "node": n, "nome": "cabeça", "c": cab, "r": 0.19 * s, "dano": 230.0, "vida": vida})
 			out.append({"esp": "vaca", "tipo": esp, "id": int(id), "node": n, "nome": "pescoço", "c": pes, "r": 0.2 * s, "dano": 70.0, "vida": vida})
-			for pt in [[Vector3(0.4, 0.95, 0), 0.3, 80.0, "peito"], [Vector3(-0.02, 0.95, 0), 0.34, 35.0, "barriga"], [Vector3(-0.48, 1.0, 0), 0.3, 30.0, "anca"],
+			for pt in [[Vector3(0.4, 0.95, 0), 0.3, 95.0, "peito"], [Vector3(-0.02, 0.95, 0), 0.34, 35.0, "barriga"], [Vector3(-0.48, 1.0, 0), 0.3, 30.0, "anca"],
 					[Vector3(0.42, 0.4, 0.15), 0.1, 15.0, "perna"], [Vector3(0.42, 0.4, -0.15), 0.1, 15.0, "perna"],
 					[Vector3(-0.55, 0.4, 0.15), 0.11, 15.0, "perna"], [Vector3(-0.55, 0.4, -0.15), 0.11, 15.0, "perna"]]:
 				out.append({"esp": "vaca", "tipo": esp, "id": int(id), "node": n, "nome": pt[3], "c": xf * (pt[0] as Vector3), "r": float(pt[1]) * s, "dano": pt[2], "vida": vida})
@@ -287,14 +279,15 @@ func _ferir(hit: Dictionary, vel: Vector3, f: Dictionary) -> void:
 	fn.reparent(pai, false)
 	_aponta(fn, entra, dir)
 	Sons.play_at(_jogo, "baque", ponto, -6.0, 1.6)
-	# o sangue: a mancha onde entrou e o escorrido
-	_mancha_bicho(pai, ponto, dir)
+	# o sangue: a mancha onde entrou, escorrendo e pingando
+	_mancha_bicho(pai, ponto, dir, true)
 	hit["pai"] = pai
-	if total >= float(hit.vida):
+	var fatal := total >= float(hit.vida)
+	_fonte(pai, ponto, dir, 40.0 if fatal else clampf(dano * 0.6, 15.0, 45.0), 0.12 if fatal else 0.3)
+	if fatal:
 		_morrer(hit, ponto, dir)
 	else:
 		_assusta(hit)
-		_pingos.append({"node": n, "t": 0.2, "resto": clampf(dano / 6.0, 4.0, 25.0)})
 
 
 func _assusta(hit: Dictionary) -> void:
@@ -305,12 +298,18 @@ func _assusta(hit: Dictionary) -> void:
 			var v: Dictionary = j._vacas._find(int(hit.id))
 			if not v.is_empty():
 				j._vacas._assusta(int(v.reb), pp)
+				var ag: Dictionary = j._vacas._agents.get(int(hit.id), {})
+				if not ag.is_empty():
+					var vp := Vector3(float(v.x), 0, float(v.z))
+					var fora := Vector3(vp.x - pp.x, 0, vp.z - pp.z).normalized()
+					ag.alvo = vp + fora.rotated(Vector3.UP, _rng.randf_range(-0.4, 0.4)) * _rng.randf_range(55.0, 80.0)
+					ag.modo = "fugir"
 		"tamandua":
 			var a: Dictionary = j._tamanduas._agents.get(int(hit.id), {})
 			if not a.is_empty():
 				var b: Dictionary = j._tamanduas._find(int(hit.id))
 				var pos := Vector3(float(b.x), 0, float(b.z))
-				a.alvo = pos + Vector3(pos.x - pp.x, 0, pos.z - pp.z).normalized() * 25.0
+				a.alvo = pos + Vector3(pos.x - pp.x, 0, pos.z - pp.z).normalized() * 50.0
 				a.modo = "fugir"
 		"macaco":
 			j._macacos._alarm((hit.node as Node3D).global_position)
@@ -366,12 +365,82 @@ func _morrer(hit: Dictionary, ponto: Vector3, dir: Vector3) -> void:
 		"feridas": [[local.x, local.y, local.z, ldir.x, ldir.y, ldir.z, str(pai.get_meta("osso", ""))]], "xf": []}
 	carcacas.append(c)
 	var nd := {"node": n, "c": c, "cai": 0.0, "de": n.global_transform}
-	if esp == "vaca" and n.has_meta("ap"):
-		var ap: AnimationPlayer = n.get_meta("ap")
-		ap.play(VacaModelo.ANIMS.morrer, 0.15)
-		nd["ap"] = ap
+	if n.has_meta("ap"):
+		nd["ap"] = n.get_meta("ap")
+	# ainda corre: na cabeça quase nada; no peito uns segundos; o resto (o sangue
+	# acabando) um pouco mais, cada vez mais devagar até cair
+	var dur := 0.0
+	match str(hit.nome):
+		"cabeça": dur = _rng.randf_range(0.0, 0.6)
+		"pescoço", "peito": dur = _rng.randf_range(3.0, 6.0)
+		_: dur = _rng.randf_range(5.0, 9.0)
+	var v0: float = {"vaca": 5.5, "tamandua": 2.4, "macaco": 3.2}.get(esp, 0.0)
+	if v0 <= 0.0 or dur < 0.3:
+		_comeca_queda(nd)
+	else:
+		var pp: Vector3 = j._player.global_position
+		var fora := Vector3(n.global_position.x - pp.x, 0, n.global_position.z - pp.z).normalized()
+		if fora.length() < 0.1:
+			fora = Vector3.RIGHT
+		nd["corre"] = {"t": 0.0, "dur": dur, "v0": v0 * n.scale.x, "dir": fora.rotated(Vector3.UP, _rng.randf_range(-0.5, 0.5)), "fase": 0.0}
+		if esp == "macaco":
+			n.set_process(true)
+			n.mode = "walk"
+		if nd.has("ap"):
+			(nd.ap as AnimationPlayer).play(VacaModelo.ANIMS.correr, 0.2)
 	_nodes[uid] = nd
 	Sons.play_at(j, "baque", n.global_position, -2.0, 0.7)
+
+
+func _comeca_queda(nd: Dictionary) -> void:
+	var n: Node3D = nd.node
+	nd.erase("corre")
+	nd.cai = 0.0
+	nd.de = n.global_transform
+	if n is MacacoModelo:
+		n.set_process(false)
+	if nd.has("ap"):
+		(nd.ap as AnimationPlayer).play(VacaModelo.ANIMS.morrer, 0.25)
+
+
+## Correndo com o tiro fatal: vai perdendo a força (cada vez mais devagar, cambaleando)
+## e o sangue vai pingando no caminho; no fim cai.
+func _correr(nd: Dictionary, delta: float) -> void:
+	var n: Node3D = nd.node
+	if not is_instance_valid(n):
+		nd.erase("corre")
+		return
+	var cr: Dictionary = nd.corre
+	cr.t = float(cr.t) + delta
+	var k := clampf(float(cr.t) / float(cr.dur), 0.0, 1.0)
+	var v := float(cr.v0) * pow(1.0 - k, 1.3) + 0.25 * (1.0 - k)
+	var dir: Vector3 = cr.dir
+	dir = dir.rotated(Vector3.UP, sin(float(cr.t) * 2.3) * 0.6 * k * delta)     # cambaleia
+	cr.dir = dir
+	var np := n.global_position + dir * v * delta
+	var c := Vector2i(int(np.x / 5.0), int(np.z / 5.0))
+	var sim = _jogo.sim
+	var agua: bool = c.x < 1 or c.y < 1 or c.x >= MundoSim.W - 1 or c.y >= MundoSim.H - 1 or float(sim.wat[c.y * MundoSim.W + c.x]) > 0.05
+	if agua or k >= 1.0:
+		_comeca_queda(nd)
+		return
+	np.y = _jogo.ground_at(np.x, np.z)
+	n.global_position = np
+	var esp := str(nd.c.esp)
+	if esp == "macaco":
+		n.rotation.y = atan2(-dir.x, -dir.z)
+	else:
+		n.rotation.y = lerp_angle(n.rotation.y, atan2(-dir.z, dir.x), minf(1.0, delta * 5.0))
+	cr.fase = float(cr.fase) + v * delta / 0.5 * PI
+	if nd.has("ap"):
+		var ap: AnimationPlayer = nd.ap
+		var quer: String = VacaModelo.ANIMS.correr if v > 2.2 * n.scale.x else VacaModelo.ANIMS.andar
+		if ap.current_animation != quer:
+			ap.play(quer, 0.4)
+		ap.speed_scale = clampf(v / (4.0 * n.scale.x), 0.35, 1.2)
+		ap.advance(delta)
+	elif esp == "tamandua":
+		TamModelo.pose(n, "correr" if v > 1.0 else "andar", float(cr.fase), float(cr.t))
 
 
 ## A queda: a vaca pela animação; os outros tombam de lado (e a ave cai do alto).
@@ -411,6 +480,9 @@ func _cair(nd: Dictionary, delta: float) -> void:
 	if k >= 1.0:
 		nd.erase("cai")
 		c.xf = _xf_json(n.global_transform)
+		for fo in _fontes:
+			if is_instance_valid(fo.pai) and (fo.pai == n or n.is_ancestor_of(fo.pai)):
+				fo.ate = minf(float(fo.ate), 12.0)        # parado, ainda pinga um pouco
 		# a poça embaixo do ferimento
 		var w: Array = (c.feridas as Array)[0]
 		var pai2 := _prender(n, Vector3.ZERO, str(w[6])) if w.size() > 6 and str(w[6]) != "" else n
@@ -428,21 +500,85 @@ static func _lado(esp: String) -> float:
 
 
 # ================== SANGUE ==================
+# Sangue líquido: vermelho-escuro e brilhante como água (reflete a luz), com um pouco de
+# transparência na borda. No couro: uma mancha de sangue que sujou (borda irregular,
+# respingos, sem volume) e uns filetes de sangue escorrendo para baixo do ferimento; do
+# fim deles as gotas pingam no chão. No chão: respingos onde as gotas caem e a poça
+# brilhante embaixo do bicho morto, crescendo.
+
+static var _texs := {}
+
+## Textura de mancha (alfa na borda): "mancha" (sujou: irregular com respingos),
+## "poca" (líquido: borda mais lisa), "escorrido" (comprida para baixo).
+static func _tex(tipo: String, v: int) -> Texture2D:
+	var key := "%s%d" % [tipo, v]
+	if _texs.has(key):
+		return _texs[key]
+	var N := 128
+	var img := Image.create(N, N, false, Image.FORMAT_RGBA8)
+	var nz := FastNoiseLite.new()
+	nz.seed = 31 + v * 17 + tipo.length()
+	nz.frequency = 0.045 if tipo != "poca" else 0.03
+	nz.fractal_octaves = 4
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7 + v * 101 + tipo.length() * 3
+	var gotas := []
+	if tipo != "poca":
+		for k in rng.randi_range(6, 14):
+			var a := rng.randf() * TAU
+			var d := rng.randf_range(0.42, 0.85)
+			gotas.append([Vector2(0.5 + cos(a) * d * 0.5, 0.5 + sin(a) * d * 0.5), rng.randf_range(0.01, 0.035)])
+	for y in N:
+		for x in N:
+			var u := Vector2(float(x) / N, float(y) / N)
+			var p := (u - Vector2(0.5, 0.5)) * 2.0
+			if tipo == "escorrido":
+				p.x *= 2.6                           # estreita e comprida para baixo
+				p.y = p.y * 0.9 + 0.1
+			var r := p.length() + nz.get_noise_2d(x, y) * (0.45 if tipo != "poca" else 0.22)
+			var a2 := 1.0 - smoothstep(0.62, 0.78, r)
+			for g in gotas:
+				var dd: float = u.distance_to(g[0])
+				a2 = maxf(a2, 1.0 - smoothstep(float(g[1]) * 0.7, float(g[1]), dd))
+			if a2 <= 0.001:
+				img.set_pixel(x, y, Color(0.3, 0.0, 0.0, 0.0))
+				continue
+			# mais escuro no meio (mais grosso), vermelho vivo na borda fina
+			var esp := clampf(1.0 - r / 0.75, 0.0, 1.0)
+			var col := Color(0.3, 0.006, 0.008).lerp(Color(0.12, 0.0, 0.004), esp * 0.85)
+			col = col.darkened(nz.get_noise_2d(x * 3.0, y * 3.0) * 0.15)
+			col.a = a2 * (0.88 + 0.12 * esp) if tipo != "poca" else a2 * 0.97
+			img.set_pixel(x, y, col)
+	img.generate_mipmaps()
+	var t := ImageTexture.create_from_image(img)
+	_texs[key] = t
+	return t
+
+
+static func _mat_tex(tipo: String, v: int) -> StandardMaterial3D:
+	var key := "m_%s%d" % [tipo, v]
+	if _mats.has(key):
+		return _mats[key]
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = _tex(tipo, v)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.roughness = 0.22 if tipo == "poca" else 0.5         # molhado: brilha um pouco
+	m.metallic_specular = 0.3 if tipo == "poca" else 0.15
+	_mats[key] = m
+	return m
+
 
 static func _mat(k: String) -> StandardMaterial3D:
 	if _mats.has(k):
 		return _mats[k]
 	var m := StandardMaterial3D.new()
 	match k:
-		"sangue":
-			m.albedo_color = Color(0.36, 0.02, 0.025)
-			m.roughness = 0.35
-			m.metallic_specular = 0.35
-		"poca":
-			m.albedo_color = Color(0.46, 0.04, 0.025)
-			m.roughness = 0.55
-			m.metallic_specular = 0.2
-			m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		"liquido":
+			# o sangue escorrendo e as gotas: brilha como água, vermelho-escuro
+			m.albedo_color = Color(0.2, 0.0, 0.003)
+			m.roughness = 0.25
+			m.metallic_specular = 0.3
 		"madeira":
 			m.albedo_color = Color(0.62, 0.47, 0.29)
 			m.roughness = 0.8
@@ -455,57 +591,185 @@ static func _mat(k: String) -> StandardMaterial3D:
 	return m
 
 
-## A mancha de sangue no couro onde a flecha entrou, e o sangue escorrendo para baixo.
-func _mancha_bicho(n: Node3D, ponto: Vector3, dir: Vector3) -> void:
-	var inv := n.global_transform.affine_inverse()
-	var sc := n.global_transform.basis.get_scale().x
-	# a mancha achatada contra o couro (o eixo fino na direção da flecha), com respingos
-	var yax := -dir.normalized()
-	var xax := yax.cross(Vector3.UP if absf(yax.y) < 0.95 else Vector3.RIGHT).normalized()
-	var zax := xax.cross(yax)
-	for k in 5:
-		var mancha := MeshInstance3D.new()
-		var sm := SphereMesh.new()
-		var r := 0.05 if k == 0 else _rng.randf_range(0.012, 0.025)
-		sm.radius = r
-		sm.height = r * 2.0
-		sm.radial_segments = 10
-		sm.rings = 4
-		mancha.mesh = sm
-		mancha.material_override = _mat("sangue")
-		n.add_child(mancha)
-		var off := Vector3.ZERO if k == 0 else (xax * _rng.randf_range(-1, 1) + zax * _rng.randf_range(-1, 1)).normalized() * _rng.randf_range(0.05, 0.09)
-		mancha.global_transform = Transform3D(Basis(xax, yax * 0.12, zax), ponto - dir * 0.005 + off)
-	if false:
-		var lp := inv * ponto
-		print(lp)
-	# escorrendo: uns filetes descendo pelo couro
-	for k in _rng.randi_range(2, 4):
-		var fio := MeshInstance3D.new()
+## A base de um plano encostado no couro (z para fora), e o "para baixo" nele.
+static func _plano(dir: Vector3) -> Array:
+	var z := -dir.normalized()
+	var x := Vector3.UP.cross(z)
+	if x.length() < 0.1:
+		x = Vector3.RIGHT
+	x = x.normalized()
+	var y := z.cross(x)
+	var dn := Vector3.DOWN - z * z.dot(Vector3.DOWN)
+	if dn.length() < 0.1:
+		dn = -y
+	return [Basis(x, y, z), dn.normalized()]
+
+
+## A mancha no couro onde a flecha entrou, o escorrido manchando para baixo e os
+## filetes de sangue líquido (fresco: crescem escorrendo).
+func _mancha_bicho(pai: Node3D, ponto: Vector3, dir: Vector3, fresco := false) -> void:
+	var pl := _plano(dir)
+	var b: Basis = pl[0]
+	var dn: Vector3 = pl[1]
+	var fora := -dir.normalized()
+	var v := _rng.randi() % 4
+	var q := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.24, 0.24)
+	q.mesh = qm
+	q.material_override = _mat_tex("mancha", v)
+	q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	pai.add_child(q)
+	q.global_transform = Transform3D(b.rotated(fora, _rng.randf() * TAU), ponto + fora * 0.012)
+	# o escorrido (sujou para baixo)
+	var e := MeshInstance3D.new()
+	var em := QuadMesh.new()
+	em.size = Vector2(0.12, 0.34)
+	e.mesh = em
+	e.material_override = _mat_tex("escorrido", v)
+	e.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	pai.add_child(e)
+	var ey := -dn
+	var ex := ey.cross(fora).normalized()
+	e.global_transform = Transform3D(Basis(ex, ey, fora), ponto + fora * 0.014 + dn * 0.15)
+	# os filetes de líquido
+	for k in _rng.randi_range(2, 3):
+		var fio := Node3D.new()
+		pai.add_child(fio)
+		var desvio := ex * _rng.randf_range(-0.03, 0.03)
+		var ddn := (dn + ex * _rng.randf_range(-0.15, 0.15)).normalized()
+		var fy := -ddn
+		var fx := fy.cross(fora).normalized()
+		fio.global_transform = Transform3D(Basis(fx, fy, fora), ponto + fora * 0.018 + desvio)
+		var mi := MeshInstance3D.new()
 		var cm := CylinderMesh.new()
-		var L := _rng.randf_range(0.08, 0.22)
-		cm.top_radius = 0.009
-		cm.bottom_radius = 0.004
-		cm.height = L
-		cm.radial_segments = 5
+		cm.top_radius = 0.0075
+		cm.bottom_radius = 0.005
+		cm.height = 1.0
+		cm.radial_segments = 6
 		cm.rings = 1
-		fio.mesh = cm
-		fio.material_override = _mat("sangue")
-		var off := Vector3(_rng.randf_range(-0.03, 0.03), 0, _rng.randf_range(-0.03, 0.03))
-		var base_w := ponto - dir * 0.015 + off + Vector3.DOWN * L * 0.5
-		n.add_child(fio)
-		fio.global_transform = Transform3D(Basis.from_euler(Vector3(_rng.randf_range(-0.15, 0.15), 0, _rng.randf_range(-0.15, 0.15))), base_w)
+		mi.mesh = cm
+		mi.material_override = _mat("liquido")
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = Vector3(0, -0.5, 0)
+		fio.add_child(mi)
+		# a gota pendurada na ponta do filete
+		var gp := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.009
+		sm.height = 0.024
+		sm.radial_segments = 8
+		sm.rings = 4
+		gp.mesh = sm
+		gp.material_override = _mat("liquido")
+		gp.name = "gota"
+		fio.add_child(gp)
+		var alvo := _rng.randf_range(0.1, 0.3)
+		var es: float = fio.global_transform.basis.get_scale().y
+		if fresco:
+			_fios.append({"node": fio, "L": 0.0, "alvo": alvo, "vel": _rng.randf_range(0.05, 0.12), "es": es})
+			_fio_comp(fio, 0.001, es)
+		else:
+			_fio_comp(fio, alvo, es)
 
 
-## Mancha de sangue no chão (gota ou poça que vai crescendo).
-func _mancha_chao(p: Vector3, r: float, cresce: bool) -> void:
+## O comprimento do filete (no mundo, mesmo com o pai escalado).
+static func _fio_comp(fio: Node3D, L: float, _es := 1.0) -> void:
+	var mi: MeshInstance3D = fio.get_child(0)
+	var gp: Node3D = fio.get_node("gota")
+	var s: float = fio.global_transform.basis.get_scale().x
+	var Ll := L / maxf(s, 0.0001)
+	mi.position = Vector3(0, -Ll * 0.5, 0)
+	mi.scale = Vector3(1.0 / maxf(s, 0.0001), Ll, 1.0 / maxf(s, 0.0001))
+	gp.position = Vector3(0, -Ll, 0)
+	gp.scale = Vector3.ONE / maxf(s, 0.0001)
+
+
+## Um ferimento sangrando: pinga gotas (do fim dos filetes) por "segundos".
+func _fonte(pai: Node3D, ponto: Vector3, dir: Vector3, segundos: float, ritmo: float) -> void:
+	var dn: Vector3 = _plano(dir)[1]
+	var inv := pai.global_transform.affine_inverse()
+	_fontes.append({"pai": pai, "local": inv * (ponto - dir.normalized() * 0.02 + dn * 0.2), "ate": segundos, "t": 0.1, "ritmo": ritmo})
+
+
+func _sangue_tick(delta: float) -> void:
+	# os filetes escorrendo (crescem até o tamanho deles)
+	for f in _fios.duplicate():
+		if not is_instance_valid(f.node):
+			_fios.erase(f)
+			continue
+		f.L = minf(float(f.alvo), float(f.L) + float(f.vel) * delta)
+		_fio_comp(f.node, float(f.L))
+		if float(f.L) >= float(f.alvo):
+			_fios.erase(f)
+	# os ferimentos pingando (correndo, o rastro fica no caminho)
+	for fo in _fontes.duplicate():
+		if not is_instance_valid(fo.pai):
+			_fontes.erase(fo)
+			continue
+		fo.ate = float(fo.ate) - delta
+		fo.t = float(fo.t) - delta
+		if float(fo.t) <= 0.0:
+			var fim := clampf(float(fo.ate) / 10.0, 0.25, 1.0)
+			fo.t = float(fo.ritmo) * _rng.randf_range(0.6, 1.6) / fim
+			var w: Vector3 = (fo.pai as Node3D).global_transform * (fo.local as Vector3)
+			_pinga(w)
+		if float(fo.ate) <= 0.0:
+			_fontes.erase(fo)
+	# as gotas caindo; no chão viram respingo
+	for g in _gotas.duplicate():
+		var n: Node3D = g.node
+		var vel: Vector3 = g.vel
+		vel.y -= G * delta
+		g.vel = vel
+		var np := n.global_position + vel * delta
+		var gy: float = _jogo.ground_at(np.x, np.z)
+		if np.y <= gy:
+			_gotas.erase(g)
+			n.queue_free()
+			_respingo(Vector3(np.x, gy, np.z), _rng.randf_range(0.04, 0.09))
+			continue
+		n.global_position = np
+		n.scale = Vector3(1.0, clampf(1.0 + vel.length() * 0.25, 1.0, 2.5), 1.0)
+	# as poças crescendo
+	for p in _poças.duplicate():
+		if not is_instance_valid(p.node):
+			_poças.erase(p)
+			continue
+		p.r = move_toward(float(p.r), float(p.alvo), delta * 0.025)
+		(p.node as Node3D).scale = Vector3(float(p.r), 1.0, float(p.r))
+		if float(p.r) >= float(p.alvo):
+			_poças.erase(p)
+
+
+func _pinga(w: Vector3) -> void:
+	if _gotas.size() > 60:
+		return
 	var n := MeshInstance3D.new()
-	n.mesh = _poca_mesh(_rng.randi() % 1000)
-	n.material_override = _mat("poca")
+	var sm := SphereMesh.new()
+	sm.radius = _rng.randf_range(0.006, 0.011)
+	sm.height = sm.radius * 2.0
+	sm.radial_segments = 6
+	sm.rings = 3
+	n.mesh = sm
+	n.material_override = _mat("liquido")
 	n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(n)
-	var gy: float = _jogo.ground_at(p.x, p.z)
-	n.global_position = Vector3(p.x, gy + 0.012, p.z)
+	n.global_position = w
+	_gotas.append({"node": n, "vel": Vector3(_rng.randf_range(-0.1, 0.1), -0.3, _rng.randf_range(-0.1, 0.1))})
+
+
+## Uma mancha deitada no chão (respingo de gota, ou a poça que cresce).
+func _respingo(p: Vector3, r: float, tipo := "mancha", cresce := false) -> void:
+	var n := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(2.0, 2.0)
+	qm.orientation = PlaneMesh.FACE_Y
+	n.mesh = qm
+	n.material_override = _mat_tex(tipo, _rng.randi() % 4)
+	n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(n)
+	n.global_position = Vector3(p.x, _jogo.ground_at(p.x, p.z) + 0.012 + _rng.randf() * 0.004, p.z)
 	n.rotation.y = _rng.randf() * TAU
 	if cresce:
 		n.scale = Vector3(0.05, 1, 0.05)
@@ -513,38 +777,20 @@ func _mancha_chao(p: Vector3, r: float, cresce: bool) -> void:
 	else:
 		n.scale = Vector3(r, 1, r)
 	_manchas.append(n)
-	while _manchas.size() > 120:
+	while _manchas.size() > 250:
 		var velha: Node3D = _manchas.pop_front()
 		if is_instance_valid(velha):
 			velha.queue_free()
 
+
+## A poça embaixo do bicho caído (ou só manchado, montando de novo).
+func _mancha_chao(p: Vector3, r: float, cresce: bool) -> void:
+	_respingo(p, r, "poca", cresce)
+	for k in 3:
+		var a := _rng.randf() * TAU
+		_respingo(p + Vector3(cos(a), 0, sin(a)) * r * _rng.randf_range(0.7, 1.2), r * _rng.randf_range(0.15, 0.3))
+
 var _manchas: Array = []
-
-
-## Disco irregular de raio ~1 (a escala dá o tamanho).
-static func _poca_mesh(seed_: int) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed_
-	var n := 28
-	var rs := []
-	for k in n:
-		rs.append(0.0)
-	# borda irregular mas lisa (somando ondas)
-	var f1 := rng.randf() * TAU
-	var f2 := rng.randf() * TAU
-	for k in n:
-		var a := TAU * k / n
-		rs[k] = 0.85 + 0.12 * sin(a * 3.0 + f1) + 0.07 * sin(a * 5.0 + f2)
-	for k in n:
-		var a0 := TAU * k / n
-		var a1 := TAU * (k + 1) / n
-		st.set_normal(Vector3.UP)
-		st.add_vertex(Vector3.ZERO)
-		st.add_vertex(Vector3(cos(a1), 0, sin(a1)) * float(rs[(k + 1) % n]))
-		st.add_vertex(Vector3(cos(a0), 0, sin(a0)) * float(rs[k]))
-	return st.commit()
 
 
 # ================== A FLECHA ==================
