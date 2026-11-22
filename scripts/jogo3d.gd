@@ -2368,7 +2368,7 @@ func _praia(at: Vector3) -> bool:
 # bem alimentado e sem sede, a vida volta aos poucos. Vida zerada: desmaia e acorda no
 # começo do mapa (com o que tinha na mochila). A água sem filtrar fica contada (a doença
 # vem com a cobra e as plantas, depois).
-const SEDE_S := 20.0 * 60.0        # segundos de 100 até 0
+const SEDE_S := 30.0 * 60.0        # segundos de 100 até 0 (meia hora)
 const FOME_S := 40.0 * 60.0
 const MORRE_S := 8.0 * 60.0        # com fome ou sede zerada, a vida some nesse tempo
 const CURA_S := 10.0 * 60.0        # bem, a vida enche nesse tempo
