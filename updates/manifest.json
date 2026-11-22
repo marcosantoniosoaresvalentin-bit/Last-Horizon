@@ -1,9 +1,9 @@
 {
-  "version": 187,
-  "file": "update_187.zip",
-  "size": 5472588,
-  "sha256": "b3efaa1636db769ab08ca3337e5135afcc3a71afaa7da6d33a9fb29caf3ee3ba",
+  "version": 188,
+  "file": "update_188.zip",
+  "size": 5475486,
+  "sha256": "6e1c303d1515d68beb7437e9707773465f78ed9c367770f0f8e16c7925aca1dc",
   "min_build": 1,
-  "notes": "Vaca: patas e cascos certos",
+  "notes": "Boi e vacas: cupim, chifres variados, crias todo ano",
   "date": "2026-11-22"
 }
