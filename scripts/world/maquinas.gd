@@ -201,21 +201,35 @@ const TIPOS := {
 	"carrinho": {
 		"nome": "Carrinho de Mão",
 		"desc": "Carrinho de mão de tábuas: carrega terra, barro, argila, areia, carvão, lenha e qualquer coisa da mochila.",
+		# tábuas encostadas umas nas outras (sem fresta): o fundo de duas tábuas largas em
+		# cima dos braços, as laterais por fora do fundo, a frente e o fundo de trás entre elas
 		"pecas": [
-			["tabua", 1.72, Vector3(-0.07, 0.22, 0.24), "x", 0.07],     # 0 braço (vira a alça atrás)
-			["tabua", 1.72, Vector3(-0.07, 0.22, -0.24), "x", 0.07],    # 1 braço
-			["tabua", 0.86, Vector3(0.05, 0.27, 0.12), "x", 0.12],      # 2 fundo
-			["tabua", 0.86, Vector3(0.05, 0.27, -0.12), "x", 0.12],     # 3 fundo
-			["tabua", 0.86, Vector3(0.05, 0.4, 0.27), "x_lado", 0.12],  # 4 lateral
-			["tabua", 0.86, Vector3(0.05, 0.4, -0.27), "x_lado", 0.12], # 5 lateral
-			["tabua", 0.58, Vector3(0.46, 0.4, 0.0), "z_lado", 0.12],   # 6 frente
-			["tabua", 0.58, Vector3(-0.36, 0.4, 0.0), "z_lado", 0.12],  # 7 trás
-			["tabua", 0.24, Vector3(-0.6, 0.1, 0.24), "y", 0.06],       # 8 pé
-			["tabua", 0.24, Vector3(-0.6, 0.1, -0.24), "y", 0.06],      # 9 pé
+			["tabua", 1.72, Vector3(-0.09, 0.22, 0.18), "x", 0.07],         # 0 braço (vira a alça atrás)
+			["tabua", 1.72, Vector3(-0.09, 0.22, -0.18), "x", 0.07],        # 1 braço
+			["tabua", 0.8, Vector3(0.04, 0.272, 0.12), "x", 0.1386],        # 2 fundo
+			["tabua", 0.8, Vector3(0.04, 0.272, -0.12), "x", 0.1386],       # 3 fundo
+			["tabua", 0.94, Vector3(0.04, 0.3575, 0.2747), "x_lado", 0.1386],   # 4 lateral
+			["tabua", 0.94, Vector3(0.04, 0.3575, -0.2747), "x_lado", 0.1386],  # 5 lateral
+			["tabua", 0.48, Vector3(0.4747, 0.3575, 0.0), "z_lado", 0.1386],    # 6 frente
+			["tabua", 0.48, Vector3(-0.3947, 0.3575, 0.0), "z_lado", 0.1386],   # 7 trás
+			["tabua", 0.22, Vector3(-0.55, 0.11, 0.18), "y", 0.06],         # 8 pé
+			["tabua", 0.22, Vector3(-0.55, 0.11, -0.18), "y", 0.06],        # 9 pé
 		],
-		"pinos": [],
+		"pinos": [
+			# o fundo pregado em cada braço (pino em pé, atravessando o fundo e entrando no braço)
+			[[0, 2], Vector3(0.32, 0.29, 0.18)], [[0, 2], Vector3(-0.24, 0.29, 0.18)],
+			[[1, 3], Vector3(0.32, 0.29, -0.18)], [[1, 3], Vector3(-0.24, 0.29, -0.18)],
+			# as laterais no fundo (pino deitado, de fora para dentro)
+			[[4, 2], Vector3(0.3, 0.272, 0.3094), Vector3(0, 0, 1)], [[4, 2], Vector3(-0.22, 0.272, 0.3094), Vector3(0, 0, 1)],
+			[[5, 3], Vector3(0.3, 0.272, -0.3094), Vector3(0, 0, -1)], [[5, 3], Vector3(-0.22, 0.272, -0.3094), Vector3(0, 0, -1)],
+			# os cantos: a lateral pregada na ponta da frente e do fundo de trás
+			[[4, 6], Vector3(0.4747, 0.38, 0.3094), Vector3(0, 0, 1)], [[4, 7], Vector3(-0.3947, 0.38, 0.3094), Vector3(0, 0, 1)],
+			[[5, 6], Vector3(0.4747, 0.38, -0.3094), Vector3(0, 0, -1)], [[5, 7], Vector3(-0.3947, 0.38, -0.3094), Vector3(0, 0, -1)],
+			# os pés debaixo dos braços
+			[[0, 8], Vector3(-0.55, 0.22, 0.18)], [[1, 9], Vector3(-0.55, 0.22, -0.18)],
+		],
 		"area": Rect2(-0.95, -0.32, 1.95, 0.64),
-		"carrinho": {"eixo": 1, "roda": 1, "cipo": 4},
+		"carrinho": {"eixo": 1, "roda": 1, "cipo": 0},
 	},
 	"forno": {
 		"nome": "Forno de Carvão",
@@ -1069,6 +1083,14 @@ func _rebuild() -> void:
 				if str(pc[0]) == "tabua":
 					bb = b * Basis(Vector3.RIGHT, PI)      # a tábua virada: a face rachada (reta) para cima
 				n.transform = Transform3D(bb, (pc[2] as Vector3) + b.x * e * 0.5)
+				if t.has("carrinho") and str(pc[0]) == "tabua":
+					# a tábua aparelhada na largura e na grossura da peça: fica rente à outra
+					var ex0: Vector2 = _arv._sec_ext(slot_log(pc))
+					var ex1: Vector2 = _arv._sec_ext(wfl)
+					var rr1: float = _arv.free_log_max_radius(wfl)
+					var r0 := float(pc[4])
+					var sc := Vector3(1.0, clampf(ex0.x * r0 / maxf(ex1.x * rr1, 0.005), 0.3, 3.0), clampf(ex0.y * r0 / maxf(ex1.y * rr1, 0.005), 0.3, 3.0))
+					n.transform = Transform3D(bb * Basis.from_scale(sc), n.transform.origin)
 				nd["p_%d" % si] = n
 				nd["t_%d" % si] = n.transform
 				# os furos das juntas dessa peça
@@ -1239,10 +1261,12 @@ func _animate(mi: int, dy: float) -> void:
 # ---------- carrinho de mão ----------
 
 const CAR_EIXO := Vector3(0.72, 0.2, 0.0)   # o eixo da roda (na ponta dos braços)
-const CAR_PE := Vector3(-0.6, 0.0, 0.0)     # onde os pés encostam no chão
+const CAR_PE := Vector3(-0.55, 0.0, 0.0)    # onde os pés encostam no chão
+const CAR_ALCA := Vector3(-0.95, 0.22, 0.0) # a ponta das alças (na mão de quem empurra)
+const CAR_MAO := 0.62            # altura das mãos empurrando (m)
 const CAR_VOL := 0.11            # m³ de terra/barro/areia/carvão que cabem na caixa (uns 4,5 baldes)
 const CAR_LENHA := 12            # achas de lenha que cabem
-const CAR_FUNDO := 0.3           # em cima das tábuas do fundo
+const CAR_FUNDO := 0.307         # em cima das tábuas do fundo
 const CAR_MATS := ["terra", "argila", "barro", "areia", "carvao"]
 
 
@@ -1380,26 +1404,36 @@ func reposicionar() -> void:
 			carrinho_pose(mi, mi == empurrando)
 
 
-## Onde o carrinho fica com os pés no chão (parado) ou com as alças levantadas (sendo
-## empurrado, só a roda no chão).
-func carrinho_pose(mi: int, empurrado: bool) -> void:
+## Onde o carrinho fica: a roda sempre em cima do chão (passa por cima dos montes de
+## terra, nunca atravessa) e, atrás, os pés no chão (parado) ou as alças na altura das
+## mãos (empurrando). vira: quanto as alças sobem além disso (virando a caçamba).
+func carrinho_pose(mi: int, empurrado: bool, vira := 0.0) -> void:
 	var nd: Dictionary = _nodes.get(mi, {})
 	if nd.is_empty() or not is_instance_valid(nd.root):
 		return
 	var p: Dictionary = plantas[mi]
 	empurrado = empurrado or bool(p.get("emp", false))       # (outro jogador empurrando)
 	var R := float((p.get("roda", {}) as Dictionary).get("r", CAR_EIXO.y))
-	var local := Transform3D()
-	if empurrado:
-		# a roda no chão (o eixo na altura do raio) e as alças levantadas: gira em volta do eixo
-		var ax := Vector3(CAR_EIXO.x, R, 0.0)
-		local = Transform3D(Basis(), Vector3(0, R - CAR_EIXO.y, 0))
-		local = Transform3D(Basis(), ax) * Transform3D(Basis(Vector3.BACK, 0.2), Vector3.ZERO) * Transform3D(Basis(), -ax) * local
-	else:
-		# parado: os pés e a roda no chão (roda maior: a frente fica mais alta)
-		var a := atan2(R - CAR_EIXO.y, CAR_EIXO.x - CAR_PE.x)
-		local = Transform3D(Basis(), CAR_PE) * Transform3D(Basis(Vector3.BACK, a), Vector3.ZERO) * Transform3D(Basis(), -CAR_PE)
-	(nd.root as Node3D).transform = xform(mi) * local
+	var yawb := Basis(Vector3.UP, float(p.yaw))
+	var dx: Vector3 = yawb * Vector3.RIGHT
+	var o := Vector3(float(p.x), 0.0, float(p.z))
+	# a roda: o ponto mais alto do chão debaixo dela (encosta no monte e sobe nele)
+	var wc := o + dx * CAR_EIXO.x
+	var wy := -1e9
+	for k in 9:
+		var sd := (float(k) / 4.0 - 1.0) * R * 0.95
+		var q := wc + dx * sd
+		wy = maxf(wy, float(_jogo.ground_at(q.x, q.z)) + sqrt(maxf(R * R - sd * sd, 0.0)))
+	# atrás: os pés no chão, ou as alças nas mãos
+	var bl: Vector3 = CAR_ALCA if empurrado else CAR_PE
+	var bw := o + dx * bl.x
+	var by := float(_jogo.ground_at(bw.x, bw.z)) + (CAR_MAO if empurrado else 0.0)
+	var v := Vector2(CAR_EIXO.x - bl.x, CAR_EIXO.y - bl.y)
+	var th := asin(clampf((wy - by) / v.length(), -0.95, 0.95)) - atan2(v.y, v.x)
+	th -= vira                         # alças para cima: a caçamba vira para a frente
+	var bs := yawb * Basis(Vector3.BACK, th)
+	var aw := Vector3(wc.x, wy, wc.z)
+	(nd.root as Node3D).transform = Transform3D(bs, aw - bs * CAR_EIXO)
 
 
 ## Move o carrinho (empurrando): só a posição, sem refazer o desenho; a roda gira.
@@ -1424,13 +1458,13 @@ func _draw_carrinho(mi: int, root: Node3D, nd: Dictionary) -> void:
 	var R := float((p.get("roda", {}) as Dictionary).get("r", 0.2))
 	# o eixo: um galho atravessado na ponta dos braços
 	if bool(p.get("eixo", false)):
-		root.add_child(_stick(CAR_EIXO + Vector3(0, 0, -0.31), CAR_EIXO + Vector3(0, 0, 0.31), 0.022))
+		root.add_child(_stick(CAR_EIXO + Vector3(0, 0, -0.25), CAR_EIXO + Vector3(0, 0, 0.25), 0.022))
 	elif etapa == "eixo":
 		var ge := MeshInstance3D.new()
 		var gm := CylinderMesh.new()
 		gm.top_radius = 0.022
 		gm.bottom_radius = 0.022
-		gm.height = 0.62
+		gm.height = 0.5
 		ge.mesh = gm
 		ge.material_override = _ghost_mat
 		ge.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), CAR_EIXO)
@@ -1513,7 +1547,7 @@ func _draw_carrinho(mi: int, root: Node3D, nd: Dictionary) -> void:
 		root.add_child(an2)
 		var fila := k % 4
 		var cam := k / 4
-		an2.transform = Transform3D(Basis(Vector3.UP, 0.05 * float((k * 7) % 5 - 2)), Vector3(0.05, CAR_FUNDO + 0.05 + cam * 0.09, -0.18 + fila * 0.12))
+		an2.transform = Transform3D(Basis(Vector3.UP, 0.05 * float((k * 7) % 5 - 2)), Vector3(0.04, CAR_FUNDO + 0.05 + cam * 0.09, -0.18 + fila * 0.12))
 	var it: Dictionary = c.itens
 	if not it.is_empty():
 		# o que veio da mochila: uma trouxa no canto da caixa
@@ -1543,7 +1577,7 @@ func _car_monte_mesh(f: float, tipo: String) -> ArrayMesh:
 		for j in nz + 1:
 			var u := float(i) / nx
 			var v := float(j) / nz
-			var x := lerpf(-0.33, 0.43, u)
+			var x := lerpf(-0.355, 0.435, u)
 			var z := lerpf(-0.235, 0.235, v)
 			var borda := minf(minf(u, 1.0 - u), minf(v, 1.0 - v))
 			var y := CAR_FUNDO + h + f * 0.06 * smoothstep(0.0, 0.5, borda) + nzl.get_noise_2d(x * 10.0, z * 10.0) * (0.012 if tipo != "carvao" else 0.025)
@@ -2591,6 +2625,15 @@ func _load(path: String) -> bool:
 	plantas = d.get("plantas", [])
 	# a caixa de barro saiu do jogo (o barro agora é feito no monte de terra no chão)
 	plantas = plantas.filter(func(q): return str(q.get("tipo", "")) != "caixa_barro")
+	# carrinho da versão do cipó: agora é de pinos (o que já estava amarrado vem pregado)
+	for q in plantas:
+		if str(q.get("tipo", "")) == "carrinho" and (q.get("pinos", []) as Array).size() != (TIPOS.carrinho.pinos as Array).size():
+			var feito := int(q.get("amarras", 0)) >= 4
+			var pn := []
+			for _j in TIPOS.carrinho.pinos:
+				pn.append(2 if feito else 0)
+			q.pinos = pn
+			q.erase("amarras")
 	# forno da versão de antes (porta de tábuas): a porta vira de barro
 	for q in plantas:
 		if str(q.get("tipo", "")) == "forno" and (q.get("pecas", []) as Array).size() > 0:

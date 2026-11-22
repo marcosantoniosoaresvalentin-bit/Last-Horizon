@@ -9156,6 +9156,7 @@ func _proj_place() -> void:
 
 const CARVAO_L := 0.0015          # m³ de cada pedaço de carvão (no balde cabem uns 16)
 var _empurra := -1                # o carrinho que este jogador está empurrando
+var _car_virar := {}              # virando a caçamba: {mi, t, feito}
 
 
 ## O carrinho pronto mais perto (o meio dele), ou -1.
@@ -9265,6 +9266,7 @@ func _car_press(act: String) -> void:
 func _car_soltar() -> void:
 	var mi := _empurra
 	_empurra = -1
+	_car_virar = {}
 	if _maq:
 		_maq.empurrando = -1
 		if mi >= 0 and mi < _maq.plantas.size():
@@ -9277,6 +9279,20 @@ func _car_soltar() -> void:
 ## Empurrando: o carrinho vai na frente do jogador, com a roda no chão.
 func _car_tick(_delta: float) -> void:
 	if _empurra < 0 or _maq == null:
+		return
+	if not _car_virar.is_empty():
+		# levanta as alças bem alto (a caçamba vira para a frente), despeja e abaixa de novo
+		var cv := _car_virar
+		cv.t = float(cv.t) + _delta
+		var k := clampf(float(cv.t) / 0.7, 0.0, 1.0) * (1.0 - clampf((float(cv.t) - 1.4) / 0.6, 0.0, 1.0))
+		var ang := 0.6 * smoothstep(0.0, 1.0, k)
+		if int(cv.mi) < _maq.plantas.size():
+			_maq.carrinho_pose(int(cv.mi), true, ang)
+			if not bool(cv.feito) and float(cv.t) >= 0.75:
+				cv.feito = true
+				_car_pick(int(cv.mi), "_car_despejar_agora")
+		if float(cv.t) >= 2.0:
+			_car_virar = {}
 		return
 	if _empurra >= _maq.plantas.size() or str(_maq.plantas[_empurra].tipo) != "carrinho" or not _carry.is_empty() or _swim or _morto >= 0.0:
 		_car_soltar()
@@ -9294,8 +9310,11 @@ func _car_tick(_delta: float) -> void:
 func _car_opts(mi: int) -> Array:
 	var c: Dictionary = _maq.car_of(mi)
 	var op := []
-	if float((c.carga as Dictionary).get("vol", 0.0)) > 0.0005 or not (c.lenhas as Array).is_empty() or not (c.itens as Dictionary).is_empty():
-		op.append(["car_despejar", "Despejar"])
+	if mi == _empurra:
+		# com as alças na mão: levantando bem as alças, a caçamba vira para a frente
+		if _car_virar.is_empty() and not _maq.car_vazio(mi):
+			op.append(["car_despejar", "Despejar"])
+		return op
 	if not (c.lenhas as Array).is_empty() and _carry.is_empty():
 		op.append(["car_pegar_lenha", "Pegar lenha"])
 	if not (c.itens as Dictionary).is_empty():
@@ -9307,7 +9326,11 @@ func _car_pick(mi: int, acao: String) -> void:
 	var xf: Transform3D = _maq.xform(mi)
 	match acao:
 		"car_despejar":
-			# vira a caixa para a frente: tudo cai na frente da roda
+			if mi != _empurra or not _car_virar.is_empty():
+				return
+			_car_virar = {"mi": mi, "t": 0.0, "feito": false}
+		"_car_despejar_agora":
+			# a caçamba virada: tudo cai na frente da roda
 			var frente: Vector3 = xf * Vector3(1.15, 0, 0)
 			var c: Dictionary = _maq.car_of(mi)
 			var cg: Dictionary = _maq.car_tirar_carga(mi, 1e9)
@@ -13038,7 +13061,7 @@ func _olho_tick() -> void:
 		cands.append([cp, pp.distance_to(Vector2(co.x, co.z))])
 	if _maq:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
-		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho"] and _maq.pronta(mi) and mi != _empurra:
+		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho"] and _maq.pronta(mi):
 			var mo: Vector3 = _maq.xform(mi).origin
 			cands.append([{"maq": mi}, maxf(0.0, pp.distance_to(Vector2(mo.x, mo.z)) - 0.8)])
 	if _fogos:
