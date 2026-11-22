@@ -155,7 +155,7 @@ func _select(tipo: String) -> void:
 	_sel = tipo
 	var t: Dictionary = Maquinas.TIPOS[tipo]
 	_name.text = str(t.nome).to_upper()
-	_desc.text = str(t.desc)
+	_desc.text = ""                    # sem texto de como fazer
 	var n := Maquinas.needs(tipo)
 	var partes := []
 	if int(n.tora) > 0:
@@ -173,7 +173,7 @@ func _select(tipo: String) -> void:
 	var nl := int(n.lamina)
 	if nl > 0:
 		partes.append(("%d lâminas de faca" % nl) if str(n.lamina_item) == "lamina_faca" else ("%d lâmina de serra" % nl))
-	_need.text = "MATERIAL:  " + " · ".join(partes) + "\nFerramentas: furador e marreta (furos e pinos), serra e machado (cortar as pontas que sobrarem)"
+	_need.text = "MATERIAL:  " + " · ".join(partes)
 	_draw.queue_redraw()
 
 
@@ -219,7 +219,7 @@ func _draw_plan() -> void:
 		_draw.draw_polyline(pts, C_INK, 2.0)
 		_draw.draw_rect(Rect2(P.call(-0.45, 1.05), P.call(-0.33, 0.85) - P.call(-0.45, 1.05)), C_INK, false, 2.0)
 		_draw.draw_string(font, P.call(-0.95, 1.15), "SUSPIRO", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
-		_draw.draw_string(font, P.call(-0.7, 0.45), "1º BARRO, 2º PEDRAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
+		_draw.draw_string(font, P.call(-0.7, 0.45), "BARRO E PEDRAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
 		_draw.draw_string(font, P.call(0.62, 0.3), "PORTA DE BARRO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
 		return
 	if t.has("filtro"):

@@ -510,7 +510,7 @@ func _fill_list() -> void:
 		nm.clip_text = true
 		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		tv.add_child(nm)
-		var d := _label("%s kg · %s" % [Itens.kg_txt(Itens.kg(r.id)), _short(r.id)], 16, C_DIM, false)
+		var d := _label("%s kg" % Itens.kg_txt(Itens.kg(r.id)), 16, C_DIM, false)
 		d.clip_text = true
 		d.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		tv.add_child(d)
@@ -562,7 +562,7 @@ func _refresh() -> void:
 	if rs.is_empty():
 		_detail.visible = false
 		_empty.visible = true
-		_empty.text = "Nenhuma receita de %s aqui.\nO craft de mão é simples: a maioria das coisas vai ser feita nas bancadas." % _cat.to_lower()
+		_empty.text = "Nenhuma receita de %s aqui." % _cat.to_lower()
 		return
 	_detail.visible = true
 	_empty.visible = false
@@ -570,7 +570,7 @@ func _refresh() -> void:
 	var r: Dictionary = rs[_sel]
 	var id := str(r.id)
 	_d_name.text = Itens.nome(id).to_upper()
-	_d_desc.text = str(Itens.ITENS.get(id, {}).get("desc", ""))
+	_d_desc.text = ""                  # sem descrição de ajuda
 	_d_icon.id = id
 	_d_icon.queue_redraw()
 	_res_icon.id = id

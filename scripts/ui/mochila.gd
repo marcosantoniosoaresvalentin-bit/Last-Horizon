@@ -406,7 +406,7 @@ func _refresh() -> void:
 	_btn.USAR.text = "COLOCAR" if has and Itens.colocavel(str(_items[_selected].id)) else "USAR"
 	_btn.SOLTAR.disabled = not has
 	if _info.text == "" or not has:
-		_info.text = "Toque num item para ver o que fazer com ele." if not _items.is_empty() else "A mochila está vazia."
+		_info.text = "" if not _items.is_empty() else "A mochila está vazia."
 
 
 func _select(i: int) -> void:
@@ -418,15 +418,15 @@ func _select(i: int) -> void:
 	var it: Dictionary = _items[i]
 	_refresh()
 	if it.id == "semente":
-		_say("%s · %d · USAR planta aqui, SOLTAR larga uma no chão" % [it.nome, int(it.qtd)])
+		_info.text = "%s · %d" % [it.nome, int(it.qtd)]
 	elif Itens.ITENS.has(str(it.id)) and it.id != "argila":
 		var dur := ""
 		if _game and Itens.dur_max(str(it.id)) > 0:
 			dur = (" · Água %d%%" if it.id in ["moringa_agua", "moringa_limpa"] else " · Durabilidade %d%%") % int(round(float(_game.tool_dur(str(it.id))) * 100.0))
 		var each: float = float(it.kg) / maxf(float(it.get("qtd", 1)), 1.0) if it.has("perfil") else Itens.kg(str(it.id))
-		_say("%s · %s kg%s · %s" % [it.nome, Itens.kg_txt(each), dur, Itens.ITENS[it.id].desc])
+		_info.text = "%s · %s kg%s" % [it.nome, Itens.kg_txt(each), dur]
 	else:
-		_say("%s · %s kg" % [it.nome, ("%.1f" % float(it.kg)).replace(".", ",")])
+		_info.text = "%s · %s kg" % [it.nome, ("%.1f" % float(it.kg)).replace(".", ",")]
 
 
 func _equip() -> void:
@@ -528,8 +528,9 @@ func _drop() -> void:
 	_say("Você soltou %s kg de %s." % [("%.1f" % float(it.kg)).replace(".", ","), str(it.nome).to_lower()])
 
 
-func _say(t: String) -> void:
-	_info.text = t
+## Sem mensagens de ajuda nem de resultado: só o nome e o peso do item escolhido.
+func _say(_t: String) -> void:
+	pass
 
 
 # ================== DESENHOS ==================
