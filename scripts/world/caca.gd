@@ -1113,13 +1113,18 @@ func _peca_monta(uid: String, pc: Dictionary) -> Node3D:
 	var sk: Skeleton3D = no.get_meta("sk")
 	_pose_pendurada(sk)
 	_cortes_escala(sk, c)
+	_cortes_escala(sk, {"cortes": pc.get("cortes", [])})
 	VacaModelo._cascos(sk)
+	var lado := str(pc.lado)
+	var bd0: Dictionary = c.get("banda", {})
+	var cab_e0 := str(bd0.get("cab", "e")) == "e"
+	var tem_cab: bool = (cab_e0 if lado == "e" else not cab_e0) and float(pc.u1) > 5.0 and not ("cabeca" in pc.get("cortes", []))
 	for ba in no.find_children("*", "BoneAttachment3D", true, false):
-		(ba as Node3D).visible = false
+		# os chifres (e o cupim) vão com a peça que tem a cabeça
+		(ba as Node3D).visible = tem_cab
 	for nm in ["saco", "prepucio"]:
 		for ch in no.find_children(nm, "MeshInstance3D", true, false):
 			ch.queue_free()
-	var lado := str(pc.lado)
 	var bd: Dictionary = c.get("banda", {})
 	var cab_e := str(bd.get("cab", "e")) == "e"
 	var com_cab: bool = cab_e if lado == "e" else not cab_e
@@ -1145,11 +1150,14 @@ func _peca_monta(uid: String, pc: Dictionary) -> Node3D:
 		eixo.append(to_no * Vector3(wx * 0.4, y, (zb + zt) * 0.5))
 		for q in [Vector3(0, y, zb), Vector3(0, y, zt), Vector3(wx, y, (zb + zt) * 0.5)]:
 			amostras.append(to_no * q)
+	var inv := no.global_transform.affine_inverse()
+	var sd: String = "_L" if lado == "e" else "_R"
 	if float(pc.u0) < 0.15:
-		var inv := no.global_transform.affine_inverse()
-		var sd: String = "_L" if lado == "e" else "_R"
 		for nm2 in ["BackFoot" + sd, "BackLowLeg" + sd, "Tail4"]:
 			amostras.append(inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(nm2)).origin))
+	if float(pc.u1) > 5.0:
+		for nm3 in ["FrontFoot" + sd, "FrontLowLeg" + sd, "Head", "Neck"]:
+			amostras.append(inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(nm3)).origin))
 	var centro := Vector3.ZERO
 	for q in eixo:
 		centro += q
@@ -1160,6 +1168,15 @@ func _peca_monta(uid: String, pc: Dictionary) -> Node3D:
 	no.set_meta("fora", (to_no.basis * Vector3(1.0 if lado == "e" else -1.0, 0, 0)).normalized())
 	no.set_meta("uid", uid)
 	no.set_meta("peca", int(pc.id))
+	# os tocos onde a pata ou a cabeça foram tiradas
+	var m_por_u: float = mi.global_transform.basis.get_scale().x
+	for t in pc.get("cortes", []):
+		var pm := parte_malha(c, str(t))
+		if pm.is_empty():
+			continue
+		var tc := _toco(float(PARTES[str(t)].r) / m_por_u)
+		mi.add_child(tc)
+		tc.transform = Transform3D(_base_para(pm.dir), pm.corte)
 	_peca_nodes[k] = no
 	if (pc.get("xf", []) as Array).size() >= 12:
 		no.global_transform = _xf_de(pc.xf)
@@ -1313,6 +1330,78 @@ func peca_partir(uid: String, id: int, t: float) -> Dictionary:
 	return d
 
 
+## As partes que ainda estão na peça e têm que sair antes de cortar a carne: as patas
+## (a canela de trás, se a peça tem a perna de trás; a da frente, se é a de cima) e a cabeça.
+func peca_partes_falta(uid: String, pc: Dictionary) -> Array:
+	var out := []
+	var c := couro_de(uid)
+	var lado := str(pc.lado)
+	var feitas: Array = pc.get("cortes", [])
+	if float(pc.u0) < 0.1:
+		out.append("pe_te" if lado == "e" else "pe_td")
+	if float(pc.u1) > 5.0:
+		out.append("pe_fe" if lado == "e" else "pe_fd")
+		var bd: Dictionary = c.get("banda", {})
+		var cab_e := str(bd.get("cab", "e")) == "e"
+		if cab_e == (lado == "e"):
+			out.append("cabeca")
+	return out.filter(func(t): return not (t in feitas))
+
+
+## Onde a parte vai ser cortada na peça (no mundo).
+func peca_parte_ponto(uid: String, id: int, tipo: String) -> Vector3:
+	var no := peca_no(uid, id)
+	var pm := parte_malha(couro_de(uid), tipo)
+	if no == null or pm.is_empty():
+		return Vector3.INF
+	return (_malha(no) as MeshInstance3D).global_transform * (pm.corte as Vector3)
+
+
+## Uma machadada na pata ou na cabeça da peça; no último golpe ela solta e cai.
+func peca_golpe_parte(uid: String, id: int, tipo: String, golpe: int) -> bool:
+	var pc := peca_de(uid, id)
+	var no := peca_no(uid, id)
+	if pc.is_empty() or no == null or not PARTES.has(tipo):
+		return false
+	var w := peca_parte_ponto(uid, id, tipo)
+	_pinga(w)
+	if golpe < int(PARTES[tipo].golpes):
+		Sons.play_at(_jogo, "machado_osso", w, 0.0, _rng.randf_range(0.92, 1.08))
+		return false
+	Sons.play_at(_jogo, "osso_quebra", w, 2.0, _rng.randf_range(0.95, 1.05))
+	var mi := _malha(no)
+	var par := _parte_no(uid, tipo, [], mi)
+	if not pc.has("cortes"):
+		pc["cortes"] = []
+	(pc.cortes as Array).append(tipo)
+	_peca_monta(uid, pc)
+	if par:
+		var fora := par.global_position - w
+		fora.y = 0.0
+		fora = fora.normalized() if fora.length() > 0.01 else Vector3.RIGHT
+		_caindo.append({"node": par, "vel": fora * 0.6 + Vector3.UP * 0.3, "ang": Vector3(_rng.randf_range(-1, 1), _rng.randf_range(-1, 1), _rng.randf_range(-1, 1)).normalized() * 3.0,
+			"uid": uid, "tipo": tipo, "chao": 0.0, "r": float(PARTES[tipo].r)})
+	return true
+
+
+## A banda pendurada (a parte de cima, depois de partida) é solta da corda: cai inteira
+## no chão como uma peça (com a pata da frente e, se for a dela, a cabeça).
+func banda_soltar(uid: String, lado: String) -> void:
+	var q := quarto_de(uid, lado)
+	if bool(q.get("solta", false)):
+		return
+	var bn := banda_no(uid, lado)
+	q["solta"] = true
+	var pc := peca_nova(uid, {"lado": lado, "u0": QUARTO_U if bool(q.get("caiu", false)) else -9.0, "u1": 99.0, "onde": "caindo", "sujo": false,
+		"xf": _xf_json(bn.global_transform) if bn else []})
+	quarto_visual(uid, lado)
+	var no := peca_no(uid, int(pc.id))
+	if no:
+		_caindo.append({"node": no, "vel": Vector3.DOWN * 0.2, "ang": Vector3(_rng.randf_range(-1, 1), 0, _rng.randf_range(-1, 1)).normalized() * 0.5,
+			"uid": uid, "tipo": "peca", "peca": int(pc.id), "chao": 0.0, "r": 0.3, "low": no.get_meta("low")})
+	Sons.play_at(_jogo, "baque", bn.global_position if bn else Vector3.ZERO, 2.0, 0.7)
+
+
 ## A peça sai do mundo (foi para a mochila).
 func peca_tirar(uid: String, id: int) -> void:
 	var lst := pecas_de(uid)
@@ -1414,7 +1503,10 @@ func quarto_visual(uid: String, lado: String) -> void:
 	var q := quarto_de(uid, lado)
 	var caiu := bool(q.get("caiu", false))
 	sm.set_shader_parameter("q_faca", 0.0 if caiu else float(q.get("faca", 0.0)) * 1.05)
-	sm.set_shader_parameter("u_lo", QUARTO_U if caiu else -9.0)
+	sm.set_shader_parameter("u_lo", 99.0 if bool(q.get("solta", false)) else (QUARTO_U if caiu else -9.0))
+	if bool(q.get("solta", false)):
+		for ba in n.find_children("*", "BoneAttachment3D", true, false):
+			(ba as Node3D).visible = false
 
 
 ## Uma machadada na espinha da banda; no último golpe o pedaço de baixo solta e cai.
@@ -2269,12 +2361,12 @@ func _tocos(uid: String) -> void:
 
 
 ## Põe a parte cortada no mundo (caindo, ou já parada com o xf salvo).
-func _parte_no(uid: String, tipo: String, xf_salvo := []) -> Node3D:
+func _parte_no(uid: String, tipo: String, xf_salvo := [], base: MeshInstance3D = null) -> Node3D:
 	var nd: Dictionary = _nodes.get(uid, {})
 	if nd.is_empty() or not is_instance_valid(nd.node):
 		return null
 	var n: Node3D = nd.node
-	var mi := _malha(n)
+	var mi := _malha(n) if base == null else base
 	var pm := parte_malha(nd.c, tipo)
 	if pm.is_empty() or mi == null:
 		return null

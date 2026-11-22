@@ -10142,6 +10142,11 @@ func _tri_ctx(mi: int) -> bool:
 	var est: Vector3 = _maq.tri_estaca(mi)
 	var perto_estaca := Vector2(_player.position.x - est.x, _player.position.z - est.z).length() < 1.6
 	if bool(ic.get("fixo", false)):
+		var sl := _solta_lado(mi)
+		if not sl.is_empty() and not perto_estaca:
+			_ctx_action = "tri_soltar_banda"
+			_ctx_btn.text = "Soltar a banda"
+			return true
 		var ql := _quarto_lado(mi)
 		if not ql.is_empty() and ((item_qtd("faca") > 0 and item_qtd("machado") > 0) or teste) and not perto_estaca:
 			var qq: Dictionary = _caca.quarto_de(str(ql[0]), str(ql[1]))
@@ -10264,6 +10269,10 @@ func _tri_press(act: String) -> void:
 			_tri = {"mi": mi, "fase": "puxa", "forca": 0.8 if act == "tri_desestaca" else 0.6}
 			_tri_ajusta_corda(mi)
 			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -8.0, 1.0)
+		"tri_soltar_banda":
+			var sl2 := _solta_lado(mi)
+			if not sl2.is_empty():
+				_caca.banda_soltar(str(sl2[0]), str(sl2[1]))
 		"tri_quarto":
 			var ql2 := _quarto_lado(mi)
 			if not ql2.is_empty():
@@ -11464,6 +11473,31 @@ func _quarto_lado(mi: int) -> Array:
 	return [] if best == "" else [uid, best]
 
 
+## A banda já partida (o pedaço de baixo caiu) mais perto, que ainda está pendurada.
+func _solta_lado(mi: int) -> Array:
+	var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+	if ic.is_empty() or not bool(ic.get("fixo", false)) or _caca == null:
+		return []
+	var uid := str(ic.uid)
+	var c: Dictionary = _caca.couro_de(uid)
+	if c.is_empty() or not bool((c.get("banda", {}) as Dictionary).get("feito", false)):
+		return []
+	var best := ""
+	var bd := 2.8
+	for ld in ["e", "d"]:
+		var q: Dictionary = _caca.quarto_de(uid, ld)
+		if not bool(q.get("caiu", false)) or bool(q.get("solta", false)):
+			continue
+		var bn: Node3D = _caca.banda_no(uid, ld)
+		if bn == null:
+			continue
+		var d := Vector2(bn.global_position.x - _player.position.x, bn.global_position.z - _player.position.z).length()
+		if d < bd:
+			bd = d
+			best = ld
+	return [] if best == "" else [uid, best]
+
+
 func _quarto_start(mi: int, uid: String, lado: String) -> void:
 	if _mao != "":
 		equip("")
@@ -12048,7 +12082,7 @@ func _mc_start(mi: int) -> void:
 		equip("")
 	var lst: Array = _caca.pecas_em("mesa", mi)
 	_mc = {"mi": mi, "sel": lst[0] if not lst.is_empty() else [], "t": 0.5, "fase": "marca", "faca": 0.0, "golpes": 0,
-		"anim": -1.0, "treme": 0.0, "drag": -9, "ini": Vector2.ZERO}
+		"anim": -1.0, "treme": 0.0, "drag": -9, "ini": Vector2.ZERO, "parte": "", "pg": {}}
 	_olho = {}
 	_bur = {}
 	_jump_btn.visible = false
@@ -12087,6 +12121,11 @@ func _mc_move(delta: float) -> void:
 		var lst: Array = _caca.pecas_em("mesa", mi)
 		_mc.sel = lst[0]
 		_mc.fase = "marca"
+	# a pata ou a cabeça ainda na peça: tem que tirar antes de cortar a carne
+	var sel2: Array = _mc.sel
+	var falta: Array = _caca.peca_partes_falta(str(sel2[0]), _caca.peca_de(str(sel2[0]), int(sel2[1]))) if not sel2.is_empty() else []
+	if str(_mc.fase) in ["marca", "partes"] and float(_mc.anim) < 0.0:
+		_mc.fase = "partes" if not falta.is_empty() else "marca"
 	var host := _peca_host_xf(mi)
 	var eye: Vector3 = host * Vector3(0.0, 2.15, 1.35)
 	var alvo: Vector3 = host * Vector3(0.0, 1.0, 0.0)
@@ -12117,10 +12156,10 @@ func _mc_move(delta: float) -> void:
 			_mc_machadada()
 		_mc.anim = a if a < 0.56 else -1.0
 	if _mach_axe:
-		_mach_axe.visible = str(_mc.fase) == "machado"
+		_mach_axe.visible = str(_mc.fase) in ["machado", "partes"]
 		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25), Vector3(0.3, -0.5, -0.6))
 	(_mc_btns[0] as Control).visible = str(_mc.fase) == "marca"
-	(_mc_btns[1] as Control).visible = str(_mc.fase) == "marca"
+	(_mc_btns[1] as Control).visible = str(_mc.fase) in ["marca", "partes"]
 	(_mc_btns[2] as Control).visible = true
 	_jump_btn.visible = false
 	_ctx_btn.visible = false
@@ -12162,6 +12201,18 @@ func _mc_cortar() -> void:
 func _mc_machadada() -> void:
 	var sel: Array = _mc.sel
 	_mc.treme = 1.0
+	if str(_mc.fase) == "partes":
+		var tp := str(_mc.parte)
+		if tp == "":
+			return
+		var pg: Dictionary = _mc.pg
+		pg[tp] = int(pg.get(tp, 0)) + 1
+		if wear("machado", 1):
+			_update_inventory()
+		if _caca.peca_golpe_parte(str(sel[0]), int(sel[1]), tp, int(pg[tp])):
+			pg.erase(tp)
+			_mc.parte = ""
+		return
 	_mc.golpes = int(_mc.golpes) + 1
 	var e := _mc_eixo()
 	var w: Vector3 = (e[2] as Vector3).lerp(e[3], float(_mc.t)) if not e.is_empty() else _player.position
@@ -12192,7 +12243,7 @@ func _mc_machadada() -> void:
 
 
 func _mc_pegar() -> void:
-	if str(_mc.get("fase", "")) != "marca" or (_mc.sel as Array).is_empty():
+	if not (str(_mc.get("fase", "")) in ["marca", "partes"]) or (_mc.sel as Array).is_empty():
 		return
 	var sel: Array = _mc.sel
 	var uid := str(sel[0])
@@ -12245,10 +12296,25 @@ func _mc_input(e: InputEvent) -> bool:
 			if str(_mc.fase) == "machado":
 				if float(_mc.anim) < 0.0 and pos.distance_to(_mc_marca()) < 110.0 and (item_qtd("machado") > 0 or teste):
 					_mc.anim = 0.0
+			elif str(_mc.fase) == "partes" and float(_mc.anim) < 0.0 and (item_qtd("machado") > 0 or teste):
+				var sl: Array = _mc.sel
+				var bp := ""
+				var bdp := 100.0
+				for tp2 in _caca.peca_partes_falta(str(sl[0]), _caca.peca_de(str(sl[0]), int(sl[1]))):
+					var w2: Vector3 = _caca.peca_parte_ponto(str(sl[0]), int(sl[1]), str(tp2))
+					if w2 == Vector3.INF or _cam.is_position_behind(w2):
+						continue
+					var dd2 := pos.distance_to(_cam.unproject_position(w2))
+					if dd2 < bdp:
+						bdp = dd2
+						bp = str(tp2)
+				if bp != "":
+					_mc.parte = bp
+					_mc.anim = 0.0
 		elif int(_mc.drag) == idx:
 			_mc.drag = -9
 			# um toque (sem arrastar) num pedaço: escolhe ele
-			if str(_mc.fase) == "marca" and float(_mc.get("andou", 0.0)) < 12.0:
+			if str(_mc.fase) in ["marca", "partes"] and float(_mc.get("andou", 0.0)) < 12.0 and float(_mc.anim) < 0.0:
 				var best := []
 				var bd := 130.0
 				for pk in _caca.pecas_em("mesa", int(_mc.mi)):
@@ -12303,6 +12369,21 @@ func _mc_draw() -> void:
 	var b: Vector2 = ex[1]
 	var cen := (a + b) * 0.5
 	ui.draw_arc(cen, maxf(40.0, a.distance_to(b) * 0.55), 0, TAU, 40, Color(1, 0.95, 0.6, 0.6), 2.0, true)
+	if str(_mc.fase) == "partes":
+		# as patas e a cabeça que faltam tirar: uma marca em cada (o arco: as machadadas)
+		var sl: Array = _mc.sel
+		for tp in _caca.peca_partes_falta(str(sl[0]), _caca.peca_de(str(sl[0]), int(sl[1]))):
+			var w: Vector3 = _caca.peca_parte_ponto(str(sl[0]), int(sl[1]), str(tp))
+			if w == Vector3.INF or _cam.is_position_behind(w):
+				continue
+			var p := _cam.unproject_position(w)
+			var r := 30.0 if str(tp) != "cabeca" else 38.0
+			ui.draw_arc(p, r, 0, TAU, 32, Color(0, 0, 0, 0.45), 6.0, true)
+			ui.draw_arc(p, r, 0, TAU, 32, Color(1, 0.95, 0.7, 0.95) if str(_mc.parte) == str(tp) else Color(1, 1, 1, 0.85), 3.0, true)
+			var f := float((_mc.pg as Dictionary).get(tp, 0)) / float(_caca.PARTES[str(tp)].golpes)
+			if f > 0.0:
+				ui.draw_arc(p, r + 7.0, -PI * 0.5, -PI * 0.5 + TAU * f, 32, Color(0.85, 0.15, 0.1, 0.95), 5.0, true)
+		return
 	var m := _mc_marca()
 	var per := Vector2(-(b - a).y, (b - a).x).normalized()
 	var cor := Color(0.95, 0.15, 0.1, 0.95)
