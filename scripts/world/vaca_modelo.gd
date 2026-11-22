@@ -330,13 +330,13 @@ static func _volume(aneis: Array, lados := 7) -> ArrayMesh:
 	for i in rows.size() - 1:
 		for k in lados:
 			var q := [rows[i][k], rows[i + 1][k], rows[i + 1][(k + 1) % lados], rows[i][(k + 1) % lados]]
-			for j in [0, 1, 2, 0, 2, 3]:
+			for j in [0, 2, 1, 0, 3, 2]:          # (faces viradas para fora)
 				st.add_vertex(q[j])
 	# fecha embaixo
 	var last: Array = rows[rows.size() - 1]
 	var fundo: Vector3 = (aneis[aneis.size() - 1][0] as Vector3) + Vector3(0, 0, -0.0004)
 	for k in lados:
-		for v in [last[k], fundo, last[(k + 1) % lados]]:
+		for v in [last[k], last[(k + 1) % lados], fundo]:
 			st.add_vertex(v)
 	st.generate_normals()
 	return st.commit()
