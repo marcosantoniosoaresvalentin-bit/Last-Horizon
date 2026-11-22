@@ -1,9 +1,9 @@
 {
-  "version": 200,
-  "file": "update_200.zip",
-  "size": 5504618,
-  "sha256": "bf4dd23969ce15aa165cb594b58281396158819ee2c529cc5d3791a538fb9c0c",
+  "version": 201,
+  "file": "update_201.zip",
+  "size": 5532041,
+  "sha256": "2e0d029083b8d8874530682bc5c40110650e9a8b477605f490ec04f0547c3f02",
   "min_build": 1,
-  "notes": "Laço: barrinha de força no arremesso; botão Força não fica mais em cima do Pular",
+  "notes": "Som novo do laço arrebentando",
   "date": "2026-11-22"
 }
