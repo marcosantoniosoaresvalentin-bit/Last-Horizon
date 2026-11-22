@@ -18,6 +18,7 @@ var _jogo: Node
 var _rng := RandomNumberGenerator.new()
 var _chunks := {}
 var _dia := -1
+var _sujo := false
 static var _mesh: ArrayMesh
 static var _mat: StandardMaterial3D
 
@@ -102,14 +103,29 @@ func point_of(i: int) -> Vector3:
 
 func colher(i: int) -> void:
 	items[i].corte = _dia_agora()
-	_rebuild()
+	_rebuild_chunk(_ck(items[i]))
+
+
+## A vaca pode comer essa touceira? (crescida e ainda verde)
+func comivel(i: int) -> bool:
+	return i >= 0 and i < items.size() and not cortado(items[i]) and seco_de(_dia_agora()) < 0.6
+
+
+## A vaca comeu: as folhas grandes vão embora, fica o toco com as raízes (rebrota).
+func comer(i: int, redesenha := true) -> void:
+	items[i].corte = _dia_agora()
+	if redesenha:
+		_rebuild_chunk(_ck(items[i]))
+	else:
+		_sujo = true
 
 
 ## Uma vez por dia: a cor muda (verde, amarelando, palha) e o colhido rebrota.
 func dia(day: int) -> void:
-	if day == _dia:
+	if day == _dia and not _sujo:
 		return
 	_dia = day
+	_sujo = false
 	_rebuild()
 
 
@@ -168,9 +184,22 @@ func _rebuild() -> void:
 		if is_instance_valid(_chunks[k]):
 			_chunks[k].free()
 	_chunks.clear()
+	_desenha(null)
+
+
+func _rebuild_chunk(key: Vector2i) -> void:
+	if _chunks.has(key) and is_instance_valid(_chunks[key]):
+		_chunks[key].free()
+	_chunks.erase(key)
+	_desenha(key)
+
+
+func _desenha(so) -> void:
 	var by := {}
 	for p in items:
 		var k := _ck(p)
+		if so != null and k != so:
+			continue
 		if not by.has(k):
 			by[k] = []
 		by[k].append(p)

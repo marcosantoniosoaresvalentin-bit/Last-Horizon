@@ -44,6 +44,7 @@ const Vitais := preload("res://scripts/ui/vitais.gd")
 const Cobras := preload("res://scripts/world/cobras.gd")
 const Taias := preload("res://scripts/world/taias.gd")
 const Goiabeiras := preload("res://scripts/world/goiabeiras.gd")
+const Vacas := preload("res://scripts/world/vacas.gd")
 const Capins := preload("res://scripts/world/capins.gd")
 const Fogueiras := preload("res://scripts/world/fogueiras.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
@@ -93,6 +94,8 @@ uniform vec4 holes[32];
 uniform int hole_n = 0;
 uniform sampler2D dig_mask : filter_linear, repeat_disable;    // terra mexida pela pá (o chão normal some ali)
 uniform bool dig_on = false;
+uniform sampler2D pasto_mask : filter_linear, repeat_disable;  // R grama comida, G pasto seco (as vacas)
+uniform bool pasto_on = false;
 varying vec3 wpos;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 vec2 hash2(vec2 p){ return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
@@ -145,6 +148,11 @@ void fragment(){
 	vec3 straw = vec3(0.60, 0.54, 0.30);
 	vec3 gc = mix(straw, green, smoothstep(0.15, 0.6, moist));
 	float g = smoothstep(0.1, 0.6, grass) * (0.75 + 0.25 * noise(wpos.xz * 1.3));
+	if (pasto_on) {
+		vec2 pm = texture(pasto_mask, uv).rg;
+		gc = mix(gc, mix(gc, straw, 0.55) * 0.92, pm.r * 0.7);     // rapada: verde amarelado
+		g *= 1.0 - smoothstep(0.2, 0.8, pm.g + (noise(wpos.xz * 2.0) - 0.5) * 0.3) * 0.9;
+	}
 	vec3 c = mix(soil, gc, g);
 	c = mix(c, vec3(0.45, 0.43, 0.39), rock);
 	c = c * c * 1.25;
@@ -179,8 +187,15 @@ uniform float fade_start = 26.0;
 uniform float fade_end = 34.0;
 uniform vec4 holes[32];
 uniform int hole_n = 0;
+uniform sampler2D pasto_mask : filter_linear, repeat_disable;   // R grama comida (baixa), G pasto seco
+uniform bool pasto_on = false;
 void vertex(){
 	vec3 root = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	if (pasto_on) {
+		vec2 pm = textureLod(pasto_mask, root.xz / dig_world, 0.0).rg;
+		VERTEX.y *= mix(1.0, 0.16, pm.r);           // comida: fica só a grama curtinha
+		if (pm.g > 0.45) { VERTEX *= 0.0; }          // pasto judiado: secou, chão pelado
+	}
 	// não cresce capim dentro dos buracos (nem logo na beira)
 	for (int i = 0; i < hole_n; i++) {
 		if (distance(root.xz, holes[i].xy) < holes[i].z * 1.35) { VERTEX *= 0.0; }
@@ -407,6 +422,7 @@ var _tamanduas: Node3D = null
 var _cobras: Node3D = null         # jararacas (de tocaia nas moitas)
 var _taias: Node3D = null          # jararaca-taia (a planta do remédio)
 var _goiab: Node3D = null          # goiabeiras (goiaba e o chá das folhas)
+var _vacas: Node3D = null          # vacas selvagens (e o pasto que elas comem)
 var _veneno := -1.0                # picado de cobra: segundos desde a picada (-1 = não)
 var _embaca: ColorRect = null      # a vista embaçando com o veneno
 var teste := false                 # modo de teste (Configurações): tudo de graça e rápido
@@ -1173,6 +1189,10 @@ func _on_world_ready() -> void:
 	_goiab = Goiabeiras.new()
 	add_child(_goiab)
 	_goiab.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/goiabeiras.json" if _world_id != "" else "")
+	_vacas = Vacas.new()
+	add_child(_vacas)
+	_vacas.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/vacas.json" if _world_id != "" else "")
+	print("vacas: %d" % _vacas.count())
 	_escav.water_mat = _water_mat
 	_escav.sea_m = MundoSim.SEA * HS
 	_escav.rio_fn = _rio_nivel
@@ -1181,6 +1201,9 @@ func _on_world_ready() -> void:
 	for m in [_terrain_mat, _grass_mat]:
 		m.set_shader_parameter("dig_mask", _escav.mask_tex)
 		m.set_shader_parameter("dig_on", true)
+		if _vacas:
+			m.set_shader_parameter("pasto_mask", _vacas.tex)
+			m.set_shader_parameter("pasto_on", true)
 	_grass_mat.set_shader_parameter("dig_world", Vector2(MundoSim.W * CELL, MundoSim.H * CELL))
 	if not _pending_carry.is_empty():
 		_hold_log(_pending_carry)
@@ -1533,6 +1556,8 @@ func _process(delta: float) -> void:
 			_tamanduas.update(delta)
 		if _cobras:
 			_cobras.update(delta)
+		if _vacas:
+			_vacas.update(delta)
 	elif _arvores:
 		_arvores.tick()   # quando vira o dia: sementes, brotos, crescimento
 		if _cipos:
@@ -1551,6 +1576,9 @@ func _process(delta: float) -> void:
 		if _cobras:
 			_cobras.tick()
 			_cobras.update(delta)
+		if _vacas:
+			_vacas.tick()
+			_vacas.update(delta)
 		if _taias and Engine.get_process_frames() % 120 == 30:
 			_taias.dia(int(sim.elapsed_days()))
 		if _goiab and Engine.get_process_frames() % 120 == 60:
@@ -1658,6 +1686,8 @@ func _save_world() -> void:
 		_taias.save(Mundos.dir(_world_id) + "/taias.json")
 	if _goiab:
 		_goiab.save(Mundos.dir(_world_id) + "/goiabeiras.json")
+	if _vacas:
+		_vacas.save(Mundos.dir(_world_id) + "/vacas.json")
 	if _constr:
 		_constr.save(Mundos.dir(_world_id) + "/construcao.json")
 	if _maq:
@@ -2751,6 +2781,14 @@ func _rio_puxar(de: Vector2, para: Vector2, vol: float) -> void:
 			sim.mexer_agua(c1, -u)
 		return
 	sim.mover_agua(c1, c2, u)
+
+
+## Quanto de grama tem no chão em (x, z) (0 a 1), pelo mapa do solo.
+func grama_em(x: float, z: float) -> float:
+	var cell := Vector2i(int(x / CELL), int(z / CELL))
+	if cell.x < 0 or cell.y < 0 or cell.x >= MundoSim.W or cell.y >= MundoSim.H or _soil_bytes.size() != MundoSim.W * MundoSim.H * 4:
+		return 0.0
+	return _soil_bytes[(cell.y * MundoSim.W + cell.x) * 4 + 3] / 255.0
 
 
 ## Nível da água doce (rio, lagoa, nascente) em cima do chão em (x, z), ou -1e9.
@@ -8517,8 +8555,8 @@ func _bld_place() -> void:
 var _sync_hash := {}               # parte -> hash do que todos já têm
 var _sync_t := {}                  # parte -> tempo até conferir de novo
 const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
-	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0, "goiabeiras": 1.0}
-const SYNC_ONLY_HOST := ["bacabas", "cobras"]        # só o dono manda (os bichos comem os frutos); buritis: degraus e folhas cortadas vêm de todos
+	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0, "goiabeiras": 1.0, "vacas": 2.0}
+const SYNC_ONLY_HOST := ["bacabas", "cobras", "vacas"]        # só o dono manda (os bichos comem os frutos); buritis: degraus e folhas cortadas vêm de todos
 
 
 func _mp_client() -> bool:
@@ -8632,6 +8670,7 @@ func _sync_mod(nome: String):
 		"cobras": return _cobras
 		"taias": return _taias
 		"goiabeiras": return _goiab
+		"vacas": return _vacas
 	return null
 
 
