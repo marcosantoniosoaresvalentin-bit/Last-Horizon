@@ -10518,6 +10518,7 @@ func _couro_move(delta: float) -> void:
 	(_couro_btns[0] as Control).visible = str(_couro.fase) == "puxa"
 	(_couro_btns[1] as Control).visible = true
 	_jump_btn.visible = false
+	_ctx_btn.visible = false
 	if _sub_ui:
 		_sub_ui.queue_redraw()
 
@@ -10608,8 +10609,8 @@ func _couro_passa(cr: Dictionary, d: Vector2, at: Vector2) -> void:
 			return
 		var t0 := float(cr.corte)
 		var a := _couro_tela(t0)
-		var b := _couro_tela(t0 + 0.06)
-		var dir := (b - a).normalized()
+		var b := _couro_tela(minf(1.0, t0 + 0.15))
+		var dir := (b - a).normalized() if b.distance_to(a) > 8.0 else (_couro_tela(1.0) - _couro_tela(0.0)).normalized()
 		if at.distance_to(a) > 140.0:
 			_couro.cortando = false               # o dedo saiu da linha
 			return

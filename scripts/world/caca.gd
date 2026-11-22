@@ -1111,8 +1111,17 @@ static func _perfil(mi: MeshInstance3D) -> Array:
 	var ks := bins.keys()
 	ks.sort()
 	ks.reverse()
+	var bruto := []
 	for b in ks:
-		_barriga.append([int(b) * 0.002, float(bins[b])])
+		bruto.append([int(b) * 0.002, float(bins[b])])
+	# alisa (média de 5 vizinhos): a linha do corte não pode dar saltos
+	for i in bruto.size():
+		var soma := 0.0
+		var n := 0
+		for j in range(maxi(0, i - 2), mini(bruto.size(), i + 3)):
+			soma += float(bruto[j][1])
+			n += 1
+		_barriga.append([bruto[i][0], soma / n])
 	return _barriga
 
 
@@ -1121,14 +1130,14 @@ static func _barriga_z(mi: MeshInstance3D, y: float) -> float:
 	var pf := _perfil(mi)
 	if pf.is_empty():
 		return 0.012
-	var best := 1e9
-	var z := float(pf[0][1])
-	for e in pf:
-		var d := absf(float(e[0]) - y)
-		if d < best:
-			best = d
-			z = float(e[1])
-	return z
+	# (de trás para a frente: y diminuindo)
+	for i in pf.size() - 1:
+		var y0 := float(pf[i][0])
+		var y1 := float(pf[i + 1][0])
+		if y <= y0 and y >= y1:
+			var t := (y0 - y) / maxf(y0 - y1, 1e-6)
+			return lerpf(float(pf[i][1]), float(pf[i + 1][1]), t)
+	return float(pf[0][1]) if y > float(pf[0][0]) else float(pf[pf.size() - 1][1])
 
 
 ## Os números do corpo para o couro (na pose de agora): y do rabo, do pescoço, onde o
