@@ -1,9 +1,9 @@
 {
-  "version": 166,
-  "file": "update_166.zip",
-  "size": 5002077,
-  "sha256": "11fea4c8e573a0c43f7738a1098d1dc847c97dacca668322461b5620a8b6cc62",
+  "version": 167,
+  "file": "update_167.zip",
+  "size": 5002792,
+  "sha256": "2a44f4c86094e3d20c9e2c3d0313b77d7f28ecd266fa6e449e1b0b21739215c2",
   "min_build": 1,
-  "notes": "Cobra não afunda mais na terra e com as manchas certinhas",
+  "notes": "Abrir a cova do barro com o losango; o barro se mistura a cada puxada da enxada",
   "date": "2026-11-22"
 }
