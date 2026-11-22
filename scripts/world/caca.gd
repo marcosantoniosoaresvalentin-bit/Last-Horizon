@@ -882,10 +882,10 @@ static func _pts_json(pts: Array) -> Array:
 
 
 # ---------- pendurada no tripé ----------
-# A vaca morta amarrada pelos pés de trás: as pernas de trás esticadas para trás (a corda
-# puxa as duas juntas), as da frente soltas. Enquanto a cabeça ainda está no chão o corpo
-# gira em volta dela (a traseira sobe e vem para baixo da roldana); levantada a altura do
-# corpo, fica pendurada de cabeça para baixo.
+# A vaca morta amarrada pelas duas patas da frente (a corda pega as canelas juntas): as
+# da frente esticadas para cima, as de trás soltas. Enquanto a traseira ainda está no chão
+# o corpo gira em volta dela (a frente sobe e vem para baixo da roldana); levantada a
+# altura do corpo, fica pendurada com o pescoço em cima.
 
 const PEND_ROLL := PI * 0.5        # deitada de lado no chão
 
@@ -919,9 +919,10 @@ func pes_tras(uid: String) -> Vector3:
 		return n.global_position
 	var sk: Skeleton3D = n.get_meta("sk")
 	var soma := Vector3.ZERO
-	for nm in ["BackLowLeg_R", "BackLowLeg_L"]:
-		var bi := sk.find_bone(nm)
-		soma += sk.global_transform * sk.get_bone_global_pose(bi).origin
+	for sd in ["_R", "_L"]:
+		var a: Vector3 = sk.global_transform * sk.get_bone_global_pose(sk.find_bone("FrontLowLeg" + sd)).origin
+		var b: Vector3 = sk.global_transform * sk.get_bone_global_pose(sk.find_bone("FrontFoot" + sd)).origin
+		soma += a.lerp(b, 0.75)
 	return soma * 0.5
 
 
@@ -943,13 +944,13 @@ func base_pendura(uid: String) -> Dictionary:
 static func _pose_pendurada(sk: Skeleton3D) -> void:
 	sk.reset_bone_poses()
 	for sd in ["_R", "_L"]:
-		VacaModelo._dobra(sk, "BackUpLeg" + sd, 1.5)
-		VacaModelo._dobra(sk, "BackLowLeg" + sd, 0.35)
-		VacaModelo._dobra(sk, "FrontUpLeg" + sd, -0.9)
-		VacaModelo._dobra(sk, "FrontLowLeg" + sd, -0.3)
-	VacaModelo._dobra(sk, "Neck", 0.55)
-	VacaModelo._dobra(sk, "Head", 0.35)
-	VacaModelo._dobra(sk, "Tail1", -0.6)
+		VacaModelo._dobra(sk, "FrontUpLeg" + sd, -1.5)          # as da frente esticadas para cima (amarradas)
+		VacaModelo._dobra(sk, "FrontLowLeg" + sd, -0.2)
+		VacaModelo._dobra(sk, "BackUpLeg" + sd, 0.55)           # as de trás soltas, caídas
+		VacaModelo._dobra(sk, "BackLowLeg" + sd, 0.25)
+	VacaModelo._dobra(sk, "Neck", 1.1)                           # o pescoço cai entre as patas
+	VacaModelo._dobra(sk, "Head", 0.45)
+	VacaModelo._dobra(sk, "Tail1", 1.0)
 
 
 ## A pose de pendurada nos ossos (uma vez): devolve os pontos dela no corpo.
@@ -964,11 +965,15 @@ func _rig(n: Node3D) -> Dictionary:
 	VacaModelo._cascos(sk)
 	var inv := n.global_transform.affine_inverse()
 	var pk := Vector3.ZERO
-	for nm in ["BackLowLeg_R", "BackLowLeg_L"]:
-		pk += inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(nm)).origin) * 0.5
-	var ph: Vector3 = inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Head")).origin)
+	var pt := Vector3.ZERO
+	for sd in ["_R", "_L"]:
+		var a: Vector3 = sk.global_transform * sk.get_bone_global_pose(sk.find_bone("FrontLowLeg" + sd)).origin
+		var b: Vector3 = sk.global_transform * sk.get_bone_global_pose(sk.find_bone("FrontFoot" + sd)).origin
+		pk += inv * a.lerp(b, 0.75) * 0.5
+		pt += inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("BackFoot" + sd)).origin) * 0.5
+	var ph := pt
 	var cr: Vector3 = inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Body")).origin)
-	var rig := {"pk": pk, "l": pk.distance_to(ph) + 0.3, "cr": cr}
+	var rig := {"pk": pk, "l": pk.distance_to(ph) + 0.15, "cr": cr}
 	n.set_meta("rig", rig)
 	for uid in _nodes:
 		if _nodes[uid].node == n and (_nodes[uid].c as Dictionary).has("couro"):
@@ -1000,7 +1005,7 @@ func pendura_calc(uid: String, roldana: Vector3, alt: float, base: Dictionary) -
 	var a := asin(f)
 	var hx := Vector2(h0.x, h0.z).lerp(Vector2(roldana.x, roldana.z), f)
 	var h := Vector3(hx.x, _jogo.ground_at(hx.x, hx.y) + alt, hx.y)
-	var b := Basis(Vector3.UP, yaw) * Basis(Vector3.BACK, -a) * Basis(Vector3.RIGHT, PEND_ROLL)
+	var b := Basis(Vector3.UP, yaw) * Basis(Vector3.BACK, a) * Basis(Vector3.RIGHT, PEND_ROLL)
 	return {"h": h, "alt0": alt0, "l": L, "xf": Transform3D(b.scaled(Vector3.ONE * s), h - b * pk)}
 
 
@@ -1655,7 +1660,7 @@ void fragment() {
 		ALBEDO = mix(vec3(0.3, 0.012, 0.012), vec3(0.16, 0.015, 0.012), aberto);
 		ROUGHNESS = 0.25;
 		SPECULAR = 0.5;
-	} else if (u < pele) {
+	} else if (u > pele) {
 		float n1 = ruido(q * 11.0);
 		float n2 = ruido(q * 34.0 + vec3(3.1, 1.7, 5.3));
 		float n3 = ruido(q * 70.0 + vec3(7.7, 2.2, 0.4));
@@ -1663,12 +1668,12 @@ void fragment() {
 		vec3 carne = mix(vec3(0.22, 0.02, 0.018), vec3(0.4, 0.045, 0.035), n1 * 0.6 + fio * 0.25 + n3 * 0.15);
 		float gord = smoothstep(0.66, 0.8, n2 * 0.7 + n3 * 0.3);
 		vec3 col = mix(carne, vec3(0.74, 0.66, 0.55), gord * 0.5);
-		float borda = smoothstep(pele - 0.05, pele, u);
+		float borda = smoothstep(pele + 0.05, pele, u);
 		col = mix(col, vec3(0.82, 0.74, 0.7), borda * 0.7);
 		ALBEDO = col;
 		ROUGHNESS = 0.55;
 		SPECULAR = 0.25;
-	} else if (u >= corte_ini && u < corte && nn.z < -0.55 && abs(p.x) < largura) {
+	} else if (u >= corte_ini && u >= corte && nn.z < -0.55 && abs(p.x) < largura) {
 		ALBEDO = vec3(0.4, 0.02, 0.02);
 		ROUGHNESS = 0.25;
 		SPECULAR = 0.5;
@@ -1783,9 +1788,9 @@ func couro_visual(uid: String) -> void:
 	sm.set_shader_parameter("y_rabo", rf.y_rabo)
 	sm.set_shader_parameter("y_pescoco", rf.y_pescoco)
 	sm.set_shader_parameter("corte_ini", u_ini)
-	sm.set_shader_parameter("corte", lerpf(u_ini, 1.0, float(cr.get("corte", 0.0))))
+	sm.set_shader_parameter("corte", lerpf(1.0, u_ini, float(cr.get("corte", 0.0))) if float(cr.get("corte", 0.0)) > 0.0 else 9.0)
 	var pl := float(cr.get("pele", 0.0))
-	sm.set_shader_parameter("pele", -9.0 if pl <= 0.0 else lerpf(-0.55, 1.0, pl))
+	sm.set_shader_parameter("pele", 9.0 if pl <= 0.0 else lerpf(1.0, -0.55, pl))
 	sm.set_shader_parameter("largura", 0.016 / m_por_u)
 	sm.set_shader_parameter("infla", 0.0015 / m_por_u)
 	sm.set_shader_parameter("esc", m_por_u)
@@ -1811,8 +1816,8 @@ func couro_linha(uid: String, n_pts := 16) -> Array:
 		return []
 	var rf := _couro_ref(nd.node)
 	var mi: MeshInstance3D = rf.mi
-	var y0 := lerpf(float(rf.y_rabo), float(rf.y_pescoco), float(rf.u_ini))
-	var y1 := float(rf.y_pescoco)
+	var y0 := float(rf.y_pescoco)
+	var y1 := lerpf(float(rf.y_rabo), float(rf.y_pescoco), float(rf.u_ini))
 	var out := []
 	for i in n_pts:
 		var y := lerpf(y0, y1, float(i) / (n_pts - 1))

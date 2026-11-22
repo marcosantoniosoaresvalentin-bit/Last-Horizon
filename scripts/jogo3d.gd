@@ -10047,7 +10047,7 @@ func _tri_ctx(mi: int) -> bool:
 				var c: Vector3 = _maq.xform(mi).origin
 				if Vector2(pe.x - c.x, pe.z - c.z).length() < 3.0:
 					_ctx_action = "tri_pe"
-					_ctx_btn.text = "Amarrar no pé da vaca"
+					_ctx_btn.text = "Amarrar as patas da frente"
 					return true
 		return false
 	if ic.is_empty():
@@ -10066,10 +10066,6 @@ func _tri_ctx(mi: int) -> bool:
 			var ce: Dictionary = _caca.couro_de(str(ic.uid))
 			_ctx_action = "tri_evis"
 			_ctx_btn.text = "Continuar a abrir" if ce.has("evis") else "Abrir a barriga"
-			return true
-		if (item_qtd("machado") > 0 or teste) and _mach_pode(mi) != "" and not perto_estaca:
-			_ctx_action = "tri_mach"
-			_ctx_btn.text = "Cortar patas e cabeça"
 			return true
 		if (item_qtd("faca") > 0 or teste) and _couro_pode(mi) != "" and not perto_estaca:
 			var cc: Dictionary = _caca.couro_de(str(ic.uid))
@@ -10575,9 +10571,9 @@ func _couro_tela_len() -> float:
 	return maxf(n, 60.0)
 
 
-## Onde o couro está saindo (na linha da tela).
+## Onde o couro está saindo (na linha da tela: 0 no pescoço, 1 nas pernas de trás).
 func _couro_borda(cr: Dictionary) -> float:
-	return clampf((lerpf(-0.55, 1.0, float(cr.pele)) - 0.0) / 1.0, 0.0, 1.0)
+	return clampf(float(cr.pele) * 1.55 / 0.9, 0.0, 1.0)
 
 
 func _couro_input(e: InputEvent) -> bool:
