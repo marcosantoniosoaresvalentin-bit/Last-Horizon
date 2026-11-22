@@ -1295,7 +1295,7 @@ void fragment() {
 	}
 	// o corte da faca em volta da banda (entre as costelas, até a espinha)
 	if (q_parte < 0.5 && FRONT_FACING && abs(u - corte_q) < q_w && (p.z - zb) / max(zt - zb, 1e-6) < q_faca) {
-		ALBEDO = vec3(0.3, 0.015, 0.015);
+		ALBEDO = abs(u - corte_q) < q_w * 0.5 ? vec3(0.05, 0.0, 0.0) : vec3(0.62, 0.16, 0.12);
 	}
 	// caiu na terra: sujo de barro
 	if (sujo > 0.5) {
@@ -1412,7 +1412,7 @@ func _banda_mat(n: Node3D, c: Dictionary, lado: float, cab: bool) -> ShaderMater
 	sm.set_shader_parameter("com_rabo", 0.0 if cab else 1.0)     # o rabo vai com a banda sem a cabeça
 	var yq := lerpf(float(rf.y_rabo), float(rf.y_pescoco), QUARTO_U)
 	sm.set_shader_parameter("corte_q", QUARTO_U)
-	sm.set_shader_parameter("q_w", 0.014 / ((float(rf.y_rabo) - float(rf.y_pescoco)) * m_por_u))
+	sm.set_shader_parameter("q_w", 0.022 / ((float(rf.y_rabo) - float(rf.y_pescoco)) * m_por_u))
 	sm.set_shader_parameter("zb", _barriga_z(mi, yq))
 	sm.set_shader_parameter("zt", _costas_z(mi, yq))
 	sm.set_shader_parameter("q_faca", 0.0)

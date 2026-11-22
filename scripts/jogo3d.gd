@@ -10974,8 +10974,11 @@ func _traca(lin: Array, t0: float, at: Vector2) -> float:
 		var f := clampf((at - a2).dot(ab) / maxf(ab.length_squared(), 1.0), 0.0, 1.0)
 		var dd := at.distance_to(a2 + ab * f)
 		var tk := (float(k) + f) / (lin.size() - 1)
-		if dd < best and tk > t0 - 0.1 and tk < t0 + 0.25:
-			best = dd
+		if tk <= t0 - 0.1 or tk >= t0 + 0.25:
+			continue
+		# (onde a linha se dobra na tela, fica com o ponto mais adiante)
+		if dd < best - 5.0 or (dd < best + 5.0 and tk > tp):
+			best = minf(best, dd)
 			tp = tk
 	return -1.0 if best > 110.0 else tp
 
@@ -11429,6 +11432,10 @@ func _quarto_move(delta: float) -> void:
 		return
 	var meio: Vector3 = lin[4]
 	var fr: Vector3 = _caca.banda_fora(uid, lado)
+	# um pouco para o lado das costas: pega o lado e a espinha
+	var mi_b: MeshInstance3D = _caca._malha(_caca.banda_no(uid, lado))
+	var costas: Vector3 = (mi_b.global_transform.basis.z).normalized()
+	fr = fr + costas * 0.7
 	fr.y = 0.0
 	fr = fr.normalized() if fr.length() > 0.1 else Vector3.RIGHT
 	var eye := _vista_livre(mi, meio, fr, 1.8)
