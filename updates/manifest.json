@@ -1,9 +1,9 @@
 {
-  "version": 185,
-  "file": "update_185.zip",
-  "size": 5284199,
-  "sha256": "650d4816a9db86ae1ab8d6721ebb5fa89f9e5463a89a8935250f5d5879aa60df",
+  "version": 186,
+  "file": "update_186.zip",
+  "size": 5472338,
+  "sha256": "520250ecca7189a5b81a3684a570f34c657dfa8233b65a0ef6c84677871c9b6d",
   "min_build": 1,
-  "notes": "Vacas selvagens comendo o pasto e o capim",
+  "notes": "Vaca nova: modelo 3D de verdade com animações",
   "date": "2026-11-22"
 }
