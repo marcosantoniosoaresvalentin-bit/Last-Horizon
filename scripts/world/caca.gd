@@ -1184,7 +1184,7 @@ func evis_puxa(uid: String, k: float, alvo: Vector3) -> void:
 	var p: Dictionary = c.get("p", {})
 	var s := float(p.get("s", 1.0))
 	if vn == null:
-		vn = visceras_no(s, not bool(p.get("touro", false)), int(p.get("seed", 1)))
+		vn = visceras_no(s * 0.62, not bool(p.get("touro", false)), int(p.get("seed", 1)))
 		add_child(vn)
 		n.set_meta("visc", vn)
 		var tb := MeshInstance3D.new()
@@ -1203,10 +1203,10 @@ func evis_puxa(uid: String, k: float, alvo: Vector3) -> void:
 	var gl: Array = evis_linha(uid, "garganta", 9)
 	var tg: Vector3 = gl[4] if gl.size() > 4 else c0 + Vector3.UP
 	# saltando pela abertura (já aberta), saindo, descendo até os pés
-	var salto := 0.12 * clampf(float(ev.get("barriga", 0.0)) * 1.5 - 0.3, 0.0, 1.0)
+	var salto := 0.07 * clampf(float(ev.get("barriga", 0.0)) * 1.5 - 0.3, 0.0, 1.0)
 	var sai := smoothstep(0.1, 0.55, k)
 	var desce := smoothstep(0.35, 1.0, k)
-	var fora := c0 + fr * (lerpf(-0.18 * s, 0.35, sai) + salto)
+	var fora := c0 + fr * (lerpf(-0.1 * s, 0.3, sai) + salto)
 	var chao := alvo + Vector3.UP * 0.3 * s
 	var pos := fora.lerp(chao, desce)
 	vn.global_position = pos
@@ -1548,7 +1548,7 @@ func _partes_monta(uid: String) -> void:
 	for e in nd.c.get("partes", []):
 		if str(e.tipo) == "buchada":
 			var p: Dictionary = nd.c.get("p", {})
-			var vn := visceras_no(float(p.get("s", 1.0)), not bool(p.get("touro", false)), int(p.get("seed", 1)))
+			var vn := visceras_no(float(p.get("s", 1.0)) * 0.62, not bool(p.get("touro", false)), int(p.get("seed", 1)))
 			vn.set_meta("uid", uid)
 			vn.set_meta("tipo", "buchada")
 			add_child(vn)
