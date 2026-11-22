@@ -1,9 +1,9 @@
 {
-  "version": 170,
-  "file": "update_170.zip",
-  "size": 5004120,
-  "sha256": "0c080268811ddd6e5eed0bb35a357067eddb26d8fce00fe16e47b1038e613ec5",
+  "version": 171,
+  "file": "update_171.zip",
+  "size": 5004124,
+  "sha256": "5938f3863f37bfdc5c5cbb82bc49f11ab1ef7dd22b63390718f7ba20fede779a",
   "min_build": 1,
-  "notes": "Dia de 2 horas e noite de 30 minutos",
+  "notes": "Sede zera em 30 minutos e fome em 40 minutos",
   "date": "2026-11-22"
 }
