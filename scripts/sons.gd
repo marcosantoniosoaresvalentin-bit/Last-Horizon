@@ -15,6 +15,7 @@ const FILES := {
 	"machado": ["machado1", "machado2", "machado3", "machado4"],
 	"corrida": ["corrida1", "corrida2", "corrida3", "corrida4", "corrida5", "corrida6"],
 	"estalo": ["estalo1", "estalo2"],
+	"corda_arrebenta": ["corda_arrebenta1", "corda_arrebenta2", "corda_arrebenta3"],
 	"queda": ["queda1"],
 	"cavar": ["cavar1"],
 	"passo": ["passo1", "passo2", "passo3", "passo4", "passo5", "passo6"],

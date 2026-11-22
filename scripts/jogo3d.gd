@@ -9704,7 +9704,7 @@ func _laco_fim(arrebentou := false) -> void:
 			_update_inventory()
 			if _mao == it and item_qtd(it) <= 0:
 				equip("")
-		Sons.play_at(self, "estalo", _player.position + Vector3.UP * 1.2, 0.0, 1.4)
+		Sons.play_at(self, "corda_arrebenta", _player.position + Vector3.UP * 1.2 + (-_cam.global_transform.basis.z) * 1.5)
 	_laco = {}
 
 
