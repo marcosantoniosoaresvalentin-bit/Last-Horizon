@@ -1176,6 +1176,7 @@ func _on_world_ready() -> void:
 	_escav.water_mat = _water_mat
 	_escav.sea_m = MundoSim.SEA * HS
 	_escav.rio_fn = _rio_nivel
+	_escav.agua_fn = _rio_puxar
 	_escav_steps = sim.steps
 	for m in [_terrain_mat, _grass_mat]:
 		m.set_shader_parameter("dig_mask", _escav.mask_tex)
@@ -2736,6 +2737,19 @@ func _water_surface(x: float, z: float) -> float:
 		if float(sim.ter[cell.y * MundoSim.W + cell.x]) < MundoSim.SEA:
 			lv = maxf(lv, MundoSim.SEA * HS)      # no mar
 	return lv
+
+
+## Os buracos puxaram (vol > 0) ou devolveram (vol < 0) m³ de água da lagoa/rio; ou a
+## lagoa escoou pela valeta de uma célula (de) para outra (para, a ponta da valeta).
+func _rio_puxar(de: Vector2, para: Vector2, vol: float) -> void:
+	var c1 := Vector2i(int(de.x / CELL), int(de.y / CELL))
+	var c2 := Vector2i(int(para.x / CELL), int(para.y / CELL))
+	var u := vol / (CELL * CELL * HS)
+	if c1 == c2:
+		if de == para:
+			sim.mexer_agua(c1, -u)
+		return
+	sim.mover_agua(c1, c2, u)
 
 
 ## Nível da água doce (rio, lagoa, nascente) em cima do chão em (x, z), ou -1e9.

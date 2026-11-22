@@ -134,6 +134,7 @@ var _out_types := PackedByteArray()
 var _soil_new := false
 var _info := PackedFloat32Array()
 var _dig_queue := []
+var _agua_queue := []      # [célula, quanto] água tirada (-) ou posta (+) pelos buracos cavados
 ## Cópias estáveis feitas logo após gerar o mundo (seguras para ler na tela).
 var ter0 := PackedFloat32Array()
 var moist0 := PackedFloat32Array()
@@ -419,6 +420,25 @@ func dig(cell: Vector2i, amount: float) -> void:
 		_info[q] = maxf(0.0, _info[q] - amount)
 	_mx.unlock()
 
+## Tira (quanto < 0) ou põe (quanto > 0) água numa célula, em unidades de altura da
+## simulação: a valeta e o poço ligados na lagoa puxam a água dela. Aplicado pela simulação.
+func mexer_agua(cell: Vector2i, quanto: float) -> void:
+	if cell.x < 0 or cell.y < 0 or cell.x >= W or cell.y >= H:
+		return
+	_mx.lock()
+	_agua_queue.append([cell.y * W + cell.x, quanto])
+	_mx.unlock()
+
+
+## Leva água de uma célula para outra (a lagoa escoando pela valeta): só o que tem lá.
+func mover_agua(de: Vector2i, para: Vector2i, quanto: float) -> void:
+	if de.x < 0 or de.y < 0 or de.x >= W or de.y >= H or para.x < 0 or para.y < 0 or para.x >= W or para.y >= H:
+		return
+	_mx.lock()
+	_agua_queue.append([de.y * W + de.x, -quanto, para.y * W + para.x])
+	_mx.unlock()
+
+
 ## Descrição do solo numa célula, para mostrar ao jogador.
 func soil_info(cell: Vector2i) -> String:
 	if cell.x < 0 or cell.y < 0 or cell.x >= W or cell.y >= H:
@@ -487,6 +507,44 @@ func _sim_loop() -> void:
 		_mx.unlock()
 		for d in digs:
 			bank[d[0]] = maxf(0.0, bank[d[0]] - d[1])
+		_mx.lock()
+		var aguas := _agua_queue
+		_agua_queue = []
+		_mx.unlock()
+		for a in aguas:
+			if a.size() == 3:
+				# a lagoa toda em volta da boca da valeta perde água (não só a beirada)
+				var falta := -float(a[1])
+				var ci: int = a[0]
+				var cx := ci % W
+				var cy := ci / W
+				var cand := []
+				for dy in range(-3, 4):
+					for dx in range(-3, 4):
+						var x := cx + dx
+						var y := cy + dy
+						if x >= 0 and y >= 0 and x < W and y < H and wat[y * W + x] > 0.01:
+							cand.append(y * W + x)
+				cand.sort_custom(func(p, q): return wat[p] > wat[q])
+				var moved := 0.0
+				for c in cand:
+					if falta <= 0.0:
+						break
+					var m := minf(falta, wat[c] * 0.5)
+					wat[c] -= m
+					falta -= m
+					moved += m
+				# a água sai pela ponta da valeta: se lá for bem mais baixo e longe da lagoa ela
+				# corre morro abaixo; senão some na terra (a simulação não vê a valeta fina)
+				var to: int = a[2]
+				var tx := to % W
+				var ty := to / W
+				if maxi(absi(tx - cx), absi(ty - cy)) >= 2 and ter[to] + wat[to] < ter[ci] + wat[ci] - 0.25:
+					wat[to] += moved
+			else:
+				wat[a[0]] = maxf(0.0, wat[a[0]] + float(a[1]))
+		if not aguas.is_empty() and n == 0:
+			_publish()
 		_mx.lock()
 		var want_save := _save_req
 		_save_req = false

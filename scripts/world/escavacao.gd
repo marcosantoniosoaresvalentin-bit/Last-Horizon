@@ -349,6 +349,11 @@ var _basins_dirty := true
 var _murk_old := {}
 ## (x, z) -> nível da água doce (rio, lagoa) que está em cima do chão ali, ou -1e9.
 var rio_fn := Callable()
+## (de, para, m³): de == para: a água que os buracos puxaram da lagoa (+) ou devolveram
+## (-); de != para: a lagoa escoando pela valeta até a ponta dela.
+var agua_fn := Callable()
+const VERTEDOURO_C := 1.7        # vazão por cima da borda (m^0,5/s): Q = C · largura · altura^1,5
+const VERTEDOURO_L := 0.6        # largura da boca da valeta (m)
 const RIO_TAU := 0.12            # horas do jogo: buraco aberto no rio enche depressa
 const LENCOL_TAU := 1.5          # horas do jogo: perto do rio a água vem minando pelo chão
 const LENCOL_R := 30.0           # até quantos metros do rio a terra fica úmida por baixo
@@ -532,24 +537,51 @@ func _agua_do_rio(b: Dictionary, vol: float, hours: float) -> float:
 	# 1) aberto no rio: algum ponto da borda (ou do fundo) está debaixo da água do rio
 	var Lr := -1e9
 	var rim_seco := 1e9
+	var boca := Vector2.ZERO          # onde o buraco encosta na água do rio/lagoa
+	var secos := []
 	for k in b.borda:
 		var x := float(k.x) * RES
 		var z := float(k.y) * RES
 		var lv: float = rio_fn.call(x, z)
 		if lv > _gk(k) + 0.01:
-			Lr = maxf(Lr, lv)
+			if lv > Lr:
+				Lr = lv
+				boca = Vector2(x, z)
 		else:
 			rim_seco = minf(rim_seco, _gk(k))
+			secos.append(k)
 	if Lr < -1e8:
 		# cavado dentro do próprio rio
 		var kl := _basin_low_k(b)
 		var lv2: float = rio_fn.call(float(kl.x) * RES, float(kl.y) * RES)
 		if lv2 > float(b.low):
 			Lr = lv2
+			boca = Vector2(kl.x, kl.y) * RES
 	if Lr > float(b.low):
 		b.fonte = "rio"
 		var alvo := _vol_at(b, minf(Lr, rim_seco))
-		return vol + (alvo - vol) * (1.0 - exp(-hours / RIO_TAU))
+		var novo := vol + (alvo - vol) * (1.0 - exp(-hours / RIO_TAU))
+		var tirou := novo - vol           # o que entrou no buraco saiu da lagoa (e volta se sair)
+		# a borda seca mais baixa ficou abaixo da água: transborda por ali e escorre morro
+		# abaixo (a lagoa vai escoando pela valeta até o nível dessa borda)
+		# (só conta a borda longe da boca: perto dela é a própria beira da lagoa)
+		var saida := 1e9
+		var ps := Vector2.ZERO
+		for k in secos:
+			var pk := Vector2(float(k.x) * RES, float(k.y) * RES)
+			if pk.distance_to(boca) > 4.0 and _gk(k) < saida:
+				saida = _gk(k)
+				ps = pk
+		var vaza := 0.0
+		if Lr > saida + 0.005:
+			var h := minf(Lr - saida, 1.0)
+			vaza = VERTEDOURO_C * VERTEDOURO_L * pow(h, 1.5) * hours * 3600.0
+		if agua_fn.is_valid():
+			if absf(tirou) > 0.0001:
+				agua_fn.call(boca, boca, tirou)
+			if vaza > 0.0001:
+				agua_fn.call(boca, ps, vaza)          # sai pela ponta da valeta e corre morro abaixo
+		return novo
 	# 2) lençol: a água do rio perto vem minando pelo chão
 	var wt := -1e9
 	var c: Vector2 = b.c
