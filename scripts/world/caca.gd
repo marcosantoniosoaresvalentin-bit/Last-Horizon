@@ -102,6 +102,7 @@ func update(delta: float) -> void:
 			_cair(nd, delta)
 	_sangue_tick(delta)
 	_caindo_tick(delta)
+	_pecas_tick()
 	# poças de sangue crescendo
 	for p in _poças.duplicate():
 		p.r = move_toward(float(p.r), float(p.alvo), delta * 0.03)
@@ -1042,6 +1043,289 @@ func despendurar(uid: String, base: Dictionary) -> void:
 		couro_visual(uid)
 
 
+# ---------- as peças de carne ----------
+# Cada pedaço cortado é uma peça: o trecho [u0, u1) de uma banda (do mesmo desenho da vaca,
+# mostrando só ele), do jeito que foi cortado. Fica em algum lugar: no chão (onde caiu), no
+# carrinho de mão (vai junto quando empurra), na mesa de carne, nas costas do jogador, ou
+# caindo. Caiu na terra: suja (imprópria); no forro de folhas ou no carrinho: limpa.
+# c.pecas = [{id, lado, u0, u1, onde ("chao"/"carrinho"/"mesa"/"costas"/"caindo"), xf (no
+# chão), maq (o carrinho ou a mesa: índice) e rel (o lugar nele), sujo}]
+
+var _peca_nodes := {}           # "uid:id" -> Node3D
+
+
+static func _pk(uid: String, id: int) -> String:
+	return "%s:%d" % [uid, id]
+
+
+func pecas_de(uid: String) -> Array:
+	var c := couro_de(uid)
+	if c.is_empty():
+		return []
+	if not c.has("pecas"):
+		c["pecas"] = []
+	return c.pecas
+
+
+func peca_de(uid: String, id: int) -> Dictionary:
+	for pc in pecas_de(uid):
+		if int(pc.id) == id:
+			return pc
+	return {}
+
+
+## Uma peça nova (e o desenho dela).
+func peca_nova(uid: String, d: Dictionary) -> Dictionary:
+	var lst := pecas_de(uid)
+	var mx := 0
+	for pc in lst:
+		mx = maxi(mx, int(pc.id))
+	d["id"] = mx + 1
+	lst.append(d)
+	_peca_monta(uid, d)
+	return d
+
+
+## Quanto pesa (kg): pela parte do corpo que tem (meia vaca ~110 kg numa vaca adulta).
+func peca_kg(uid: String, pc: Dictionary) -> float:
+	var c := couro_de(uid)
+	var s := float((c.get("p", {}) as Dictionary).get("s", 1.0))
+	var a := maxf(float(pc.u0), -0.35)
+	var b := minf(float(pc.u1), 1.2)
+	return maxf(0.3, (b - a) / 1.55 * 110.0 * s * s * s)
+
+
+## O desenho da peça: a vaca na pose de pendurada mostrando só o trecho dela.
+func _peca_monta(uid: String, pc: Dictionary) -> Node3D:
+	var k := _pk(uid, int(pc.id))
+	if _peca_nodes.has(k) and is_instance_valid(_peca_nodes[k]):
+		(_peca_nodes[k] as Node).queue_free()
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty():
+		return null
+	var c: Dictionary = nd.c
+	var p: Dictionary = c.get("p", {})
+	var no: Node3D = VacaModelo.build(float(p.get("s", 1.0)), str(p.get("cor", "branca")), bool(p.get("touro", false)), int(p.get("seed", 1)))
+	add_child(no)
+	var mi := _malha(no)
+	if mi:
+		mi.mesh = VacaModelo.malha_sem_ubere(mi.mesh)
+	var sk: Skeleton3D = no.get_meta("sk")
+	_pose_pendurada(sk)
+	_cortes_escala(sk, c)
+	VacaModelo._cascos(sk)
+	for ba in no.find_children("*", "BoneAttachment3D", true, false):
+		(ba as Node3D).visible = false
+	for nm in ["saco", "prepucio"]:
+		for ch in no.find_children(nm, "MeshInstance3D", true, false):
+			ch.queue_free()
+	var lado := str(pc.lado)
+	var bd: Dictionary = c.get("banda", {})
+	var cab_e := str(bd.get("cab", "e")) == "e"
+	var com_cab: bool = cab_e if lado == "e" else not cab_e
+	var sm := _banda_mat(no, c, 1.0 if lado == "e" else -1.0, com_cab and float(pc.u1) > 5.0)
+	sm.set_shader_parameter("com_rabo", 0.0 if com_cab else 1.0)
+	sm.set_shader_parameter("u_lo", float(pc.u0))
+	sm.set_shader_parameter("u_hi", float(pc.u1))
+	sm.set_shader_parameter("sujo", 1.0 if bool(pc.get("sujo", false)) else 0.0)
+	mi.material_override = sm
+	# os pontos da peça (no nó): o meio, as pontas do eixo e os de baixo (para encostar)
+	var rf := _couro_ref(no)
+	var to_no := no.global_transform.affine_inverse() * mi.global_transform
+	var amostras := []
+	var eixo := []
+	var u_a := maxf(float(pc.u0), -0.25)
+	var u_b := minf(float(pc.u1), 1.0)
+	for i in 5:
+		var u := lerpf(u_a, u_b, float(i) / 4.0)
+		var y := lerpf(float(rf.y_rabo), float(rf.y_pescoco), u)
+		var zb := _barriga_z(mi, y)
+		var zt := _costas_z(mi, y)
+		var wx := _meia_largura(mi, y) * (1.0 if lado == "e" else -1.0)
+		eixo.append(to_no * Vector3(wx * 0.4, y, (zb + zt) * 0.5))
+		for q in [Vector3(0, y, zb), Vector3(0, y, zt), Vector3(wx, y, (zb + zt) * 0.5)]:
+			amostras.append(to_no * q)
+	if float(pc.u0) < 0.15:
+		var inv := no.global_transform.affine_inverse()
+		var sd: String = "_L" if lado == "e" else "_R"
+		for nm2 in ["BackFoot" + sd, "BackLowLeg" + sd, "Tail4"]:
+			amostras.append(inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(nm2)).origin))
+	var centro := Vector3.ZERO
+	for q in eixo:
+		centro += q
+	centro /= eixo.size()
+	no.set_meta("low", amostras)
+	no.set_meta("eixo", [eixo[0], eixo[eixo.size() - 1]])
+	no.set_meta("centro", centro)
+	no.set_meta("fora", (to_no.basis * Vector3(1.0 if lado == "e" else -1.0, 0, 0)).normalized())
+	no.set_meta("uid", uid)
+	no.set_meta("peca", int(pc.id))
+	_peca_nodes[k] = no
+	if (pc.get("xf", []) as Array).size() >= 12:
+		no.global_transform = _xf_de(pc.xf)
+	_peca_lugar(uid, pc)
+	return no
+
+
+func peca_no(uid: String, id: int) -> Node3D:
+	return _peca_nodes.get(_pk(uid, id), null)
+
+
+## O meio da peça no mundo.
+func peca_centro(uid: String, id: int) -> Vector3:
+	var no := peca_no(uid, id)
+	if no == null or not is_instance_valid(no):
+		return Vector3.INF
+	return no.global_transform * (no.get_meta("centro") as Vector3)
+
+
+## O jeito de deitar a peça: o eixo do corpo na direção "ao_longo", o lado de fora para
+## cima (a carne partida para baixo), com o meio em "onde".
+func peca_deitada(uid: String, id: int, onde: Transform3D) -> Transform3D:
+	var no := peca_no(uid, id)
+	if no == null:
+		return onde
+	var ex: Array = no.get_meta("eixo")
+	var a_l: Vector3 = ((ex[1] as Vector3) - (ex[0] as Vector3)).normalized()
+	var f_l: Vector3 = no.get_meta("fora")
+	f_l = (f_l - a_l * a_l.dot(f_l)).normalized()
+	var de := Basis(a_l, f_l, a_l.cross(f_l))                 # no nó: eixo, fora, o outro
+	var para := Basis(onde.basis.x.normalized(), onde.basis.y.normalized(), onde.basis.x.normalized().cross(onde.basis.y.normalized()))
+	var b := para * de.inverse()
+	var s := no.global_transform.basis.get_scale().x
+	var cen: Vector3 = no.get_meta("centro")
+	return Transform3D(b.scaled(Vector3.ONE * s), onde.origin - b * (cen * s))
+
+
+## Põe a peça no lugar dela (no carrinho, na mesa: pelo lugar guardado; no chão: o xf).
+func _peca_lugar(uid: String, pc: Dictionary) -> void:
+	var no := peca_no(uid, int(pc.id))
+	if no == null or not is_instance_valid(no):
+		return
+	match str(pc.onde):
+		"carrinho", "mesa":
+			var host: Transform3D = _jogo._peca_host_xf(int(pc.get("maq", -1)))
+			if host != Transform3D.IDENTITY and (pc.get("rel", []) as Array).size() >= 12:
+				no.global_transform = host * _xf_de(pc.rel)
+		"costas":
+			no.global_transform = _jogo._peca_costas_xf(uid, int(pc.id))
+		"chao":
+			if (pc.get("xf", []) as Array).size() >= 12:
+				no.global_transform = _xf_de(pc.xf)
+
+
+## Todo quadro: as peças no carrinho (anda), na mesa e nas costas acompanham.
+func _pecas_tick() -> void:
+	for uid in _nodes:
+		var c: Dictionary = _nodes[uid].c
+		for pc in c.get("pecas", []):
+			if str(pc.onde) in ["carrinho", "mesa", "costas"]:
+				_peca_lugar(str(uid), pc)
+
+
+## Monta as peças salvas (ao montar a carcaça).
+func _pecas_monta(uid: String) -> void:
+	for k in _peca_nodes.keys():
+		if str(k).begins_with(uid + ":"):
+			if is_instance_valid(_peca_nodes[k]):
+				(_peca_nodes[k] as Node).queue_free()
+			_peca_nodes.erase(k)
+	var c := couro_de(uid)
+	# (as peças antigas, de antes, que eram "quarto_" nas partes)
+	var partes: Array = c.get("partes", [])
+	for e in partes.duplicate():
+		if str(e.tipo).begins_with("quarto_"):
+			partes.erase(e)
+			pecas_de(uid).append({"id": pecas_de(uid).size() + 1, "lado": str(e.tipo).substr(7), "u0": -9.0, "u1": QUARTO_U,
+				"onde": "chao", "xf": e.xf, "sujo": bool(e.get("sujo", true))})
+	for pc in pecas_de(uid):
+		if str(pc.onde) == "caindo":
+			pc.onde = "chao"
+		_peca_monta(uid, pc)
+
+
+## A peça mais perto (no chão), [uid, id] ou [].
+func peca_perto(pos: Vector3, reach: float, onde := "chao") -> Array:
+	var best := []
+	var bd := reach
+	for uid in _nodes:
+		for pc in (_nodes[uid].c as Dictionary).get("pecas", []):
+			if str(pc.onde) != onde:
+				continue
+			var cp := peca_centro(str(uid), int(pc.id))
+			var d := Vector2(cp.x - pos.x, cp.z - pos.z).length()
+			if d < bd:
+				bd = d
+				best = [str(uid), int(pc.id)]
+	return best
+
+
+## As peças num carrinho ou numa mesa (índice): [[uid, id]...].
+func pecas_em(onde: String, mi: int) -> Array:
+	var out := []
+	for uid in _nodes:
+		for pc in (_nodes[uid].c as Dictionary).get("pecas", []):
+			if str(pc.onde) == onde and int(pc.get("maq", -1)) == mi:
+				out.append([str(uid), int(pc.id)])
+	return out
+
+
+## Muda a peça de lugar (pega, põe no carrinho/mesa, solta no chão).
+func peca_por(uid: String, id: int, onde: String, maq := -1, rel := Transform3D.IDENTITY) -> void:
+	var pc := peca_de(uid, id)
+	if pc.is_empty():
+		return
+	pc.onde = onde
+	pc.erase("xf")
+	pc.erase("rel")
+	pc.erase("maq")
+	if onde in ["carrinho", "mesa"]:
+		pc["maq"] = maq
+		pc["rel"] = _xf_json(rel)
+	_peca_lugar(uid, pc)
+
+
+## Solta a peça (das costas, ou o carrinho despejou): cai no chão.
+func peca_cai(uid: String, id: int) -> void:
+	var pc := peca_de(uid, id)
+	var no := peca_no(uid, id)
+	if pc.is_empty() or no == null:
+		return
+	pc.onde = "caindo"
+	_caindo.append({"node": no, "vel": Vector3.DOWN * 0.2, "ang": Vector3(_rng.randf_range(-1, 1), 0, _rng.randf_range(-1, 1)).normalized() * 0.4,
+		"uid": uid, "tipo": "peca", "peca": id, "chao": 0.0, "r": 0.3, "low": no.get_meta("low")})
+
+
+## A peça é cortada em duas no ponto t (0..1 do comprimento dela): devolve a nova.
+func peca_partir(uid: String, id: int, t: float) -> Dictionary:
+	var pc := peca_de(uid, id)
+	if pc.is_empty():
+		return {}
+	var a := maxf(float(pc.u0), -0.25)
+	var b := minf(float(pc.u1), 1.0)
+	var uc := lerpf(a, b, clampf(t, 0.08, 0.92))
+	var nova := pc.duplicate(true)
+	nova.erase("id")
+	nova.u0 = uc
+	pc.u1 = uc
+	var d := peca_nova(uid, nova)
+	_peca_monta(uid, pc)
+	return d
+
+
+## A peça sai do mundo (foi para a mochila).
+func peca_tirar(uid: String, id: int) -> void:
+	var lst := pecas_de(uid)
+	for pc in lst.duplicate():
+		if int(pc.id) == id:
+			lst.erase(pc)
+	var k := _pk(uid, id)
+	if _peca_nodes.has(k):
+		if is_instance_valid(_peca_nodes[k]):
+			(_peca_nodes[k] as Node).queue_free()
+		_peca_nodes.erase(k)
+
+
 # ---------- partir a banda (faca e machado) ----------
 # Cada banda pendurada é partida no meio: com a faca, entre os fios de costela (onde a
 # carne é mole), corta a carne em volta da banda até a espinha; com o machado, a espinha.
@@ -1128,8 +1412,9 @@ func quarto_visual(uid: String, lado: String) -> void:
 	if sm == null:
 		return
 	var q := quarto_de(uid, lado)
-	sm.set_shader_parameter("q_faca", float(q.get("faca", 0.0)) * 1.05)
-	sm.set_shader_parameter("q_parte", 1.0 if bool(q.get("caiu", false)) else 0.0)
+	var caiu := bool(q.get("caiu", false))
+	sm.set_shader_parameter("q_faca", 0.0 if caiu else float(q.get("faca", 0.0)) * 1.05)
+	sm.set_shader_parameter("u_lo", QUARTO_U if caiu else -9.0)
 
 
 ## Uma machadada na espinha da banda; no último golpe o pedaço de baixo solta e cai.
@@ -1145,10 +1430,14 @@ func quarto_golpe(uid: String, lado: String) -> bool:
 	Sons.play_at(_jogo, "osso_quebra", w, 2.0, 1.05)
 	q.caiu = true
 	quarto_visual(uid, lado)
-	var pc := _quarto_no(uid, lado, [], false)
-	if pc:
-		_caindo.append({"node": pc, "vel": Vector3.DOWN * 0.3, "ang": Vector3(_rng.randf_range(-1, 1), 0, _rng.randf_range(-1, 1)).normalized() * 0.6,
-			"uid": uid, "tipo": "quarto_" + lado, "chao": 0.0, "r": 0.3, "low": pc.get_meta("low")})
+	# o pedaço de baixo vira uma peça de carne (do jeito que foi cortada) e cai
+	var bn := banda_no(uid, lado)
+	var pc := peca_nova(uid, {"lado": lado, "u0": -9.0, "u1": QUARTO_U, "onde": "caindo", "sujo": false,
+		"xf": _xf_json(bn.global_transform) if bn else []})
+	var no: Node3D = _peca_nodes.get(_pk(uid, int(pc.id)), null)
+	if no:
+		_caindo.append({"node": no, "vel": Vector3.DOWN * 0.3, "ang": Vector3(_rng.randf_range(-1, 1), 0, _rng.randf_range(-1, 1)).normalized() * 0.5,
+			"uid": uid, "tipo": "peca", "peca": int(pc.id), "chao": 0.0, "r": 0.3, "low": no.get_meta("low")})
 	return true
 
 
@@ -1235,6 +1524,8 @@ uniform float com_rabo;
 uniform float corte_q;
 uniform float q_faca;
 uniform float q_parte;
+uniform float u_lo = -9.0;
+uniform float u_hi = 9.0;
 uniform float q_w;
 uniform float zb;
 uniform float zt;
@@ -1260,8 +1551,9 @@ void fragment() {
 	dr = min(dr, seg(p, rabo0, rabo1) + r_rabo * 0.35);
 	bool rabo = dr < r_rabo;
 	// a banda partida no meio: em cima (pendurada) ou o pedaço de baixo (que caiu)
-	if (q_parte > 0.5 && q_parte < 1.5 && (u < corte_q || rabo)) { discard; }
-	if (q_parte > 1.5 && u >= corte_q) { discard; }
+	// só o trecho [u_lo, u_hi) do corpo (a banda pendurada depois de partida, ou um pedaço)
+	if (u_lo > -5.0 && (u < u_lo || rabo)) { discard; }
+	if (u >= u_hi) { discard; }
 	if (rabo) {
 		if (com_rabo < 0.5) { discard; }      // o rabo inteiro fica numa banda só
 	} else if (cab) {
@@ -1294,7 +1586,7 @@ void fragment() {
 		ROUGHNESS = 0.55;
 	}
 	// o corte da faca em volta da banda (entre as costelas, até a espinha)
-	if (q_parte < 0.5 && FRONT_FACING && abs(u - corte_q) < q_w && (p.z - zb) / max(zt - zb, 1e-6) < q_faca) {
+	if (q_faca > 0.0 && FRONT_FACING && abs(u - corte_q) < q_w && (p.z - zb) / max(zt - zb, 1e-6) < q_faca) {
 		ALBEDO = abs(u - corte_q) < q_w * 0.5 ? vec3(0.05, 0.0, 0.0) : vec3(0.62, 0.16, 0.12);
 	}
 	// caiu na terra: sujo de barro
@@ -2043,9 +2335,7 @@ func _partes_monta(uid: String) -> void:
 	if is_instance_valid(nd.node):
 		_evis_aplica(nd.node, nd.c)
 	partir_monta(uid)
-	for e in nd.c.get("partes", []):
-		if str(e.tipo).begins_with("quarto_"):
-			_quarto_no(uid, str(e.tipo).substr(7), e.xf, bool(e.get("sujo", false)))
+	_pecas_monta(uid)
 
 
 ## Onde a parte vai ser cortada, no mundo (para o machado mirar).
@@ -2131,30 +2421,40 @@ func _caindo_tick(delta: float) -> void:
 						if wpt.y < low:
 							low = wpt.y
 							lowp = wpt
-		# o quarto caindo num carrinho de mão (posto embaixo): vai para dentro dele, limpo
-		if str(f.tipo).begins_with("quarto_") and _jogo.has_method("quarto_no_carrinho") and f.has("low"):
-			# o meio do pedaço (a perna pendurada não conta) na altura do ponto mais baixo
-			var meio := Vector3.ZERO
-			for lp2 in f.low:
-				meio += nd.global_transform * (lp2 as Vector3)
-			meio /= maxf(1.0, (f.low as Array).size())
-			meio.y = low
-			if _jogo.quarto_no_carrinho(meio, str(f.uid), str(f.tipo).substr(7)):
-				_caindo.erase(f)
-				nd.queue_free()
-				continue
 		var gy: float = _jogo.ground_at(lowp.x, lowp.z)
+		# a peça de carne: o que segura cada ponto é o fundo da caixa do carrinho (se está em
+		# cima dela) ou o chão; encostou no carrinho: fica lá
+		var no_car := -1
+		if str(f.tipo) == "peca" and f.has("low"):
+			low = 1e9
+			for lp in f.low:
+				var w: Vector3 = nd.global_transform * (lp as Vector3)
+				var apoio: float = _jogo.ground_at(w.x, w.z)
+				var ci: int = _jogo._car_debaixo(w)
+				if ci >= 0:
+					apoio = maxf(apoio, float(_jogo._car_fundo_y(ci)))
+				if w.y - apoio < low:
+					low = w.y - apoio
+					lowp = w
+					gy = w.y - low
+					no_car = ci
+			low = lowp.y
 		if low < gy:
 			nd.global_position.y += gy - low
 			if vel.y < -1.2:
 				Sons.play_at(_jogo, "baque", lowp, -10.0 + minf(-vel.y, 5.0), 1.3 if str(f.tipo) != "cabeca" else 0.85)
 				_respingo(Vector3(lowp.x, 0, lowp.z), _rng.randf_range(0.08, 0.16), "gota")
-			if str(f.tipo).begins_with("quarto_") and not bool(f.get("sujou", false)) and not bool(f.get("limpo", false)):
+			if str(f.tipo) == "peca" and no_car >= 0:
+				f["car"] = no_car                     # caiu dentro do carrinho: limpa
+			elif str(f.tipo) == "peca" and not bool(f.get("sujou", false)) and not f.has("car"):
 				if _jogo._maq and _jogo._maq.no_forro(lowp):
-					f["limpo"] = true                 # caiu no forro de folhas: limpo
+					pass                              # caiu no forro de folhas: limpa
 				else:
 					f["sujou"] = true
 					quarto_sujar(nd)                  # caiu na terra: sujou
+					var pcs := peca_de(str(f.uid), int(f.peca))
+					if not pcs.is_empty():
+						pcs["sujo"] = true
 			vel.y = -vel.y * 0.22 if vel.y < -0.6 else 0.0
 			vel.x *= 0.55
 			vel.z *= 0.55
@@ -2164,6 +2464,19 @@ func _caindo_tick(delta: float) -> void:
 		f.ang = ang
 		if float(f.chao) > 0.5 and vel.length() < 0.25 and ang.length() < 0.6:
 			_caindo.erase(f)
+			if str(f.tipo) == "peca":
+				var pcp := peca_de(str(f.uid), int(f.peca))
+				if not pcp.is_empty():
+					if f.has("car") and _jogo._car_debaixo(nd.global_transform * (nd.get_meta("centro") as Vector3) + Vector3.DOWN * 0.1) >= 0:
+						var hx: Transform3D = _jogo._peca_host_xf(int(f.car))
+						pcp.onde = "carrinho"
+						pcp["maq"] = int(f.car)
+						pcp["rel"] = _xf_json(hx.affine_inverse() * nd.global_transform)
+						pcp.erase("xf")
+					else:
+						pcp.onde = "chao"
+						pcp["xf"] = _xf_json(nd.global_transform)
+				continue
 			var cc: Dictionary = _nodes.get(str(f.uid), {}).get("c", {})
 			if not cc.is_empty():
 				if not cc.has("partes"):
@@ -2563,6 +2876,11 @@ func _rebuild() -> void:
 	for ch in get_children():
 		if ch.has_meta("tipo") and not tem.has(str(ch.get_meta("uid", ""))):
 			ch.queue_free()                  # (as patas e a cabeça somem com a carcaça)
+	for k in _peca_nodes.keys():
+		if not tem.has(str(k).split(":")[0]):
+			if is_instance_valid(_peca_nodes[k]):
+				(_peca_nodes[k] as Node).queue_free()
+			_peca_nodes.erase(k)
 	for uid in tem:
 		if _nodes.has(uid):
 			# (veio de outro celular: os dados novos, o mesmo desenho)
@@ -2572,7 +2890,11 @@ func _rebuild() -> void:
 			_nodes[uid].c = cv
 			if mudou:
 				couro_visual(str(uid))
+			var pmud: bool = JSON.stringify(cv.get("pecas", [])) != JSON.stringify((_nodes[uid].c as Dictionary).get("pecas", []))
 			var qmud: bool = JSON.stringify(cv.get("quartos", {})) != JSON.stringify((_nodes[uid].c as Dictionary).get("quartos", {}))
+			if pmud:
+				_nodes[uid].c = cv
+				_pecas_monta(str(uid))
 			if qmud:
 				_nodes[uid].c = cv
 				for ld in ["e", "d"]:

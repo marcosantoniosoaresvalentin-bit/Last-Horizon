@@ -45,8 +45,8 @@ const Cobras := preload("res://scripts/world/cobras.gd")
 const Taias := preload("res://scripts/world/taias.gd")
 const Goiabeiras := preload("res://scripts/world/goiabeiras.gd")
 const Babacus := preload("res://scripts/world/babacus.gd")
-const Vacas := preload("res://scripts/world/vacas.gd")
 const Caca := preload("res://scripts/world/caca.gd")
+const Vacas := preload("res://scripts/world/vacas.gd")
 const Capins := preload("res://scripts/world/capins.gd")
 const Fogueiras := preload("res://scripts/world/fogueiras.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
@@ -847,6 +847,7 @@ void fragment() {
 	_mach_btns = [mk.call("Parar", -480, -146, _mach_end)]
 	_evis_btns = [mk.call("Força", -290, -146, _evis_forca), mk.call("Parar", -480, -146, _evis_end)]
 	_quarto_btns = [mk.call("Parar", -480, -146, _quarto_end)]
+	_mc_btns = [mk.call("Cortar", -290, -146, _mc_cortar), mk.call("Pegar", -430, -146, _mc_pegar), mk.call("Sair", -570, -146, _mc_end)]
 	_banda_btns = [mk.call("Cabeça à esquerda", -640, -286, func(): _banda_escolhe(true)), mk.call("Cabeça à direita", -290, -286, func(): _banda_escolhe(false)), mk.call("Parar", -480, -146, _banda_end)]
 	(_evis_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	(_couro_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
@@ -3137,8 +3138,11 @@ func _update_chop(delta: float) -> void:
 ## de cima delas ou recolher uma forquilha.
 func _update_ctx_btn() -> void:
 	_ctx_action = ""
-	if not _couro.is_empty() or not _mach.is_empty() or not _evis.is_empty() or not _banda.is_empty() or not _quarto.is_empty():
+	if not _couro.is_empty() or not _mach.is_empty() or not _evis.is_empty() or not _banda.is_empty() or not _quarto.is_empty() or not _mc.is_empty():
 		_ctx_btn.visible = false
+		return
+	if _carne_ctx():
+		_ctx_btn.visible = true
 		return
 	if _empurra >= 0:
 		_car_ctx()
@@ -3250,6 +3254,9 @@ func _ctx_press() -> void:
 		return
 	if _ctx_action.begins_with("tri_"):
 		_tri_press(_ctx_action)
+		return
+	if _ctx_action.begins_with("carne_"):
+		_carne_press(_ctx_action)
 		return
 	match _ctx_action:
 		"timbo":
@@ -6184,6 +6191,9 @@ func _move_player(delta: float) -> void:
 	if not _quarto.is_empty():
 		_quarto_move(delta)
 		return
+	if not _mc.is_empty():
+		_mc_move(delta)
+		return
 	if not _mesa.is_empty():
 		_mesa_move(delta)
 		return
@@ -6240,6 +6250,8 @@ func _move_player(delta: float) -> void:
 				sp *= 0.8                                              # arrastando: mais devagar ainda
 		if not _coop.is_empty():
 			sp *= lerpf(0.75, 0.45, clampf(float(_coop.kg) / COOP_KG, 0.0, 1.0))   # devagar, junto com o outro
+		if not _carne.is_empty():
+			sp *= 0.7                                                  # a carne nas costas pesa
 		if _mao == "balde" and not _balde_carga.is_empty():
 			var bkg := float(_balde_carga.vol) * float(DENS.get(_balde_carga.tipo, 1500.0))
 			sp *= lerpf(1.0, 0.72, clampf(bkg / BALDE_KG, 0.0, 1.0))   # balde pesado: mais devagar
@@ -6575,6 +6587,8 @@ func _input(e: InputEvent) -> void:
 		return
 	if not _quarto.is_empty() and _quarto_input(e):
 		return
+	if not _mc.is_empty() and _mc_input(e):
+		return
 	if not _mix.is_empty() and _mix_input(e):
 		return
 	if not _reb.is_empty() and _reb_input(e):
@@ -6601,7 +6615,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _mach_btns + _evis_btns + _banda_btns + _quarto_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _mach_btns + _evis_btns + _banda_btns + _quarto_btns + _mc_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -11884,6 +11898,424 @@ func _mach_draw() -> void:
 		ui.draw_line(p + Vector2(-9, 0), p + Vector2(9, 0), Color(1, 1, 1, 0.8), 2.0, true)
 
 
+# ================== CARNE: PEGAR, LEVAR, PÔR ==================
+# As peças de carne cortadas: perto de uma no chão, "Pegar a carne" (vai nas costas,
+# o jogador anda mais devagar); com ela nas costas, perto do carrinho de mão "Pôr no
+# carrinho" (vai deitada na caixa e anda junto quando empurra), perto da mesa de carne
+# "Pôr na mesa", senão "Soltar a carne" (cai: na terra suja). Do carrinho: "Pegar a carne".
+
+var _carne := {}                  # {uid, id}: a peça nas costas
+
+
+## O lugar que segura a peça (o carrinho com a inclinação dele, a mesa).
+func _peca_host_xf(mi: int) -> Transform3D:
+	if _maq == null or mi < 0 or mi >= _maq.plantas.size():
+		return Transform3D.IDENTITY
+	var nd: Dictionary = _maq._nodes.get(mi, {})
+	if nd.has("root") and is_instance_valid(nd.root):
+		return (nd.root as Node3D).global_transform
+	return _maq.xform(mi)
+
+
+## Nas costas: deitada atravessada nos ombros, atrás da cabeça.
+func _peca_costas_xf(uid: String, id: int) -> Transform3D:
+	var b := Basis(Vector3.UP, _face)
+	var ombro := _player.position + Vector3.UP * 1.5 + b * Vector3(0, 0, 0.3)
+	return _caca.peca_deitada(uid, id, Transform3D(Basis(b.x, Vector3.UP, b.x.cross(Vector3.UP)), ombro))
+
+
+## O carrinho de mão pronto com a caixa embaixo desse ponto (ou -1).
+func _car_debaixo(w: Vector3) -> int:
+	if _maq == null:
+		return -1
+	for mi in _maq.plantas.size():
+		if str(_maq.plantas[mi].tipo) != "carrinho" or not _maq.pronta(mi):
+			continue
+		var l: Vector3 = _peca_host_xf(mi).affine_inverse() * w
+		if l.x > -0.42 and l.x < 0.5 and absf(l.z) < 0.3 and l.y > -0.2 and l.y < 1.4:
+			return mi
+	return -1
+
+
+## A altura do fundo da caixa do carrinho (no mundo).
+func _car_fundo_y(mi: int) -> float:
+	return (_peca_host_xf(mi) * Vector3(0.04, Maquinas.CAR_FUNDO, 0.0)).y
+
+
+func _peca_maq_perto(tipo: String, reach: float) -> int:
+	if _maq == null:
+		return -1
+	var best := -1
+	var bd := reach
+	for mi in _maq.plantas.size():
+		if str(_maq.plantas[mi].tipo) != tipo or not _maq.pronta(mi):
+			continue
+		var o: Vector3 = _peca_host_xf(mi).origin
+		var d := Vector2(o.x - _player.position.x, o.z - _player.position.z).length()
+		if d < bd:
+			bd = d
+			best = mi
+	return best
+
+
+## O botão de contexto da carne (levando ou perto de uma peça). true se pôs.
+func _carne_ctx() -> bool:
+	if _caca == null:
+		return false
+	if not _carne.is_empty():
+		if _caca.peca_de(str(_carne.uid), int(_carne.id)).is_empty():
+			_carne = {}
+			return false
+		if _peca_maq_perto("mesa_carne", 1.9) >= 0:
+			_ctx_action = "carne_mesa"
+			_ctx_btn.text = "Pôr na mesa"
+		elif _peca_maq_perto("carrinho", 1.8) >= 0:
+			_ctx_action = "carne_carrinho"
+			_ctx_btn.text = "Pôr no carrinho"
+		else:
+			_ctx_action = "carne_soltar"
+			_ctx_btn.text = "Soltar a carne"
+		return true
+	if not _carry.is_empty() or _crouch_job != "" or _air or _empurra >= 0:
+		return false
+	if not _caca.peca_perto(_player.position, 1.6, "chao").is_empty():
+		_ctx_action = "carne_pegar"
+		_ctx_btn.text = "Pegar a carne"
+		return true
+	var ci := _peca_maq_perto("carrinho", 1.8)
+	if ci >= 0 and not _caca.pecas_em("carrinho", ci).is_empty():
+		_ctx_action = "carne_do_carrinho"
+		_ctx_btn.text = "Pegar a carne"
+		return true
+	return false
+
+
+func _carne_press(act: String) -> void:
+	match act:
+		"carne_pegar":
+			var pk: Array = _caca.peca_perto(_player.position, 1.6, "chao")
+			if not pk.is_empty():
+				_carne = {"uid": pk[0], "id": pk[1]}
+				_caca.peca_por(str(pk[0]), int(pk[1]), "costas")
+				Sons.play_at(self, "baque", _player.position + Vector3.UP, -10.0, 0.8)
+		"carne_do_carrinho":
+			var ci := _peca_maq_perto("carrinho", 1.8)
+			var lst: Array = _caca.pecas_em("carrinho", ci) if ci >= 0 else []
+			if not lst.is_empty():
+				var pk2: Array = lst[lst.size() - 1]
+				_carne = {"uid": pk2[0], "id": pk2[1]}
+				_caca.peca_por(str(pk2[0]), int(pk2[1]), "costas")
+		"carne_carrinho", "carne_mesa":
+			var tipo := "carrinho" if act == "carne_carrinho" else "mesa_carne"
+			var mi := _peca_maq_perto(tipo, 1.9)
+			if mi < 0 or _carne.is_empty():
+				return
+			var host := _peca_host_xf(mi)
+			var n: int = _caca.pecas_em("carrinho" if tipo == "carrinho" else "mesa", mi).size()
+			var alvo: Transform3D
+			if tipo == "carrinho":
+				# deitada na caixa, de comprido (uma em cima da outra se tiver mais)
+				alvo = host * Transform3D(Basis(), Vector3(0.04, Maquinas.CAR_FUNDO + 0.16 + n * 0.12, 0.0))
+			else:
+				# em cima da mesa, uma do lado da outra
+				var x := -0.55 + float(n % 3) * 0.55
+				alvo = host * Transform3D(Basis(), Vector3(x, 1.06 + float(n / 3) * 0.12, 0.0))
+			var deit: Transform3D = _caca.peca_deitada(str(_carne.uid), int(_carne.id), alvo)
+			_caca.peca_por(str(_carne.uid), int(_carne.id), "carrinho" if tipo == "carrinho" else "mesa", mi, host.affine_inverse() * deit)
+			Sons.play_at(self, "baque", alvo.origin, -6.0, 0.8)
+			_carne = {}
+		"carne_soltar":
+			if not _carne.is_empty():
+				_caca.peca_cai(str(_carne.uid), int(_carne.id))
+				_carne = {}
+	_act_check = 0.0
+
+
+# ================== MESA DE CARNE (TRABALHAR A CARNE) ==================
+# Com carne em cima da mesa, o olho da mesa dá "Trabalhar a carne": de cima da mesa, toca
+# num pedaço para escolher, arrasta o dedo para pôr a marca vermelha onde quer cortar,
+# "Cortar": passa a faca atravessando a marca e depois duas machadadas nela: vira dois
+# pedaços. "Pegar": o pedaço escolhido vai para a mochila (carne crua, 1 kg cada) ou, se
+# for grande, para as costas.
+
+const MC_PEGAR_KG := 12.0
+var _mc := {}                     # {mi, sel: [uid, id], t, fase ("marca"/"faca"/"machado"), faca, golpes, anim, treme, drag, ini}
+var _mc_btns: Array = []          # [Cortar, Pegar, Sair]
+
+
+func _mc_start(mi: int) -> void:
+	if _mao != "":
+		equip("")
+	var lst: Array = _caca.pecas_em("mesa", mi)
+	_mc = {"mi": mi, "sel": lst[0] if not lst.is_empty() else [], "t": 0.5, "fase": "marca", "faca": 0.0, "golpes": 0,
+		"anim": -1.0, "treme": 0.0, "drag": -9, "ini": Vector2.ZERO}
+	_olho = {}
+	_bur = {}
+	_jump_btn.visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false
+	if _mach_axe == null:
+		_mach_axe = MeshInstance3D.new()
+		_mach_axe.mesh = Corte.axe_mesh()
+		_mach_axe.material_override = Corte.axe_material()
+		_mach_axe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_cam.add_child(_mach_axe)
+	_act_check = 0.0
+
+
+func _mc_end() -> void:
+	if _mc.is_empty():
+		return
+	_mc = {}
+	for b in _mc_btns:
+		(b as Control).visible = false
+	if _mach_axe:
+		_mach_axe.visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
+func _mc_move(delta: float) -> void:
+	var mi := int(_mc.mi)
+	if _caca == null or mi >= _maq.plantas.size() or _caca.pecas_em("mesa", mi).is_empty():
+		_mc_end()
+		return
+	var sel: Array = _mc.sel
+	if sel.is_empty() or _caca.peca_de(str(sel[0]), int(sel[1])).is_empty() or str(_caca.peca_de(str(sel[0]), int(sel[1])).onde) != "mesa":
+		var lst: Array = _caca.pecas_em("mesa", mi)
+		_mc.sel = lst[0]
+		_mc.fase = "marca"
+	var host := _peca_host_xf(mi)
+	var eye: Vector3 = host * Vector3(0.0, 2.15, 1.35)
+	var alvo: Vector3 = host * Vector3(0.0, 1.0, 0.0)
+	var pe: Vector3 = host * Vector3(0.0, 0.0, 1.0)
+	_player.position = Vector3(pe.x, ground_at(pe.x, pe.z), pe.z)
+	_air = false
+	_vy = 0.0
+	var olha := alvo - eye
+	_face = atan2(-olha.x, -olha.z)
+	_yaw = _face
+	_player.rotation.y = _face
+	_play("Idle")
+	var tr := float(_mc.treme)
+	_mc.treme = maxf(0.0, tr - delta * 6.0)
+	_cam.global_transform = Transform3D(Basis.looking_at(olha, Vector3.UP), eye + Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.01 * tr)
+	# o machado
+	var a := float(_mc.anim)
+	var th := 0.35
+	if a >= 0.0:
+		a += delta
+		if a < 0.13:
+			th = lerpf(0.35, 1.25, a / 0.13)
+		elif a < 0.24:
+			th = lerpf(1.25, -1.35, (a - 0.13) / 0.11)
+		else:
+			th = lerpf(-1.35, 0.35, clampf((a - 0.24) / 0.3, 0.0, 1.0))
+		if float(_mc.anim) < 0.24 and a >= 0.24:
+			_mc_machadada()
+		_mc.anim = a if a < 0.56 else -1.0
+	if _mach_axe:
+		_mach_axe.visible = str(_mc.fase) == "machado"
+		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25), Vector3(0.3, -0.5, -0.6))
+	(_mc_btns[0] as Control).visible = str(_mc.fase) == "marca"
+	(_mc_btns[1] as Control).visible = str(_mc.fase) == "marca"
+	(_mc_btns[2] as Control).visible = true
+	_jump_btn.visible = false
+	_ctx_btn.visible = false
+	if _sub_ui:
+		_sub_ui.queue_redraw()
+
+
+## As pontas do eixo da peça escolhida (na tela) e onde a marca está.
+func _mc_eixo() -> Array:
+	var sel: Array = _mc.sel
+	var no: Node3D = _caca.peca_no(str(sel[0]), int(sel[1]))
+	if no == null:
+		return []
+	var ex: Array = no.get_meta("eixo")
+	var a: Vector3 = no.global_transform * (ex[0] as Vector3)
+	var b: Vector3 = no.global_transform * (ex[1] as Vector3)
+	return [_cam.unproject_position(a), _cam.unproject_position(b), a, b]
+
+
+func _mc_marca() -> Vector2:
+	var e := _mc_eixo()
+	if e.is_empty():
+		return Vector2.ZERO
+	return (e[0] as Vector2).lerp(e[1], float(_mc.t))
+
+
+func _mc_cortar() -> void:
+	if str(_mc.get("fase", "")) != "marca" or (_mc.sel as Array).is_empty():
+		return
+	if item_qtd("faca") <= 0 and not teste:
+		return
+	var sel: Array = _mc.sel
+	if _caca.peca_kg(str(sel[0]), _caca.peca_de(str(sel[0]), int(sel[1]))) < 1.2:
+		return                              # pequeno demais para cortar de novo
+	_mc.fase = "faca"
+	_mc.faca = 0.0
+
+
+func _mc_machadada() -> void:
+	var sel: Array = _mc.sel
+	_mc.treme = 1.0
+	_mc.golpes = int(_mc.golpes) + 1
+	var e := _mc_eixo()
+	var w: Vector3 = (e[2] as Vector3).lerp(e[3], float(_mc.t)) if not e.is_empty() else _player.position
+	if wear("machado", 1):
+		_update_inventory()
+	if int(_mc.golpes) < 2:
+		Sons.play_at(self, "machado_osso", w, -2.0, randf_range(0.95, 1.1))
+		return
+	Sons.play_at(self, "osso_quebra", w, 0.0, 1.15)
+	var uid := str(sel[0])
+	var id := int(sel[1])
+	var t := float(_mc.t)
+	var nova: Dictionary = _caca.peca_partir(uid, id, t)
+	# os dois pedaços se afastam um pouco na mesa
+	var host := _peca_host_xf(int(_mc.mi))
+	for par in [[id, -1.0], [int(nova.get("id", -1)), 1.0]]:
+		var pc: Dictionary = _caca.peca_de(uid, int(par[0]))
+		if pc.is_empty() or (pc.get("rel", []) as Array).size() < 12:
+			continue
+		var ax: Vector3 = ((e[3] as Vector3) - (e[2] as Vector3)).normalized() if not e.is_empty() else Vector3.RIGHT
+		var rel: Transform3D = Caca._xf_de(pc.rel)
+		var mundo := host * rel
+		mundo.origin += ax * 0.04 * float(par[1])
+		pc.rel = Caca._xf_json(host.affine_inverse() * mundo)
+	_mc.fase = "marca"
+	_mc.golpes = 0
+	_mc.t = 0.5
+
+
+func _mc_pegar() -> void:
+	if str(_mc.get("fase", "")) != "marca" or (_mc.sel as Array).is_empty():
+		return
+	var sel: Array = _mc.sel
+	var uid := str(sel[0])
+	var id := int(sel[1])
+	var pc: Dictionary = _caca.peca_de(uid, id)
+	if pc.is_empty():
+		return
+	var kg: float = _caca.peca_kg(uid, pc)
+	if kg <= MC_PEGAR_KG:
+		var item := "carne_suja" if bool(pc.get("sujo", false)) else "carne_crua"
+		var n := maxi(1, roundi(kg))
+		if _bag_total() + Itens.kg(item) * n > BAG_MAX:
+			return
+		add_item(item, n)
+		_update_inventory()
+		_caca.peca_tirar(uid, id)
+		Sons.play_at(self, "baque", _player.position + Vector3.UP, -10.0, 1.1)
+		_mc.sel = []
+	else:
+		# grande: vai nas costas
+		_carne = {"uid": uid, "id": id}
+		_caca.peca_por(uid, id, "costas")
+		_mc_end()
+
+
+func _mc_input(e: InputEvent) -> bool:
+	if _mc.is_empty():
+		return false
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var pos := Vector2.INF
+	var idx := -9
+	var pressed := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		idx = e.index
+		pressed = e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		idx = -1
+		pressed = e.pressed
+	if pos != Vector2.INF:
+		for b in _mc_btns:
+			if (b as Control).visible and (b as Control).get_global_rect().has_point(pos):
+				return false
+		if pressed:
+			_mc.drag = idx
+			_mc.ini = pos
+			_mc["andou"] = 0.0
+			if str(_mc.fase) == "machado":
+				if float(_mc.anim) < 0.0 and pos.distance_to(_mc_marca()) < 110.0 and (item_qtd("machado") > 0 or teste):
+					_mc.anim = 0.0
+		elif int(_mc.drag) == idx:
+			_mc.drag = -9
+			# um toque (sem arrastar) num pedaço: escolhe ele
+			if str(_mc.fase) == "marca" and float(_mc.get("andou", 0.0)) < 12.0:
+				var best := []
+				var bd := 130.0
+				for pk in _caca.pecas_em("mesa", int(_mc.mi)):
+					var cp: Vector3 = _caca.peca_centro(str(pk[0]), int(pk[1]))
+					var d := pos.distance_to(_cam.unproject_position(cp))
+					if d < bd:
+						bd = d
+						best = pk
+				if not best.is_empty() and best != (_mc.sel as Array):
+					_mc.sel = best
+					_mc.t = 0.5
+		return true
+	var d := Vector2.ZERO
+	if e is InputEventScreenDrag and e.index == int(_mc.drag):
+		d = e.relative
+	elif e is InputEventMouseMotion and int(_mc.drag) == -1:
+		d = e.relative
+	else:
+		return e is InputEventScreenDrag or e is InputEventMouseMotion
+	_mc["andou"] = float(_mc.get("andou", 0.0)) + d.length()
+	var ex := _mc_eixo()
+	if ex.is_empty():
+		return true
+	var ax: Vector2 = (ex[1] as Vector2) - (ex[0] as Vector2)
+	if str(_mc.fase) == "marca":
+		# arrasta a marca ao longo do pedaço
+		_mc.t = clampf(float(_mc.t) + d.dot(ax.normalized()) / maxf(ax.length(), 40.0), 0.08, 0.92)
+	elif str(_mc.fase) == "faca":
+		# a faca atravessando a marca (de um lado ao outro)
+		var per := Vector2(-ax.y, ax.x).normalized()
+		_mc.faca = float(_mc.faca) + absf(d.dot(per)) / 160.0
+		if float(_mc.faca) >= 1.0:
+			_mc.fase = "machado"
+			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -8.0, 1.6)
+			if wear("faca", 1):
+				_update_inventory()
+	return true
+
+
+func _mc_draw() -> void:
+	if _mc.is_empty() or _caca == null:
+		return
+	var ui := _sub_ui
+	# os pedaços na mesa: um pontinho em cada (o escolhido com a roda)
+	for pk in _caca.pecas_em("mesa", int(_mc.mi)):
+		var cp: Vector2 = _cam.unproject_position(_caca.peca_centro(str(pk[0]), int(pk[1])))
+		ui.draw_circle(cp, 5.0, Color(1, 1, 1, 0.7))
+	var ex := _mc_eixo()
+	if ex.is_empty():
+		return
+	var a: Vector2 = ex[0]
+	var b: Vector2 = ex[1]
+	var cen := (a + b) * 0.5
+	ui.draw_arc(cen, maxf(40.0, a.distance_to(b) * 0.55), 0, TAU, 40, Color(1, 0.95, 0.6, 0.6), 2.0, true)
+	var m := _mc_marca()
+	var per := Vector2(-(b - a).y, (b - a).x).normalized()
+	var cor := Color(0.95, 0.15, 0.1, 0.95)
+	ui.draw_line(m - per * 70.0, m + per * 70.0, Color(0, 0, 0, 0.5), 8.0, true)
+	ui.draw_line(m - per * 70.0, m + per * 70.0, cor, 4.0, true)
+	if str(_mc.fase) == "faca":
+		var f := clampf(float(_mc.faca), 0.0, 1.0)
+		ui.draw_line(m - per * 70.0, m - per * 70.0 + per * 140.0 * f, Color(1, 0.95, 0.6, 0.95), 6.0, true)
+	elif str(_mc.fase) == "machado":
+		var pul := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0)
+		ui.draw_arc(m, 30.0 + pul * 6.0, 0, TAU, 32, Color(1, 0.95, 0.7, 0.95), 3.0, true)
+
+
 # ================== ARCO E FLECHA ==================
 # Com o arco na mão (Mochila → EQUIPAR) e flechas na mochila: segurando "Atirar" a corda
 # vai sendo puxada (a mira fecha), soltando a flecha sai para onde a mira aponta, mais
@@ -12209,6 +12641,9 @@ func _car_pick(mi: int, acao: String) -> void:
 		"_car_despejar_agora":
 			# a caçamba virada: tudo cai na frente da roda
 			var frente: Vector3 = xf * Vector3(1.15, 0, 0)
+			if _caca:
+				for pk3 in _caca.pecas_em("carrinho", mi):
+					_caca.peca_cai(str(pk3[0]), int(pk3[1]))
 			var c: Dictionary = _maq.car_of(mi)
 			var cg: Dictionary = _maq.car_tirar_carga(mi, 1e9)
 			if not cg.is_empty():
@@ -15956,7 +16391,7 @@ func _olho_tick() -> void:
 		cands.append([cp, pp.distance_to(Vector2(co.x, co.z))])
 	if _maq:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
-		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho", "trancador"] and _maq.pronta(mi) and _tranca.is_empty():
+		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho", "trancador", "mesa_carne"] and _maq.pronta(mi) and _tranca.is_empty() and _carne.is_empty() and _mc.is_empty():
 			var mo: Vector3 = _maq.xform(mi).origin
 			cands.append([{"maq": mi}, maxf(0.0, pp.distance_to(Vector2(mo.x, mo.z)) - 0.8)])
 	if _fogos:
@@ -15997,6 +16432,8 @@ func _olho_opts(p: Dictionary) -> Array:
 			return _filtro_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "torno_ceramica":
 			return [["modelar", "Modelar"]]
+		if str(_maq.plantas[int(p.maq)].tipo) == "mesa_carne":
+			return [["carne_trabalhar", "Trabalhar a carne"]] if _caca and not _caca.pecas_em("mesa", int(p.maq)).is_empty() else []
 		if str(_maq.plantas[int(p.maq)].tipo) == "mesa_argila":
 			var op := []
 			if _maq.plantas[int(p.maq)].has("argila"):
@@ -16075,6 +16512,7 @@ func _draw_bur_ui() -> void:
 	_evis_draw()
 	_banda_draw()
 	_quarto_draw()
+	_mc_draw()
 	if _mao == "arco" and _morto < 0.0:
 		# a mira: um círculo pequeno no meio da tela (fecha quando a corda está puxada)
 		var mc := _sub_ui.size * 0.5
@@ -16245,6 +16683,9 @@ func _olho_pick(acao: String) -> void:
 			return
 		"modelar":
 			_torno_start(int(p.maq))
+			return
+		"carne_trabalhar":
+			_mc_start(int(p.maq))
 			return
 		"forno_lenha", "forno_acender", "forno_fechar", "forno_abrir", "forno_carvao":
 			_forno_pick(int(p.maq), acao)
