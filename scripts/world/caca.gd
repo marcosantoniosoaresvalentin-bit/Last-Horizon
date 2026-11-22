@@ -1033,6 +1033,198 @@ func despendurar(uid: String, base: Dictionary) -> void:
 		couro_visual(uid)
 
 
+# ---------- abrir e tirar as vísceras (com a faca) ----------
+# Esfolada, a vaca é aberta com a faca: o corte da barriga do pescoço até o úbere, o Y em
+# volta do úbere (um corte de cada lado, até as pernas de trás) e o corte na garganta.
+# Depois as vísceras são puxadas para baixo e saem todas (a buchada, o fígado, os bofes,
+# o coração, as tripas e o úbere), caem no chão e ficam lá. A vaca fica com os pés e a
+# cabeça. c.evis = {barriga, y_e, y_d, garganta, puxa} (0..1 cada); c.evis.feito = true.
+
+## As linhas da faca no mundo: "barriga" (do pescoço até o úbere), "y_e"/"y_d" (do úbere
+## até as pernas de trás, abrindo para o lado) e "garganta" (de um lado ao outro).
+func evis_linha(uid: String, qual: String, n_pts := 24) -> Array:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return []
+	var rf := _couro_ref(nd.node)
+	var mi: MeshInstance3D = rf.mi
+	var m_por_u: float = mi.global_transform.basis.get_scale().x
+	var yr := float(rf.y_rabo)
+	var yp := float(rf.y_pescoco)
+	var y_u := func(u: float) -> float:
+		return lerpf(yr, yp, u)
+	var out := []
+	match qual:
+		"barriga":
+			for i in n_pts:
+				var u := lerpf(1.0, float(rf.u_ubere), float(i) / (n_pts - 1))
+				var y: float = y_u.call(u)
+				out.append(mi.global_transform * Vector3(0, y, _barriga_z(mi, y) - 0.0006))
+		"y_e", "y_d":
+			var sd := -1.0 if qual == "y_e" else 1.0
+			for i in n_pts:
+				var k := float(i) / (n_pts - 1)
+				var u := lerpf(float(rf.u_ubere), float(rf.u_ini), k)
+				var y: float = y_u.call(u)
+				out.append(mi.global_transform * Vector3(sd * 0.13 / m_por_u * k, y, _barriga_z(mi, y) + 0.004 * k - 0.0008))
+		"garganta":
+			var y2: float = y_u.call(0.96)
+			var z2 := _barriga_z(mi, y2)
+			for i in n_pts:
+				var a := lerpf(-1.1, 1.1, float(i) / (n_pts - 1))
+				out.append(mi.global_transform * Vector3(sin(a) * 0.0042, y2, z2 + (1.0 - cos(a)) * 0.004 - 0.0006))
+	return out
+
+
+## O monte de vísceras (feito na hora, com volumes): a buchada (o rúmen, verde-acinzentado),
+## as tripas rosadas em voltas, o fígado (vinho escuro), os bofes (rosa), o coração e,
+## na vaca, o úbere. r: o tamanho (1 = adulta).
+static func visceras_no(s: float, ubere: bool, seed_v: int) -> Node3D:
+	var root := Node3D.new()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_v
+	var bola := func(cor: Color, raio: Vector3, pos: Vector3, rough := 0.35) -> MeshInstance3D:
+		var m := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 1.0
+		sm.height = 2.0
+		sm.radial_segments = 16
+		sm.rings = 10
+		m.mesh = sm
+		var mt := StandardMaterial3D.new()
+		mt.albedo_color = cor
+		mt.roughness = rough
+		mt.metallic_specular = 0.45
+		m.material_override = mt
+		m.scale = raio * s
+		m.position = pos * s
+		root.add_child(m)
+		return m
+	# a buchada (rúmen) grande e o barrete
+	bola.call(Color(0.5, 0.52, 0.42), Vector3(0.36, 0.3, 0.28), Vector3(0, 0, 0))
+	bola.call(Color(0.56, 0.55, 0.46), Vector3(0.2, 0.18, 0.17), Vector3(0.28, 0.12, 0.1))
+	bola.call(Color(0.46, 0.47, 0.38), Vector3(0.16, 0.15, 0.14), Vector3(-0.25, 0.16, -0.1))
+	# o fígado e os bofes, o coração
+	bola.call(Color(0.28, 0.05, 0.05), Vector3(0.22, 0.07, 0.15), Vector3(0.12, 0.3, 0.12), 0.25)
+	bola.call(Color(0.82, 0.5, 0.52), Vector3(0.18, 0.14, 0.12), Vector3(-0.15, 0.36, 0.05), 0.45)
+	bola.call(Color(0.8, 0.48, 0.5), Vector3(0.16, 0.13, 0.11), Vector3(0.05, 0.4, -0.08), 0.45)
+	bola.call(Color(0.42, 0.08, 0.07), Vector3(0.08, 0.1, 0.08), Vector3(-0.02, 0.32, 0.18), 0.3)
+	# as tripas: tubos rosados dando voltas por fora da buchada
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for k in 3:
+		var pts := []
+		var r0 := 0.26 + k * 0.04
+		var a0 := rng.randf() * TAU
+		for i in 60:
+			var a := a0 + float(i) / 59.0 * TAU * 1.6
+			pts.append(Vector3(cos(a) * r0, -0.18 + sin(a * 3.0 + k) * 0.06 + k * 0.03, sin(a) * r0 * 0.8) * s)
+		var lados := 6
+		var rr := 0.035 * s
+		for i in pts.size() - 1:
+			var p0: Vector3 = pts[i]
+			var p1: Vector3 = pts[i + 1]
+			var d := (p1 - p0).normalized()
+			var ax := d.cross(Vector3.UP).normalized()
+			var bx := d.cross(ax).normalized()
+			for j in lados:
+				var t0 := TAU * j / lados
+				var t1 := TAU * (j + 1) / lados
+				var q := [p0 + (ax * cos(t0) + bx * sin(t0)) * rr, p1 + (ax * cos(t0) + bx * sin(t0)) * rr,
+					p1 + (ax * cos(t1) + bx * sin(t1)) * rr, p0 + (ax * cos(t1) + bx * sin(t1)) * rr]
+				for jj in [0, 1, 2, 0, 2, 3]:
+					st.add_vertex(q[jj])
+	st.generate_normals()
+	var tr := MeshInstance3D.new()
+	tr.mesh = st.commit()
+	var mtr := StandardMaterial3D.new()
+	mtr.albedo_color = Color(0.86, 0.6, 0.55)
+	mtr.roughness = 0.3
+	mtr.metallic_specular = 0.5
+	mtr.cull_mode = BaseMaterial3D.CULL_DISABLED
+	tr.material_override = mtr
+	root.add_child(tr)
+	# o úbere (com as quatro tetas)
+	if ubere:
+		var ub: MeshInstance3D = bola.call(Color(0.86, 0.66, 0.64), Vector3(0.17, 0.11, 0.14), Vector3(0.05, -0.32, 0.2), 0.5)
+		for i in 4:
+			var tx := (-0.07 if i % 2 == 0 else 0.07)
+			var tz := (0.14 if i < 2 else 0.26)
+			bola.call(Color(0.84, 0.6, 0.6), Vector3(0.022, 0.05, 0.022), Vector3(0.05 + tx, -0.43, tz), 0.5)
+	return root
+
+
+## O centro da barriga por dentro, no mundo (onde as vísceras estão).
+func evis_centro(uid: String) -> Vector3:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return Vector3.ZERO
+	var rf := _couro_ref(nd.node)
+	var mi: MeshInstance3D = rf.mi
+	var y := lerpf(float(rf.y_rabo), float(rf.y_pescoco), 0.55)
+	return mi.global_transform * Vector3(0, y, _barriga_z(mi, y) + 0.006)
+
+
+## As vísceras saindo (k 0..1): aparecem na abertura e vão descendo para fora.
+func evis_puxa(uid: String, k: float) -> void:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return
+	var n: Node3D = nd.node
+	var c: Dictionary = nd.c
+	var vn: Node3D = n.get_meta("visc") if n.has_meta("visc") and is_instance_valid(n.get_meta("visc")) else null
+	if vn == null:
+		var p: Dictionary = c.get("p", {})
+		vn = visceras_no(float(p.get("s", 1.0)), not bool(p.get("touro", false)), int(p.get("seed", 1)))
+		add_child(vn)
+		n.set_meta("visc", vn)
+	var fr := couro_frente(uid)
+	var c0 := evis_centro(uid)
+	vn.global_position = c0 + fr * lerpf(-0.12, 0.45, k) + Vector3.DOWN * k * 0.55
+	vn.visible = k > 0.02
+
+
+## Saíram todas: o monte cai no chão (e fica); o úbere sai da carcaça.
+func evis_solta(uid: String) -> void:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return
+	var n: Node3D = nd.node
+	var c: Dictionary = nd.c
+	(c.evis as Dictionary)["feito"] = true
+	_evis_aplica(n, c)
+	var vn: Node3D = n.get_meta("visc") if n.has_meta("visc") else null
+	n.remove_meta("visc")
+	if vn == null or not is_instance_valid(vn):
+		return
+	vn.set_meta("uid", uid)
+	vn.set_meta("tipo", "buchada")
+	var fr := couro_frente(uid)
+	_caindo.append({"node": vn, "vel": fr * 0.7 + Vector3.DOWN * 0.5, "ang": Vector3(_rng.randf_range(-1, 1), 0.2, _rng.randf_range(-1, 1)).normalized() * 1.5,
+		"uid": uid, "tipo": "buchada", "chao": 0.0, "r": 0.3})
+	Sons.play_at(_jogo, "baque", vn.global_position, 4.0, 0.6)
+	_fonte(n, evis_centro(uid), Vector3.DOWN, 14.0, 0.8)
+
+
+## Aberta: a carcaça sem o úbere (e, no boi, sem o saco e o prepúcio).
+func _evis_aplica(n: Node3D, c: Dictionary) -> void:
+	if not bool((c.get("evis", {}) as Dictionary).get("feito", false)):
+		return
+	var mi := _malha(n)
+	if mi == null or mi.has_meta("sem_ubere"):
+		return
+	var mats := []
+	for k in mi.mesh.get_surface_count():
+		mats.append(mi.get_surface_override_material(k))
+	mi.mesh = VacaModelo.malha_sem_ubere(mi.mesh)
+	for k in mini(mats.size(), mi.mesh.get_surface_count()):
+		mi.set_surface_override_material(k, mats[k])
+	mi.set_meta("sem_ubere", true)
+	for nm in ["saco", "prepucio"]:
+		for ch in n.find_children(nm, "MeshInstance3D", true, false):
+			ch.queue_free()
+
+
 # ---------- patas e cabeça (com o machado) ----------
 # Pendurada, as canelas (do jarrete/joelho para baixo, com o casco) e a cabeça saem a
 # machadadas. A parte cortada vira um pedaço separado (a mesma malha da vaca, só daquela
@@ -1284,8 +1476,18 @@ func _partes_monta(uid: String) -> void:
 		if ch.has_meta("tipo") and str(ch.get_meta("uid", "")) == uid:
 			ch.queue_free()
 	for e in nd.c.get("partes", []):
-		_parte_no(uid, str(e.tipo), e.xf)
+		if str(e.tipo) == "buchada":
+			var p: Dictionary = nd.c.get("p", {})
+			var vn := visceras_no(float(p.get("s", 1.0)), not bool(p.get("touro", false)), int(p.get("seed", 1)))
+			vn.set_meta("uid", uid)
+			vn.set_meta("tipo", "buchada")
+			add_child(vn)
+			vn.global_transform = _xf_de(e.xf)
+		else:
+			_parte_no(uid, str(e.tipo), e.xf)
 	_tocos(uid)
+	if is_instance_valid(nd.node):
+		_evis_aplica(nd.node, nd.c)
 
 
 ## Onde a parte vai ser cortada, no mundo (para o machado mirar).
@@ -1356,8 +1558,8 @@ func _caindo_tick(delta: float) -> void:
 		# o ponto mais baixo (os cantos da caixa da malha)
 		var low := 1e9
 		var lowp := p
-		for ch in nd.get_children():
-			if ch is MeshInstance3D and (ch as MeshInstance3D).mesh:
+		for ch in nd.find_children("*", "MeshInstance3D", true, false):
+			if (ch as MeshInstance3D).mesh:
 				var bx: AABB = (ch as MeshInstance3D).get_aabb()
 				for i in 8:
 					var wpt: Vector3 = (ch as MeshInstance3D).global_transform * bx.get_endpoint(i)
@@ -1409,6 +1611,14 @@ uniform vec3 casco1;
 uniform vec3 casco2;
 uniform vec3 casco3;
 uniform float r_casco;
+uniform float ab_y;
+uniform float ab;
+uniform float y_e;
+uniform float y_d;
+uniform float y_off;
+uniform float garg;
+uniform float aberto;
+uniform float u_ini2;
 varying vec3 p;
 varying vec3 nn;
 void vertex() {
@@ -1427,7 +1637,25 @@ void fragment() {
 	float dc = min(min(distance(p, casco0), distance(p, casco1)), min(distance(p, casco2), distance(p, casco3)));
 	if (dc < r_casco || u > 1.0) { discard; }
 	vec3 q = p * esc;
-	if (u < pele) {
+	// a vaca aberta: o corte da barriga (do pescoço até o úbere), o Y em volta do úbere
+	// (um de cada lado até as pernas de trás) e a garganta; abrindo, vira um rasgo escuro
+	float wa = largura * (1.0 + aberto * 5.0);
+	bool rasgo = false;
+	if (nn.z < -0.35) {
+		if (u <= 1.0 && u >= max(ab, ab_y) && abs(p.x) < wa) { rasgo = true; }
+		if (u < ab_y && u >= u_ini2) {
+			float k = (ab_y - u) / max(ab_y - u_ini2, 0.0001);
+			float off = y_off * k;
+			if (abs(p.x - off) < wa && k <= y_d) { rasgo = true; }
+			if (abs(p.x + off) < wa && k <= y_e) { rasgo = true; }
+		}
+	}
+	if (garg > 0.5 && u > 0.93 && u < 0.99 && nn.z < 0.2) { rasgo = true; }
+	if (rasgo) {
+		ALBEDO = mix(vec3(0.4, 0.02, 0.02), vec3(0.08, 0.005, 0.005), aberto);
+		ROUGHNESS = 0.25;
+		SPECULAR = 0.5;
+	} else if (u < pele) {
 		float n1 = ruido(q * 11.0);
 		float n2 = ruido(q * 34.0 + vec3(3.1, 1.7, 5.3));
 		float n3 = ruido(q * 70.0 + vec3(7.7, 2.2, 0.4));
@@ -1438,8 +1666,8 @@ void fragment() {
 		float borda = smoothstep(pele - 0.05, pele, u);
 		col = mix(col, vec3(0.82, 0.74, 0.7), borda * 0.7);
 		ALBEDO = col;
-		ROUGHNESS = 0.3;
-		SPECULAR = 0.45;
+		ROUGHNESS = 0.55;
+		SPECULAR = 0.25;
 	} else if (u >= corte_ini && u < corte && nn.z < -0.55 && abs(p.x) < largura) {
 		ALBEDO = vec3(0.4, 0.02, 0.02);
 		ROUGHNESS = 0.25;
@@ -1515,7 +1743,7 @@ func _couro_ref(n: Node3D) -> Dictionary:
 	var y_rabo: float = (pos.call("Back") as Vector3).y + 0.002
 	var y_pes: float = (pos.call("Neck") as Vector3).y
 	var y_ini: float = (pos.call("BackUpLeg_R") as Vector3).y
-	return {"mi": mi, "y_rabo": y_rabo, "y_pescoco": y_pes, "u_ini": (y_rabo - y_ini) / (y_rabo - y_pes),
+	return {"mi": mi, "y_rabo": y_rabo, "y_pescoco": y_pes, "u_ini": (y_rabo - y_ini) / (y_rabo - y_pes), "u_ubere": (y_rabo - (-0.004)) / (y_rabo - y_pes),
 		"cascos": [pos.call("BackFoot_R"), pos.call("BackFoot_L"), pos.call("FrontFoot_R"), pos.call("FrontFoot_L")]}
 
 
@@ -1564,6 +1792,16 @@ func couro_visual(uid: String) -> void:
 	sm.set_shader_parameter("r_casco", 0.1 / m_por_u)
 	for i in 4:
 		sm.set_shader_parameter("casco%d" % i, rf.cascos[i])
+	var ev: Dictionary = c.get("evis", {})
+	var uy := float(rf.u_ubere)
+	sm.set_shader_parameter("ab_y", uy)
+	sm.set_shader_parameter("u_ini2", u_ini)
+	sm.set_shader_parameter("ab", lerpf(1.0, uy, float(ev.get("barriga", 0.0))) if float(ev.get("barriga", 0.0)) > 0.0 else 9.0)
+	sm.set_shader_parameter("y_e", float(ev.get("y_e", 0.0)))
+	sm.set_shader_parameter("y_d", float(ev.get("y_d", 0.0)))
+	sm.set_shader_parameter("y_off", 0.13 / m_por_u)
+	sm.set_shader_parameter("garg", 1.0 if float(ev.get("garganta", 0.0)) >= 1.0 else 0.0)
+	sm.set_shader_parameter("aberto", clampf(float(ev.get("puxa", 0.0)) * 2.0, 0.0, 1.0))
 
 
 ## A linha do corte na barriga, no mundo (n pontos, dos pés de trás até o pescoço).

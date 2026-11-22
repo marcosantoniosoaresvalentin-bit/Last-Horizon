@@ -843,6 +843,8 @@ void fragment() {
 	(_laco_btns[1] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_couro_btns = [mk.call("Força", -290, -146, _couro_forca), mk.call("Parar", -480, -146, _couro_end)]
 	_mach_btns = [mk.call("Parar", -480, -146, _mach_end)]
+	_evis_btns = [mk.call("Força", -290, -146, _evis_forca), mk.call("Parar", -480, -146, _evis_end)]
+	(_evis_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	(_couro_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_tri_btns = [mk.call("Força", -290, -146, _tri_forca), mk.call("Soltar", -480, -146, _tri_soltar), mk.call("Amarrar", -290, -286, _tri_amarrar_estaca)]
 	(_tri_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
@@ -3123,7 +3125,7 @@ func _update_chop(delta: float) -> void:
 ## de cima delas ou recolher uma forquilha.
 func _update_ctx_btn() -> void:
 	_ctx_action = ""
-	if not _couro.is_empty() or not _mach.is_empty():
+	if not _couro.is_empty() or not _mach.is_empty() or not _evis.is_empty():
 		_ctx_btn.visible = false
 		return
 	if _empurra >= 0:
@@ -6126,6 +6128,9 @@ func _move_player(delta: float) -> void:
 	if not _mach.is_empty():
 		_mach_move(delta)
 		return
+	if not _evis.is_empty():
+		_evis_move(delta)
+		return
 	if not _mesa.is_empty():
 		_mesa_move(delta)
 		return
@@ -6509,6 +6514,8 @@ func _input(e: InputEvent) -> void:
 		return
 	if not _mach.is_empty() and _mach_input(e):
 		return
+	if not _evis.is_empty() and _evis_input(e):
+		return
 	if not _mix.is_empty() and _mix_input(e):
 		return
 	if not _reb.is_empty() and _reb_input(e):
@@ -6535,7 +6542,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _mach_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _mach_btns + _evis_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -10055,6 +10062,11 @@ func _tri_ctx(mi: int) -> bool:
 	var est: Vector3 = _maq.tri_estaca(mi)
 	var perto_estaca := Vector2(_player.position.x - est.x, _player.position.z - est.z).length() < 1.6
 	if bool(ic.get("fixo", false)):
+		if (item_qtd("faca") > 0 or teste) and _evis_pode(mi) != "" and not perto_estaca:
+			var ce: Dictionary = _caca.couro_de(str(ic.uid))
+			_ctx_action = "tri_evis"
+			_ctx_btn.text = "Continuar a abrir" if ce.has("evis") else "Abrir a barriga"
+			return true
 		if (item_qtd("machado") > 0 or teste) and _mach_pode(mi) != "" and not perto_estaca:
 			_ctx_action = "tri_mach"
 			_ctx_btn.text = "Cortar patas e cabeça"
@@ -10153,6 +10165,10 @@ func _tri_press(act: String) -> void:
 			_tri = {"mi": mi, "fase": "puxa", "forca": 0.8 if act == "tri_desestaca" else 0.6}
 			_tri_ajusta_corda(mi)
 			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -8.0, 1.0)
+		"tri_evis":
+			var uid4 := _evis_pode(mi)
+			if uid4 != "":
+				_evis_start(mi, uid4)
 		"tri_mach":
 			var uid3 := _mach_pode(mi)
 			if uid3 != "":
@@ -10771,6 +10787,266 @@ func _couro_draw() -> void:
 	ui.draw_rect(rb, Color(1, 1, 1, 0.6), false, 2.0)
 
 
+# ================== ABRIR A VACA E TIRAR AS VÍSCERAS (FACA) ==================
+# Esfolada e pendurada, com a faca: "Abrir a barriga". Passando o dedo em cima de cada
+# linha (como no couro): o corte da barriga do pescoço até o úbere, um lado do Y em volta
+# do úbere, o outro lado, e o corte na garganta. Depois, tocando "Força" e passando o dedo
+# para baixo, as vísceras saem todas e caem no chão (com o úbere).
+
+const EVIS_FASES := ["barriga", "y_e", "y_d", "garganta", "puxa"]
+const EVIS_PRECISA := 0.5
+var _evis := {}                   # {mi, uid, fase, drag, cortando, forca}
+var _evis_btns: Array = []        # [Força, Parar]
+
+
+func _evis_pode(mi: int) -> String:
+	var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+	if ic.is_empty() or not bool(ic.get("fixo", false)) or _caca == null:
+		return ""
+	var uid := str(ic.uid)
+	var c: Dictionary = _caca.couro_de(uid)
+	if c.is_empty() or not bool(c.get("esfolada", false)) or bool((c.get("evis", {}) as Dictionary).get("feito", false)):
+		return ""
+	var pe: Vector3 = _caca.pes_tras(uid)
+	if pe.y - ground_at(pe.x, pe.z) < 1.4:
+		return ""
+	if Vector2(pe.x - _player.position.x, pe.z - _player.position.z).length() > 2.6:
+		return ""
+	return uid
+
+
+func _evis_dados() -> Dictionary:
+	var c: Dictionary = _caca.couro_de(str(_evis.uid))
+	if not c.has("evis"):
+		c["evis"] = {}
+	return c.evis
+
+
+func _evis_start(mi: int, uid: String) -> void:
+	if _mao != "":
+		equip("")
+	_evis = {"mi": mi, "uid": uid, "fase": "barriga", "drag": -9, "cortando": false, "forca": 0.0}
+	var ev := _evis_dados()
+	for f in EVIS_FASES:
+		if float(ev.get(f, 0.0)) < 1.0:
+			_evis.fase = f
+			break
+	_olho = {}
+	_bur = {}
+	_jump_btn.visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false
+	_caca.couro_visual(uid)
+	if float(ev.get("puxa", 0.0)) > 0.0:
+		_caca.evis_puxa(uid, float(ev.puxa))
+	_act_check = 0.0
+
+
+func _evis_end() -> void:
+	if _evis.is_empty():
+		return
+	_evis = {}
+	for b in _evis_btns:
+		(b as Control).visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
+func _evis_move(delta: float) -> void:
+	var uid := str(_evis.uid)
+	var mi := int(_evis.mi)
+	if _caca == null or _caca.couro_de(uid).is_empty() or mi >= _maq.plantas.size() or (_maq.plantas[mi].get("ice", {}) as Dictionary).is_empty():
+		_evis_end()
+		return
+	var lin: Array = _caca.couro_linha(uid, 8)
+	if lin.is_empty():
+		_evis_end()
+		return
+	var meio := Vector3.ZERO
+	for q in lin:
+		meio += q
+	meio /= lin.size()
+	var fr: Vector3 = _caca.couro_frente(uid)
+	fr.y = 0.0
+	fr = fr.normalized() if fr.length() > 0.1 else Vector3.RIGHT
+	var eye := meio + fr * 2.0 + Vector3.UP * 0.05
+	_player.position = Vector3(eye.x, ground_at(eye.x, eye.z), eye.z)
+	_air = false
+	_vy = 0.0
+	_face = atan2(fr.x, fr.z)
+	_yaw = _face
+	_player.rotation.y = _face
+	_play("Idle")
+	_cam.global_transform = Transform3D(Basis.looking_at(meio - eye, Vector3.UP), eye)
+	_evis.forca = maxf(0.0, float(_evis.forca) - delta * 0.12)
+	(_evis_btns[0] as Control).visible = str(_evis.fase) == "puxa"
+	(_evis_btns[1] as Control).visible = true
+	_jump_btn.visible = false
+	_ctx_btn.visible = false
+	if _sub_ui:
+		_sub_ui.queue_redraw()
+
+
+## Um ponto da linha da fase (0..1) na tela.
+func _evis_tela(fase: String, t: float) -> Vector2:
+	var lin: Array = _caca.evis_linha(str(_evis.uid), fase, 24)
+	if lin.is_empty():
+		return Vector2.ZERO
+	var f := clampf(t, 0.0, 1.0) * (lin.size() - 1)
+	var i := mini(int(f), lin.size() - 2)
+	return _cam.unproject_position((lin[i] as Vector3).lerp(lin[i + 1], f - i))
+
+
+## O dedo em cima da linha: até onde chegou (ou -1 se saiu da linha).
+func _traca(lin: Array, t0: float, at: Vector2) -> float:
+	var best := 1e9
+	var tp := t0
+	for k in lin.size() - 1:
+		var a2: Vector2 = _cam.unproject_position(lin[k])
+		var b2: Vector2 = _cam.unproject_position(lin[k + 1])
+		var ab := b2 - a2
+		var f := clampf((at - a2).dot(ab) / maxf(ab.length_squared(), 1.0), 0.0, 1.0)
+		var dd := at.distance_to(a2 + ab * f)
+		var tk := (float(k) + f) / (lin.size() - 1)
+		if dd < best and tk > t0 - 0.1 and tk < t0 + 0.25:
+			best = dd
+			tp = tk
+	return -1.0 if best > 110.0 else tp
+
+
+func _evis_input(e: InputEvent) -> bool:
+	if _evis.is_empty():
+		return false
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var ev := _evis_dados()
+	var fase := str(_evis.fase)
+	var pos := Vector2.INF
+	var idx := -9
+	var pressed := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		idx = e.index
+		pressed = e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		idx = -1
+		pressed = e.pressed
+	if pos != Vector2.INF:
+		for b in _evis_btns:
+			if (b as Control).visible and (b as Control).get_global_rect().has_point(pos):
+				return false
+		if pressed:
+			_evis.drag = idx
+			_evis.cortando = fase != "puxa" and pos.distance_to(_evis_tela(fase, float(ev.get(fase, 0.0)))) < 110.0
+		elif int(_evis.drag) == idx:
+			_evis.drag = -9
+			_evis.cortando = false
+		return true
+	var d := Vector2.ZERO
+	var at := Vector2.ZERO
+	if e is InputEventScreenDrag and e.index == int(_evis.drag):
+		d = e.relative
+		at = e.position
+	elif e is InputEventMouseMotion and int(_evis.drag) == -1:
+		d = e.relative
+		at = e.position
+	else:
+		return e is InputEventScreenDrag or e is InputEventMouseMotion
+	var uid := str(_evis.uid)
+	if fase != "puxa":
+		if not bool(_evis.cortando) or (item_qtd("faca") <= 0 and not teste):
+			return true
+		var t0 := float(ev.get(fase, 0.0))
+		var tp := _traca(_caca.evis_linha(uid, fase, 24), t0, at)
+		if tp < 0.0:
+			_evis.cortando = false
+			return true
+		if tp <= t0:
+			return true
+		var t1 := minf(1.0, tp)
+		ev[fase] = t1
+		if int(t1 * 6.0) != int(t0 * 6.0):
+			Sons.play_at(self, "fibra_puxa", _cam.global_position - _cam.global_transform.basis.z * 1.5, -13.0, 1.8)
+			if wear("faca", 1):
+				_update_inventory()
+		if t1 >= 1.0:
+			_evis.cortando = false
+			var i := EVIS_FASES.find(fase)
+			_evis.fase = EVIS_FASES[i + 1]
+		_caca.couro_visual(uid)
+		return true
+	# puxando as vísceras para baixo
+	if d.y <= 0.0 or float(_evis.forca) < EVIS_PRECISA:
+		return true
+	var p0 := float(ev.get("puxa", 0.0))
+	var p1 := minf(1.0, p0 + d.y / 420.0 * 0.5)
+	ev.puxa = p1
+	_caca.evis_puxa(uid, p1)
+	_caca.couro_visual(uid)
+	if int(p1 * 10.0) != int(p0 * 10.0):
+		Sons.play_at(self, "fibra_puxa", _cam.global_position - _cam.global_transform.basis.z * 1.5, -6.0, 0.55)
+	if p1 >= 1.0:
+		_caca.evis_solta(uid)
+		_evis_end()
+	return true
+
+
+func _evis_forca() -> void:
+	if str(_evis.get("fase", "")) != "puxa":
+		return
+	_evis.forca = minf(1.0, float(_evis.forca) + 0.1)
+
+
+func _evis_draw() -> void:
+	if _evis.is_empty() or _caca == null:
+		return
+	var ui := _sub_ui
+	var s := ui.size
+	var ev := _evis_dados()
+	var fase := str(_evis.fase)
+	if fase != "puxa":
+		var t0 := float(ev.get(fase, 0.0))
+		var n := 20
+		for k in n:
+			var a := t0 + (1.0 - t0) * float(k) / n
+			var b := t0 + (1.0 - t0) * (float(k) + 0.5) / n
+			ui.draw_line(_evis_tela(fase, a), _evis_tela(fase, b), Color(1, 1, 1, 0.75), 3.0, true)
+		var tip := _evis_tela(fase, t0)
+		var pulso := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 160.0)
+		ui.draw_arc(tip, 22.0 + pulso * 6.0, 0, TAU, 28, Color(1, 0.95, 0.6, 0.85), 3.0, true)
+		var dn := (_evis_tela(fase, t0 + 0.08) - tip).normalized()
+		if dn.length() < 0.5:
+			dn = Vector2.DOWN
+		var lt := Vector2(-dn.y, dn.x)
+		var pc := tip + lt * 6.0
+		ui.draw_colored_polygon(PackedVector2Array([pc + dn * 4.0, pc - dn * 34.0 + lt * 8.0, pc - dn * 34.0 - lt * 4.0]), Color(0.55, 0.55, 0.52))
+		ui.draw_line(pc - dn * 34.0, pc - dn * 70.0, Color(0.38, 0.26, 0.14), 9.0, true)
+	else:
+		var cp := _cam.unproject_position(_caca.evis_centro(str(_evis.uid)))
+		var cor := Color(1, 0.95, 0.6, 0.85) if float(_evis.forca) >= EVIS_PRECISA else Color(1, 1, 1, 0.35)
+		ui.draw_line(cp + Vector2(60, -40), cp + Vector2(60, 50), cor, 6.0, true)
+		ui.draw_colored_polygon(PackedVector2Array([cp + Vector2(60, 72), cp + Vector2(46, 48), cp + Vector2(74, 48)]), cor)
+		var btn: Control = _evis_btns[0]
+		var r := Rect2(btn.get_global_rect().position - ui.get_global_rect().position + Vector2(-44, 0), Vector2(28, btn.size.y))
+		ui.draw_rect(r.grow(3), Color(0.04, 0.04, 0.03, 0.85))
+		var v := float(_evis.forca)
+		var h := r.size.y * v
+		ui.draw_rect(Rect2(Vector2(r.position.x, r.end.y - h), Vector2(r.size.x, h)), Color(0.95, 0.75, 0.2) if v >= EVIS_PRECISA else Color(0.4, 0.6, 0.95))
+		var ny := r.end.y - r.size.y * EVIS_PRECISA
+		ui.draw_line(Vector2(r.position.x - 8, ny), Vector2(r.end.x + 8, ny), Color(1, 1, 1, 0.95), 3.0)
+		ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
+	var rb := Rect2(Vector2(s.x * 0.5 - 200, 30), Vector2(400, 12))
+	ui.draw_rect(rb.grow(3), Color(0.05, 0.04, 0.03, 0.8))
+	var tot := 0.0
+	for f in EVIS_FASES:
+		tot += float(ev.get(f, 0.0))
+	ui.draw_rect(Rect2(rb.position, Vector2(rb.size.x * tot / EVIS_FASES.size(), rb.size.y)), Color(0.7, 0.25, 0.18))
+	ui.draw_rect(rb, Color(1, 1, 1, 0.6), false, 2.0)
+
+
 # ================== PATAS E CABEÇA (MACHADO) ==================
 # Com a vaca pendurada e esfolada e o machado na mochila: "Cortar patas e cabeça". De
 # frente para a vaca, cada parte tem a sua marca (as quatro canelas e a cabeça); tocando
@@ -10788,7 +11064,7 @@ func _mach_pode(mi: int) -> String:
 		return ""
 	var uid := str(ic.uid)
 	var c: Dictionary = _caca.couro_de(uid)
-	if c.is_empty() or not bool(c.get("esfolada", false)):
+	if c.is_empty() or not bool(c.get("esfolada", false)) or not bool((c.get("evis", {}) as Dictionary).get("feito", false)):
 		return ""
 	if (c.get("cortes", []) as Array).size() >= _caca.PARTES.size():
 		return ""
@@ -15163,6 +15439,7 @@ func _draw_bur_ui() -> void:
 	_tri_draw()
 	_couro_draw()
 	_mach_draw()
+	_evis_draw()
 	if _mao == "arco" and _morto < 0.0:
 		# a mira: um círculo pequeno no meio da tela (fecha quando a corda está puxada)
 		var mc := _sub_ui.size * 0.5

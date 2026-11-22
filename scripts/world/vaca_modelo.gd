@@ -182,8 +182,8 @@ static func build(s := 1.0, cor := "branca", touro := false, _seed := 1) -> Node
 	if touro:
 		var pele: StandardMaterial3D = _material(cor, 0 if cor != "malhada" else 1, true).duplicate()
 		pele.cull_mode = BaseMaterial3D.CULL_DISABLED        # (nunca transparente)
-		_preso(sk0, "Body", _saco_mesh(), pele, Vector3(0, 0.0272, 0.0215))
-		_preso(sk0, "Body", _prepucio_mesh(), pele, Vector3(0, 0.009, 0.0206))
+		_preso(sk0, "Body", _saco_mesh(), pele, Vector3(0, 0.0272, 0.0215), "saco")
+		_preso(sk0, "Body", _prepucio_mesh(), pele, Vector3(0, 0.009, 0.0206), "prepucio")
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	var ap: AnimationPlayer = m.find_children("*", "AnimationPlayer", true, false)[0]
 	ap.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
@@ -241,8 +241,34 @@ static func _malha_boi(src: Mesh) -> ArrayMesh:
 	return out
 
 
+## A malha sem o úbere (a vaca aberta: ele sai junto com as vísceras); o focinho fica.
+static var _sem_ubere := {}
+
+static func malha_sem_ubere(src: Mesh) -> ArrayMesh:
+	if _sem_ubere.has(src):
+		return _sem_ubere[src]
+	var out := ArrayMesh.new()
+	for si in mini(3, src.get_surface_count()):
+		var arr: Array = src.surface_get_arrays(si)
+		var flags: int = src.surface_get_format(si) & (Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS)
+		if si == 2:
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+			if not idx.is_empty():
+				var foc := PackedInt32Array()
+				for f in idx.size() / 3:
+					var c := (vs[idx[f * 3]] + vs[idx[f * 3 + 1]] + vs[idx[f * 3 + 2]]) / 3.0
+					if c.y <= -0.02:
+						foc.append_array([idx[f * 3], idx[f * 3 + 1], idx[f * 3 + 2]])
+				arr[Mesh.ARRAY_INDEX] = foc
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr, [], {}, flags)
+		out.surface_set_material(si, src.surface_get_material(si))
+	_sem_ubere[src] = out
+	return out
+
+
 ## Prende uma malha num osso (segue a animação); pos em coordenadas do esqueleto.
-static func _preso(sk: Skeleton3D, osso: String, mesh: Mesh, mat: Material, pos: Vector3) -> void:
+static func _preso(sk: Skeleton3D, osso: String, mesh: Mesh, mat: Material, pos: Vector3, nome := "") -> void:
 	var bi := sk.find_bone(osso)
 	if bi < 0:
 		return
@@ -252,6 +278,8 @@ static func _preso(sk: Skeleton3D, osso: String, mesh: Mesh, mat: Material, pos:
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.material_override = mat
+	if nome != "":
+		mi.name = nome
 	ba.add_child(mi)
 	mi.transform = sk.get_bone_global_rest(bi).affine_inverse() * Transform3D(Basis(), pos)
 
