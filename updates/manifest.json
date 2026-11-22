@@ -1,9 +1,9 @@
 {
-  "version": 192,
-  "file": "update_192.zip",
-  "size": 5475668,
-  "sha256": "ecce5601224e477509a921e0a8a20110a3dffbfd4596c696e2bfc4f0319329a2",
+  "version": 193,
+  "file": "update_193.zip",
+  "size": 5475793,
+  "sha256": "d709e46b7ab7c512b0c06044ae7cad5e98c8589a7ada9d3a7e6da56583a338ab",
   "min_build": 1,
-  "notes": "Boi: órgão sem transparência",
+  "notes": "Boi: sem parte transparente",
   "date": "2026-11-22"
 }
