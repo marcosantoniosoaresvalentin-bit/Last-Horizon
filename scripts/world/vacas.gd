@@ -341,8 +341,8 @@ func _day(day: int) -> void:
 					var rb2 := _rebanho(int(v.reb))
 					if not rb2.is_empty():
 						nascidos.append([v, rb2])
-			elif int(v.fome) == 0 and not _tem_bezerro(v, day) and _touro_no(int(v.reb), day) and _rng.randf() < 0.012:
-				v.prenhe = day
+			elif em_cio(v, day) and _touro_no(int(v.reb), day) and not _agents.has(int(v.id)) and _rng.randf() < 0.05:
+				v.prenhe = day                  # (perto do jogador é o boi que vai atrás dela)
 		keep.append(v)
 	vacas = keep
 	for nb in nascidos:
@@ -371,6 +371,19 @@ func _day(day: int) -> void:
 				for f in vacas:
 					if int(f.mae) == int(m[i].id):
 						f.reb = int(nr.id)
+
+
+## Vaca adulta, vazia, bem alimentada e com o bezerro já grandinho (uns 80 dias depois de
+## parir ela volta a entrar no cio): assim cada uma cria um bezerro por ano.
+func em_cio(v: Dictionary, day := -1) -> bool:
+	if day < 0:
+		day = last_day
+	if str(v.sexo) != "f" or day - int(v.nasc) < ADULTA or int(v.prenhe) >= 0 or int(v.fome) > 0:
+		return false
+	for o in vacas:
+		if int(o.mae) == int(v.id) and day - int(o.nasc) < 80:
+			return false
+	return true
 
 
 func _tem_bezerro(v: Dictionary, day: int) -> bool:
@@ -461,7 +474,49 @@ func _step(v: Dictionary, a: Dictionary, pp: Vector3, h: float, delta: float) ->
 	if modo != "fugir" and dist_p < (MEDO if modo != "deitar" else MEDO * 0.7):
 		_assusta(int(v.reb), pp)
 		modo = str(a.modo)
+	# o boi: tem vaca no cio no rebanho, vai atrás dela (trotando) até cobrir
+	if str(v.sexo) == "m" and age(v) >= ADULTA and modo in ["parado", "pastar", "andar", "cobrir"] and not _jogo._mp_client():
+		var alvo_v := {}
+		for o in vacas:
+			if int(o.reb) == int(v.reb) and _agents.has(int(o.id)) and em_cio(o):
+				alvo_v = o
+				break
+		if not alvo_v.is_empty():
+			a.modo = "cobrir"
+			a.vaca = int(alvo_v.id)
+			a.alvo = Vector3(float(alvo_v.x), 0, float(alvo_v.z))
+			modo = "cobrir"
+		elif modo == "cobrir":
+			a.modo = "parado"
+			modo = "parado"
 	match modo:
+		"cobrir":
+			var vc := _find(int(a.get("vaca", -1)))
+			if vc.is_empty() or not _agents.has(int(vc.id)):
+				a.modo = "parado"
+			else:
+				var vp := Vector3(float(vc.x), 0, float(vc.z))
+				var dv := Vector2(vp.x - pos.x, vp.z - pos.z).length()
+				var ag2: Dictionary = _agents[int(vc.id)]
+				if dv > 1.6:
+					a.alvo = vp
+					_walk(v, a, TROTE * 0.8, delta)
+					# ela anda na frente, fugindo um pouco dele
+					if str(ag2.modo) != "fugir" and dv < 5.0:
+						var fora := (vp - pos).normalized()
+						ag2.alvo = vp + fora * 6.0
+						ag2.modo = "andar"
+				else:
+					a.timer = float(a.get("cob_t", 0.0)) + delta
+					a.cob_t = float(a.timer)
+					a.yaw = atan2(-(vp.z - pos.z), vp.x - pos.x)
+					ag2.modo = "parado"
+					ag2.timer = 2.0
+					if float(a.cob_t) > 4.0:
+						vc.prenhe = last_day          # cobriu: daqui a uns 9 meses nasce o bezerro
+						a.cob_t = 0.0
+						a.modo = "parado"
+						a.timer = _rng.randf_range(3.0, 6.0)
 		"fugir":
 			if _walk(v, a, TROTE, delta):
 				a.modo = "parado"
@@ -522,8 +577,10 @@ func _step(v: Dictionary, a: Dictionary, pp: Vector3, h: float, delta: float) ->
 	node.position = Vector3(float(v.x), y, float(v.z))
 	node.rotation.y = lerp_angle(node.rotation.y, float(a.yaw), minf(1.0, delta * 3.0))
 	var anim := str(a.modo)
-	if anim == "fugir":
+	if anim == "fugir" or (anim == "cobrir" and float(a.get("cob_t", 0.0)) <= 0.0):
 		anim = "correr"
+	elif anim == "cobrir":
+		anim = "parado"
 	Modelo.pose(node, anim, float(a.fase), float(a.t))
 
 

@@ -84,7 +84,7 @@ static func _suaviza(mi: MeshInstance3D) -> void:
 				nr[i] = nn
 		arr[Mesh.ARRAY_NORMAL] = nr
 		arr[Mesh.ARRAY_TANGENT] = null
-		var flags := src.surface_get_format(si) & (Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS)
+		var flags: int = src.surface_get_format(si) & (Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS)
 		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr, [], {}, flags)
 		out.surface_set_material(si, src.surface_get_material(si))
 	mi.mesh = out
@@ -143,8 +143,46 @@ static func build(s := 1.0, cor := "branca", touro := false, _seed := 1) -> Node
 	m.scale = Vector3.ONE * _escala
 	root.add_child(m)
 	var mi: MeshInstance3D = m.find_children("*", "MeshInstance3D", true, false)[0]
+	if touro:
+		mi.mesh = _malha_boi(mi.mesh)               # sem o úbere
 	for k in mi.mesh.get_surface_count():
 		mi.set_surface_override_material(k, _material(cor, k, touro))
+	var sk0: Skeleton3D = m.find_children("*", "Skeleton3D", true, false)[0]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = _seed * 7919 + 13
+	var bezerro := s < 0.7
+	# o cupim: grande no boi; nas vacas pequeno ou nenhum
+	var cup := 0.0
+	if touro:
+		cup = rng.randf_range(1.35, 1.65)
+	elif not bezerro and rng.randf() < 0.55:
+		cup = rng.randf_range(0.3, 0.55)
+	if cup > 0.0:
+		_preso(sk0, "Body", _cupim_mesh(cup), _material(cor, 1 if cor != "malhada" else 0, touro), Vector3(0, -0.0125, 0.0418 + 0.0015 * cup))
+	# os chifres: sem, pequenos, grandes, ou um menor que o outro (quebrado)
+	if not bezerro:
+		var tipo := rng.randi() % 4 if not touro else 1 + rng.randi() % 3
+		if tipo > 0:
+			var tam := rng.randf_range(0.35, 0.55) if tipo == 1 else rng.randf_range(0.85, 1.25)
+			var tam_d := tam
+			var tam_e := tam
+			if tipo == 3:
+				tam = rng.randf_range(0.6, 1.1)
+				tam_d = tam
+				tam_e = tam * rng.randf_range(0.2, 0.45)          # um chifre só, o outro quebrado/pequeno
+				if rng.randf() < 0.5:
+					var tt := tam_d
+					tam_d = tam_e
+					tam_e = tt
+			var curva := rng.randf_range(-0.4, 0.6)
+			for sd in [-1.0, 1.0]:
+				var tm: float = tam_d if sd > 0.0 else tam_e
+				_preso(sk0, "Head", _chifre_mesh(tm, sd, curva), _mat_chifre(), Vector3(sd * 0.0034, -0.0405, 0.0492))
+	# o boi: o saco entre as pernas de trás e o prepúcio na barriga
+	if touro:
+		var pele := _material(cor, 0 if cor != "malhada" else 1, true)
+		_preso(sk0, "Body", _saco_mesh(), pele, Vector3(0, 0.0255, 0.0232))
+		_preso(sk0, "Body", _prepucio_mesh(), pele, Vector3(0, 0.003, 0.0215))
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	var ap: AnimationPlayer = m.find_children("*", "AnimationPlayer", true, false)[0]
 	ap.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
@@ -157,6 +195,169 @@ static func build(s := 1.0, cor := "branca", touro := false, _seed := 1) -> Node
 	root.set_meta("baixa", 0.0)
 	root.scale = Vector3.ONE * s
 	return root
+
+
+## A malha do boi: a mesma, sem os triângulos do úbere (a parte cor-de-rosa de trás).
+static var _boi_mesh: ArrayMesh = null
+
+static func _malha_boi(src: Mesh) -> ArrayMesh:
+	if _boi_mesh != null:
+		return _boi_mesh
+	var out := ArrayMesh.new()
+	for si in src.get_surface_count():
+		var arr: Array = src.surface_get_arrays(si)
+		if si == 2:
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+			if not idx.is_empty():
+				var novo := PackedInt32Array()
+				for f in idx.size() / 3:
+					var c := (vs[idx[f * 3]] + vs[idx[f * 3 + 1]] + vs[idx[f * 3 + 2]]) / 3.0
+					if c.y > -0.02:
+						continue                          # o úbere (o focinho fica)
+					novo.append_array([idx[f * 3], idx[f * 3 + 1], idx[f * 3 + 2]])
+				arr[Mesh.ARRAY_INDEX] = novo
+		var flags: int = src.surface_get_format(si) & (Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS)
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr, [], {}, flags)
+		out.surface_set_material(si, src.surface_get_material(si))
+	_boi_mesh = out
+	return out
+
+
+## Prende uma malha num osso (segue a animação); pos em coordenadas do esqueleto.
+static func _preso(sk: Skeleton3D, osso: String, mesh: Mesh, mat: Material, pos: Vector3) -> void:
+	var bi := sk.find_bone(osso)
+	if bi < 0:
+		return
+	var ba := BoneAttachment3D.new()
+	ba.bone_name = osso
+	sk.add_child(ba)
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = mat
+	ba.add_child(mi)
+	mi.transform = sk.get_bone_global_rest(bi).affine_inverse() * Transform3D(Basis(), pos)
+
+
+static var _chifre_mat: StandardMaterial3D
+
+static func _mat_chifre() -> StandardMaterial3D:
+	if _chifre_mat == null:
+		_chifre_mat = StandardMaterial3D.new()
+		_chifre_mat.vertex_color_use_as_albedo = true
+		_chifre_mat.roughness = 0.6
+	return _chifre_mat
+
+
+## Malha de poucas faces (combina com o modelo): anéis ao longo de uma linha.
+static func _tubo(st: SurfaceTool, pts: Array, raios: Array, cores: Array, lados := 6) -> void:
+	var rows := []
+	for i in pts.size():
+		var p: Vector3 = pts[i]
+		var d: Vector3 = ((pts[mini(i + 1, pts.size() - 1)] as Vector3) - (pts[maxi(i - 1, 0)] as Vector3)).normalized()
+		var a := d.cross(Vector3(0.3, 0.2, 1.0).normalized()).normalized()
+		var b := d.cross(a).normalized()
+		var row := []
+		for k in lados:
+			var t := TAU * k / lados
+			row.append(p + (a * cos(t) + b * sin(t)) * float(raios[i]))
+		rows.append(row)
+	for i in pts.size() - 1:
+		for k in lados:
+			var q := [rows[i][k], rows[i + 1][k], rows[i + 1][(k + 1) % lados], rows[i][(k + 1) % lados]]
+			for j in [0, 1, 2, 0, 2, 3]:
+				st.set_color(cores[i] if j in [0, 3] else cores[i + 1])
+				st.add_vertex(q[j])
+
+
+static func _bola(st: SurfaceTool, c: Vector3, r: Vector3, la := 5, lo := 8) -> void:
+	for i in la:
+		for j in lo:
+			var q := []
+			for dd in [[0, 0], [1, 0], [1, 1], [0, 1]]:
+				var th := PI * float(i + dd[0]) / la
+				var ph := TAU * float(j + dd[1]) / lo
+				q.append(c + Vector3(sin(th) * cos(ph) * r.x, sin(th) * sin(ph) * r.y, cos(th) * r.z))
+			for k in [0, 2, 1, 0, 3, 2]:
+				st.add_vertex(q[k])
+
+
+## O cupim: a corcova em cima da cernelha (alto na frente, caindo para trás).
+static func _cupim_mesh(f: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_bola(st, Vector3(0, 0.0005, 0.0005 * f), Vector3(0.0042, 0.0072, 0.0068 * f), 5, 10)
+	_bola(st, Vector3(0, 0.005, -0.0005), Vector3(0.0036, 0.0055, 0.0035 * f), 4, 8)
+	st.generate_normals()
+	return st.commit()
+
+
+## Um chifre: sai do lado da cabeça, vai para fora e curva para cima (curva > 0 para a
+## frente, < 0 para trás); base clara e ponta escura.
+static func _chifre_mesh(tam: float, sd: float, curva: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var L := 0.014 * tam
+	var pts := []
+	var rs := []
+	var cs := []
+	var n := 6
+	for i in n + 1:
+		var u := float(i) / n
+		var p := Vector3(sd * L * (0.15 + 0.85 * sin(u * PI * 0.5)), -L * curva * u * u * 0.6, L * 0.9 * u * u)
+		pts.append(p)
+		rs.append(lerpf(0.0016 * (0.6 + 0.4 * tam), 0.0002, pow(u, 0.8)))
+		cs.append(Color(0.78, 0.72, 0.6).lerp(Color(0.12, 0.1, 0.08), clampf((u - 0.45) / 0.55, 0.0, 1.0)))
+	_tubo(st, pts, rs, cs, 6)
+	st.generate_normals()
+	return st.commit()
+
+
+## O saco do boi: sai de dentro da barriga entre as coxas (o "pescoço" estreito) e pende
+## em gota até perto dos jarretes.
+static func _saco_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pts := []
+	var rs := []
+	var cs := []
+	var n := 8
+	for i in n + 1:
+		var u := float(i) / n
+		pts.append(Vector3(0, -0.0012 * u, -0.0085 * u))         # para baixo (e um pouco para a frente)
+		var r := 0.0014 + 0.0016 * smoothstep(0.15, 0.7, u)
+		if u > 0.75:
+			r *= sqrt(maxf(0.0, 1.0 - (u - 0.75) / 0.25)) * 0.95 + 0.05
+		rs.append(r)
+		cs.append(Color.WHITE)
+	_tubo(st, pts, rs, cs, 8)
+	st.generate_normals()
+	return st.commit()
+
+
+## A bainha do órgão (prepúcio): presa embaixo da barriga, no meio, descendo inclinada
+## para a frente, com a ponta de pelo.
+static func _prepucio_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pts := []
+	var rs := []
+	var cs := []
+	var n := 7
+	for i in n + 1:
+		var u := float(i) / n
+		pts.append(Vector3(0, -0.0105 * u, -0.0006 - 0.0024 * u * u))
+		rs.append(lerpf(0.0019, 0.0009, u))
+		cs.append(Color.WHITE)
+	_tubo(st, pts, rs, cs, 7)
+	# o tufo de pelo na ponta
+	for k in 7:
+		var a := TAU * k / 7.0
+		var b0 := Vector3(0, -0.0105, -0.003)
+		var t := b0 + Vector3(cos(a) * 0.0007, -0.0004, -0.0018 + sin(a) * 0.0003)
+		_tubo(st, [b0, t], [0.00035, 0.00005], [Color.WHITE, Color.WHITE], 4)
+	st.generate_normals()
+	return st.commit()
 
 
 ## A pose de cada quadro: "andar", "correr", "pastar", "deitar", "parado".
