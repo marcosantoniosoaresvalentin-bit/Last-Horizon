@@ -121,6 +121,8 @@ static func kind_for(text: String) -> String:
 		return "argila"
 	if t.contains("semente"):
 		return "semente"
+	if t.begins_with("atirar"):
+		return "atirar"
 	if t.begins_with("pular"):
 		return "pular"
 	if t.begins_with("craft"):
@@ -149,6 +151,17 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 		return out
 	var ink: Color = col.call(INK)
 	match k:
+		"atirar":
+			# o arco com a flecha no ponto de soltar
+			var pa := PackedVector2Array()
+			for i in 17:
+				var t := float(i) / 16.0
+				pa.append(c + Vector2(-20 + sin(t * PI) * 30, lerpf(-44, 44, t)) * u)
+			ci.draw_polyline(pa, col.call(Color(0.5, 0.33, 0.18)), 8 * u, true)
+			ci.draw_line(pa[0], c + Vector2(-34, 0) * u, col.call(Color(0.85, 0.8, 0.55)), 2.5 * u, true)
+			ci.draw_line(pa[16], c + Vector2(-34, 0) * u, col.call(Color(0.85, 0.8, 0.55)), 2.5 * u, true)
+			ci.draw_line(c + Vector2(-38, 0) * u, c + Vector2(40, 0) * u, col.call(Color(0.7, 0.52, 0.32)), 5 * u, true)
+			ci.draw_colored_polygon(P.call([[38, -9], [54, 0], [38, 9]]), col.call(Color(0.6, 0.6, 0.58)))
 		"projetos":
 			# folha de planta azul enrolada com o desenho em linhas brancas
 			var pg: PackedVector2Array = P.call([[-40, -34], [36, -34], [36, 38], [-40, 38]])

@@ -394,6 +394,29 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_line(c + Vector2(-40, 38) * u, c + Vector2(40, -38) * u, Color(0.35, 0.24, 0.13), 9 * u, true)
 			ci.draw_line(c + Vector2(-40, 38) * u, c + Vector2(40, -38) * u, Color(0.6, 0.44, 0.26), 6 * u, true)
 			ci.draw_circle(c + Vector2(40, -38) * u, 4.5 * u, Color(0.82, 0.68, 0.48))
+		"arco", "acao_atirar":
+			# o arco envergado (vareta) com a corda de cipó trançado
+			var pa := PackedVector2Array()
+			for i in 17:
+				var t := float(i) / 16.0
+				pa.append(c + Vector2(-26 + sin(t * PI) * 34, lerpf(-46, 46, t)) * u)
+			ci.draw_polyline(pa, Color(0.36, 0.24, 0.13), 8 * u, true)
+			ci.draw_polyline(pa, Color(0.55, 0.38, 0.22), 4 * u, true)
+			ci.draw_line(pa[0], pa[16], Color(0.62, 0.55, 0.3), 2.5 * u, true)
+			for k in 6:
+				var yy := -44.0 + k * 17.6
+				ci.draw_line(c + Vector2(-27, yy) * u, c + Vector2(-25, yy + 8) * u, Color(0.4, 0.33, 0.15), 1.5 * u, true)
+			if id == "acao_atirar":
+				ci.draw_line(c + Vector2(-34, 0) * u, c + Vector2(44, 0) * u, Color(0.6, 0.45, 0.28), 4 * u, true)
+				ci.draw_colored_polygon(P.call([[44, -7], [58, 0], [44, 7]]), Color(0.45, 0.45, 0.43))
+		"flecha":
+			# a vareta com a ponta de pedra amarrada e as penas atrás
+			ci.draw_line(c + Vector2(-44, 36) * u, c + Vector2(30, -30) * u, Color(0.6, 0.45, 0.28), 5 * u, true)
+			ci.draw_colored_polygon(P.call([[24, -20], [46, -44], [34, -16]]), Color(0.45, 0.45, 0.43))
+			ci.draw_polyline(P.call([[24, -20], [46, -44], [34, -16], [24, -20]]), ink, 1.5 * u, true)
+			ci.draw_line(c + Vector2(22, -26) * u, c + Vector2(28, -18) * u, Color(0.3, 0.22, 0.1), 5 * u, true)
+			ci.draw_colored_polygon(P.call([[-44, 36], [-50, 20], [-36, 26]]), Color(0.85, 0.82, 0.75))
+			ci.draw_colored_polygon(P.call([[-44, 36], [-28, 42], [-36, 26]]), Color(0.75, 0.72, 0.65))
 		"arco_fogo":
 			# o galho curvo e o cipó esticado, com a vareta atravessada
 			var pts := PackedVector2Array()

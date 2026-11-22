@@ -45,6 +45,7 @@ const Cobras := preload("res://scripts/world/cobras.gd")
 const Taias := preload("res://scripts/world/taias.gd")
 const Goiabeiras := preload("res://scripts/world/goiabeiras.gd")
 const Vacas := preload("res://scripts/world/vacas.gd")
+const Caca := preload("res://scripts/world/caca.gd")
 const Capins := preload("res://scripts/world/capins.gd")
 const Fogueiras := preload("res://scripts/world/fogueiras.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
@@ -423,6 +424,10 @@ var _cobras: Node3D = null         # jararacas (de tocaia nas moitas)
 var _taias: Node3D = null          # jararaca-taia (a planta do remédio)
 var _goiab: Node3D = null          # goiabeiras (goiaba e o chá das folhas)
 var _vacas: Node3D = null          # vacas selvagens (e o pasto que elas comem)
+var _caca: Node3D = null           # flechas voando, bichos feridos e carcaças
+var _tiro_btn: Button
+var _arco_fp: Node3D = null        # o arco na frente da câmera (primeira pessoa)
+var _puxa := -1.0                  # puxando a corda: 0 a 1 (-1 = não)
 var _veneno := -1.0                # picado de cobra: segundos desde a picada (-1 = não)
 var _embaca: ColorRect = null      # a vista embaçando com o veneno
 var teste := false                 # modo de teste (Configurações): tudo de graça e rápido
@@ -754,6 +759,20 @@ void fragment() {
 	_jump_btn.offset_bottom = -16
 	_jump_btn.pressed.connect(_jump)
 	_hud.add_child(_jump_btn)
+
+	# atirar com o arco: segurando puxa a corda, soltando a flecha vai
+	_tiro_btn = Icones.IconButton.new()
+	_tiro_btn.text = "Atirar"
+	_tiro_btn.add_theme_font_size_override("font_size", 22)
+	_tiro_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_tiro_btn.offset_left = -290
+	_tiro_btn.offset_top = -146
+	_tiro_btn.offset_right = -160
+	_tiro_btn.offset_bottom = -16
+	_tiro_btn.visible = false
+	_tiro_btn.button_down.connect(_arco_puxar)
+	_tiro_btn.button_up.connect(_arco_soltar)
+	_hud.add_child(_tiro_btn)
 
 	_ctx_btn = Icones.IconButton.new()
 	_ctx_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
@@ -1193,6 +1212,9 @@ func _on_world_ready() -> void:
 	add_child(_vacas)
 	_vacas.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/vacas.json" if _world_id != "" else "")
 	print("vacas: %d" % _vacas.count())
+	_caca = Caca.new()
+	add_child(_caca)
+	_caca.build(self, Mundos.dir(_world_id) + "/caca.json" if _world_id != "" else "")
 	_escav.water_mat = _water_mat
 	_escav.sea_m = MundoSim.SEA * HS
 	_escav.rio_fn = _rio_nivel
@@ -1610,6 +1632,11 @@ func _process(delta: float) -> void:
 	_update_pour(delta)
 	_vitais_tick(delta)
 	_car_tick(delta)
+	_flecha_tick(delta)
+	if _caca:
+		_caca.update(delta)
+		if Engine.get_process_frames() % 120 == 90:
+			_caca.dia(int(sim.elapsed_days()))
 	_dig_ring_tick()
 	_filtro_tick(delta)
 	if not _racha.is_empty() and (_mao != "machado" or _cepo_near(1.8, true) != int(_racha.ci)):
@@ -1688,6 +1715,8 @@ func _save_world() -> void:
 		_goiab.save(Mundos.dir(_world_id) + "/goiabeiras.json")
 	if _vacas:
 		_vacas.save(Mundos.dir(_world_id) + "/vacas.json")
+	if _caca:
+		_caca.save(Mundos.dir(_world_id) + "/caca.json")
 	if _constr:
 		_constr.save(Mundos.dir(_world_id) + "/construcao.json")
 	if _maq:
@@ -2054,6 +2083,22 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 		mi.mesh = _banda_mesh(L, float(dur[1]) if dur.size() >= 3 else 0.12, float(dur[2]) if dur.size() >= 3 else 0.1)
 		mi.rotation.y = float(dur[3]) if dur.size() >= 4 else 0.0
 		node.add_child(mi)
+	elif id == "flecha":
+		# cravada no chão, inclinada (como caiu)
+		var mi := MeshInstance3D.new()
+		mi.mesh = Caca.flecha_mesh()
+		node.add_child(mi)
+		var yaw := float(dur[0]) if dur.size() >= 2 else randf() * TAU
+		var pit := float(dur[1]) if dur.size() >= 2 else -0.05
+		var dir := Vector3(-sin(yaw) * cos(pit), -sin(pit), -cos(yaw) * cos(pit)).normalized()
+		if dir.y > -0.05:
+			mi.set_meta("deitada", true)
+			dir = Vector3(dir.x, 0, dir.z).normalized()
+		var zz := -dir
+		var up := Vector3.UP if absf(zz.y) < 0.98 else Vector3.RIGHT
+		var xx := up.cross(zz).normalized()
+		var ponta := 0.1 if not mi.has_meta("deitada") else -0.4
+		mi.transform = Transform3D(Basis(xx, zz.cross(xx), zz), dir * ponta + (Vector3.UP * 0.01 if mi.has_meta("deitada") else Vector3.ZERO))
 	elif id in ["machado", "cavadeira", "serra", "marreta"]:
 		var mi := MeshInstance3D.new()
 		mi.mesh = Corte.axe_mesh() if id == "machado" else (Corte.digger_mesh() if id == "cavadeira" else (Corte.saw_mesh() if id == "serra" else Corte.marreta_mesh()))
@@ -6345,7 +6390,7 @@ func _fp_camera(delta: float, moved: float) -> void:
 	if _chop_pose:
 		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
 		# com ferramenta na mão os braços não aparecem (só a ferramenta, segura por baixo da tela)
-		_chop_pose.hide_arms = not _desf.is_empty() or not _mesa.is_empty() or not _torno.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada"]) and _vine.is_empty()
+		_chop_pose.hide_arms = not _desf.is_empty() or not _mesa.is_empty() or not _torno.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada", "arco"]) and _vine.is_empty()
 	for m in _body_mats:
 		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, maxf(_busy_f, down))
 		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, maxf(_busy_f, down))
@@ -8555,7 +8600,7 @@ func _bld_place() -> void:
 var _sync_hash := {}               # parte -> hash do que todos já têm
 var _sync_t := {}                  # parte -> tempo até conferir de novo
 const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
-	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0, "goiabeiras": 1.0, "vacas": 2.0}
+	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0, "goiabeiras": 1.0, "vacas": 2.0, "caca": 0.6}
 const SYNC_ONLY_HOST := ["bacabas", "cobras", "vacas"]        # só o dono manda (os bichos comem os frutos); buritis: degraus e folhas cortadas vêm de todos
 
 
@@ -8617,6 +8662,8 @@ func _sync_uids(nome: String) -> void:
 			_uid_fix(_taias.items)
 		"goiabeiras":
 			_uid_fix(_goiab.items)
+		"caca":
+			_uid_fix(_caca.carcacas)
 
 
 ## O estado da parte, em texto (o mesmo formato do arquivo salvo do mundo).
@@ -8671,6 +8718,7 @@ func _sync_mod(nome: String):
 		"taias": return _taias
 		"goiabeiras": return _goiab
 		"vacas": return _vacas
+		"caca": return _caca
 	return null
 
 
@@ -9187,6 +9235,147 @@ func _proj_place() -> void:
 
 
 ## Decide o botão de contexto perto de uma planta/máquina. true se pôs algum.
+# ================== ARCO E FLECHA ==================
+# Com o arco na mão (Mochila → EQUIPAR) e flechas na mochila: segurando "Atirar" a corda
+# vai sendo puxada (a mira fecha), soltando a flecha sai para onde a mira aponta, mais
+# forte quanto mais puxou. A flecha voa e cai com o peso (o resto fica no módulo de caça).
+
+const PUXA_S := 0.8               # segundos para puxar a corda até o fim
+
+func _arco_puxar() -> void:
+	if _mao != "arco" or item_qtd("flecha") <= 0 or _morto >= 0.0 or _swim:
+		return
+	_puxa = 0.0
+
+
+func _arco_soltar() -> void:
+	if _puxa < 0.0:
+		return
+	var forca := _puxa
+	_puxa = -1.0
+	if forca < 0.12 or item_qtd("flecha") <= 0 or _caca == null:
+		return                          # mal puxou: a flecha não sai
+	remove_item("flecha", 1)
+	_update_inventory()
+	var cxf := _cam.global_transform
+	var dir := -cxf.basis.z
+	_caca.atirar(cxf.origin + dir * 0.5, dir, forca)
+	Sons.play_at(self, "fibra_bate", _player.position + Vector3.UP * 1.5, -4.0, 1.6)
+
+
+func _flecha_tick(delta: float) -> void:
+	var com := _mao == "arco" and _morto < 0.0 and not _swim and _carry.is_empty()
+	if _tiro_btn:
+		_tiro_btn.visible = com and item_qtd("flecha") > 0
+		if com and _chop_btn:
+			_chop_btn.visible = false
+	if not com:
+		_puxa = -1.0
+	if _puxa >= 0.0:
+		_puxa = minf(1.0, _puxa + delta / PUXA_S)
+	# o arco na frente da câmera
+	if com and _arco_fp == null:
+		_arco_fp = _arco_fp_node()
+		_cam.add_child(_arco_fp)
+	if _arco_fp:
+		_arco_fp.visible = com
+		if com:
+			_arco_fp_pose(maxf(_puxa, 0.0), item_qtd("flecha") > 0)
+	if _sub_ui and _mao == "arco":
+		_sub_ui.queue_redraw()
+
+
+## O arco: a vareta envergada (em pé, um pouco inclinada), a corda de cipó trançado e
+## a flecha encaixada na corda.
+func _arco_fp_node() -> Node3D:
+	var root := Node3D.new()
+	root.scale = Vector3.ONE * 0.55
+	root.position = Vector3(-0.14, -0.06, -0.62)
+	root.rotation = Vector3(0, 0.08, 0.3)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := 16
+	var lados := 6
+	var rows := []
+	for i in n + 1:
+		var t := float(i) / n
+		var y := lerpf(-0.6, 0.6, t)
+		var c := Vector3(0, y, -sin(t * PI) * 0.16)
+		var r := lerpf(0.011, 0.017, sin(t * PI))
+		var row := []
+		for k in lados:
+			var a := TAU * k / lados
+			row.append(c + Vector3(cos(a) * r, 0, sin(a) * r))
+		rows.append(row)
+	for i in n:
+		for k in lados:
+			var q := [rows[i][k], rows[i + 1][k], rows[i + 1][(k + 1) % lados], rows[i][(k + 1) % lados]]
+			for j in [0, 2, 1, 0, 3, 2]:
+				st.add_vertex(q[j])
+	st.generate_normals()
+	var arco := MeshInstance3D.new()
+	arco.mesh = st.commit()
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.48, 0.33, 0.19)
+	m.roughness = 0.75
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	arco.material_override = m
+	root.add_child(arco)
+	# a pegada: cipó enrolado no meio
+	var peg := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.021
+	cm.bottom_radius = 0.021
+	cm.height = 0.1
+	cm.radial_segments = 8
+	peg.mesh = cm
+	var mc := StandardMaterial3D.new()
+	mc.albedo_color = Color(0.28, 0.2, 0.09)
+	peg.material_override = mc
+	peg.position = Vector3(0, 0, -0.16)
+	root.add_child(peg)
+	for nm in ["corda_a", "corda_b"]:
+		var corda := MeshInstance3D.new()
+		corda.name = nm
+		var cc := CylinderMesh.new()
+		cc.top_radius = 0.0028
+		cc.bottom_radius = 0.0028
+		cc.height = 1.0
+		cc.radial_segments = 4
+		corda.mesh = cc
+		var mk := StandardMaterial3D.new()
+		mk.albedo_color = Color(0.62, 0.55, 0.32)
+		corda.material_override = mk
+		root.add_child(corda)
+	var fl := MeshInstance3D.new()
+	fl.name = "flecha"
+	fl.mesh = Caca.flecha_mesh()
+	root.add_child(fl)
+	return root
+
+
+func _arco_fp_pose(puxa: float, com_flecha: bool) -> void:
+	var r := _arco_fp
+	var topo := Vector3(0, 0.6, 0)
+	var baixo := Vector3(0, -0.6, 0)
+	var nock := Vector3(0.0, 0.0, 0.02 + puxa * 0.5)        # a corda vem para trás
+	for pr in [["corda_a", topo], ["corda_b", baixo]]:
+		var c: MeshInstance3D = r.get_node(pr[0])
+		var a: Vector3 = pr[1]
+		var d := nock - a
+		var y := d.normalized()
+		var x := y.cross(Vector3.FORWARD).normalized() if absf(y.z) < 0.95 else Vector3.RIGHT
+		c.transform = Transform3D(Basis(x, y, x.cross(y)).scaled(Vector3(1, d.length(), 1)), (a + nock) * 0.5)
+	var fl: MeshInstance3D = r.get_node("flecha")
+	fl.visible = com_flecha
+	fl.transform = Transform3D(Basis(), nock - Vector3(0, 0, Caca.FLECHA_L))
+	# a flecha descansa na pegada (do lado de fora do arco), apontando para a frente
+	# puxando, o arco vem um pouco para o meio e treme de leve no fim
+	var tre := sin(Time.get_ticks_msec() / 40.0) * 0.002 * smoothstep(0.85, 1.0, puxa)
+	r.position = Vector3(-0.14 + puxa * 0.06 + tre, -0.06 + puxa * 0.02, -0.62)
+	r.rotation = Vector3(0, 0.08 - puxa * 0.05, 0.3 - puxa * 0.1)
+
+
 # ================== CARRINHO DE MÃO ==================
 # Pronto, o carrinho carrega terra, argila, barro, areia e carvão (despejados do balde),
 # achas de lenha (na mão: "Pôr no carrinho") e qualquer coisa da mochila (SOLTAR perto
@@ -13209,6 +13398,13 @@ func _olho_layout() -> Dictionary:
 
 func _draw_bur_ui() -> void:
 	_draw_fornos()
+	if _mao == "arco" and _morto < 0.0:
+		# a mira: um círculo pequeno no meio da tela (fecha quando a corda está puxada)
+		var mc := _sub_ui.size * 0.5
+		var rr := lerpf(16.0, 7.0, clampf(_puxa, 0.0, 1.0)) if _puxa >= 0.0 else 16.0
+		_sub_ui.draw_arc(mc, rr, 0, TAU, 24, Color(0, 0, 0, 0.5), 3.0, true)
+		_sub_ui.draw_arc(mc, rr, 0, TAU, 24, Color(1, 1, 1, 0.8), 1.5, true)
+		_sub_ui.draw_circle(mc, 2.0, Color(1, 1, 1, 0.9))
 	var font := ThemeDB.fallback_font
 	var L := _olho_layout() if _olho_free() and _bur.is_empty() else {}
 	if not L.is_empty():

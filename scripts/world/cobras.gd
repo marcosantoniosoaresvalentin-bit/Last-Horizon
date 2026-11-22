@@ -317,6 +317,7 @@ func _agent(c: Dictionary, a: Dictionary, pp: Vector3, delta: float) -> void:
 func _desenha(c: Dictionary, a: Dictionary, pos: Vector3, s: float) -> void:
 	var L := 1.25 * s
 	var spine := _espinha(c, a, L)
+	a["spine"] = spine                    # (para a flecha acertar)
 	var im: ImmediateMesh = (a.node as MeshInstance3D).mesh
 	im.clear_surfaces()
 	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
