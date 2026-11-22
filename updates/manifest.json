@@ -1,9 +1,9 @@
 {
-  "version": 195,
-  "file": "update_195.zip",
-  "size": 5488861,
-  "sha256": "daeaca560de0adb2fd4d68f5eed7618d2b964a2e2804bf4a88b7a47b23683084",
+  "version": 196,
+  "file": "update_196.zip",
+  "size": 5491718,
+  "sha256": "2a920da2f2ecf662f3125d529c702ef4a4732bb5a247021677d44fa5c3af6409",
   "min_build": 1,
-  "notes": "Arco e flecha: caça com dano por parte do corpo, carcaça e sangue",
+  "notes": "Caça: bicho corre até cair, sangue líquido pingando",
   "date": "2026-11-22"
 }
