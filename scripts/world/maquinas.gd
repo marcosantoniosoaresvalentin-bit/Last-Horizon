@@ -204,7 +204,7 @@ const MESA_TOPO := 0.84          # em cima do tampo (m)
 const MESA_SUJEIRA := 10         # coisas para tirar num balde cheio de argila
 const MESA_BOLAS := 8            # bolas de argila limpa num balde cheio
 
-const NOMES := {"tora": "tora redonda", "meia": "meia tora (tora rachada ao meio)", "tabua": "tábua"}
+const NOMES := {"tora": "tora redonda", "meia": "meia tora (tora rachada ao meio)", "tabua": "tábua", "lenha": "lenha (lenha é só para o fogo)"}
 const BOARD_T := 0.05            # grossura das tábuas que a serra tira (m)
 
 var plantas: Array = []          # {tipo, x, y, z, yaw, pecas: [bool], pinos: [bool], sobra: [m], lamina, tora, prog}
@@ -358,6 +358,8 @@ static func slot_log(pc: Array) -> Dictionary:
 
 ## Que tipo de madeira é essa: "tora" (redonda), "meia" (rachada grossa) ou "tabua".
 func kind_of(fl: Dictionary) -> String:
+	if fl.has("lenha"):
+		return "lenha"                    # toquinho e acha: só para o fogo
 	if not fl.has("sec"):
 		return "tora"
 	# pela área da seção (círculo inteiro = 3,14): inteira, metade, ou menos (tábua)

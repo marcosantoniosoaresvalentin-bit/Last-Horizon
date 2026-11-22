@@ -7349,8 +7349,8 @@ func _mp_tick(delta: float) -> void:
 
 ## Pedaço rachado fino o bastante para ser tábua (até uns 12 cm de grossura).
 func _is_board(fl: Dictionary) -> bool:
-	if not fl.has("sec"):
-		return false
+	if not fl.has("sec") or fl.has("lenha"):
+		return false                      # (o toquinho rachado é lenha, não tábua)
 	var e: Vector2 = _arvores._sec_ext(fl)
 	var r: float = _arvores._cil_r(fl, 0.5)
 	return minf(e.x, e.y) * r * 2.0 <= 0.12
