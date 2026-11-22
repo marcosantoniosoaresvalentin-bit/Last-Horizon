@@ -1,9 +1,9 @@
 {
-  "version": 193,
-  "file": "update_193.zip",
-  "size": 5475793,
-  "sha256": "d709e46b7ab7c512b0c06044ae7cad5e98c8589a7ada9d3a7e6da56583a338ab",
+  "version": 194,
+  "file": "update_194.zip",
+  "size": 5476015,
+  "sha256": "752e026c00ea0e8dad24bd647bb4ea3146564a5169f692359268cc8a1827a083",
   "min_build": 1,
-  "notes": "Boi: sem parte transparente",
+  "notes": "Boi: sem buraco na barriga",
   "date": "2026-11-22"
 }
