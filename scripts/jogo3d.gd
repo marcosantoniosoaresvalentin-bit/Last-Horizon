@@ -592,10 +592,15 @@ func _ready() -> void:
 func _build_hud() -> void:
 	_hud = CanvasLayer.new()
 	add_child(_hud)
+	# a tela de carregamento numa camada por cima de tudo (os botões do jogo não aparecem)
+	var load_layer := CanvasLayer.new()
+	load_layer.layer = 50
+	add_child(load_layer)
 	_loading_bg = ColorRect.new()
 	_loading_bg.color = Color(0.043, 0.059, 0.102)
 	_loading_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_hud.add_child(_loading_bg)
+	_loading_bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	load_layer.add_child(_loading_bg)
 	_loading = Label.new()
 	_loading.text = "Gerando o mundo…"
 	_loading.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -603,7 +608,7 @@ func _build_hud() -> void:
 	_loading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_loading.add_theme_font_size_override("font_size", 30)
 	_loading.add_theme_color_override("font_color", Color(0.91, 0.86, 0.77))
-	_hud.add_child(_loading)
+	load_layer.add_child(_loading)
 
 	_clock = Label.new()
 	_clock.position = Vector2(24, 18)
