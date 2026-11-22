@@ -122,6 +122,34 @@ const TIPOS := {
 		# a ponta que sobra da travessa só se corta com o tampo já em cima (corta rente)
 		"cortar_depois": {2: [4, 5], 3: [4, 5]},
 	},
+	# Mesa de carne: 4 pés de tora (não precisa fincar), em cima de cada par de pés uma
+	# tora deitada atravessada (a travessa) e, de comprido por cima das duas travessas, as
+	# tábuas do tampo, largo. É onde a carne vai ser posta e cortada com a faca e o machado.
+	"mesa_carne": {
+		"nome": "Mesa de Carne",
+		"desc": "Mesa de tábuas em cima de duas travessas de tora, nos quatro pés: para pôr a carne e cortar os pedaços com a faca e o machado.",
+		"pecas": [
+			["tora", 0.8, Vector3(0.8, 0.4, 0.42), "y", 0.07],       # 0 pé
+			["tora", 0.8, Vector3(0.8, 0.4, -0.42), "y", 0.07],      # 1 pé
+			["tora", 0.8, Vector3(-0.8, 0.4, 0.42), "y", 0.07],      # 2 pé
+			["tora", 0.8, Vector3(-0.8, 0.4, -0.42), "y", 0.07],     # 3 pé
+			["tora", 1.1, Vector3(0.8, 0.86, 0.0), "z", 0.06],       # 4 travessa em cima dos pés 0 e 1
+			["tora", 1.1, Vector3(-0.8, 0.86, 0.0), "z", 0.06],      # 5 travessa em cima dos pés 2 e 3
+			["tabua", 1.95, Vector3(0.0, 0.955, -0.375), "x", 0.15], # 6 tábua do tampo
+			["tabua", 1.95, Vector3(0.0, 0.955, -0.125), "x", 0.15], # 7 tábua do tampo
+			["tabua", 1.95, Vector3(0.0, 0.955, 0.125), "x", 0.15],  # 8 tábua do tampo
+			["tabua", 1.95, Vector3(0.0, 0.955, 0.375), "x", 0.15],  # 9 tábua do tampo
+		],
+		# a travessa em cada pé (pino em pé) e cada tábua nas duas travessas
+		"pinos": [
+			[[4, 0], Vector3(0.8, 0.86, 0.42)], [[4, 1], Vector3(0.8, 0.86, -0.42)],
+			[[5, 2], Vector3(-0.8, 0.86, 0.42)], [[5, 3], Vector3(-0.8, 0.86, -0.42)],
+			[[6, 4], Vector3(0.8, 0.94, -0.375)], [[7, 4], Vector3(0.8, 0.94, -0.125)], [[8, 4], Vector3(0.8, 0.94, 0.125)], [[9, 4], Vector3(0.8, 0.94, 0.375)],
+			[[6, 5], Vector3(-0.8, 0.94, -0.375)], [[7, 5], Vector3(-0.8, 0.94, -0.125)], [[8, 5], Vector3(-0.8, 0.94, 0.125)], [[9, 5], Vector3(-0.8, 0.94, 0.375)],
+		],
+		"area": Rect2(-1.05, -0.6, 2.1, 1.2),
+		"mesa_carne": true,
+	},
 	# Torno de oleiro (de pedal): armação quadrada (4 pés com 2 tábuas em cima e uma tábua
 	# atravessada no meio, o mancal, com o furo do eixo). O eixo (tora fina em pé) passa
 	# pelo mancal: em cima dele a mesa giratória (rodela grossa de tora), embaixo o
@@ -1254,6 +1282,9 @@ func _rebuild() -> void:
 				root.add_child(nd.biela)
 			_nodes[mi] = nd
 			torno_girar(mi, float(p.get("_ang", 0.0)), 0.0)
+			continue
+		if bool(t.get("mesa_carne", false)):
+			_nodes[mi] = nd
 			continue
 		if bool(t.get("mesa", false)):
 			if p.has("argila"):
