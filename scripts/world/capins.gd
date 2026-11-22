@@ -97,7 +97,7 @@ func colhivel(i: int) -> bool:
 
 func point_of(i: int) -> Vector3:
 	var p: Dictionary = items[i]
-	return Vector3(float(p.x), _jogo.height_at(float(p.x), float(p.z)), float(p.z))
+	return Vector3(float(p.x), _jogo.ground_at(float(p.x), float(p.z)), float(p.z))
 
 
 func colher(i: int) -> void:
@@ -200,7 +200,7 @@ func _rebuild() -> void:
 			var x := float(p.x)
 			var z := float(p.z)
 			var b := Basis(Vector3.UP, float(int(p.seed) % 628) / 100.0).scaled(Vector3(s, hy, s))
-			mm.set_instance_transform(i, Transform3D(b, Vector3(x, _jogo.height_at(x, z) - 0.03, z)))
+			mm.set_instance_transform(i, Transform3D(b, Vector3(x, _jogo.ground_at(x, z) - 0.03, z)))
 			mm.set_instance_color(i, col)
 		var mi := MultiMeshInstance3D.new()
 		mi.multimesh = mm

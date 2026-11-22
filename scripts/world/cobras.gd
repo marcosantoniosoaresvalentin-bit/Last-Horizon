@@ -44,8 +44,8 @@ func build(jogo: Node, seed_: int, save_path := "") -> void:
 	_mat = StandardMaterial3D.new()
 	_mat.vertex_color_use_as_albedo = true
 	_mat.vertex_color_is_srgb = true
-	_mat.roughness = 0.55
-	_mat.metallic_specular = 0.35
+	_mat.roughness = 0.7
+	_mat.metallic_specular = 0.18
 	_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	if save_path == "" or not _load(save_path):
 		_generate()
@@ -228,7 +228,7 @@ func update(delta: float) -> void:
 func _agent(c: Dictionary, a: Dictionary, pp: Vector3, delta: float) -> void:
 	a.t = float(a.t) + delta
 	a.cd = maxf(0.0, float(a.cd) - delta)
-	var pos := Vector3(float(c.x), _jogo.height_at(float(c.x), float(c.z)), float(c.z))
+	var pos := Vector3(float(c.x), _jogo.ground_at(float(c.x), float(c.z)), float(c.z))
 	# quem está perto: o jogador ou um tamanduá passando
 	var alvo := Vector3.INF
 	var alvo_tam := -1
@@ -320,9 +320,9 @@ func _desenha(c: Dictionary, a: Dictionary, pos: Vector3, s: float) -> void:
 	var im: ImmediateMesh = (a.node as MeshInstance3D).mesh
 	im.clear_surfaces()
 	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-	var base := Color(0.5, 0.39, 0.26)
-	var escuro := Color(0.16, 0.11, 0.07)
-	var barriga := Color(0.78, 0.72, 0.52)
+	var base := Color(0.55, 0.42, 0.25)
+	var escuro := Color(0.2, 0.13, 0.07)
+	var barriga := Color(0.82, 0.76, 0.55)
 	var segs := 8
 	var n := spine.size()
 	var rings := []
@@ -347,7 +347,7 @@ func _desenha(c: Dictionary, a: Dictionary, pos: Vector3, s: float) -> void:
 				col = barriga
 			else:
 				# as manchas em "V"/trapézio escuro dos lados, alternando
-				var faixa := fmod(u * 22.0 + (0.5 if cos(ang) > 0.0 else 0.0), 1.0)
+				var faixa := fmod(u * 13.0 + (0.5 if cos(ang) > 0.0 else 0.0), 1.0)
 				if faixa < 0.38 and lado > 0.25:
 					col = escuro
 				elif faixa < 0.5 and lado > 0.25:
@@ -400,7 +400,7 @@ func _espinha(c: Dictionary, a: Dictionary, L: float) -> Array:
 	var fwd := Vector3(cos(yaw), 0, -sin(yaw))
 	var side := Vector3(sin(yaw), 0, cos(yaw))
 	var t := float(a.t)
-	var n := 26
+	var n := 64                          # pontos bastantes para as manchas saírem certinhas
 	var pts := []
 	var modo := str(a.modo)
 	var bote := float(a.bote)
@@ -433,8 +433,10 @@ func _espinha(c: Dictionary, a: Dictionary, L: float) -> Array:
 					lift *= 1.0 - e * 0.7
 				var sway := sin(t * 1.3) * 0.015 * (1.0 - k2)
 				p = start + fwd * (ahead + (1.0 - k2) * 0.08) + side * (sin(k2 * PI * 1.4) * 0.05 * L / 1.25 + sway) + Vector3.UP * lift
-		var y: float = _jogo.height_at(p.x, p.z)
-		pts.append(Vector3(p.x, maxf(p.y, 0.0) + y + 0.025, p.z))
+		# em cima do chão do jeito que ele está desenhado (o corpo inteiro para fora)
+		var y: float = _jogo.ground_at(p.x, p.z)
+		var r := 0.032 * L / 1.25 * 1.3
+		pts.append(Vector3(p.x, maxf(p.y, 0.0) + y + r + 0.005, p.z))
 	return pts
 
 

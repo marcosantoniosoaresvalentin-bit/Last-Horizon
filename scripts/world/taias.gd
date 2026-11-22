@@ -74,7 +74,7 @@ func nearest(pos: Vector3, reach: float) -> int:
 
 func point_of(i: int) -> Vector3:
 	var p: Dictionary = items[i]
-	return Vector3(float(p.x), _jogo.height_at(float(p.x), float(p.z)), float(p.z))
+	return Vector3(float(p.x), _jogo.ground_at(float(p.x), float(p.z)), float(p.z))
 
 
 ## Arranca: devolve quantas batatas (1 ou 2, a planta grande dá 2).
@@ -211,7 +211,7 @@ func _rebuild() -> void:
 			var s := float(p.s)
 			var x := float(p.x)
 			var z := float(p.z)
-			mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, float(int(p.seed) % 628) / 100.0).scaled(Vector3(s, s, s)), Vector3(x, _jogo.height_at(x, z) - 0.02, z)))
+			mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, float(int(p.seed) % 628) / 100.0).scaled(Vector3(s, s, s)), Vector3(x, _jogo.ground_at(x, z) - 0.02, z)))
 		var mi := MultiMeshInstance3D.new()
 		mi.multimesh = mm
 		mi.material_override = _material()

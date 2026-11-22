@@ -98,7 +98,7 @@ func near(pos: Vector3, reach: float) -> int:
 
 func center(i: int) -> Vector3:
 	var f: Dictionary = items[i]
-	return Vector3(float(f.x), _jogo.height_at(float(f.x), float(f.z)), float(f.z))
+	return Vector3(float(f.x), _jogo.ground_at(float(f.x), float(f.z)), float(f.z))
 
 
 ## Começa as chamas com f de combustível (o que já tinha posto entra junto).
