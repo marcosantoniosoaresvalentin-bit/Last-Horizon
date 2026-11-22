@@ -844,7 +844,7 @@ void fragment() {
 	_couro_btns = [mk.call("Força", -290, -146, _couro_forca), mk.call("Parar", -480, -146, _couro_end)]
 	_mach_btns = [mk.call("Parar", -480, -146, _mach_end)]
 	_evis_btns = [mk.call("Força", -290, -146, _evis_forca), mk.call("Parar", -480, -146, _evis_end)]
-	_banda_btns = [mk.call("Cabeça à esquerda", -430, -286, func(): _banda_escolhe(true)), mk.call("Cabeça à direita", -290, -286, func(): _banda_escolhe(false)), mk.call("Parar", -480, -146, _banda_end)]
+	_banda_btns = [mk.call("Cabeça à esquerda", -640, -286, func(): _banda_escolhe(true)), mk.call("Cabeça à direita", -290, -286, func(): _banda_escolhe(false)), mk.call("Parar", -480, -146, _banda_end)]
 	(_evis_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	(_couro_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_tri_btns = [mk.call("Força", -290, -146, _tri_forca), mk.call("Soltar", -480, -146, _tri_soltar), mk.call("Amarrar", -290, -286, _tri_amarrar_estaca)]

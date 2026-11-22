@@ -1099,8 +1099,9 @@ void fragment() {
 	} else {
 		float fio = abs(sin((q.y * 90.0 + n1 * 4.0)));
 		vec3 carne = mix(vec3(0.22, 0.02, 0.018), vec3(0.4, 0.045, 0.035), n1 * 0.6 + fio * 0.25);
-		float gord = smoothstep(0.66, 0.8, n2);
-		ALBEDO = mix(carne, vec3(0.74, 0.66, 0.55), gord * 0.5);
+		float n3 = ruido(q * 70.0 + vec3(7.7, 2.2, 0.4));
+		float gord = smoothstep(0.7, 0.85, n2 * 0.7 + n3 * 0.3);
+		ALBEDO = mix(carne, vec3(0.74, 0.66, 0.55), gord * 0.45);
 		ROUGHNESS = 0.55;
 	}
 	SPECULAR = 0.25;
@@ -1257,9 +1258,22 @@ func _partir_afasta(uid: String) -> void:
 		return
 	var n: Node3D = nd.node
 	var xf: Transform3D = n.get_meta("xf_inteira", n.global_transform)
+	if not n.has_meta("xf_inteira"):
+		n.set_meta("xf_inteira", xf)
 	var lado: Vector3 = (_malha(n) as MeshInstance3D).global_transform.basis.x.normalized() if n.has_meta("sk") else Vector3.RIGHT
-	n.global_transform = Transform3D(xf.basis, xf.origin + lado * 0.07)
-	(nd.n2 as Node3D).global_transform = Transform3D(xf.basis, xf.origin - lado * 0.07)
+	lado.y = 0.0
+	lado = lado.normalized() if lado.length() > 0.1 else Vector3.RIGHT
+	# cada banda gira para fora em volta da sua pata (abre como um livro) e se afasta
+	var rig: Dictionary = n.get_meta("rig", {})
+	var piv: Vector3 = xf * (rig.get("pk", Vector3.ZERO) as Vector3)
+	for k in 2:
+		var sd := 1.0 if k == 0 else -1.0
+		var giro := Transform3D(Basis(Vector3.UP, sd * 0.55), Vector3.ZERO)
+		var t := Transform3D(Basis(), piv + lado * sd * 0.2) * giro * Transform3D(Basis(), -piv) * xf
+		if k == 0:
+			n.global_transform = t
+		else:
+			(nd.n2 as Node3D).global_transform = t
 
 
 ## Uma machadada na espinha: o corte desce um pedaço; no fim a vaca se parte.
