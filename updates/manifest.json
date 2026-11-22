@@ -1,9 +1,9 @@
 {
-  "version": 171,
-  "file": "update_171.zip",
-  "size": 5004124,
-  "sha256": "5938f3863f37bfdc5c5cbb82bc49f11ab1ef7dd22b63390718f7ba20fede779a",
+  "version": 172,
+  "file": "update_172.zip",
+  "size": 5010601,
+  "sha256": "6c79eed0a3566b96eccc9a2809595d9e62c975d58e9a92551bab00e8108d8cb3",
   "min_build": 1,
-  "notes": "Sede zera em 30 minutos e fome em 40 minutos",
+  "notes": "Forno de carvão nas plantas: pedras, barro e porta; lenha vira carvão com a porta fechada, relógio e fumaça no suspiro",
   "date": "2026-11-22"
 }
