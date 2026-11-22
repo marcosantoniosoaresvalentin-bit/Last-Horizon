@@ -1,9 +1,9 @@
 {
-  "version": 196,
-  "file": "update_196.zip",
-  "size": 5491718,
-  "sha256": "2a920da2f2ecf662f3125d529c702ef4a4732bb5a247021677d44fa5c3af6409",
+  "version": 197,
+  "file": "update_197.zip",
+  "size": 5498214,
+  "sha256": "04f97ac94c4e16ee7f660af78e6582ba3258b0d036536158d0f75cec70ca7c56",
   "min_build": 1,
-  "notes": "Caça: bicho corre até cair, sangue líquido pingando",
+  "notes": "Cavalete de trançar e corda de cipó",
   "date": "2026-11-22"
 }
