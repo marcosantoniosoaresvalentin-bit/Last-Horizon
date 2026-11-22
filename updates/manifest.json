@@ -1,9 +1,9 @@
 {
-  "version": 186,
-  "file": "update_186.zip",
-  "size": 5472338,
-  "sha256": "520250ecca7189a5b81a3684a570f34c657dfa8233b65a0ef6c84677871c9b6d",
+  "version": 187,
+  "file": "update_187.zip",
+  "size": 5472588,
+  "sha256": "b3efaa1636db769ab08ca3337e5135afcc3a71afaa7da6d33a9fb29caf3ee3ba",
   "min_build": 1,
-  "notes": "Vaca nova: modelo 3D de verdade com animações",
+  "notes": "Vaca: patas e cascos certos",
   "date": "2026-11-22"
 }
