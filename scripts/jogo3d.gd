@@ -11605,7 +11605,7 @@ func quarto_no_carrinho(p: Vector3, uid: String, lado: String) -> bool:
 		if str(_maq.plantas[mi].tipo) != "carrinho" or not _maq.pronta(mi):
 			continue
 		var l: Vector3 = _maq.xform(mi).affine_inverse() * p
-		if l.x > -0.45 and l.x < 0.55 and absf(l.z) < 0.34 and l.y < 0.75 and l.y > -0.2:
+		if l.x > -0.55 and l.x < 0.65 and absf(l.z) < 0.45 and l.y < 0.9 and l.y > -0.3:
 			_maq.car_por_item(mi, "quarto_vaca", 1)
 			var q: Dictionary = _caca.quarto_de(uid, lado)
 			q["onde"] = "carrinho"

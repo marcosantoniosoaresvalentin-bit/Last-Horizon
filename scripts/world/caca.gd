@@ -2132,8 +2132,14 @@ func _caindo_tick(delta: float) -> void:
 							low = wpt.y
 							lowp = wpt
 		# o quarto caindo num carrinho de mão (posto embaixo): vai para dentro dele, limpo
-		if str(f.tipo).begins_with("quarto_") and _jogo.has_method("quarto_no_carrinho"):
-			if _jogo.quarto_no_carrinho(lowp, str(f.uid), str(f.tipo).substr(7)):
+		if str(f.tipo).begins_with("quarto_") and _jogo.has_method("quarto_no_carrinho") and f.has("low"):
+			# o meio do pedaço (a perna pendurada não conta) na altura do ponto mais baixo
+			var meio := Vector3.ZERO
+			for lp2 in f.low:
+				meio += nd.global_transform * (lp2 as Vector3)
+			meio /= maxf(1.0, (f.low as Array).size())
+			meio.y = low
+			if _jogo.quarto_no_carrinho(meio, str(f.uid), str(f.tipo).substr(7)):
 				_caindo.erase(f)
 				nd.queue_free()
 				continue
