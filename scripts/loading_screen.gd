@@ -55,8 +55,7 @@ func _ready() -> void:
 	Updater.check_last_boot()
 	_set_version_label(Updater.base_build())
 
-	_tip_index = randi() % TIPS.size()
-	_tip.text = TIPS[_tip_index]
+	_tip.visible = false          # sem dicas: o jogador aprende sozinho
 	_progress.value = 0.0
 	_percent.text = ""
 
@@ -146,6 +145,7 @@ func _stage_text(p: float) -> String:
 
 
 func _rotate_tips(delta: float) -> void:
+	return
 	_tip_timer += delta
 	if _tip_timer < tip_interval:
 		return

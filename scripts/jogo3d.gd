@@ -2252,10 +2252,9 @@ func _update_inventory() -> void:
 	_inv_label.text = "Mochila: argila %s kg  (%s/%d kg)" % [_kg(_bag), _kg(_bag_total()), int(BAG_MAX)]
 
 
-func _show_toast(text: String) -> void:
-	_toast.text = text
-	_toast.modulate.a = 1.0
-	_toast_t = 3.5
+## Sem mensagens de ajuda na tela: é sobrevivência, o jogador aprende sozinho.
+func _show_toast(_text: String) -> void:
+	pass
 
 
 func _player_depth() -> float:
@@ -11211,14 +11210,7 @@ func _arco_draw(ui: Control) -> void:
 	ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
 	var font := ThemeDB.fallback_font
 	ui.draw_string(font, r.position + Vector2(-8, -10), "Calor", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.95, 0.8))
-	if not bool(_arco.brasa):
-		# a dica: o dedo indo e voltando para os lados
-		var c := Vector2(ui.size.x * 0.5, ui.size.y - 90)
-		var off := sin(Time.get_ticks_msec() / 140.0) * 70.0
-		ui.draw_line(c - Vector2(90, 0), c + Vector2(90, 0), Color(1, 1, 1, 0.35), 3.0, true)
-		ui.draw_circle(c + Vector2(off, 0), 14.0, Color(1, 0.9, 0.5, 0.85))
-		ui.draw_string(font, c + Vector2(-110, -26), "Passe o dedo para os lados", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.95, 0.8))
-	else:
+	if bool(_arco.brasa):
 		ui.draw_string(font, Vector2(40, ui.size.y - 210), "Sopros: %d de %d" % [int(_arco.sopros), ARCO_SOPROS], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.95, 0.8))
 
 
@@ -11653,9 +11645,7 @@ func _torno_escolher(id: String) -> void:
 		var pin := c + Vector2(cos(a), sin(a)) * R
 		dial.draw_line(c, pin, Color(0.85, 0.7, 0.5), 3.0, true)
 		dial.draw_circle(pin, 9.0, Color(1, 1, 1))
-		dial.draw_circle(c, 5.0, Color(0.6, 0.45, 0.3))
-		var font := ThemeDB.fallback_font
-		dial.draw_string(font, Vector2(0, -8), "Pise no verde", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.95, 0.8)))
+		dial.draw_circle(c, 5.0, Color(0.6, 0.45, 0.3)))
 	(_torno.ui as Control).add_child(dial)
 	_torno.dial = dial
 	Sons.play_at(self, "cavar", _maq.xform(int(_torno.mi)) * Vector3(0, Maquinas.TORNO_MESA, 0), -6.0, 0.7)
