@@ -1094,20 +1094,20 @@ static func visceras_no(s: float, ubere: bool, seed_v: int) -> Node3D:
 		var mt := StandardMaterial3D.new()
 		mt.albedo_color = cor
 		mt.roughness = rough
-		mt.metallic_specular = 0.45
+		mt.metallic_specular = 0.3
 		m.material_override = mt
 		m.scale = raio * s
 		m.position = pos * s
 		root.add_child(m)
 		return m
 	# a buchada (rúmen) grande e o barrete
-	bola.call(Color(0.5, 0.52, 0.42), Vector3(0.36, 0.3, 0.28), Vector3(0, 0, 0))
-	bola.call(Color(0.56, 0.55, 0.46), Vector3(0.2, 0.18, 0.17), Vector3(0.28, 0.12, 0.1))
-	bola.call(Color(0.46, 0.47, 0.38), Vector3(0.16, 0.15, 0.14), Vector3(-0.25, 0.16, -0.1))
+	bola.call(Color(0.36, 0.38, 0.28), Vector3(0.36, 0.3, 0.28), Vector3(0, 0, 0), 0.55)
+	bola.call(Color(0.42, 0.42, 0.33), Vector3(0.2, 0.18, 0.17), Vector3(0.28, 0.12, 0.1), 0.55)
+	bola.call(Color(0.33, 0.34, 0.26), Vector3(0.16, 0.15, 0.14), Vector3(-0.25, 0.16, -0.1), 0.55)
 	# o fígado e os bofes, o coração
 	bola.call(Color(0.28, 0.05, 0.05), Vector3(0.22, 0.07, 0.15), Vector3(0.12, 0.3, 0.12), 0.25)
-	bola.call(Color(0.82, 0.5, 0.52), Vector3(0.18, 0.14, 0.12), Vector3(-0.15, 0.36, 0.05), 0.45)
-	bola.call(Color(0.8, 0.48, 0.5), Vector3(0.16, 0.13, 0.11), Vector3(0.05, 0.4, -0.08), 0.45)
+	bola.call(Color(0.68, 0.3, 0.34), Vector3(0.18, 0.14, 0.12), Vector3(-0.15, 0.36, 0.05), 0.5)
+	bola.call(Color(0.64, 0.28, 0.32), Vector3(0.16, 0.13, 0.11), Vector3(0.05, 0.4, -0.08), 0.5)
 	bola.call(Color(0.42, 0.08, 0.07), Vector3(0.08, 0.1, 0.08), Vector3(-0.02, 0.32, 0.18), 0.3)
 	# as tripas: tubos rosados dando voltas por fora da buchada
 	var st := SurfaceTool.new()
@@ -1138,19 +1138,19 @@ static func visceras_no(s: float, ubere: bool, seed_v: int) -> Node3D:
 	var tr := MeshInstance3D.new()
 	tr.mesh = st.commit()
 	var mtr := StandardMaterial3D.new()
-	mtr.albedo_color = Color(0.86, 0.6, 0.55)
-	mtr.roughness = 0.3
-	mtr.metallic_specular = 0.5
+	mtr.albedo_color = Color(0.7, 0.36, 0.36)
+	mtr.roughness = 0.45
+	mtr.metallic_specular = 0.35
 	mtr.cull_mode = BaseMaterial3D.CULL_DISABLED
 	tr.material_override = mtr
 	root.add_child(tr)
 	# o úbere (com as quatro tetas)
 	if ubere:
-		var ub: MeshInstance3D = bola.call(Color(0.86, 0.66, 0.64), Vector3(0.17, 0.11, 0.14), Vector3(0.05, -0.32, 0.2), 0.5)
+		var ub: MeshInstance3D = bola.call(Color(0.72, 0.5, 0.48), Vector3(0.17, 0.11, 0.14), Vector3(0.05, -0.32, 0.2), 0.6)
 		for i in 4:
 			var tx := (-0.07 if i % 2 == 0 else 0.07)
 			var tz := (0.14 if i < 2 else 0.26)
-			bola.call(Color(0.84, 0.6, 0.6), Vector3(0.022, 0.05, 0.022), Vector3(0.05 + tx, -0.43, tz), 0.5)
+			bola.call(Color(0.7, 0.46, 0.46), Vector3(0.022, 0.05, 0.022), Vector3(0.05 + tx, -0.43, tz), 0.6)
 	return root
 
 
@@ -1639,7 +1639,7 @@ void fragment() {
 	vec3 q = p * esc;
 	// a vaca aberta: o corte da barriga (do pescoço até o úbere), o Y em volta do úbere
 	// (um de cada lado até as pernas de trás) e a garganta; abrindo, vira um rasgo escuro
-	float wa = largura * (1.0 + aberto * 5.0);
+	float wa = largura * 1.5 * (1.0 + aberto * 2.2);
 	bool rasgo = false;
 	if (nn.z < -0.35) {
 		if (u <= 1.0 && u >= max(ab, ab_y) && abs(p.x) < wa) { rasgo = true; }
@@ -1652,7 +1652,7 @@ void fragment() {
 	}
 	if (garg > 0.5 && u > 0.93 && u < 0.99 && nn.z < 0.2) { rasgo = true; }
 	if (rasgo) {
-		ALBEDO = mix(vec3(0.4, 0.02, 0.02), vec3(0.08, 0.005, 0.005), aberto);
+		ALBEDO = mix(vec3(0.3, 0.012, 0.012), vec3(0.16, 0.015, 0.012), aberto);
 		ROUGHNESS = 0.25;
 		SPECULAR = 0.5;
 	} else if (u < pele) {
@@ -1786,7 +1786,7 @@ func couro_visual(uid: String) -> void:
 	sm.set_shader_parameter("corte", lerpf(u_ini, 1.0, float(cr.get("corte", 0.0))))
 	var pl := float(cr.get("pele", 0.0))
 	sm.set_shader_parameter("pele", -9.0 if pl <= 0.0 else lerpf(-0.55, 1.0, pl))
-	sm.set_shader_parameter("largura", 0.012 / m_por_u)
+	sm.set_shader_parameter("largura", 0.016 / m_por_u)
 	sm.set_shader_parameter("infla", 0.0015 / m_por_u)
 	sm.set_shader_parameter("esc", m_por_u)
 	sm.set_shader_parameter("r_casco", 0.1 / m_por_u)
