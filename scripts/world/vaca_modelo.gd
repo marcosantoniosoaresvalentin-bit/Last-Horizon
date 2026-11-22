@@ -181,8 +181,8 @@ static func build(s := 1.0, cor := "branca", touro := false, _seed := 1) -> Node
 	# o boi: o saco entre as pernas de trás e o prepúcio na barriga
 	if touro:
 		var pele := _material(cor, 0 if cor != "malhada" else 1, true)
-		_preso(sk0, "Body", _saco_mesh(), pele, Vector3(0, 0.0255, 0.0232))
-		_preso(sk0, "Body", _prepucio_mesh(), pele, Vector3(0, 0.022, 0.0212))
+		_preso(sk0, "Body", _saco_mesh(), pele, Vector3(0, 0.0255, 0.0222))
+		_preso(sk0, "Body", _prepucio_mesh(), pele, Vector3(0, 0.009, 0.0206))
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	var ap: AnimationPlayer = m.find_children("*", "AnimationPlayer", true, false)[0]
 	ap.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
@@ -313,49 +313,56 @@ static func _chifre_mesh(tam: float, sd: float, curva: float) -> ArrayMesh:
 	return st.commit()
 
 
-## O saco do boi: sai de dentro da barriga entre as coxas (o "pescoço" estreito) e pende
-## em gota até perto dos jarretes.
+## Volume de pele saindo do corpo (faces retas, igual ao modelo): anéis de cima (dentro
+## do corpo) para baixo. aneis: [[centro, meia largura x, meio comprimento y], ...]
+static func _volume(aneis: Array, lados := 7) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_smooth_group(0xFFFFFFFF)          # faces retas (low poly)
+	var rows := []
+	for r in aneis:
+		var c: Vector3 = r[0]
+		var row := []
+		for k in lados:
+			var t := TAU * (float(k) + 0.5) / lados
+			row.append(c + Vector3(cos(t) * float(r[1]), sin(t) * float(r[2]), 0))
+		rows.append(row)
+	for i in rows.size() - 1:
+		for k in lados:
+			var q := [rows[i][k], rows[i + 1][k], rows[i + 1][(k + 1) % lados], rows[i][(k + 1) % lados]]
+			for j in [0, 1, 2, 0, 2, 3]:
+				st.add_vertex(q[j])
+	# fecha embaixo
+	var last: Array = rows[rows.size() - 1]
+	var fundo: Vector3 = (aneis[aneis.size() - 1][0] as Vector3) + Vector3(0, 0, -0.0004)
+	for k in lados:
+		for v in [last[k], fundo, last[(k + 1) % lados]]:
+			st.add_vertex(v)
+	st.generate_normals()
+	return st.commit()
+
+
+## O saco: um volume pequeno e redondo entre as coxas, colado no corpo.
 static func _saco_mesh() -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var pts := []
-	var rs := []
-	var cs := []
-	var n := 8
-	for i in n + 1:
-		var u := float(i) / n
-		pts.append(Vector3(0, -0.0012 * u, -0.0085 * u))         # para baixo (e um pouco para a frente)
-		var r := 0.0014 + 0.0016 * smoothstep(0.15, 0.7, u)
-		if u > 0.75:
-			r *= sqrt(maxf(0.0, 1.0 - (u - 0.75) / 0.25)) * 0.95 + 0.05
-		rs.append(r)
-		cs.append(Color.WHITE)
-	_tubo(st, pts, rs, cs, 8)
-	st.generate_normals()
-	return st.commit()
+	return _volume([
+		[Vector3(0, 0, 0.0015), 0.0016, 0.0018],
+		[Vector3(0, -0.0002, -0.0012), 0.0021, 0.0022],
+		[Vector3(0, -0.0004, -0.0032), 0.0019, 0.0020],
+		[Vector3(0, -0.0005, -0.0045), 0.0010, 0.0011],
+	], 7)
 
 
-## A bainha do órgão (prepúcio): um cordão de pele colado embaixo da barriga, que sai
-## de trás (do saco, entre as coxas) e corre para a frente até a ponta, que pende um
-## pouco antes do meio da barriga. Coordenadas a partir do saco (y para a cabeça é -).
+## A bainha (o "umbigo" do zebu): a barriga desce num volume liso de pele, largo onde
+## gruda e arredondado embaixo, com a ponta um pouco para a frente. Fica no fim da
+## barriga, antes das coxas.
 static func _prepucio_mesh() -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var pts := []
-	var rs := []
-	var cs := []
-	var n := 10
-	for i in n + 1:
-		var u := float(i) / n                       # 0 no saco, 1 na ponta
-		var y := -0.015 * u
-		var z := 0.0004 - 0.0004 * sin(u * PI) - 0.0022 * smoothstep(0.7, 1.0, u)
-		pts.append(Vector3(0, y, z))
-		rs.append(lerpf(0.0016, 0.0015, u) * (1.0 - 0.45 * smoothstep(0.9, 1.0, u)))
-		cs.append(Color.WHITE)
-	_tubo(st, pts, rs, cs, 8)
-	_bola(st, Vector3(0, -0.015, -0.0021), Vector3(0.0009, 0.0011, 0.0009), 3, 6)
-	st.generate_normals()
-	return st.commit()
+	return _volume([
+		[Vector3(0, 0, 0.0018), 0.0030, 0.0080],
+		[Vector3(0, -0.0008, -0.0006), 0.0030, 0.0068],
+		[Vector3(0, -0.0018, -0.0024), 0.0024, 0.0045],
+		[Vector3(0, -0.0026, -0.0036), 0.0016, 0.0026],
+		[Vector3(0, -0.0030, -0.0042), 0.0008, 0.0012],
+	], 8)
 
 
 ## A pose de cada quadro: "andar", "correr", "pastar", "deitar", "parado".
