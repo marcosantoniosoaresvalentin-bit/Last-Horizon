@@ -844,6 +844,7 @@ void fragment() {
 	_couro_btns = [mk.call("Força", -290, -146, _couro_forca), mk.call("Parar", -480, -146, _couro_end)]
 	_mach_btns = [mk.call("Parar", -480, -146, _mach_end)]
 	_evis_btns = [mk.call("Força", -290, -146, _evis_forca), mk.call("Parar", -480, -146, _evis_end)]
+	_banda_btns = [mk.call("Cabeça à esquerda", -430, -286, func(): _banda_escolhe(true)), mk.call("Cabeça à direita", -290, -286, func(): _banda_escolhe(false)), mk.call("Parar", -480, -146, _banda_end)]
 	(_evis_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	(_couro_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_tri_btns = [mk.call("Força", -290, -146, _tri_forca), mk.call("Soltar", -480, -146, _tri_soltar), mk.call("Amarrar", -290, -286, _tri_amarrar_estaca)]
@@ -3125,7 +3126,7 @@ func _update_chop(delta: float) -> void:
 ## de cima delas ou recolher uma forquilha.
 func _update_ctx_btn() -> void:
 	_ctx_action = ""
-	if not _couro.is_empty() or not _mach.is_empty() or not _evis.is_empty():
+	if not _couro.is_empty() or not _mach.is_empty() or not _evis.is_empty() or not _banda.is_empty():
 		_ctx_btn.visible = false
 		return
 	if _empurra >= 0:
@@ -6131,6 +6132,9 @@ func _move_player(delta: float) -> void:
 	if not _evis.is_empty():
 		_evis_move(delta)
 		return
+	if not _banda.is_empty():
+		_banda_move(delta)
+		return
 	if not _mesa.is_empty():
 		_mesa_move(delta)
 		return
@@ -6516,6 +6520,8 @@ func _input(e: InputEvent) -> void:
 		return
 	if not _evis.is_empty() and _evis_input(e):
 		return
+	if not _banda.is_empty() and _banda_input(e):
+		return
 	if not _mix.is_empty() and _mix_input(e):
 		return
 	if not _reb.is_empty() and _reb_input(e):
@@ -6542,7 +6548,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _mach_btns + _evis_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _mach_btns + _evis_btns + _banda_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -10062,6 +10068,11 @@ func _tri_ctx(mi: int) -> bool:
 	var est: Vector3 = _maq.tri_estaca(mi)
 	var perto_estaca := Vector2(_player.position.x - est.x, _player.position.z - est.z).length() < 1.6
 	if bool(ic.get("fixo", false)):
+		if (item_qtd("machado") > 0 or teste) and _banda_pode(mi) != "" and not perto_estaca:
+			var cb: Dictionary = _caca.couro_de(str(ic.uid))
+			_ctx_action = "tri_banda"
+			_ctx_btn.text = "Continuar a partir" if (cb.get("banda", {}) as Dictionary).has("cab") else "Partir ao meio"
+			return true
 		if (item_qtd("faca") > 0 or teste) and _evis_pode(mi) != "" and not perto_estaca:
 			var ce: Dictionary = _caca.couro_de(str(ic.uid))
 			_ctx_action = "tri_evis"
@@ -10161,6 +10172,10 @@ func _tri_press(act: String) -> void:
 			_tri = {"mi": mi, "fase": "puxa", "forca": 0.8 if act == "tri_desestaca" else 0.6}
 			_tri_ajusta_corda(mi)
 			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -8.0, 1.0)
+		"tri_banda":
+			var uid5 := _banda_pode(mi)
+			if uid5 != "":
+				_banda_start(mi, uid5)
 		"tri_evis":
 			var uid4 := _evis_pode(mi)
 			if uid4 != "":
@@ -10386,8 +10401,9 @@ func _tri_desenha(mi: int, pp: Vector3, lado: Vector3, a: Vector3, b: Vector3, n
 	var pts := []
 	var lt := pp - lado * R
 	var rt := pp + lado * R
+	var a0 := a + Vector3.UP * 0.12 if no_pe else a
 	for i in 7:
-		pts.append(a.lerp(lt, float(i) / 7.0))
+		pts.append(a0.lerp(lt, float(i) / 7.0))
 	for i in 9:
 		var an := PI - PI * float(i) / 8.0
 		pts.append(pp + (lado * cos(an) + Vector3.UP * sin(an)) * R)
@@ -10405,13 +10421,21 @@ func _tri_desenha(mi: int, pp: Vector3, lado: Vector3, a: Vector3, b: Vector3, n
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	Maquinas.fio_cipo(st, pts, 0.0095, 0.3)
 	if no_pe:
-		# as voltas nos pés de trás
-		for k in 3:
-			var anel := []
-			for i in 13:
-				var an2 := TAU * float(i) / 12.0
-				anel.append(a + Vector3(cos(an2) * 0.075, -0.04 + k * 0.035, sin(an2) * 0.075))
-			Maquinas.fio_cipo(st, anel, 0.009, 0.4 + k * 0.1)
+		# a ponta se abre em duas: uma amarrada em cada pata da frente (com as voltas)
+		var ic_d: Dictionary = _maq.plantas[mi].get("ice", {})
+		var pes: Array = _caca.patas_frente(str(ic_d.get("uid", ""))) if _caca and not ic_d.is_empty() else []
+		if pes.size() < 2:
+			pes = [a, a]
+		var no := a0
+		for pe in pes:
+			var pv: Vector3 = pe
+			Maquinas.fio_cipo(st, [no, no.lerp(pv, 0.5) + Vector3.DOWN * 0.01, pv], 0.0085, 0.35)
+			for k in 2:
+				var anel := []
+				for i in 11:
+					var an2 := TAU * float(i) / 10.0
+					anel.append(pv + Vector3(cos(an2) * 0.05, -0.02 + k * 0.03, sin(an2) * 0.05))
+				Maquinas.fio_cipo(st, anel, 0.008, 0.4 + k * 0.1)
 	st.generate_normals()
 	node.mesh = st.commit()
 
@@ -11080,6 +11104,227 @@ func _evis_draw() -> void:
 		tot += float(ev.get(f, 0.0))
 	ui.draw_rect(Rect2(rb.position, Vector2(rb.size.x * tot / EVIS_FASES.size(), rb.size.y)), Color(0.7, 0.25, 0.18))
 	ui.draw_rect(rb, Color(1, 1, 1, 0.6), false, 2.0)
+
+
+# ================== PARTIR AO MEIO (MACHADO) ==================
+# Aberta e pendurada (cada pata da frente na sua ponta da corda), com o machado: "Partir
+# ao meio". Primeiro escolhe em qual banda ficam a cabeça e o pescoço (a da esquerda ou a
+# da direita, como se vê na tela). De costas para a vaca, a marca fica na espinha: cada
+# toque nela é uma machadada e o corte vai descendo, das patas da frente até o rabo.
+# Partida, as duas bandas ficam penduradas, cada uma pela sua pata.
+
+const BANDA_GOLPES := 12
+var _banda := {}                  # {mi, uid, fase ("escolha"/"corte"), anim, treme, fim}
+var _banda_btns: Array = []       # [Cabeça à esquerda, Cabeça à direita, Parar]
+
+
+func _banda_pode(mi: int) -> String:
+	var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+	if ic.is_empty() or not bool(ic.get("fixo", false)) or _caca == null:
+		return ""
+	var uid := str(ic.uid)
+	var c: Dictionary = _caca.couro_de(uid)
+	if c.is_empty() or not bool((c.get("evis", {}) as Dictionary).get("feito", false)) or bool((c.get("banda", {}) as Dictionary).get("feito", false)):
+		return ""
+	var pe: Vector3 = _caca.pes_tras(uid)
+	if pe.y - ground_at(pe.x, pe.z) < 1.4:
+		return ""
+	if Vector2(pe.x - _player.position.x, pe.z - _player.position.z).length() > 2.6:
+		return ""
+	return uid
+
+
+func _banda_start(mi: int, uid: String) -> void:
+	if _mao != "":
+		equip("")
+	var c: Dictionary = _caca.couro_de(uid)
+	var ja := (c.get("banda", {}) as Dictionary).has("cab")
+	_banda = {"mi": mi, "uid": uid, "fase": "corte" if ja else "escolha", "anim": -1.0, "treme": 0.0, "fim": -1.0}
+	_olho = {}
+	_bur = {}
+	_jump_btn.visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false
+	if _mach_axe == null:
+		_mach_axe = MeshInstance3D.new()
+		_mach_axe.mesh = Corte.axe_mesh()
+		_mach_axe.material_override = Corte.axe_material()
+		_mach_axe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_cam.add_child(_mach_axe)
+	_mach_axe.visible = true
+	_act_check = 0.0
+
+
+func _banda_end() -> void:
+	if _banda.is_empty():
+		return
+	_banda = {}
+	for b in _banda_btns:
+		(b as Control).visible = false
+	if _mach_axe:
+		_mach_axe.visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
+## Escolheu a banda da cabeça pelo lado da tela: descobre qual lado da vaca é.
+func _banda_escolhe(tela_esq: bool) -> void:
+	if str(_banda.get("fase", "")) != "escolha":
+		return
+	var uid := str(_banda.uid)
+	var lin: Array = _caca.partir_linha(uid, 5)
+	var c: Dictionary = _caca.couro_de(uid)
+	var mi_v: MeshInstance3D = _caca._malha(_caca._nodes[uid].node)
+	var lado_x: Vector3 = mi_v.global_transform.basis.x.normalized()
+	var meio: Vector3 = lin[2]
+	var mais_x_na_esq := _cam.unproject_position(meio + lado_x * 0.3).x < _cam.unproject_position(meio - lado_x * 0.3).x
+	var cab := "e" if (tela_esq == mais_x_na_esq) else "d"
+	c["banda"] = {"cab": cab, "corte": 0.0}
+	_banda.fase = "corte"
+	Sons.play_at(self, "baque", meio, -14.0, 1.5)
+
+
+func _banda_move(delta: float) -> void:
+	var uid := str(_banda.uid)
+	var mi := int(_banda.mi)
+	if _caca == null or _caca.couro_de(uid).is_empty() or mi >= _maq.plantas.size() or (_maq.plantas[mi].get("ice", {}) as Dictionary).is_empty():
+		_banda_end()
+		return
+	var lin: Array = _caca.partir_linha(uid, 9)
+	if lin.is_empty():
+		_banda_end()
+		return
+	var meio := Vector3.ZERO
+	for q in lin:
+		meio += q
+	meio /= lin.size()
+	var fr: Vector3 = -_caca.couro_frente(uid)
+	fr.y = 0.0
+	fr = fr.normalized() if fr.length() > 0.1 else Vector3.RIGHT
+	var eye := _vista_livre(mi, meio, fr, 2.3)
+	_player.position = Vector3(eye.x, ground_at(eye.x, eye.z), eye.z)
+	_air = false
+	_vy = 0.0
+	var olha := meio - eye
+	_face = atan2(-olha.x, -olha.z)
+	_yaw = _face
+	_player.rotation.y = _face
+	_play("Idle")
+	var tr := float(_banda.treme)
+	_banda.treme = maxf(0.0, tr - delta * 6.0)
+	var sacode := Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.012 * tr
+	_cam.global_transform = Transform3D(Basis.looking_at(olha, Vector3.UP), eye + sacode)
+	# o machado
+	var a := float(_banda.anim)
+	var th := 0.35
+	if a >= 0.0:
+		a += delta
+		if a < 0.13:
+			th = lerpf(0.35, 1.25, a / 0.13)
+		elif a < 0.24:
+			th = lerpf(1.25, -1.35, (a - 0.13) / 0.11)
+		else:
+			th = lerpf(-1.35, 0.35, clampf((a - 0.24) / 0.3, 0.0, 1.0))
+		if float(_banda.anim) < 0.24 and a >= 0.24:
+			_banda.treme = 1.0
+			if wear("machado", 1):
+				_update_inventory()
+			if _caca.partir_golpe(uid, 1.0 / BANDA_GOLPES):
+				_banda.fim = 0.0
+		_banda.anim = a if a < 0.56 else -1.0
+	if _mach_axe:
+		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25), Vector3(0.3, -0.5, -0.6))
+	if float(_banda.fim) >= 0.0:
+		_banda.fim = float(_banda.fim) + delta
+		if float(_banda.fim) > 1.8:
+			_banda_end()
+			return
+	var esc := str(_banda.fase) == "escolha"
+	(_banda_btns[0] as Control).visible = esc
+	(_banda_btns[1] as Control).visible = esc
+	(_banda_btns[2] as Control).visible = true
+	_jump_btn.visible = false
+	_ctx_btn.visible = false
+	if _sub_ui:
+		_sub_ui.queue_redraw()
+
+
+## Onde o machado vai bater agora (na tela).
+func _banda_ponto() -> Vector2:
+	var c: Dictionary = _caca.couro_de(str(_banda.uid))
+	var t := float((c.get("banda", {}) as Dictionary).get("corte", 0.0))
+	var lin: Array = _caca.partir_linha(str(_banda.uid), 20)
+	var f := clampf(t, 0.0, 1.0) * 19.0
+	var i := mini(int(f), 18)
+	return _cam.unproject_position((lin[i] as Vector3).lerp(lin[i + 1], f - i))
+
+
+func _banda_input(e: InputEvent) -> bool:
+	if _banda.is_empty():
+		return false
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var pos := Vector2.INF
+	var pressed := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		pressed = e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		pressed = e.pressed
+	if pos == Vector2.INF:
+		return e is InputEventScreenDrag or e is InputEventMouseMotion
+	for b in _banda_btns:
+		if (b as Control).visible and (b as Control).get_global_rect().has_point(pos):
+			return false
+	if not pressed or str(_banda.fase) != "corte" or float(_banda.anim) >= 0.0 or float(_banda.fim) >= 0.0:
+		return true
+	if item_qtd("machado") <= 0 and not teste:
+		return true
+	if pos.distance_to(_banda_ponto()) < 100.0:
+		_banda.anim = 0.0
+	return true
+
+
+func _banda_draw() -> void:
+	if _banda.is_empty() or _caca == null:
+		return
+	var ui := _sub_ui
+	var uid := str(_banda.uid)
+	var lin: Array = _caca.partir_linha(uid, 20)
+	if lin.is_empty():
+		return
+	if str(_banda.fase) == "escolha":
+		# as duas bandas: uma seta de cada lado da espinha
+		var mi_v: MeshInstance3D = _caca._malha(_caca._nodes[uid].node)
+		var lado_x: Vector3 = mi_v.global_transform.basis.x.normalized()
+		var m: Vector3 = lin[6]
+		var a := _cam.unproject_position(m + lado_x * 0.35)
+		var b := _cam.unproject_position(m - lado_x * 0.35)
+		var esq := a if a.x < b.x else b
+		var dir := b if a.x < b.x else a
+		for q in [[esq, -1.0], [dir, 1.0]]:
+			var pq: Vector2 = q[0]
+			var sx: float = q[1]
+			ui.draw_colored_polygon(PackedVector2Array([pq + Vector2(sx * 40, 0), pq + Vector2(sx * 8, -22), pq + Vector2(sx * 8, 22)]), Color(1, 0.95, 0.6, 0.9))
+		for k in 19:
+			ui.draw_line(_cam.unproject_position(lin[k]), _cam.unproject_position(lin[k + 1]), Color(1, 1, 1, 0.5), 2.0, true)
+		return
+	var c: Dictionary = _caca.couro_de(uid)
+	var t := float((c.get("banda", {}) as Dictionary).get("corte", 0.0))
+	for k in 19:
+		var tk := float(k) / 19.0
+		if tk + 0.05 < t or k % 2 == 1:
+			continue
+		ui.draw_line(_cam.unproject_position(lin[k]), _cam.unproject_position(lin[k + 1]), Color(1, 1, 1, 0.7), 3.0, true)
+	if float(_banda.fim) < 0.0:
+		var pp := _banda_ponto()
+		var pul := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0)
+		ui.draw_arc(pp, 30.0 + pul * 6.0, 0, TAU, 32, Color(0, 0, 0, 0.45), 6.0, true)
+		ui.draw_arc(pp, 30.0 + pul * 6.0, 0, TAU, 32, Color(1, 0.95, 0.7, 0.95), 3.0, true)
+		ui.draw_line(pp + Vector2(-10, 0), pp + Vector2(10, 0), Color(1, 1, 1, 0.8), 2.0, true)
 
 
 # ================== PATAS E CABEÇA (MACHADO) ==================
@@ -15475,6 +15720,7 @@ func _draw_bur_ui() -> void:
 	_couro_draw()
 	_mach_draw()
 	_evis_draw()
+	_banda_draw()
 	if _mao == "arco" and _morto < 0.0:
 		# a mira: um círculo pequeno no meio da tela (fecha quando a corda está puxada)
 		var mc := _sub_ui.size * 0.5

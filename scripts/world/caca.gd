@@ -1014,7 +1014,11 @@ func pendurar(uid: String, roldana: Vector3, alt: float, base: Dictionary) -> Di
 	var r := pendura_calc(uid, roldana, alt, base)
 	if r.is_empty():
 		return r
-	(_nodes[uid].node as Node3D).global_transform = r.xf
+	var n0: Node3D = _nodes[uid].node
+	n0.global_transform = r.xf
+	if _nodes[uid].has("n2"):
+		n0.set_meta("xf_inteira", r.xf)
+		_partir_afasta(uid)
 	return r
 
 
@@ -1036,6 +1040,252 @@ func despendurar(uid: String, base: Dictionary) -> void:
 		n.global_transform = _xf_de(base.xf0)
 	if (nd.c as Dictionary).has("couro"):
 		couro_visual(uid)
+
+
+# ---------- partir ao meio (com o machado) ----------
+# Aberta e pendurada (cada pata da frente amarrada na sua ponta da corda), a vaca é
+# partida ao meio pela espinha com o machado, de cima para baixo. Antes, o jogador escolhe
+# em qual banda ficam a cabeça e o pescoço. Partida, são duas bandas (dois desenhos da
+# mesma vaca, cada um mostrando só o seu lado; o lado de dentro é a carne e o osso
+# partido), cada uma pendurada pela sua pata. c.banda = {cab: "e"/"d", corte: 0..1, feito}.
+
+const BANDA_SHADER := """
+shader_type spatial;
+render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
+uniform float y_rabo;
+uniform float y_pescoco;
+uniform float lado;
+uniform float com_cabeca;
+uniform vec3 cor_pelo;
+uniform float esc;
+uniform vec3 casco0;
+uniform vec3 casco1;
+uniform vec3 casco2;
+uniform vec3 casco3;
+uniform float r_casco;
+varying vec3 p;
+varying vec3 nn;
+void vertex() { p = VERTEX; nn = NORMAL; }
+float hh(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float ruido(vec3 q) {
+	vec3 i = floor(q); vec3 f = fract(q); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(hh(i), hh(i + vec3(1,0,0)), f.x), mix(hh(i + vec3(0,1,0)), hh(i + vec3(1,1,0)), f.x), f.y),
+		mix(mix(hh(i + vec3(0,0,1)), hh(i + vec3(1,0,1)), f.x), mix(hh(i + vec3(0,1,1)), hh(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+void fragment() {
+	float u = (y_rabo - p.y) / (y_rabo - y_pescoco);
+	bool cab = u > 0.92;
+	if (cab) {
+		if (com_cabeca < 0.5) { discard; }
+	} else if (p.x * lado < 0.0) {
+		discard;
+	}
+	vec3 q = p * esc;
+	float n1 = ruido(q * 11.0);
+	float n2 = ruido(q * 34.0 + vec3(3.1, 1.7, 5.3));
+	float dc = min(min(distance(p, casco0), distance(p, casco1)), min(distance(p, casco2), distance(p, casco3)));
+	if (!FRONT_FACING) {
+		// o lado de dentro da banda: a carne partida e, perto do meio, o osso da espinha
+		vec3 carne = mix(vec3(0.3, 0.025, 0.02), vec3(0.46, 0.06, 0.045), n1);
+		float osso = smoothstep(0.55, 0.8, abs(sin(q.y * 3.14159 / 0.05))) * step(0.0, nn.z);
+		ALBEDO = mix(carne, vec3(0.88, 0.82, 0.74), osso * 0.8);
+		ROUGHNESS = 0.45;
+	} else if (dc < r_casco) {
+		ALBEDO = vec3(0.12, 0.1, 0.08);
+		ROUGHNESS = 0.6;
+	} else if (u > 1.0) {
+		ALBEDO = cor_pelo * (0.85 + 0.3 * n2);
+		ROUGHNESS = 0.85;
+	} else {
+		float fio = abs(sin((q.y * 90.0 + n1 * 4.0)));
+		vec3 carne = mix(vec3(0.22, 0.02, 0.018), vec3(0.4, 0.045, 0.035), n1 * 0.6 + fio * 0.25);
+		float gord = smoothstep(0.66, 0.8, n2);
+		ALBEDO = mix(carne, vec3(0.74, 0.66, 0.55), gord * 0.5);
+		ROUGHNESS = 0.55;
+	}
+	SPECULAR = 0.25;
+}
+"""
+static var _banda_sh: Shader
+static var _carne_m: StandardMaterial3D
+static var _costas: Array = []
+
+
+static func _carne_mat() -> StandardMaterial3D:
+	if _carne_m == null:
+		_carne_m = StandardMaterial3D.new()
+		_carne_m.albedo_color = Color(0.36, 0.05, 0.04)
+		_carne_m.roughness = 0.55
+	return _carne_m
+
+
+## O perfil das costas (o alto da espinha, na linha do meio): [[y, z]].
+static func _costas_z(mi: MeshInstance3D, y: float) -> float:
+	if _costas.is_empty():
+		var bins := {}
+		var vs: PackedVector3Array = mi.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+		for v in vs:
+			if absf(v.x) > 0.0016:
+				continue
+			var b := int(round(v.y / 0.002))
+			if not bins.has(b) or v.z > float(bins[b]):
+				bins[b] = v.z
+		var ks := bins.keys()
+		ks.sort()
+		ks.reverse()
+		for b in ks:
+			_costas.append([int(b) * 0.002, float(bins[b])])
+	var best := 1e9
+	var z := 0.035
+	for e in _costas:
+		var d := absf(float(e[0]) - y)
+		if d < best:
+			best = d
+			z = float(e[1])
+	return z
+
+
+## A linha do machado pela espinha, no mundo (de cima, entre as patas, até o rabo).
+func partir_linha(uid: String, n_pts := 20) -> Array:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return []
+	var rf := _couro_ref(nd.node)
+	var mi: MeshInstance3D = rf.mi
+	var out := []
+	for i in n_pts:
+		var u := lerpf(0.9, 0.02, float(i) / (n_pts - 1))
+		var y := lerpf(float(rf.y_rabo), float(rf.y_pescoco), u)
+		out.append(mi.global_transform * Vector3(0, y, _costas_z(mi, y) + 0.0006))
+	return out
+
+
+## As duas patas da frente (onde cada ponta da corda amarra), no mundo: [direita, esquerda].
+func patas_frente(uid: String) -> Array:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return []
+	var out := []
+	for k in 2:
+		var n: Node3D = nd.node
+		if k == 1 and nd.has("n2") and is_instance_valid(nd.n2):
+			n = nd.n2
+		if not n.has_meta("sk"):
+			return []
+		var sk: Skeleton3D = n.get_meta("sk")
+		var sd: String = ["_R", "_L"][k]
+		var a: Vector3 = sk.global_transform * sk.get_bone_global_pose(sk.find_bone("FrontLowLeg" + sd)).origin
+		var b: Vector3 = sk.global_transform * sk.get_bone_global_pose(sk.find_bone("FrontFoot" + sd)).origin
+		out.append(a.lerp(b, 0.75))
+	return out
+
+
+## O material de uma banda (lado +1: a esquerda; -1: a direita).
+func _banda_mat(n: Node3D, c: Dictionary, lado: float, cab: bool) -> ShaderMaterial:
+	if _banda_sh == null:
+		_banda_sh = Shader.new()
+		_banda_sh.code = BANDA_SHADER
+	var sm := ShaderMaterial.new()
+	sm.shader = _banda_sh
+	var rf := _couro_ref(n)
+	var mi: MeshInstance3D = rf.mi
+	var m_por_u: float = mi.global_transform.basis.get_scale().x
+	var p: Dictionary = c.get("p", {})
+	var cores: Array = VacaModelo.CORES.get(str(p.get("cor", "branca")), VacaModelo.CORES.branca)
+	var cp: Color = cores[0]
+	sm.set_shader_parameter("y_rabo", rf.y_rabo)
+	sm.set_shader_parameter("y_pescoco", rf.y_pescoco)
+	sm.set_shader_parameter("lado", lado)
+	sm.set_shader_parameter("com_cabeca", 1.0 if cab else 0.0)
+	sm.set_shader_parameter("cor_pelo", Vector3(cp.r, cp.g, cp.b))
+	sm.set_shader_parameter("esc", m_por_u)
+	sm.set_shader_parameter("r_casco", 0.1 / m_por_u)
+	for i in 4:
+		sm.set_shader_parameter("casco%d" % i, rf.cascos[i])
+	return sm
+
+
+## Partida: monta as duas bandas (a carcaça vira uma, e um segundo desenho a outra).
+func partir_monta(uid: String) -> void:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return
+	var c: Dictionary = nd.c
+	var bd: Dictionary = c.get("banda", {})
+	if not bool(bd.get("feito", false)):
+		return
+	var n: Node3D = nd.node
+	if not n.has_meta("sk"):
+		return
+	var cab_e := str(bd.get("cab", "e")) == "e"
+	var n2: Node3D = nd.get("n2", null)
+	if n2 == null or not is_instance_valid(n2):
+		var p: Dictionary = c.get("p", {})
+		n2 = VacaModelo.build(float(p.get("s", 1.0)), str(p.get("cor", "branca")), bool(p.get("touro", false)), int(p.get("seed", 1)))
+		add_child(n2)
+		nd["n2"] = n2
+	var mi2 := _malha(n2)
+	if mi2 and not mi2.has_meta("sem_ubere"):
+		mi2.mesh = VacaModelo.malha_sem_ubere(mi2.mesh)
+		mi2.set_meta("sem_ubere", true)
+	var sk2: Skeleton3D = n2.get_meta("sk")
+	_pose_pendurada(sk2)
+	_cortes_escala(sk2, c)
+	VacaModelo._cascos(sk2)
+	n2.global_transform = n.global_transform
+	# a carcaça é a banda esquerda (+x), o segundo desenho a direita
+	(_malha(n) as MeshInstance3D).material_override = _banda_mat(n, c, 1.0, cab_e)
+	(_malha(n2) as MeshInstance3D).material_override = _banda_mat(n2, c, -1.0, not cab_e)
+	for par in [[n, cab_e], [n2, not cab_e]]:
+		var nn: Node3D = par[0]
+		for ba in nn.find_children("*", "BoneAttachment3D", true, false):
+			if str((ba as BoneAttachment3D).bone_name) == "Head":
+				(ba as Node3D).visible = bool(par[1])
+			if str((ba as BoneAttachment3D).bone_name) == "Body":
+				(ba as Node3D).visible = bool(par[1])     # o cupim e o resto ficam numa banda só
+		for nm in ["saco", "prepucio"]:
+			for ch in nn.find_children(nm, "MeshInstance3D", true, false):
+				ch.queue_free()
+	n.remove_meta("couro_mat")
+	_partir_afasta(uid)
+
+
+## As bandas penduradas cada uma pela sua pata: um pouco afastadas para os lados.
+func _partir_afasta(uid: String) -> void:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not nd.has("n2") or not is_instance_valid(nd.n2):
+		return
+	var n: Node3D = nd.node
+	var xf: Transform3D = n.get_meta("xf_inteira", n.global_transform)
+	var lado: Vector3 = (_malha(n) as MeshInstance3D).global_transform.basis.x.normalized() if n.has_meta("sk") else Vector3.RIGHT
+	n.global_transform = Transform3D(xf.basis, xf.origin + lado * 0.07)
+	(nd.n2 as Node3D).global_transform = Transform3D(xf.basis, xf.origin - lado * 0.07)
+
+
+## Uma machadada na espinha: o corte desce um pedaço; no fim a vaca se parte.
+func partir_golpe(uid: String, quanto: float) -> bool:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty():
+		return false
+	var c: Dictionary = nd.c
+	if not c.has("banda"):
+		c["banda"] = {"cab": "e", "corte": 0.0}
+	var bd: Dictionary = c.banda
+	var lin := partir_linha(uid, 20)
+	var t := float(bd.get("corte", 0.0))
+	if not lin.is_empty():
+		var w: Vector3 = lin[mini(int(t * 19.0), 19)]
+		_pinga(w)
+		Sons.play_at(_jogo, "machado_osso", w, 0.0, _rng.randf_range(0.9, 1.1))
+	bd.corte = minf(1.0, t + quanto)
+	couro_visual(uid)
+	if float(bd.corte) >= 1.0:
+		bd["feito"] = true
+		if not lin.is_empty():
+			Sons.play_at(_jogo, "osso_quebra", lin[19], 3.0, 0.9)
+		partir_monta(uid)
+		return true
+	return false
 
 
 # ---------- abrir e tirar as vísceras (com a faca) ----------
@@ -1558,6 +1808,7 @@ func _partes_monta(uid: String) -> void:
 	_tocos(uid)
 	if is_instance_valid(nd.node):
 		_evis_aplica(nd.node, nd.c)
+	partir_monta(uid)
 
 
 ## Onde a parte vai ser cortada, no mundo (para o machado mirar).
@@ -1690,6 +1941,7 @@ uniform float garg;
 uniform float aberto;
 uniform float u_ini2;
 uniform float abre_w;
+uniform float parte_u;
 varying vec3 p;
 varying vec3 nn;
 void vertex() {
@@ -1740,6 +1992,11 @@ void fragment() {
 			cav = mix(cav, vec3(0.6, 0.12, 0.09), beira * 0.6);
 			dentro = true;
 		}
+	}
+	// partindo ao meio: o corte do machado pela espinha (de cima para baixo), o osso no meio
+	if (!dentro && u <= 0.9 && u >= parte_u && nn.z > 0.15 && abs(p.x) < wa * 1.3) {
+		dentro = true;
+		cav = abs(p.x) < wa * 0.45 ? vec3(0.86, 0.8, 0.72) : vec3(0.3, 0.02, 0.02);
 	}
 	if (dentro) {
 		ALBEDO = cav;
@@ -1848,7 +2105,7 @@ func couro_visual(uid: String) -> void:
 		return
 	var c: Dictionary = nd.c
 	var cr: Dictionary = c.get("couro", {})
-	if cr.is_empty():
+	if cr.is_empty() or bool((c.get("banda", {}) as Dictionary).get("feito", false)):
 		return
 	var n: Node3D = nd.node
 	var rf := _couro_ref(n)
@@ -1874,6 +2131,9 @@ func couro_visual(uid: String) -> void:
 		n.set_meta("couro_mat", sm)
 	var m_por_u: float = mi.global_transform.basis.get_scale().x
 	var u_ini := float(rf.u_ini)
+	if float(cr.get("pele", 0.0)) >= 1.0:
+		for cp in n.find_children("cupim", "MeshInstance3D", true, false):
+			(cp as MeshInstance3D).material_override = _carne_mat()
 	sm.set_shader_parameter("y_rabo", rf.y_rabo)
 	sm.set_shader_parameter("y_pescoco", rf.y_pescoco)
 	sm.set_shader_parameter("corte_ini", u_ini)
@@ -1897,6 +2157,8 @@ func couro_visual(uid: String) -> void:
 	sm.set_shader_parameter("garg", 1.0 if float(ev.get("garganta", 0.0)) >= 1.0 else 0.0)
 	sm.set_shader_parameter("aberto", 1.0 if bool(ev.get("feito", false)) else clampf(float(ev.get("puxa", 0.0)) * 1.5, 0.0, 1.0))
 	sm.set_shader_parameter("abre_w", 0.12 / m_por_u)
+	var bd: Dictionary = c.get("banda", {})
+	sm.set_shader_parameter("parte_u", lerpf(0.9, 0.0, float(bd.get("corte", 0.0))) if float(bd.get("corte", 0.0)) > 0.0 else 9.0)
 
 
 ## A linha do corte na barriga, no mundo (n pontos, dos pés de trás até o pescoço).
@@ -2029,6 +2291,8 @@ func _rebuild() -> void:
 		if not tem.has(uid):
 			if is_instance_valid(_nodes[uid].node):
 				(_nodes[uid].node as Node).queue_free()
+			if _nodes[uid].has("n2") and is_instance_valid(_nodes[uid].n2):
+				(_nodes[uid].n2 as Node).queue_free()
 			_nodes.erase(uid)
 	for ch in get_children():
 		if ch.has_meta("tipo") and not tem.has(str(ch.get_meta("uid", ""))):
@@ -2037,10 +2301,14 @@ func _rebuild() -> void:
 		if _nodes.has(uid):
 			# (veio de outro celular: os dados novos, o mesmo desenho)
 			var cv: Dictionary = tem[uid]
-			var mudou: bool = JSON.stringify(cv.get("couro", {})) != JSON.stringify((_nodes[uid].c as Dictionary).get("couro", {}))
+			var mudou: bool = JSON.stringify([cv.get("couro", {}), cv.get("evis", {})]) != JSON.stringify([(_nodes[uid].c as Dictionary).get("couro", {}), (_nodes[uid].c as Dictionary).get("evis", {})])
 			var cortou: bool = JSON.stringify(cv.get("cortes", [])) != JSON.stringify((_nodes[uid].c as Dictionary).get("cortes", [])) or (cv.get("partes", []) as Array).size() != ((_nodes[uid].c as Dictionary).get("partes", []) as Array).size()
 			_nodes[uid].c = cv
 			if mudou:
+				couro_visual(str(uid))
+			if bool((cv.get("banda", {}) as Dictionary).get("feito", false)) and not _nodes[uid].has("n2"):
+				partir_monta(str(uid))
+			elif (cv.get("banda", {}) as Dictionary).has("corte"):
 				couro_visual(str(uid))
 			if cortou:
 				var n0: Node3D = _nodes[uid].node

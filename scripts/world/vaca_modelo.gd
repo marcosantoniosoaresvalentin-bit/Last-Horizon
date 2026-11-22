@@ -158,7 +158,7 @@ static func build(s := 1.0, cor := "branca", touro := false, _seed := 1) -> Node
 	elif not bezerro and rng.randf() < 0.55:
 		cup = rng.randf_range(0.3, 0.55)
 	if cup > 0.0:
-		_preso(sk0, "Body", _cupim_mesh(cup), _material(cor, 1 if cor != "malhada" else 0, touro), Vector3(0, -0.0125, 0.0418 + 0.0015 * cup))
+		_preso(sk0, "Body", _cupim_mesh(cup), _material(cor, 1 if cor != "malhada" else 0, touro), Vector3(0, -0.0125, 0.0418 + 0.0015 * cup), "cupim")
 	# os chifres: sem, pequenos, grandes, ou um menor que o outro (quebrado)
 	if not bezerro:
 		var tipo := rng.randi() % 4 if not touro else 1 + rng.randi() % 3
