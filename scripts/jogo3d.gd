@@ -841,6 +841,8 @@ void fragment() {
 	_tranca_btns = [mk.call("Parar", -290, -146, _tranca_end)]
 	_laco_btns = [mk.call("Laçar", -290, -146, _laco_lancar), mk.call("Força", -290, -146, _laco_forca), mk.call("Soltar", -480, -146, _laco_soltar)]
 	(_laco_btns[1] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+	_tri_btns = [mk.call("Força", -290, -146, _tri_forca), mk.call("Soltar", -480, -146, _tri_soltar), mk.call("Amarrar", -290, -286, _tri_amarrar_estaca)]
+	(_tri_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_sub_ui = Control.new()
 	_sub_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_sub_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1637,6 +1639,7 @@ func _process(delta: float) -> void:
 	_car_tick(delta)
 	_flecha_tick(delta)
 	_laco_tick(delta)
+	_tri_tick(delta)
 	if _caca:
 		_caca.update(delta)
 		if Engine.get_process_frames() % 120 == 90:
@@ -3215,6 +3218,9 @@ func _update_ctx_btn() -> void:
 
 func _ctx_press() -> void:
 	if _ctx_action == "" or _crouch_job != "":
+		return
+	if _ctx_action.begins_with("tri_"):
+		_tri_press(_ctx_action)
 		return
 	match _ctx_action:
 		"timbo":
@@ -6513,7 +6519,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -9184,7 +9190,7 @@ func _proj_start(tipo: String) -> void:
 		bm.size = Vector3(float(pc[1]), r * 2.0, r * 2.0)
 		mi.mesh = bm
 		mi.material_override = gm
-		mi.transform = Transform3D(Maquinas.slot_basis(str(pc[3])), pc[2])
+		mi.transform = Transform3D(Maquinas.slot_basis(str(pc[3])), Maquinas.slot_pos(pc))
 		ghost.add_child(mi)
 	_proj = {"tipo": tipo, "yaw": _face + PI * 0.5, "ghost": ghost, "mat": gm, "ok": false, "c": Vector3.ZERO}
 	for b in _proj_btns:
@@ -9966,6 +9972,432 @@ func _laco_draw() -> void:
 		ui.draw_rect(Rect2(rb.position, Vector2(rb.size.x * clampf(t, 0.0, 1.0), rb.size.y)), Color(0.95, 0.2, 0.12, 0.6 + 0.4 * pisca))
 
 
+# ================== TRIPÉ DE IÇAR ==================
+# Pronto (pernas, amarras, roldana e corda), pelo botão de contexto: "Pegar a corda" (a
+# ponta do lado do bicho); perto dos pés de trás de uma vaca morta embaixo do tripé,
+# "Amarrar no pé da vaca": a ponta fica nos pés e a outra ponta vem para a mão. Tocando
+# "Força" (como no laço) e andando para trás a corda corre na roldana e a vaca sobe: a
+# traseira primeiro, girando na cabeça, até ficar pendurada. Sem força ela desce e puxa o
+# jogador de volta. Na estaca: "Amarrar" e ela fica lá em cima.
+
+const TRI_PRECISA := 0.3          # força para começar a levantar (mais quanto mais alto)
+var _tri := {}                    # {mi, fase: "ponta"|"puxa", forca}
+var _tri_btns: Array = []         # [Força, Soltar, Amarrar]
+var _tri_cordas := {}             # mi -> MeshInstance3D (a corda em uso)
+
+
+func _tri_mao() -> Vector3:
+	return _cam.global_position + _cam.global_transform.basis * Vector3(0.18, -0.32, -0.35)
+
+
+## A corda mais curta da mochila com pelo menos 5 m ("" se não tem).
+func _tri_corda_item() -> String:
+	for m in CORDAS:
+		if int(m) >= 5 and item_qtd("corda_%d" % int(m)) > 0:
+			return "corda_%d" % int(m)
+	return ""
+
+
+func _tri_ctx(mi: int) -> bool:
+	var p: Dictionary = _maq.plantas[mi]
+	if not _carry.is_empty():
+		return false
+	match _maq.tripe_etapa(mi):
+		"roldana":
+			if (item_qtd("roldana") > 0 and item_qtd("cipo_trancado") > 0) or teste:
+				_ctx_action = "tri_roldana"
+				_ctx_btn.text = "Pendurar a roldana"
+				return true
+			return false
+		"corda":
+			if _tri_corda_item() != "" or teste:
+				_ctx_action = "tri_corda"
+				_ctx_btn.text = "Passar a corda na roldana"
+				return true
+			return false
+	var ic: Dictionary = p.get("ice", {})
+	if not _tri.is_empty():
+		if int(_tri.mi) == mi and str(_tri.fase) == "ponta" and _caca:
+			var uid: String = _caca.vaca_perto(_player.position, 1.9)
+			if uid != "" and _tri_livre(uid):
+				var pe: Vector3 = _caca.pes_tras(uid)
+				var c: Vector3 = _maq.xform(mi).origin
+				if Vector2(pe.x - c.x, pe.z - c.z).length() < 3.0:
+					_ctx_action = "tri_pe"
+					_ctx_btn.text = "Amarrar no pé da vaca"
+					return true
+		return false
+	if ic.is_empty():
+		var c2: Vector3 = _maq.xform(mi).origin
+		if Vector2(_player.position.x - c2.x, _player.position.z - c2.z).length() < 2.6:
+			_ctx_action = "tri_pegar"
+			_ctx_btn.text = "Pegar a corda"
+			return true
+		return false
+	if bool(ic.get("puxando", false)):
+		return false                       # (outro jogador está puxando)
+	var est: Vector3 = _maq.tri_estaca(mi)
+	var perto_estaca := Vector2(_player.position.x - est.x, _player.position.z - est.z).length() < 1.6
+	if bool(ic.get("fixo", false)):
+		if perto_estaca:
+			_ctx_action = "tri_desestaca"
+			_ctx_btn.text = "Desamarrar da estaca"
+			return true
+		return false
+	# no chão, amarrada: perto dos pés desamarra; senão pega a ponta e puxa de novo
+	var pe2: Vector3 = _caca.pes_tras(str(ic.uid)) if _caca else Vector3.ZERO
+	var no_chao := pe2.y - ground_at(pe2.x, pe2.z) < 0.6
+	if no_chao and Vector2(pe2.x - _player.position.x, pe2.z - _player.position.z).length() < 1.9:
+		_ctx_action = "tri_desamarrar"
+		_ctx_btn.text = "Desamarrar a vaca"
+		return true
+	_ctx_action = "tri_puxar"
+	_ctx_btn.text = "Puxar a corda"
+	return true
+
+
+## Essa vaca já não está amarrada em outro tripé?
+func _tri_livre(uid: String) -> bool:
+	for q in _maq.plantas:
+		if str((q.get("ice", {}) as Dictionary).get("uid", "")) == uid:
+			return false
+	return true
+
+
+## O tripé pronto com a estaca do lado do jogador (a estaca fica longe do meio), ou -1.
+func _tri_na_estaca() -> int:
+	if _maq == null:
+		return -1
+	for mi in _maq.plantas.size():
+		var p: Dictionary = _maq.plantas[mi]
+		if str(p.tipo) != "tripe" or (p.get("ice", {}) as Dictionary).is_empty():
+			continue
+		var e: Vector3 = _maq.tri_estaca(mi)
+		if Vector2(_player.position.x - e.x, _player.position.z - e.z).length() < 1.6:
+			return mi
+	return -1
+
+
+func _tri_press(act: String) -> void:
+	var mi: int = _maq.planta_near(_player.position, 5.0)
+	var me := _tri_na_estaca()
+	if me >= 0:
+		mi = me
+	if mi < 0 or not Maquinas.TIPOS[_maq.plantas[mi].tipo].has("tripe"):
+		return
+	var p: Dictionary = _maq.plantas[mi]
+	var xf: Transform3D = _maq.xform(mi)
+	match act:
+		"tri_roldana":
+			if not teste:
+				remove_item("roldana", 1)
+				remove_item("cipo_trancado", 1)
+				_update_inventory()
+			_maq.tripe_por(mi, "roldana")
+			Sons.play_at(self, "fibra_puxa", xf.origin + Vector3.UP * 2.6, -4.0, 1.0)
+		"tri_corda":
+			var it := _tri_corda_item()
+			var m := 5
+			if it != "":
+				m = int(it.substr(6))
+				remove_item(it, 1)
+				_update_inventory()
+			_maq.tripe_por(mi, "corda", m)
+			Sons.play_at(self, "fibra_puxa", xf.origin + Vector3.UP * 2.6, -6.0, 0.8)
+		"tri_pegar":
+			_tri = {"mi": mi, "fase": "ponta", "forca": 0.0}
+			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -10.0, 1.2)
+		"tri_pe":
+			if _tri.is_empty() or _caca == null:
+				return
+			var uid: String = _caca.vaca_perto(_player.position, 1.9)
+			if uid == "":
+				return
+			var base: Dictionary = _caca.base_pendura(uid)
+			var r: Dictionary = _caca.pendurar(uid, _maq.tri_roldana(mi), 0.0, base)
+			p["ice"] = {"uid": uid, "base": base, "alt": float(r.alt0), "fixo": false, "puxando": true, "L": 0.0}
+			_tri = {"mi": mi, "fase": "puxa", "forca": 0.7}
+			_tri_corda_estaca(mi)
+			Sons.play_at(self, "fibra_puxa", r.h, -4.0, 1.0)
+		"tri_puxar", "tri_desestaca":
+			var ic: Dictionary = p.get("ice", {})
+			if ic.is_empty():
+				return
+			ic.fixo = false
+			ic.puxando = true
+			_tri = {"mi": mi, "fase": "puxa", "forca": 0.8 if act == "tri_desestaca" else 0.6}
+			_tri_ajusta_corda(mi)
+			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -8.0, 1.0)
+		"tri_desamarrar":
+			var ic2: Dictionary = p.get("ice", {})
+			if ic2.is_empty():
+				return
+			if _caca:
+				_caca.despendurar(str(ic2.uid), ic2.base)
+			p.erase("ice")
+			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP * 0.5, -8.0, 1.3)
+	_act_check = 0.0
+
+
+## O comprimento da corda quando amarra no pé: chegando na estaca, a vaca fica toda
+## levantada (até lá o jogador vai recolhendo a folga).
+func _tri_corda_estaca(mi: int) -> void:
+	var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+	if ic.is_empty() or _caca == null:
+		return
+	var pp: Vector3 = _maq.tri_roldana(mi)
+	var lado: Vector3 = _maq.tri_lado(mi)
+	var r0: Dictionary = _caca.pendura_calc(str(ic.uid), pp, -1.0, ic.base)
+	if r0.is_empty():
+		return
+	var altmax := minf(float(r0.alt0) + float(r0.l), pp.y - ground_at(pp.x, pp.z) - 0.4)
+	var r: Dictionary = _caca.pendura_calc(str(ic.uid), pp, altmax, ic.base)
+	var est: Vector3 = _maq.tri_estaca(mi) - lado * 1.0
+	var mao := Vector3(est.x, ground_at(est.x, est.z) + 1.25, est.z)
+	var lt := pp - lado * Maquinas.TRI_RR
+	var rt := pp + lado * Maquinas.TRI_RR
+	ic.L = (r.h as Vector3).distance_to(lt) + rt.distance_to(mao) + PI * Maquinas.TRI_RR
+
+
+## O comprimento da corda em uso fica igual ao de agora (esticada: da mão aos pés).
+func _tri_ajusta_corda(mi: int) -> void:
+	var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+	if ic.is_empty() or _caca == null:
+		return
+	var pp: Vector3 = _maq.tri_roldana(mi)
+	var lado: Vector3 = _maq.tri_lado(mi)
+	var r: Dictionary = _caca.pendura_calc(str(ic.uid), pp, float(ic.alt), ic.base)
+	if r.is_empty():
+		return
+	var lt := pp - lado * Maquinas.TRI_RR
+	var rt := pp + lado * Maquinas.TRI_RR
+	ic.L = (r.h as Vector3).distance_to(lt) + rt.distance_to(_tri_mao()) + PI * Maquinas.TRI_RR
+
+
+func _tri_forca() -> void:
+	if str(_tri.get("fase", "")) != "puxa":
+		return
+	_tri.forca = minf(1.0, float(_tri.forca) + 0.1)
+
+
+func _tri_soltar() -> void:
+	if _tri.is_empty():
+		return
+	var mi := int(_tri.mi)
+	if mi < _maq.plantas.size():
+		var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+		if not ic.is_empty():
+			ic.puxando = false
+	_tri = {}
+
+
+func _tri_amarrar_estaca() -> void:
+	if str(_tri.get("fase", "")) != "puxa":
+		return
+	var mi := int(_tri.mi)
+	var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+	if ic.is_empty():
+		return
+	ic.fixo = true
+	ic.puxando = false
+	_tri = {}
+	Sons.play_at(self, "fibra_puxa", _maq.tri_estaca(mi), -4.0, 0.9)
+
+
+## Quanto a corda do lado da vaca mede com os pés na altura alt.
+func _tri_seg(ic: Dictionary, pp: Vector3, lt: Vector3, alt: float) -> float:
+	var r: Dictionary = _caca.pendura_calc(str(ic.uid), pp, alt, ic.base)
+	return 1e9 if r.is_empty() else (r.h as Vector3).distance_to(lt)
+
+
+func _tri_tick(delta: float) -> void:
+	if _maq == null:
+		return
+	# os botões
+	var puxa := str(_tri.get("fase", "")) == "puxa"
+	if not _tri.is_empty() and (_morto >= 0.0 or _swim or not _carry.is_empty() or int(_tri.mi) >= _maq.plantas.size()):
+		_tri_soltar()
+		puxa = false
+	if _tri_btns.size() == 3:
+		(_tri_btns[0] as Control).visible = puxa
+		(_tri_btns[1] as Control).visible = not _tri.is_empty()
+		var est_ok := false
+		if puxa:
+			var est: Vector3 = _maq.tri_estaca(int(_tri.mi))
+			var ic0: Dictionary = _maq.plantas[int(_tri.mi)].get("ice", {})
+			est_ok = Vector2(_player.position.x - est.x, _player.position.z - est.z).length() < 1.5 and float(ic0.get("alt", 0.0)) > 0.0
+		(_tri_btns[2] as Control).visible = est_ok
+		if not _tri.is_empty() and _jump_btn:
+			_jump_btn.visible = false
+	if puxa:
+		_tri.forca = maxf(0.0, float(_tri.forca) - delta * 0.1)
+		if _sub_ui:
+			_sub_ui.queue_redraw()
+	for mi in _maq.plantas.size():
+		var p: Dictionary = _maq.plantas[mi]
+		if not Maquinas.TIPOS[p.tipo].has("tripe") or not _maq.pronta(mi):
+			continue
+		var ic: Dictionary = p.get("ice", {})
+		var minha: bool = not _tri.is_empty() and int(_tri.mi) == mi
+		var em_uso: bool = minha or not ic.is_empty()
+		_maq.tri_corda_parada(mi, not em_uso)
+		if not em_uso:
+			if _tri_cordas.has(mi):
+				(_tri_cordas[mi] as Node3D).visible = false
+			continue
+		var pp: Vector3 = _maq.tri_roldana(mi)
+		var lado: Vector3 = _maq.tri_lado(mi)
+		var lt := pp - lado * Maquinas.TRI_RR
+		var rt := pp + lado * Maquinas.TRI_RR
+		var ponta_vaca: Vector3
+		var ponta_puxa: Vector3
+		var no_pe := false
+		if ic.is_empty():
+			# segurando a ponta do lado da vaca: a outra fica pendurada e enrolada no chão
+			ponta_vaca = _tri_mao()
+			ponta_puxa = Vector3.INF
+		else:
+			if _caca == null or not _caca._nodes.has(str(ic.uid)):
+				p.erase("ice")                         # a carcaça sumiu (apodreceu)
+				if minha:
+					_tri = {}
+				continue
+			var alt := float(ic.alt)
+			var r0: Dictionary = _caca.pendura_calc(str(ic.uid), pp, -1.0, ic.base)
+			var alt0 := float(r0.get("alt0", 0.0))
+			# (os pés sobem no máximo até um pouco abaixo da roldana)
+			var altmax := minf(alt0 + float(r0.get("l", 2.0)), pp.y - ground_at(pp.x, pp.z) - 0.4)
+			if minha and puxa:
+				# a corda: o que sobra depois da mão é o lado da vaca
+				var mao := _tri_mao()
+				var seg := float(ic.L) - PI * Maquinas.TRI_RR - rt.distance_to(mao)
+				var alvo := alt0
+				if seg < _tri_seg(ic, pp, lt, alt0):
+					var lo := alt0
+					var hi := altmax
+					if _tri_seg(ic, pp, lt, hi) > seg:
+						alvo = hi
+					else:
+						for _i in 18:
+							var md := (lo + hi) * 0.5
+							if _tri_seg(ic, pp, lt, md) > seg:
+								lo = md
+							else:
+								hi = md
+						alvo = lo
+				alvo = minf(alvo, altmax)
+				# a força: quanto mais em cima, mais pesado
+				var f := clampf((alt - alt0) / maxf(altmax - alt0, 0.1), 0.0, 1.0)
+				var precisa := TRI_PRECISA + 0.45 * f
+				var fz := float(_tri.forca)
+				if alvo > alt and fz < precisa:
+					alvo = alt                            # não tem força para subir mais
+				if fz < precisa - 0.15:
+					alvo = minf(alvo, alt - delta * (0.4 + (precisa - fz) * 2.0))   # desce e puxa o jogador
+				alt = maxf(alt0, move_toward(alt, alvo, delta * 1.4))
+				# o jogador não passa do comprimento da corda (é puxado de volta)
+				var dmax := float(ic.L) - PI * Maquinas.TRI_RR - _tri_seg(ic, pp, lt, alt)
+				# (pela mão, que fica um pouco na frente do corpo)
+				var hv := Vector2(mao.x - rt.x, mao.z - rt.z)
+				var dy := mao.y - rt.y
+				var hmax := sqrt(maxf(dmax * dmax - dy * dy, 0.0))
+				if alt > alt0 + 0.01 and hv.length() > hmax + 0.01:
+					var volta := hv.normalized() * (hv.length() - hmax)
+					_player.position.x -= volta.x
+					_player.position.z -= volta.y
+				ic.alt = alt
+				ic["mao"] = [snappedf(mao.x, 0.01), snappedf(mao.y, 0.01), snappedf(mao.z, 0.01)]
+			elif not bool(ic.get("fixo", false)) and not bool(ic.get("puxando", false)):
+				alt = maxf(alt0, alt - delta * 3.5)          # soltou: ela cai
+				ic.alt = alt
+			var r: Dictionary = _caca.pendurar(str(ic.uid), pp, alt, ic.base)
+			if r.is_empty():
+				continue
+			ponta_vaca = r.h
+			no_pe = true
+			if bool(ic.get("fixo", false)):
+				ponta_puxa = _maq.tri_estaca(mi)
+			elif minha and puxa:
+				ponta_puxa = _tri_mao()
+			elif bool(ic.get("puxando", false)) and (ic.get("mao", []) as Array).size() == 3:
+				ponta_puxa = Vector3(ic.mao[0], ic.mao[1], ic.mao[2])
+			else:
+				ponta_puxa = Vector3.INF
+		_tri_desenha(mi, pp, lado, ponta_vaca, ponta_puxa, no_pe)
+
+
+## A corda em uso: dos pés (ou da mão) sobe até a roldana, passa por cima dela e desce até a
+## mão de quem puxa, a estaca, ou o chão (solta).
+func _tri_desenha(mi: int, pp: Vector3, lado: Vector3, a: Vector3, b: Vector3, no_pe: bool) -> void:
+	if not _tri_cordas.has(mi):
+		var m := MeshInstance3D.new()
+		m.material_override = Maquinas.cipo_mat()
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(m)
+		_tri_cordas[mi] = m
+	var node: MeshInstance3D = _tri_cordas[mi]
+	node.visible = true
+	var R := Maquinas.TRI_RR * 0.85
+	var pts := []
+	var lt := pp - lado * R
+	var rt := pp + lado * R
+	for i in 7:
+		pts.append(a.lerp(lt, float(i) / 7.0))
+	for i in 9:
+		var an := PI - PI * float(i) / 8.0
+		pts.append(pp + (lado * cos(an) + Vector3.UP * sin(an)) * R)
+	if b == Vector3.INF:
+		# a ponta solta: desce da roldana até o chão e fica enrolada
+		var g := rt + lado * 0.05
+		g.y = ground_at(g.x, g.z) + 0.04
+		for i in range(1, 8):
+			pts.append(rt.lerp(g, float(i) / 7.0))
+		pts.append(g + lado * 0.35)
+	else:
+		for i in range(1, 9):
+			pts.append(rt.lerp(b, float(i) / 8.0))
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	Maquinas.fio_cipo(st, pts, 0.0095, 0.3)
+	if no_pe:
+		# as voltas nos pés de trás
+		for k in 3:
+			var anel := []
+			for i in 13:
+				var an2 := TAU * float(i) / 12.0
+				anel.append(a + Vector3(cos(an2) * 0.075, -0.04 + k * 0.035, sin(an2) * 0.075))
+			Maquinas.fio_cipo(st, anel, 0.009, 0.4 + k * 0.1)
+	st.generate_normals()
+	node.mesh = st.commit()
+
+
+## A barra de força ao lado do botão (igual à do laço) com o risco do quanto precisa.
+func _tri_draw() -> void:
+	if str(_tri.get("fase", "")) != "puxa" or _tri_btns.size() < 3:
+		return
+	var mi := int(_tri.mi)
+	var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+	if ic.is_empty() or _caca == null:
+		return
+	var ui := _sub_ui
+	var btn: Control = _tri_btns[0]
+	var r := Rect2(btn.get_global_rect().position - ui.get_global_rect().position + Vector2(-44, 0), Vector2(28, btn.size.y))
+	ui.draw_rect(r.grow(3), Color(0.04, 0.04, 0.03, 0.85))
+	var v := float(_tri.forca)
+	var cols := [Color(0.25, 0.55, 0.95), Color(0.25, 0.85, 0.3), Color(0.95, 0.88, 0.2), Color(1.0, 0.55, 0.12), Color(0.95, 0.18, 0.12)]
+	var f := v * (cols.size() - 1)
+	var i := mini(int(f), cols.size() - 2)
+	var col: Color = (cols[i] as Color).lerp(cols[i + 1], f - i)
+	var h := r.size.y * v
+	ui.draw_rect(Rect2(Vector2(r.position.x, r.end.y - h), Vector2(r.size.x, h)), col)
+	var r0: Dictionary = _caca.pendura_calc(str(ic.uid), _maq.tri_roldana(mi), -1.0, ic.base)
+	var alt0 := float(r0.get("alt0", 0.0))
+	var fr := clampf((float(ic.alt) - alt0) / maxf(float(r0.get("l", 2.0)), 0.1), 0.0, 1.0)
+	var ny := r.end.y - r.size.y * (TRI_PRECISA + 0.45 * fr)
+	ui.draw_line(Vector2(r.position.x - 8, ny), Vector2(r.end.x + 8, ny), Color(1, 1, 1, 0.95), 3.0)
+	ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
+
+
 # ================== ARCO E FLECHA ==================
 # Com o arco na mão (Mochila → EQUIPAR) e flechas na mochila: segurando "Atirar" a corda
 # vai sendo puxada (a mira fecha), soltando a flecha sai para onde a mira aponta, mais
@@ -10372,9 +10804,14 @@ func soltar_no_carrinho(id: String, n: int) -> bool:
 
 func _maq_ctx() -> bool:
 	var mi: int = _maq.planta_near(_player.position, 5.0)     # a serra tem 6 m: as pontas ficam longe do meio
+	var me := _tri_na_estaca()
+	if me >= 0:
+		mi = me
 	if mi < 0:
 		return false
 	var p: Dictionary = _maq.plantas[mi]
+	if Maquinas.TIPOS[p.tipo].has("tripe") and _maq.tripe_etapa(mi) in ["roldana", "corda", ""]:
+		return _tri_ctx(mi)
 	if _maq.pronta(mi):
 		var role: String = _maq.role_at(mi, _player.position)
 		if role == "pedal" and _carry.is_empty():
@@ -14146,6 +14583,7 @@ func _draw_bur_ui() -> void:
 	_draw_fornos()
 	_tranca_draw()
 	_laco_draw()
+	_tri_draw()
 	if _mao == "arco" and _morto < 0.0:
 		# a mira: um círculo pequeno no meio da tela (fecha quando a corda está puxada)
 		var mc := _sub_ui.size * 0.5

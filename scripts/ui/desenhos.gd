@@ -419,6 +419,22 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			# a ponta solta saindo do rolo
 			ci.draw_line(c + Vector2(30, 10) * u, c + Vector2(46, 36) * u, Color(0.22, 0.16, 0.07), 8.0 * u, true)
 			ci.draw_line(c + Vector2(30, 10) * u, c + Vector2(46, 36) * u, cor, 5.5 * u, true)
+		"roldana":
+			# a forquilha em V segurando a rodela pela vareta (o eixo), o sulco em volta
+			var mad := Color(0.5, 0.36, 0.2)
+			ci.draw_line(c + Vector2(0, -46) * u, c + Vector2(0, -30) * u, ink, 9.0 * u, true)
+			ci.draw_line(c + Vector2(0, -46) * u, c + Vector2(0, -30) * u, mad, 6.0 * u, true)
+			for sd in [-1.0, 1.0]:
+				ci.draw_line(c + Vector2(0, -30) * u, c + Vector2(sd * 30, 2) * u, ink, 9.0 * u, true)
+				ci.draw_line(c + Vector2(0, -30) * u, c + Vector2(sd * 30, 2) * u, mad, 6.0 * u, true)
+			ci.draw_circle(c + Vector2(0, 14) * u, 32.0 * u, Color(0.3, 0.22, 0.14))
+			ci.draw_circle(c + Vector2(0, 14) * u, 29.0 * u, Color(0.78, 0.63, 0.42))
+			ci.draw_arc(c + Vector2(0, 14) * u, 25.0 * u, 0, TAU, 32, Color(0.45, 0.32, 0.18), 3.0 * u, true)
+			for r in [17.0, 10.0]:
+				ci.draw_arc(c + Vector2(0, 14) * u, r * u, 0, TAU, 28, Color(0.62, 0.46, 0.28), 1.6 * u, true)
+			ci.draw_arc(c + Vector2(0, 14) * u, 32.0 * u, 0, TAU, 36, ink, 2.0 * u, true)
+			ci.draw_line(c + Vector2(-34, 14) * u, c + Vector2(34, 14) * u, ink, 6.0 * u, true)
+			ci.draw_line(c + Vector2(-34, 14) * u, c + Vector2(34, 14) * u, Color(0.66, 0.52, 0.3), 3.5 * u, true)
 		"laco_5", "laco_10":
 			# a corda enrolada na mão e a laçada aberta na ponta
 			var cor2 := Color(0.55, 0.45, 0.22)

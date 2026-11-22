@@ -174,6 +174,12 @@ func _select(tipo: String) -> void:
 		partes.append("%d galho (o eixo)" % int(n.galho))
 	if int(n.get("cipo", 0)) > 0:
 		partes.append("%d cipós" % int(n.cipo))
+	if int(n.get("roldana", 0)) > 0:
+		partes.append("%d roldana de madeira" % int(n.roldana))
+	if int(n.get("cipo_trancado", 0)) > 0:
+		partes.append("%d cipó trançado (a cordinha)" % int(n.cipo_trancado))
+	if int(n.get("corda", 0)) > 0:
+		partes.append("1 corda de %d m ou mais" % int(n.corda))
 	if int(n.get("barro", 0)) > 0:
 		partes.append("%d baldes de barro" % int(n.barro))
 	var nl := int(n.lamina)
@@ -193,8 +199,36 @@ func _draw_plan() -> void:
 	var o := Vector2(s.x * 0.5, s.y - 18)
 	if t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho") or t.has("amarrar"):
 		sc = minf(s.x / 2.8, s.y / 1.25)          # máquina pequena: desenho maior
+	if t.has("tripe"):
+		sc = minf(s.x / 8.0, s.y / 5.0)
+		o = Vector2(s.x * 0.33, s.y - 18)
 	var P := func(x: float, y: float) -> Vector2:
 		return o + Vector2(x * sc, -y * sc)
+	if t.has("tripe"):
+		var fnt := get_theme_default_font()
+		_draw.draw_line(P.call(-2.2, 0), P.call(5.4, 0), C_DIM, 1.5)
+		# as pernas de lado (a de trás e as duas da frente, que aparecem juntas)
+		for i in 3:
+			var a: float = Maquinas.TRI_ANG[i]
+			var pe := Vector2(cos(a) * Maquinas.TRI_R, 0)
+			var u: Vector3 = Maquinas.tri_dir(i)
+			var fim := pe + Vector2(u.x, u.y) * Maquinas.TRI_L
+			_draw.draw_line(P.call(pe.x, pe.y), P.call(fim.x, fim.y), C_INK, 3.0)
+		_draw.draw_circle(P.call(0, Maquinas.TRI_H), 0.1 * sc, C_HI)
+		_draw.draw_string(fnt, P.call(0.25, Maquinas.TRI_H + 0.1), "AMARRAS DE CIPÓ", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
+		var rc := Vector2(0, Maquinas.TRI_H - Maquinas.TRI_ROLDANA)
+		_draw.draw_line(P.call(0, Maquinas.TRI_H - 0.1), P.call(rc.x, rc.y + Maquinas.TRI_RR), C_DIM, 2.0)
+		_draw.draw_arc(P.call(rc.x, rc.y), Maquinas.TRI_RR * sc, 0, TAU, 24, C_HI, 2.0)
+		_draw.draw_string(fnt, P.call(0.25, rc.y - 0.05), "ROLDANA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
+		var e: Vector3 = Maquinas.TRI_ESTACA
+		_draw.draw_rect(Rect2(P.call(e.x - 0.05, e.y), Vector2(0.1 * sc, (e.y + 0.23) * sc)), C_INK, false, 2.0)
+		_draw.draw_line(P.call(e.x - 0.25, -0.23), P.call(e.x + 0.25, -0.23), C_DIM, 1.0)
+		_draw.draw_string(fnt, P.call(e.x - 0.45, e.y + 0.25), "ESTACA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
+		# a corda: da roldana até a estaca
+		_draw.draw_line(P.call(rc.x + Maquinas.TRI_RR, rc.y), P.call(e.x, e.y), C_DIM, 1.5)
+		_draw.draw_line(P.call(rc.x - Maquinas.TRI_RR, rc.y), P.call(rc.x - Maquinas.TRI_RR, 0.5), C_DIM, 1.5)
+		_draw.draw_string(fnt, P.call(1.9, 2.3), "CORDA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_DIM)
+		return
 	var small := t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho") or t.has("amarrar")
 	_draw.draw_line(P.call(-3.2 if not small else -1.2, 0), P.call(3.2 if not small else 0.9, 0), C_DIM, 1.5)
 	for pc in t.pecas:

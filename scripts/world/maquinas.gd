@@ -249,6 +249,25 @@ const TIPOS := {
 		"area": Rect2(-1.0, -0.55, 2.0, 1.1),
 		"amarrar": {"n": 4, "nos": [Vector3(0.8, 1.38, 0.0), Vector3(-0.8, 1.38, 0.0)]},
 	},
+	# Tripé de içar: três toras compridas em pé, abertas embaixo e cruzadas em cima,
+	# amarradas com cipó no cruzamento. Do cruzamento pende a roldana (amarrada com uma
+	# cordinha de cipó trançado) e por ela corre a corda: uma ponta vai no pé do bicho, a
+	# outra o jogador puxa andando para trás até a estaca fincada no chão, e amarra ali.
+	"tripe": {
+		"nome": "Tripé de Içar",
+		"desc": "Três toras amarradas com cipó no topo, a roldana pendurada e a corda correndo nela, com a estaca no chão para amarrar.",
+		"pecas": [
+			["tora", 4.7, Vector3.ZERO, "tri0", 0.08],     # 0..2 as pernas (o centro é calculado)
+			["tora", 4.7, Vector3.ZERO, "tri1", 0.08],
+			["tora", 4.7, Vector3.ZERO, "tri2", 0.08],
+			["tora", 0.7, Vector3(4.8, 0.12, 0.0), "y", 0.05],   # 3 a estaca (meio enterrada)
+		],
+		"pinos": [],
+		"area": Rect2(-2.0, -2.0, 4.0, 4.0),
+		"sem_colisao": true,
+		"amarrar": {"n": 3, "nos": [Vector3(0.0, 4.0, 0.0)]},
+		"tripe": {"roldana": 1, "cordinha": 1, "corda": 5},
+	},
 	"forno": {
 		"nome": "Forno de Carvão",
 		"desc": "Domo de barro com pedras do chão encaixadas, uma porta de barro e o suspiro em cima. Primeiro levante as paredes de barro, depois encaixe as pedras e por último faça a porta de barro. Encha de lenha, acenda com o arco de fogo e tampe a boca: a lenha queima devagar, sem ar, e vira carvão.",
@@ -271,6 +290,15 @@ const FORNO_S := 360.0           # segundos de verdade com a porta fechada até 
 const FORNO_R := 0.82            # raio do domo
 const FORNO_H := 0.95            # altura do domo
 const FORNO_FRENTE := 0.55       # a parede da frente (reta, com a boca)
+
+const TRI_R := 1.9               # raio dos pés do tripé
+const TRI_H := 4.0              # altura do cruzamento das pernas
+const TRI_L := 4.7               # comprimento das pernas
+const TRI_ANG := [PI, PI / 3.0, -PI / 3.0]       # onde ficam os pés (a estaca em +x, entre dois)
+const TRI_ROLDANA := 0.36        # quanto a roldana pende abaixo do cruzamento (o centro dela)
+const TRI_RR := 0.11             # raio da roldana
+const TRI_ESTACA := Vector3(4.8, 0.47, 0.0)     # a cabeça da estaca (onde amarra)
+const TRI_CORDA := 5.0           # o comprimento de corda que trabalha (o resto fica enrolado)
 
 const TORNO_MESA := 0.76         # em cima da mesa giratória do torno (m)
 const MESA_TOPO := 0.84          # em cima do tampo (m)
@@ -317,6 +345,8 @@ func build(jogo: Node, arvores: Node, save_path := "") -> void:
 		_load(save_path)
 		for q in plantas:
 			q.erase("emp")             # ninguém está empurrando quando o mundo abre
+			if q.get("ice", {}) is Dictionary:
+				(q.get("ice", {}) as Dictionary).erase("puxando")
 	_rebuild()
 
 
@@ -340,6 +370,10 @@ static func needs(tipo: String) -> Dictionary:
 	out["galho"] = int(ca.get("eixo", 0))
 	out["rodela"] = int(ca.get("roda", 0))
 	out["cipo"] = int(ca.get("cipo", 0)) + int((t.get("amarrar", {}) as Dictionary).get("n", 0))
+	var tp: Dictionary = t.get("tripe", {})
+	out["roldana"] = int(tp.get("roldana", 0))
+	out["cipo_trancado"] = int(tp.get("cordinha", 0))
+	out["corda"] = int(tp.get("corda", 0))
 	out["pedra"] = int(fz.get("pedras", 0))
 	out["barro"] = int(fz.get("barro", 0)) + int(fz.get("porta", 0))
 	return out
@@ -399,6 +433,9 @@ func complete(mi: int) -> void:
 		if (p.get("roda", {}) as Dictionary).is_empty():
 			p["roda"] = {"r": 0.2}
 		p["amarras"] = int(TIPOS[p.tipo].carrinho.cipo)
+	if TIPOS[p.tipo].has("tripe"):
+		p["roldana"] = true
+		p["corda_m"] = 5
 	var fz: Dictionary = TIPOS[p.tipo].get("forno", {})
 	if not fz.is_empty():
 		p["ped"] = int(fz.pedras)
@@ -436,7 +473,29 @@ static func slot_basis(dir: String) -> Basis:
 		"z_lado": return Basis(Vector3.UP, PI * 0.5) * Basis(Vector3.RIGHT, PI * 0.5)
 		"y_t+": return Basis(Vector3.RIGHT, 0.36) * Basis(Vector3.BACK, PI * 0.5)     # em pé, inclinada
 		"y_t-": return Basis(Vector3.RIGHT, -0.36) * Basis(Vector3.BACK, PI * 0.5)
+	if dir.begins_with("tri"):
+		var u := tri_dir(int(dir.substr(3)))
+		var up := Vector3.UP - u * u.y
+		var zz := u.cross(up.normalized()).normalized()
+		return Basis(u, zz.cross(u), zz)
 	return Basis()
+
+
+## A perna i do tripé: do pé para o cruzamento (normalizado).
+static func tri_dir(i: int) -> Vector3:
+	var a: float = TRI_ANG[i]
+	# (cada perna passa um pouco para o lado dela no cruzamento: as três ficam encostadas)
+	return (Vector3(cos(a) * 0.075, TRI_H, sin(a) * 0.075) - Vector3(cos(a) * TRI_R, 0, sin(a) * TRI_R)).normalized()
+
+
+## O centro da peça (as pernas do tripé têm o centro calculado).
+static func slot_pos(pc: Array) -> Vector3:
+	var d := str(pc[3])
+	if d.begins_with("tri"):
+		var i := int(d.substr(3))
+		var a: float = TRI_ANG[i]
+		return Vector3(cos(a) * TRI_R, -0.05, sin(a) * TRI_R) + tri_dir(i) * float(pc[1]) * 0.5
+	return pc[2]
 
 
 ## A madeira que a peça da planta usa (no tamanho dela).
@@ -497,6 +556,8 @@ func pronta(mi: int) -> bool:
 		return false
 	if TIPOS[p.tipo].has("carrinho") and carrinho_etapa(mi) != "":
 		return false
+	if TIPOS[p.tipo].has("tripe") and (not bool(p.get("roldana", false)) or int(p.get("corda_m", 0)) <= 0):
+		return false
 	if int(p.get("amarras", 0)) < int((TIPOS[p.tipo].get("amarrar", {}) as Dictionary).get("n", 0)):
 		return false
 	for b in p.pecas:
@@ -539,7 +600,7 @@ func slot_for(mi: int, fl: Dictionary, pos: Vector3) -> Dictionary:
 		if pc.size() > 5 and r < float(pc[5]):
 			thin = float(pc[5]) if thin <= 0.0 else minf(thin, float(pc[5]))
 			continue                   # fina demais (a rodela da mesa e o volante são de tora grossa)
-		var w := xf * (pc[2] as Vector3)
+		var w := xf * slot_pos(pc)
 		var d := Vector2(w.x - pos.x, w.z - pos.z).length()
 		if d < bd:
 			bd = d
@@ -569,6 +630,8 @@ func fill_slot(mi: int, si: int, sobra := 0.0, fl := {}) -> void:
 		plantas[mi]["sobra"] = []
 		for _p in plantas[mi].pecas:
 			plantas[mi].sobra.append(0.0)
+	if str(TIPOS[plantas[mi].tipo].pecas[si][3]).begins_with("tri"):
+		sobra = 0.0                # (a perna do tripé passando do cruzamento é normal)
 	plantas[mi].sobra[si] = snappedf(sobra, 0.005) if sobra > 0.015 else 0.0
 	_rebuild()
 
@@ -599,7 +662,7 @@ func sobra_info(mi: int, si: int) -> Dictionary:
 	var b := slot_basis(str(pc[3]))
 	var L := float(pc[1])
 	var e := float(plantas[mi].sobra[si])
-	var c: Vector3 = pc[2]
+	var c: Vector3 = slot_pos(pc)
 	var xf := xform(mi)
 	var cut := c + b.x * (L * 0.5)
 	return {"pos": xf * cut, "mid": xf * (cut + b.x * e * 0.5), "deitada": str(pc[3]) != "y", "len": e}
@@ -1057,6 +1120,8 @@ func push_out(p: Vector3) -> Vector3:
 		if done_count(mi) < 3 or mi == empurrando:
 			continue
 		var t: Dictionary = TIPOS[plantas[mi].tipo]
+		if bool(t.get("sem_colisao", false)):
+			continue
 		var ar: Rect2 = t.area
 		var xf := xform(mi)
 		var l := xf.affine_inverse() * p
@@ -1106,7 +1171,7 @@ func _rebuild() -> void:
 				var bb := b
 				if str(pc[0]) == "tabua":
 					bb = b * Basis(Vector3.RIGHT, PI)      # a tábua virada: a face rachada (reta) para cima
-				n.transform = Transform3D(bb, (pc[2] as Vector3) + b.x * e * 0.5)
+				n.transform = Transform3D(bb, slot_pos(pc) + b.x * e * 0.5)
 				if t.has("carrinho") and str(pc[0]) == "tabua":
 					# a tábua aparelhada na largura e na grossura da peça: fica rente à outra
 					var ex0: Vector2 = _arv._sec_ext(slot_log(pc))
@@ -1137,7 +1202,7 @@ func _rebuild() -> void:
 				mi2.material_override = _ghost_mat
 				mi2.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				root.add_child(mi2)
-				mi2.transform = Transform3D(b, pc[2])
+				mi2.transform = Transform3D(b, slot_pos(pc))
 		# juntas: com o pino batido, ou esperando o pino (bolinha amarela)
 		for ji in (t.pinos as Array).size():
 			var at: Vector3 = t.pinos[ji][1]
@@ -1163,6 +1228,10 @@ func _rebuild() -> void:
 			continue
 		if t.has("forno"):
 			_draw_forno(mi, root, nd)
+			_nodes[mi] = nd
+			continue
+		if t.has("tripe"):
+			_draw_tripe(mi, root, nd)
 			_nodes[mi] = nd
 			continue
 		if t.has("amarrar"):
@@ -1545,6 +1614,156 @@ static func rolo_mesh(metros: float) -> ArrayMesh:
 	return st.commit()
 
 
+# ---------- tripé de içar ----------
+
+## Falta o quê: "pecas", "amarrar", "roldana", "corda" ou "" (pronto).
+func tripe_etapa(mi: int) -> String:
+	var p: Dictionary = plantas[mi]
+	for b in p.pecas:
+		if not bool(b):
+			return "pecas"
+	if amarras_falta(mi) > 0:
+		return "amarrar"
+	if not bool(p.get("roldana", false)):
+		return "roldana"
+	if int(p.get("corda_m", 0)) <= 0:
+		return "corda"
+	return ""
+
+
+func tripe_por(mi: int, what: String, metros := 0) -> void:
+	match what:
+		"roldana": plantas[mi]["roldana"] = true
+		"corda": plantas[mi]["corda_m"] = metros
+	_rebuild()
+
+
+## O centro da roldana no mundo.
+func tri_roldana(mi: int) -> Vector3:
+	return xform(mi) * Vector3(0, TRI_H - TRI_ROLDANA, 0)
+
+
+## A cabeça da estaca no mundo.
+func tri_estaca(mi: int) -> Vector3:
+	return xform(mi) * TRI_ESTACA
+
+
+## O lado da roldana para onde vai a estaca (o lado de puxar), no mundo.
+func tri_lado(mi: int) -> Vector3:
+	return xform(mi).basis.x.normalized()
+
+
+## A corda parada (pendurada na roldana) aparece ou não (o jogo desenha a que está em uso).
+func tri_corda_parada(mi: int, ver: bool) -> void:
+	var nd: Dictionary = _nodes.get(mi, {})
+	if nd.has("corda") and is_instance_valid(nd.corda):
+		(nd.corda as Node3D).visible = ver
+
+
+## As voltas de cipó amarrando as três pernas no cruzamento (k: quantas amarras já foram).
+static func tripe_amarra_mesh(k: int) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var r := 0.0085
+	var R := 0.158
+	var voltas := 2 + k * 2
+	var pts := []
+	var n := voltas * 18
+	for i in n + 1:
+		var u := float(i) / n
+		var a := u * TAU * voltas
+		pts.append(Vector3(cos(a) * R, -0.13 + u * 0.19, sin(a) * R))
+	fio_cipo(st, pts, r, 0.3)
+	# as voltas de aperto entre as pernas (passam por fora e por dentro das voltas)
+	if k >= 2:
+		for j in 3:
+			var a0: float = TRI_ANG[j] + PI / 3.0
+			var c := Vector3(cos(a0), 0, sin(a0)) * (R + 0.005)
+			var pp := []
+			for i in 17:
+				var t := float(i) / 16.0 * TAU
+				pp.append(c + Vector3(cos(a0), 0, sin(a0)) * cos(t) * 0.03 + Vector3(0, sin(t) * 0.11 - 0.035, 0))
+			fio_cipo(st, pp, r * 0.9, 0.6 + j * 0.1)
+	if k >= 3:
+		var no := []
+		for i in 9:
+			var a3 := float(i) / 8.0 * TAU
+			no.append(Vector3(R + 0.012, 0.06 + sin(a3) * 0.016, cos(a3) * 0.016))
+		fio_cipo(st, no, r * 1.1, 0.2)
+	st.generate_normals()
+	return st.commit()
+
+
+func _draw_tripe(mi: int, root: Node3D, nd: Dictionary) -> void:
+	var p: Dictionary = plantas[mi]
+	var k := int(p.get("amarras", 0))
+	if k > 0:
+		var m := MeshInstance3D.new()
+		m.mesh = tripe_amarra_mesh(k)
+		m.material_override = cipo_mat()
+		m.position = Vector3(0, TRI_H, 0)
+		root.add_child(m)
+	if not bool(p.get("roldana", false)):
+		return
+	var pc := Vector3(0, TRI_H - TRI_ROLDANA, 0)
+	# a cordinha de cipó trançado: do cruzamento (em volta das amarras) até a forquilha
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	corda_tubo(st, [Vector3(0, TRI_H - 0.1, 0), pc + Vector3(0, 0.22, 0)], 0.0055, 0.05)
+	var laco := []
+	for i in 13:
+		var a := float(i) / 12.0 * TAU
+		laco.append(Vector3(0, TRI_H - 0.1, 0) + Vector3(cos(a) * 0.17, 0.02 * sin(a * 2.0), sin(a) * 0.17))
+	corda_tubo(st, laco, 0.0055, 0.05)
+	st.generate_normals()
+	var cm := MeshInstance3D.new()
+	cm.mesh = st.commit()
+	cm.material_override = cipo_mat()
+	root.add_child(cm)
+	# a forquilha segurando a roldana pela vareta (o eixo atravessa de lado, em z)
+	root.add_child(_stick(pc + Vector3(0, 0.23, 0), pc + Vector3(0, 0.15, 0), 0.016))
+	for sd in [-1.0, 1.0]:
+		root.add_child(_stick(pc + Vector3(0, 0.15, 0), pc + Vector3(0, 0.0, sd * 0.045), 0.014))
+	root.add_child(_stick(pc + Vector3(0, 0, -0.06), pc + Vector3(0, 0, 0.06), 0.009))
+	# a roldana: rodela com o sulco (duas bordas e o miolo mais fino)
+	var rod := Node3D.new()
+	rod.name = "roldana"
+	rod.position = pc
+	root.add_child(rod)
+	nd["roldana"] = rod
+	for e in [[-0.019, TRI_RR, 0.012], [0.019, TRI_RR, 0.012], [0.0, TRI_RR * 0.78, 0.028]]:
+		var w: Node3D = _arv.free_log_node(slot_log(["tora", float(e[2]), Vector3.ZERO, "x", float(e[1])]))
+		w.transform = Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(0, 0, float(e[0])))
+		rod.add_child(w)
+	if int(p.get("corda_m", 0)) <= 0:
+		return
+	# a corda parada: passando por cima da roldana, uma ponta pendurada de cada lado e o
+	# resto enrolado no chão do lado da estaca
+	var gy := 0.03
+	var st2 := SurfaceTool.new()
+	st2.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var cam := [Vector3(-TRI_RR * 0.85, 0.45, 0.0), Vector3(-TRI_RR * 0.85, pc.y, 0.0)]
+	for i in range(1, 8):
+		var a := PI - PI * float(i) / 8.0
+		cam.append(pc + Vector3(cos(a), sin(a), 0) * TRI_RR * 0.85)
+	cam.append(Vector3(TRI_RR * 0.85, pc.y, 0.0))
+	cam.append(Vector3(TRI_RR * 0.85, gy + 0.05, 0.0))
+	cam.append(Vector3(0.45, gy, 0.08))
+	corda_tubo(st2, cam, 0.0075, 0.07)
+	st2.generate_normals()
+	var cd := MeshInstance3D.new()
+	cd.name = "corda"
+	cd.mesh = st2.commit()
+	cd.material_override = cipo_mat()
+	root.add_child(cd)
+	nd["corda"] = cd
+	var rolo := MeshInstance3D.new()
+	rolo.mesh = rolo_mesh(2.0)
+	rolo.material_override = cipo_mat()
+	rolo.position = Vector3(0.6, 0.0, 0.1)
+	cd.add_child(rolo)
+
+
 # ---------- carrinho de mão ----------
 
 const CAR_EIXO := Vector3(0.72, 0.2, 0.0)   # o eixo da roda (na ponta dos braços)
@@ -1679,6 +1898,8 @@ func assinatura() -> String:
 				continue
 			if str(p.get("tipo", "")) == "carrinho" and str(k) in ["x", "y", "z", "yaw"]:
 				continue
+			if str(k) == "ice":
+				continue                   # (o içamento anda todo quadro: desenhado pelo jogo)
 			c[k] = p[k]
 		out.append(c)
 	return JSON.stringify(out)

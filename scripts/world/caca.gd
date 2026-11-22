@@ -880,6 +880,144 @@ static func _pts_json(pts: Array) -> Array:
 	return out
 
 
+# ---------- pendurada no tripé ----------
+# A vaca morta amarrada pelos pés de trás: as pernas de trás esticadas para trás (a corda
+# puxa as duas juntas), as da frente soltas. Enquanto a cabeça ainda está no chão o corpo
+# gira em volta dela (a traseira sobe e vem para baixo da roldana); levantada a altura do
+# corpo, fica pendurada de cabeça para baixo.
+
+const PEND_ROLL := PI * 0.5        # deitada de lado no chão
+
+
+## A carcaça de vaca (caída e parada) com os pés de trás mais perto de pos (até raio), ou "".
+func vaca_perto(pos: Vector3, raio: float) -> String:
+	var best := ""
+	var bd := raio
+	for uid in _nodes:
+		var nd: Dictionary = _nodes[uid]
+		var c: Dictionary = nd.c
+		if str(c.esp) != "vaca" or nd.has("corre") or nd.has("cai") or not is_instance_valid(nd.node):
+			continue
+		if (c.get("xf", []) as Array).size() < 12:
+			continue
+		var pe := pes_tras(str(uid))
+		var d := Vector2(pe.x - pos.x, pe.z - pos.z).length()
+		if d < bd:
+			bd = d
+			best = str(uid)
+	return best
+
+
+## Onde estão os pés de trás (o meio dos dois) agora.
+func pes_tras(uid: String) -> Vector3:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return Vector3.ZERO
+	var n: Node3D = nd.node
+	if not n.has_meta("sk"):
+		return n.global_position
+	var sk: Skeleton3D = n.get_meta("sk")
+	var soma := Vector3.ZERO
+	for nm in ["BackFoot_R", "BackFoot_L"]:
+		var bi := sk.find_bone(nm)
+		soma += sk.global_transform * sk.get_bone_global_pose(bi).origin
+	return soma * 0.5
+
+
+## Como a vaca estava deitada antes de amarrar (para pendurar e para soltar depois).
+func base_pendura(uid: String) -> Dictionary:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return {}
+	var n: Node3D = nd.node
+	var bx: Vector3 = n.global_transform.basis.x
+	var c0 := n.global_position
+	if n.has_meta("sk"):
+		var sk: Skeleton3D = n.get_meta("sk")
+		c0 = sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Body")).origin
+	return {"yaw": atan2(-bx.z, bx.x), "c0": [c0.x, c0.z], "xf0": _xf_json(n.global_transform)}
+
+
+## A pose de pendurada nos ossos (uma vez): devolve os pontos dela no corpo.
+func _rig(n: Node3D) -> Dictionary:
+	if n.has_meta("rig"):
+		return n.get_meta("rig")
+	var sk: Skeleton3D = n.get_meta("sk")
+	sk.reset_bone_poses()
+	for sd in ["_R", "_L"]:
+		VacaModelo._dobra(sk, "BackUpLeg" + sd, 1.5)
+		VacaModelo._dobra(sk, "BackLowLeg" + sd, 0.35)
+		VacaModelo._dobra(sk, "FrontUpLeg" + sd, -0.9)
+		VacaModelo._dobra(sk, "FrontLowLeg" + sd, -0.3)
+	VacaModelo._dobra(sk, "Neck", 0.55)
+	VacaModelo._dobra(sk, "Head", 0.35)
+	VacaModelo._dobra(sk, "Tail1", -0.6)
+	VacaModelo._cascos(sk)
+	var inv := n.global_transform.affine_inverse()
+	var pk := Vector3.ZERO
+	for nm in ["BackFoot_R", "BackFoot_L"]:
+		pk += inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(nm)).origin) * 0.5
+	var ph: Vector3 = inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Head")).origin)
+	var cr: Vector3 = inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Body")).origin)
+	var rig := {"pk": pk, "l": pk.distance_to(ph) + 0.3, "cr": cr}
+	n.set_meta("rig", rig)
+	return rig
+
+
+## Onde fica tudo com os pés de trás na altura alt (m acima do chão), puxados para baixo da
+## roldana: {h (os pés), alt0 (a altura deitada), l (do pé ao focinho), xf}.
+func pendura_calc(uid: String, roldana: Vector3, alt: float, base: Dictionary) -> Dictionary:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node) or not (nd.node as Node3D).has_meta("sk"):
+		return {}
+	var n: Node3D = nd.node
+	var rig := _rig(n)
+	var s := float((nd.c.get("p", {}) as Dictionary).get("s", 1.0))
+	var yaw := float(base.yaw)
+	var c0 := Vector3(float(base.c0[0]), 0, float(base.c0[1]))
+	var pk: Vector3 = rig.pk * s
+	var cr: Vector3 = rig.cr * s
+	var L := float(rig.l) * s
+	var b0 := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, PEND_ROLL)
+	var o0 := Vector3(c0.x, _jogo.ground_at(c0.x, c0.z) + 0.3 * s, c0.z) - b0 * cr
+	var h0 := o0 + b0 * pk
+	var alt0 := h0.y - float(_jogo.ground_at(h0.x, h0.z))
+	if alt <= alt0:
+		return {"h": h0, "alt0": alt0, "l": L, "xf": Transform3D(b0.scaled(Vector3.ONE * s), o0)}
+	var f := clampf((alt - alt0) / L, 0.0, 1.0)
+	var a := asin(f)
+	var hx := Vector2(h0.x, h0.z).lerp(Vector2(roldana.x, roldana.z), f)
+	var h := Vector3(hx.x, _jogo.ground_at(hx.x, hx.y) + alt, hx.y)
+	var b := Basis(Vector3.UP, yaw) * Basis(Vector3.BACK, -a) * Basis(Vector3.RIGHT, PEND_ROLL)
+	return {"h": h, "alt0": alt0, "l": L, "xf": Transform3D(b.scaled(Vector3.ONE * s), h - b * pk)}
+
+
+## Põe a vaca na pose de pendurada; devolve onde estão os pés de trás (onde a corda amarra).
+func pendurar(uid: String, roldana: Vector3, alt: float, base: Dictionary) -> Dictionary:
+	var r := pendura_calc(uid, roldana, alt, base)
+	if r.is_empty():
+		return r
+	(_nodes[uid].node as Node3D).global_transform = r.xf
+	return r
+
+
+## Desamarrou: a vaca volta a ficar deitada como estava.
+func despendurar(uid: String, base: Dictionary) -> void:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return
+	var n: Node3D = nd.node
+	if n.has_meta("rig"):
+		n.remove_meta("rig")
+		if n.has_meta("ap"):
+			var ap: AnimationPlayer = n.get_meta("ap")
+			ap.play(VacaModelo.ANIMS.morrer)
+			ap.advance(ap.current_animation_length)
+			VacaModelo._cascos(n.get_meta("sk"))
+	if (base.get("xf0", []) as Array).size() >= 12:
+		n.global_transform = _xf_de(base.xf0)
+
+
 ## Monta a carcaça salva (deitada, com a mancha e a flecha cravada).
 func _monta(c: Dictionary) -> Node3D:
 	var esp := str(c.esp)
