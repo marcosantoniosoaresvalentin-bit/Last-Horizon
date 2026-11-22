@@ -1,9 +1,9 @@
 {
-  "version": 165,
-  "file": "update_165.zip",
-  "size": 5001987,
-  "sha256": "477debb5284ac01fcdbce775b16acbce9a304418557589612d49995250d6ad65",
+  "version": 166,
+  "file": "update_166.zip",
+  "size": 5002077,
+  "sha256": "11fea4c8e573a0c43f7738a1098d1dc847c97dacca668322461b5620a8b6cc62",
   "min_build": 1,
-  "notes": "Tela de carregamento limpa, sem os botões do jogo",
+  "notes": "Cobra não afunda mais na terra e com as manchas certinhas",
   "date": "2026-11-22"
 }
