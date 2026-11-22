@@ -1,9 +1,9 @@
 {
-  "version": 168,
-  "file": "update_168.zip",
-  "size": 5002862,
-  "sha256": "69d69e06001495db01cf55a0704e5667aafdde8df2fb4449cdb111bde9e6e737",
+  "version": 169,
+  "file": "update_169.zip",
+  "size": 5003502,
+  "sha256": "ac25fa9faa28413cac5584966d0402c64f86d341d541b6aad43013916c566583",
   "min_build": 1,
-  "notes": "Lenha rachada não dá mais para fazer ripa",
+  "notes": "Multiplayer: não duplica mais toras, forquilhas e itens (cada coisa tem identidade própria)",
   "date": "2026-11-22"
 }
