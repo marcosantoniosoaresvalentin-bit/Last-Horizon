@@ -1675,7 +1675,7 @@ func _save_player() -> void:
 	var p := _player.position
 	var chao := []
 	for g in _chao:
-		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", [])})
+		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", []), "uid": g.get("uid", "")})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
 		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja, "vida": _vida, "fome": _fome, "sede": _sede, "frutos_dia": _frutos_dia, "lenhas": _lenhas, "veneno": _veneno}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
@@ -1725,6 +1725,8 @@ func _load_player() -> void:
 		for g in d.chao:
 			if g is Dictionary and Itens.ITENS.has(str(g.get("id", ""))):
 				_add_ground(str(g.id), int(g.get("qtd", 1)), float(g.get("x", 0.0)), float(g.get("z", 0.0)), float(g.get("r", 0.0)), g.get("dur", []))
+				if str(g.get("uid", "")) != "":
+					_chao[-1]["uid"] = str(g.uid)
 	_pa_full = bool(d.get("pa_cheia", false))
 	_pa_tipo = str(d.get("pa_tipo", "terra"))
 	_agua_suja = int(d.get("agua_suja", 0))
@@ -8294,14 +8296,61 @@ func _file_text(path: String) -> String:
 	return FileAccess.get_file_as_string(path) if FileAccess.file_exists(path) else ""
 
 
+## Cada coisa solta no mundo (tora, forquilha, galho, pedra, item no chão...) ganha uma
+## identidade própria ("uid") que vai junto para os outros jogadores. É por ela que se
+## sabe que é a MESMA coisa nos dois celulares (antes era pelo lugar: a tora que rolava
+## um pouquinho num celular virava "outra" e aparecia duplicada).
+func _uid_fix(arr: Array) -> void:
+	var vistos := {}
+	for e in arr:
+		if not e is Dictionary:
+			continue
+		var u := str(e.get("uid", ""))
+		if u == "" or vistos.has(u):
+			u = "%x%x" % [randi(), Time.get_ticks_usec() & 0xffffff]
+			e["uid"] = u
+		vistos[u] = true
+
+
+func _sync_uids(nome: String) -> void:
+	match nome:
+		"arvores":
+			_uid_fix(_arvores.free_logs)
+		"apoios":
+			_uid_fix(_apoios.forks)
+			_uid_fix(_apoios.rested)
+		"buracos":
+			_uid_fix(_buracos.holes)
+			_uid_fix(_buracos.posts)
+			_uid_fix(_buracos.montes)
+		"galhos":
+			_uid_fix(_galhos.items)
+			_uid_fix(_galhos.folhas)
+		"pedras":
+			_uid_fix(_pedras.items)
+		"construcao":
+			_uid_fix(_constr.pieces)
+		"maquinas":
+			_uid_fix(_maq.plantas)
+		"barreiros":
+			_uid_fix(_barr.montes)
+		"fogueiras":
+			_uid_fix(_fogos.items)
+		"capins":
+			_uid_fix(_capins.items)
+		"taias":
+			_uid_fix(_taias.items)
+
+
 ## O estado da parte, em texto (o mesmo formato do arquivo salvo do mundo).
 func _sync_get(nome: String) -> String:
 	var tmp := _sync_tmp(nome)
 	match nome:
 		"chao":
 			var chao := []
+			_uid_fix(_chao)
 			for g in _chao:
-				chao.append({"id": g.id, "qtd": g.qtd, "x": snappedf(float(g.x), 0.001), "z": snappedf(float(g.z), 0.001), "r": g.get("r", 0.0), "dur": g.get("dur", [])})
+				chao.append({"id": g.id, "qtd": g.qtd, "x": snappedf(float(g.x), 0.001), "z": snappedf(float(g.z), 0.001), "r": g.get("r", 0.0), "dur": g.get("dur", []), "uid": g.uid})
 			return JSON.stringify(chao)
 		"escavacao":
 			# só a terra mexida (a água nos buracos sobe e desce sozinha em cada celular)
@@ -8319,6 +8368,7 @@ func _sync_get(nome: String) -> String:
 	var mod = _sync_mod(nome)
 	if mod == null:
 		return ""
+	_sync_uids(nome)
 	mod.save(tmp)
 	return _file_text(tmp)
 
@@ -8358,6 +8408,8 @@ func _sync_set(nome: String, txt: String) -> void:
 			_chao = []
 			for e in lst:
 				_add_ground(str(e.id), int(e.qtd), float(e.x), float(e.z), float(e.get("r", 0.0)), e.get("dur", []))
+				if e.has("uid"):
+					_chao[-1]["uid"] = str(e.uid)
 			_act_check = 0.0
 			return
 		"escavacao":
@@ -8671,6 +8723,8 @@ static func _lista_obj(a: Array) -> bool:
 ## A identidade de uma coisa na lista: o id, ou o lugar (x, z), ou ela inteira.
 static func _ident(e) -> String:
 	if e is Dictionary:
+		if e.has("uid"):
+			return "u" + str(e.uid)              # a identidade própria (mesma nos dois celulares)
 		for k in ["id", "uid"]:
 			if e.has(k) and not (e[k] is Dictionary or e[k] is Array):
 				if e.has("x") and e.has("z"):

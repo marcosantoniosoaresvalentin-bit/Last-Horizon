@@ -580,7 +580,7 @@ func _load(path: String) -> bool:
 		var m := {"x": float(e.get("x", 0.0)), "z": float(e.get("z", 0.0)), "terra": float(e.get("terra", 0.0)),
 			"aberto": int(e.get("aberto", 0)), "agua": float(e.get("agua", 0.0)), "fibra": bool(e.get("fibra", false)),
 			"mix": mx, "pronto": bool(e.get("pronto", false)), "baldes": float(e.get("baldes", 0.0)), "cav": float(e.get("cav", 0.0)),
-			"riscos": e.get("riscos", [])}
+			"riscos": e.get("riscos", []), "uid": str(e.get("uid", ""))}
 		# a água que estava escorrendo aqui continua (veio de outro jogador)
 		for o in old:
 			if absf(float(o.x) - float(m.x)) < 0.01 and absf(float(o.z) - float(m.z)) < 0.01:
