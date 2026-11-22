@@ -1802,31 +1802,8 @@ func _draw_forno(mi: int, root: Node3D, nd: Dictionary) -> void:
 	root.add_child(luz)
 	nd["luz"] = luz
 	# a fumaça do suspiro: grossa, subindo alto (dá para ver de longe)
-	var fum := CPUParticles3D.new()
-	var q2 := QuadMesh.new()
-	q2.size = Vector2(0.6, 0.6)
-	fum.mesh = q2
-	fum.material_override = _fzm("fumaca")
-	fum.amount = 60
-	fum.lifetime = 12.0
-	fum.direction = Vector3.UP
-	fum.spread = 12.0
-	fum.gravity = Vector3(0.25, 0.35, 0.05)
-	fum.initial_velocity_min = 0.7
-	fum.initial_velocity_max = 1.1
-	fum.scale_amount_min = 1.5
-	fum.scale_amount_max = 6.0
-	var sc := Curve.new()
-	sc.add_point(Vector2(0, 0.3))
-	sc.add_point(Vector2(1, 1.0))
-	fum.scale_amount_curve = sc
-	var g2 := Gradient.new()
-	g2.offsets = PackedFloat32Array([0.0, 0.1, 0.6, 1.0])
-	g2.colors = PackedColorArray([Color(0.7, 0.69, 0.67, 0.0), Color(0.66, 0.65, 0.63, 0.75), Color(0.78, 0.78, 0.77, 0.45), Color(0.85, 0.85, 0.85, 0.0)])
-	fum.color_ramp = g2
-	fum.visibility_aabb = AABB(Vector3(-8, -2, -8), Vector3(16, 40, 16))
+	var fum: Node3D = load("res://scripts/world/fumaca.gd").new()
 	fum.position = nd.get("suspiro", Vector3(-0.8, 0.9, 0))
-	fum.emitting = false
 	root.add_child(fum)
 	nd["fumaca"] = fum
 	# a porta: as duas tábuas giram na dobradiça (z = -0.27)
@@ -1852,7 +1829,7 @@ func forno_visual(mi: int, nd := {}) -> void:
 			(nd.porta as Node3D).transform = Transform3D(Basis(), Vector3(FORNO_FRENTE + 0.04, 0.29, 0.0))
 	var fum := forno_fumando(mi)
 	if nd.has("fumaca") and is_instance_valid(nd.fumaca):
-		(nd.fumaca as CPUParticles3D).emitting = fum
+		nd.fumaca.set_emitting(fum)
 	var fogo_aberto := bool(f.aceso) and aberta and float(f.t0) < 0.0
 	if nd.has("chama") and is_instance_valid(nd.chama):
 		(nd.chama as CPUParticles3D).emitting = fogo_aberto
