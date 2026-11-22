@@ -961,6 +961,9 @@ func _rig(n: Node3D) -> Dictionary:
 	var cr: Vector3 = inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Body")).origin)
 	var rig := {"pk": pk, "l": pk.distance_to(ph) + 0.3, "cr": cr}
 	n.set_meta("rig", rig)
+	for uid in _nodes:
+		if _nodes[uid].node == n and (_nodes[uid].c as Dictionary).has("couro"):
+			couro_visual.call_deferred(str(uid))
 	return rig
 
 
@@ -1016,6 +1019,210 @@ func despendurar(uid: String, base: Dictionary) -> void:
 			VacaModelo._cascos(n.get_meta("sk"))
 	if (base.get("xf0", []) as Array).size() >= 12:
 		n.global_transform = _xf_de(base.xf0)
+	if (nd.c as Dictionary).has("couro"):
+		couro_visual(uid)
+
+
+# ---------- o couro ----------
+# Pendurada, o couro sai com a faca: primeiro o corte pela barriga (dos pés de trás até o
+# pescoço), depois vai sendo puxado de cima para baixo. O desenho: por cima do pelo, uma
+# segunda passada que pinta o corte (vermelho fino) e a carne onde o couro já saiu
+# (vermelha com gordura branca, molhada), deixando os cascos e a cabeça.
+# c.couro = {corte: 0..1, pele: 0..1}; c.esfolada quando sai todo.
+
+const COURO_SHADER := """
+shader_type spatial;
+render_mode cull_back, diffuse_burley, specular_schlick_ggx;
+uniform float y_rabo;
+uniform float y_pescoco;
+uniform float corte_ini;
+uniform float corte;
+uniform float pele;
+uniform float largura;
+uniform float infla;
+uniform float esc;
+uniform vec3 casco0;
+uniform vec3 casco1;
+uniform vec3 casco2;
+uniform vec3 casco3;
+uniform float r_casco;
+varying vec3 p;
+varying vec3 nn;
+void vertex() {
+	p = VERTEX;
+	nn = NORMAL;
+	VERTEX += NORMAL * infla;
+}
+float hh(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float ruido(vec3 q) {
+	vec3 i = floor(q); vec3 f = fract(q); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(hh(i), hh(i + vec3(1,0,0)), f.x), mix(hh(i + vec3(0,1,0)), hh(i + vec3(1,1,0)), f.x), f.y),
+		mix(mix(hh(i + vec3(0,0,1)), hh(i + vec3(1,0,1)), f.x), mix(hh(i + vec3(0,1,1)), hh(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+void fragment() {
+	float u = (y_rabo - p.y) / (y_rabo - y_pescoco);
+	float dc = min(min(distance(p, casco0), distance(p, casco1)), min(distance(p, casco2), distance(p, casco3)));
+	if (dc < r_casco || u > 1.0) { discard; }
+	vec3 q = p * esc;
+	if (u < pele) {
+		float n1 = ruido(q * 7.0);
+		float n2 = ruido(q * 19.0 + vec3(3.1, 1.7, 5.3));
+		float fio = abs(sin((q.y * 40.0 + n1 * 3.0)));
+		vec3 carne = mix(vec3(0.36, 0.035, 0.03), vec3(0.58, 0.1, 0.075), n1 * 0.7 + fio * 0.3);
+		float gord = smoothstep(0.58, 0.74, n2 * 0.65 + n1 * 0.35);
+		vec3 col = mix(carne, vec3(0.83, 0.76, 0.64), gord * 0.75);
+		float borda = smoothstep(pele - 0.05, pele, u);
+		col = mix(col, vec3(0.82, 0.74, 0.7), borda * 0.7);
+		ALBEDO = col;
+		ROUGHNESS = 0.3;
+		SPECULAR = 0.45;
+	} else if (u >= corte_ini && u < corte && nn.z < -0.55 && abs(p.x) < largura) {
+		ALBEDO = vec3(0.4, 0.02, 0.02);
+		ROUGHNESS = 0.25;
+		SPECULAR = 0.5;
+	} else {
+		discard;
+	}
+}
+"""
+static var _couro_sh: Shader
+static var _barriga: Array = []       # [[y, z]] a barriga por baixo (na malha, em pé)
+
+
+## A malha da vaca dentro do nó.
+static func _malha(n: Node3D) -> MeshInstance3D:
+	var l := n.find_children("*", "MeshInstance3D", true, false)
+	return l[0] if not l.is_empty() else null
+
+
+## O perfil da barriga (de cima, na linha do meio), uma vez: [[y, z]] de trás para a frente.
+static func _perfil(mi: MeshInstance3D) -> Array:
+	if not _barriga.is_empty():
+		return _barriga
+	var bins := {}
+	for k in mini(2, mi.mesh.get_surface_count()):
+		var vs: PackedVector3Array = mi.mesh.surface_get_arrays(k)[Mesh.ARRAY_VERTEX]
+		for v in vs:
+			if absf(v.x) > 0.0016 or v.z < 0.012:
+				continue
+			var b := int(round(v.y / 0.002))
+			if not bins.has(b) or v.z < float(bins[b]):
+				bins[b] = v.z
+	var ks := bins.keys()
+	ks.sort()
+	ks.reverse()
+	for b in ks:
+		_barriga.append([int(b) * 0.002, float(bins[b])])
+	return _barriga
+
+
+## Onde a barriga está, na malha, na altura y do corpo.
+static func _barriga_z(mi: MeshInstance3D, y: float) -> float:
+	var pf := _perfil(mi)
+	if pf.is_empty():
+		return 0.012
+	var best := 1e9
+	var z := float(pf[0][1])
+	for e in pf:
+		var d := absf(float(e[0]) - y)
+		if d < best:
+			best = d
+			z = float(e[1])
+	return z
+
+
+## Os números do corpo para o couro (na pose de agora): y do rabo, do pescoço, onde o
+## corte começa (pés de trás) e os cascos.
+func _couro_ref(n: Node3D) -> Dictionary:
+	var mi := _malha(n)
+	var sk: Skeleton3D = n.get_meta("sk")
+	var to := mi.global_transform.affine_inverse() * sk.global_transform
+	var pos := func(nm: String) -> Vector3:
+		return to * sk.get_bone_global_pose(sk.find_bone(nm)).origin
+	var y_rabo: float = (pos.call("Back") as Vector3).y + 0.002
+	var y_pes: float = (pos.call("Neck") as Vector3).y
+	var y_ini: float = (pos.call("BackUpLeg_R") as Vector3).y
+	return {"mi": mi, "y_rabo": y_rabo, "y_pescoco": y_pes, "u_ini": (y_rabo - y_ini) / (y_rabo - y_pes),
+		"cascos": [pos.call("BackFoot_R"), pos.call("BackFoot_L"), pos.call("FrontFoot_R"), pos.call("FrontFoot_L")]}
+
+
+## O couro na pele (o corte e a carne aparecendo). Faz o material da carcaça na primeira vez.
+func couro_visual(uid: String) -> void:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node) or not (nd.node as Node3D).has_meta("sk"):
+		return
+	var c: Dictionary = nd.c
+	var cr: Dictionary = c.get("couro", {})
+	if cr.is_empty():
+		return
+	var n: Node3D = nd.node
+	var rf := _couro_ref(n)
+	var mi: MeshInstance3D = rf.mi
+	if mi == null:
+		return
+	var sm: ShaderMaterial
+	if n.has_meta("couro_mat"):
+		sm = n.get_meta("couro_mat")
+	else:
+		if _couro_sh == null:
+			_couro_sh = Shader.new()
+			_couro_sh.code = COURO_SHADER
+		sm = ShaderMaterial.new()
+		sm.shader = _couro_sh
+		for k in mi.mesh.get_surface_count():
+			var m0 := mi.get_surface_override_material(k)
+			if m0 == null:
+				continue
+			var m1: Material = m0.duplicate()
+			m1.next_pass = sm
+			mi.set_surface_override_material(k, m1)
+		n.set_meta("couro_mat", sm)
+	var m_por_u: float = mi.global_transform.basis.get_scale().x
+	var u_ini := float(rf.u_ini)
+	sm.set_shader_parameter("y_rabo", rf.y_rabo)
+	sm.set_shader_parameter("y_pescoco", rf.y_pescoco)
+	sm.set_shader_parameter("corte_ini", u_ini)
+	sm.set_shader_parameter("corte", lerpf(u_ini, 1.0, float(cr.get("corte", 0.0))))
+	var pl := float(cr.get("pele", 0.0))
+	sm.set_shader_parameter("pele", -9.0 if pl <= 0.0 else lerpf(-0.55, 1.0, pl))
+	sm.set_shader_parameter("largura", 0.012 / m_por_u)
+	sm.set_shader_parameter("infla", 0.0015 / m_por_u)
+	sm.set_shader_parameter("esc", m_por_u)
+	sm.set_shader_parameter("r_casco", 0.1 / m_por_u)
+	for i in 4:
+		sm.set_shader_parameter("casco%d" % i, rf.cascos[i])
+
+
+## A linha do corte na barriga, no mundo (n pontos, dos pés de trás até o pescoço).
+func couro_linha(uid: String, n_pts := 16) -> Array:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return []
+	var rf := _couro_ref(nd.node)
+	var mi: MeshInstance3D = rf.mi
+	var y0 := lerpf(float(rf.y_rabo), float(rf.y_pescoco), float(rf.u_ini))
+	var y1 := float(rf.y_pescoco)
+	var out := []
+	for i in n_pts:
+		var y := lerpf(y0, y1, float(i) / (n_pts - 1))
+		out.append(mi.global_transform * Vector3(0, y, _barriga_z(mi, y) - 0.0005))
+	return out
+
+
+## Para onde a barriga olha (no mundo).
+func couro_frente(uid: String) -> Vector3:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return Vector3.FORWARD
+	var mi := _malha(nd.node)
+	return (mi.global_transform.basis * Vector3(0, 0, -1)).normalized()
+
+
+func couro_de(uid: String) -> Dictionary:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty():
+		return {}
+	return nd.c
 
 
 ## Monta a carcaça salva (deitada, com a mancha e a flecha cravada).
@@ -1117,6 +1324,12 @@ func _rebuild() -> void:
 			_nodes.erase(uid)
 	for uid in tem:
 		if _nodes.has(uid):
+			# (veio de outro celular: os dados novos, o mesmo desenho)
+			var cv: Dictionary = tem[uid]
+			var mudou: bool = JSON.stringify(cv.get("couro", {})) != JSON.stringify((_nodes[uid].c as Dictionary).get("couro", {}))
+			_nodes[uid].c = cv
+			if mudou:
+				couro_visual(str(uid))
 			continue
 		var c: Dictionary = tem[uid]
 		if (c.get("xf", []) as Array).size() < 12:
@@ -1124,6 +1337,8 @@ func _rebuild() -> void:
 		var n := _monta(c)
 		if n:
 			_nodes[uid] = {"node": n, "c": c}
+			if c.has("couro"):
+				couro_visual(str(uid))
 	_mortes_locais()
 
 

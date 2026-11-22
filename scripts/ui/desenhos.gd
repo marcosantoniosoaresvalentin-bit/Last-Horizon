@@ -419,6 +419,17 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			# a ponta solta saindo do rolo
 			ci.draw_line(c + Vector2(30, 10) * u, c + Vector2(46, 36) * u, Color(0.22, 0.16, 0.07), 8.0 * u, true)
 			ci.draw_line(c + Vector2(30, 10) * u, c + Vector2(46, 36) * u, cor, 5.5 * u, true)
+		"couro_vaca", "couro_boi":
+			# o couro aberto (com as pernas) dobrado ao meio: pelo de fora, o lado de dentro claro
+			var fora := Color(0.74, 0.7, 0.64) if id == "couro_vaca" else Color(0.42, 0.3, 0.2)
+			var pel: PackedVector2Array = P.call([[-40, -26], [-30, -36], [-18, -28], [18, -28], [30, -36], [40, -26], [34, -8], [42, 14], [34, 34], [16, 26], [-16, 26], [-34, 34], [-42, 14], [-34, -8]])
+			ci.draw_colored_polygon(pel, fora)
+			ci.draw_colored_polygon(P.call([[-30, -18], [30, -18], [26, 18], [-26, 18]]), Color(0.9, 0.82, 0.74))
+			for k in 4:
+				var yy := -12.0 + k * 9.0
+				ci.draw_line(c + Vector2(-24, yy) * u, c + Vector2(24, yy + 2) * u, Color(0.8, 0.62, 0.55), 1.4 * u, true)
+			pel.append(pel[0])
+			ci.draw_polyline(pel, ink, 2.0 * u, true)
 		"roldana":
 			# a forquilha em V segurando a rodela pela vareta (o eixo), o sulco em volta
 			var mad := Color(0.5, 0.36, 0.2)

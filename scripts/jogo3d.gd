@@ -841,6 +841,8 @@ void fragment() {
 	_tranca_btns = [mk.call("Parar", -290, -146, _tranca_end)]
 	_laco_btns = [mk.call("Laçar", -290, -146, _laco_lancar), mk.call("Força", -290, -146, _laco_forca), mk.call("Soltar", -480, -146, _laco_soltar)]
 	(_laco_btns[1] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+	_couro_btns = [mk.call("Força", -290, -146, _couro_forca), mk.call("Parar", -480, -146, _couro_end)]
+	(_couro_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_tri_btns = [mk.call("Força", -290, -146, _tri_forca), mk.call("Soltar", -480, -146, _tri_soltar), mk.call("Amarrar", -290, -286, _tri_amarrar_estaca)]
 	(_tri_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_sub_ui = Control.new()
@@ -6114,6 +6116,9 @@ func _move_player(delta: float) -> void:
 	if not _tranca.is_empty():
 		_tranca_move(delta)
 		return
+	if not _couro.is_empty():
+		_couro_move(delta)
+		return
 	if not _mesa.is_empty():
 		_mesa_move(delta)
 		return
@@ -6493,6 +6498,8 @@ func _input(e: InputEvent) -> void:
 		return
 	if not _tranca.is_empty() and _tranca_input(e):
 		return
+	if not _couro.is_empty() and _couro_input(e):
+		return
 	if not _mix.is_empty() and _mix_input(e):
 		return
 	if not _reb.is_empty() and _reb_input(e):
@@ -6519,7 +6526,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -10039,6 +10046,11 @@ func _tri_ctx(mi: int) -> bool:
 	var est: Vector3 = _maq.tri_estaca(mi)
 	var perto_estaca := Vector2(_player.position.x - est.x, _player.position.z - est.z).length() < 1.6
 	if bool(ic.get("fixo", false)):
+		if (item_qtd("faca") > 0 or teste) and _couro_pode(mi) != "" and not perto_estaca:
+			var cc: Dictionary = _caca.couro_de(str(ic.uid))
+			_ctx_action = "tri_couro"
+			_ctx_btn.text = "Continuar o couro" if cc.has("couro") else "Tirar o couro"
+			return true
 		if perto_estaca:
 			_ctx_action = "tri_desestaca"
 			_ctx_btn.text = "Desamarrar da estaca"
@@ -10128,6 +10140,10 @@ func _tri_press(act: String) -> void:
 			_tri = {"mi": mi, "fase": "puxa", "forca": 0.8 if act == "tri_desestaca" else 0.6}
 			_tri_ajusta_corda(mi)
 			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -8.0, 1.0)
+		"tri_couro":
+			var uid2 := _couro_pode(mi)
+			if uid2 != "":
+				_couro_start(mi, uid2)
 		"tri_desamarrar":
 			var ic2: Dictionary = p.get("ice", {})
 			if ic2.is_empty():
@@ -10396,6 +10412,335 @@ func _tri_draw() -> void:
 	var ny := r.end.y - r.size.y * (TRI_PRECISA + 0.45 * fr)
 	ui.draw_line(Vector2(r.position.x - 8, ny), Vector2(r.end.x + 8, ny), Color(1, 1, 1, 0.95), 3.0)
 	ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
+
+
+# ================== TIRAR O COURO ==================
+# Com a vaca pendurada no tripé e amarrada na estaca, e a faca na mochila: "Tirar o
+# couro". De frente para a barriga: primeiro passa o dedo de cima para baixo em cima da
+# linha (começando na ponta do corte) e a faca vai abrindo o couro dos pés de trás até o
+# pescoço. Depois o couro é puxado de cima para baixo: tocando "Força" (a barra precisa
+# passar do risco) e passando o dedo para baixo. Onde o couro gruda (a marca vermelha), só
+# soltando com a faca: passar o dedo em cima da marca. Saiu todo: o couro vai para a
+# mochila (ou para o chão, se não couber).
+
+const COURO_PRECISA := 0.45
+var _couro := {}                  # {mi, uid, drag, ini, fase, forca, presos, faca}
+var _couro_btns: Array = []       # [Força, Parar]
+
+
+func _couro_pode(mi: int) -> String:
+	var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+	if ic.is_empty() or not bool(ic.get("fixo", false)) or _caca == null:
+		return ""
+	var uid := str(ic.uid)
+	var c: Dictionary = _caca.couro_de(uid)
+	if c.is_empty() or bool(c.get("esfolada", false)):
+		return ""
+	var pe: Vector3 = _caca.pes_tras(uid)
+	if pe.y - ground_at(pe.x, pe.z) < 1.4:
+		return ""                          # ainda não está pendurada
+	if Vector2(pe.x - _player.position.x, pe.z - _player.position.z).length() > 2.4:
+		return ""
+	return uid
+
+
+func _couro_start(mi: int, uid: String) -> void:
+	var c: Dictionary = _caca.couro_de(uid)
+	if c.is_empty():
+		return
+	if not c.has("couro"):
+		c["couro"] = {"corte": 0.0, "pele": 0.0}
+	if _mao != "":
+		equip("")
+	var cr: Dictionary = c.couro
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(uid)
+	var presos := []
+	for k in 3:
+		var v := rng.randf_range(0.12 + k * 0.27, 0.3 + k * 0.27)
+		if v > float(cr.pele):
+			presos.append(v)
+	_couro = {"mi": mi, "uid": uid, "drag": -9, "ini": Vector2.ZERO, "fase": "corte" if float(cr.corte) < 1.0 else "puxa",
+		"forca": 0.0, "presos": presos, "faca": 0.0, "cortando": false, "soltando": false, "anda": 0.0}
+	_olho = {}
+	_bur = {}
+	_jump_btn.visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false
+	_caca.couro_visual(uid)
+	_act_check = 0.0
+
+
+func _couro_end() -> void:
+	if _couro.is_empty():
+		return
+	_couro = {}
+	for b in _couro_btns:
+		(b as Control).visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
+## Em pé de frente para a barriga; a câmera pega a linha toda.
+func _couro_move(delta: float) -> void:
+	var uid := str(_couro.uid)
+	var mi := int(_couro.mi)
+	if _caca == null or _caca.couro_de(uid).is_empty() or mi >= _maq.plantas.size() or (_maq.plantas[mi].get("ice", {}) as Dictionary).is_empty():
+		_couro_end()
+		return
+	var lin: Array = _caca.couro_linha(uid, 8)
+	if lin.is_empty():
+		_couro_end()
+		return
+	var meio := Vector3.ZERO
+	for q in lin:
+		meio += q
+	meio /= lin.size()
+	var fr: Vector3 = _caca.couro_frente(uid)
+	fr.y = 0.0
+	if fr.length() < 0.1:
+		fr = Vector3.RIGHT
+	fr = fr.normalized()
+	var eye := meio + fr * 1.75 + Vector3.UP * 0.05
+	_player.position = Vector3(eye.x, ground_at(eye.x, eye.z), eye.z)
+	_air = false
+	_vy = 0.0
+	_face = atan2(-(-fr).x, -(-fr).z)
+	_yaw = _face
+	_player.rotation.y = _face
+	_play("Idle")
+	_cam.global_transform = Transform3D(Basis.looking_at(meio - eye, Vector3.UP), eye)
+	_couro.forca = maxf(0.0, float(_couro.forca) - delta * 0.12)
+	_couro.faca = maxf(0.0, float(_couro.faca) - delta * 3.0)
+	_couro.anda = maxf(0.0, float(_couro.anda) - delta * 4.0)
+	(_couro_btns[0] as Control).visible = str(_couro.fase) == "puxa"
+	(_couro_btns[1] as Control).visible = true
+	_jump_btn.visible = false
+	if _sub_ui:
+		_sub_ui.queue_redraw()
+
+
+## Um ponto da linha (0 em cima, 1 no pescoço) na tela.
+func _couro_tela(t: float) -> Vector2:
+	var lin: Array = _caca.couro_linha(str(_couro.uid), 16)
+	var f := clampf(t, 0.0, 1.0) * (lin.size() - 1)
+	var i := mini(int(f), lin.size() - 2)
+	var w: Vector3 = (lin[i] as Vector3).lerp(lin[i + 1], f - i)
+	return _cam.unproject_position(w)
+
+
+func _couro_tela_len() -> float:
+	var n := 0.0
+	var a := _couro_tela(0.0)
+	for k in range(1, 9):
+		var b := _couro_tela(k / 8.0)
+		n += a.distance_to(b)
+		a = b
+	return maxf(n, 60.0)
+
+
+## Onde o couro está saindo (na linha da tela).
+func _couro_borda(cr: Dictionary) -> float:
+	return clampf((lerpf(-0.55, 1.0, float(cr.pele)) - 0.0) / 1.0, 0.0, 1.0)
+
+
+func _couro_input(e: InputEvent) -> bool:
+	if _couro.is_empty():
+		return false
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var cr: Dictionary = _caca.couro_de(str(_couro.uid)).get("couro", {})
+	if cr.is_empty():
+		return false
+	var pos := Vector2.INF
+	var idx := -9
+	var pressed := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		idx = e.index
+		pressed = e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		idx = -1
+		pressed = e.pressed
+	if pos != Vector2.INF:
+		for b in _couro_btns:
+			if (b as Control).visible and (b as Control).get_global_rect().has_point(pos):
+				return false
+		if pressed:
+			_couro.drag = idx
+			_couro.ini = pos
+			_couro.cortando = str(_couro.fase) == "corte" and pos.distance_to(_couro_tela(float(cr.corte))) < 110.0
+			_couro.soltando = str(_couro.fase) == "puxa" and _couro_preso(cr) and pos.distance_to(_couro_tela(_couro_borda(cr))) < 120.0
+		elif int(_couro.drag) == idx:
+			_couro.drag = -9
+			_couro.cortando = false
+			_couro.soltando = false
+		return true
+	var d := Vector2.ZERO
+	var at := Vector2.ZERO
+	if e is InputEventScreenDrag and e.index == int(_couro.drag):
+		d = e.relative
+		at = e.position
+	elif e is InputEventMouseMotion and int(_couro.drag) == -1:
+		d = e.relative
+		at = e.position
+	else:
+		return e is InputEventScreenDrag or e is InputEventMouseMotion
+	_couro_passa(cr, d, at)
+	return true
+
+
+## O couro está grudado na borda agora?
+func _couro_preso(cr: Dictionary) -> bool:
+	var pr: Array = _couro.presos
+	return not pr.is_empty() and float(pr[0]) <= float(cr.pele) + 0.001
+
+
+## O dedo passando: corta (na linha), solta (em cima da marca) ou puxa (com força).
+func _couro_passa(cr: Dictionary, d: Vector2, at: Vector2) -> void:
+	var uid := str(_couro.uid)
+	var total := _couro_tela_len()
+	if str(_couro.fase) == "corte":
+		if not bool(_couro.cortando):
+			return
+		var t0 := float(cr.corte)
+		var a := _couro_tela(t0)
+		var b := _couro_tela(t0 + 0.06)
+		var dir := (b - a).normalized()
+		if at.distance_to(a) > 140.0:
+			_couro.cortando = false               # o dedo saiu da linha
+			return
+		var anda := d.dot(dir)
+		if anda <= 0.0:
+			return
+		if item_qtd("faca") <= 0 and not teste:
+			_couro.cortando = false
+			return
+		var t1 := minf(1.0, t0 + anda / total)
+		cr.corte = t1
+		_couro.faca = 1.0
+		if int(t1 * 8.0) != int(t0 * 8.0):
+			Sons.play_at(self, "fibra_puxa", _cam.global_position + _cam.global_transform.basis.z * -1.2, -14.0, 1.7)
+			if wear("faca", 1):
+				_update_inventory()
+		if t1 >= 1.0:
+			_couro.fase = "puxa"
+			_couro.cortando = false
+		_caca.couro_visual(uid)
+		return
+	# puxando
+	if bool(_couro.soltando):
+		if item_qtd("faca") <= 0 and not teste:
+			return
+		if at.distance_to(_couro.ini) > 55.0:
+			(_couro.presos as Array).pop_front()
+			_couro.soltando = false
+			_couro.faca = 1.0
+			Sons.play_at(self, "fibra_puxa", _cam.global_position + _cam.global_transform.basis.z * -1.2, -10.0, 1.4)
+			if wear("faca", 1):
+				_update_inventory()
+		return
+	if d.y <= 0.0 or _couro_preso(cr):
+		return
+	if float(_couro.forca) < COURO_PRECISA:
+		return
+	var p0 := float(cr.pele)
+	var p1 := minf(1.0, p0 + d.y / total * 0.55)
+	var pr: Array = _couro.presos
+	if not pr.is_empty():
+		p1 = minf(p1, float(pr[0]))
+	cr.pele = p1
+	_couro.anda = 1.0
+	if int(p1 * 12.0) != int(p0 * 12.0):
+		Sons.play_at(self, "fibra_puxa", _cam.global_position + _cam.global_transform.basis.z * -1.2, -8.0, 0.7)
+	_caca.couro_visual(uid)
+	if p1 >= 1.0:
+		_couro_pronto()
+
+
+func _couro_forca() -> void:
+	if str(_couro.get("fase", "")) != "puxa":
+		return
+	_couro.forca = minf(1.0, float(_couro.forca) + 0.1)
+
+
+## Saiu todo: o couro vai para a mochila (ou cai no chão).
+func _couro_pronto() -> void:
+	var uid := str(_couro.uid)
+	var c: Dictionary = _caca.couro_de(uid)
+	c["esfolada"] = true
+	var p: Dictionary = c.get("p", {})
+	var id := "couro_boi" if bool(p.get("touro", false)) else "couro_vaca"
+	var sobra := 0
+	if _bag_total() + Itens.kg(id) > BAG_MAX:
+		sobra = 1
+	else:
+		sobra = add_item(id, 1)
+	if sobra > 0:
+		var w := _player.position + Vector3(randf_range(-0.4, 0.4), 0, randf_range(-0.4, 0.4))
+		_add_ground(id, sobra, w.x, w.z)
+	_update_inventory()
+	Sons.play_at(self, "baque", _player.position + Vector3.UP * 0.3, -6.0, 0.8)
+	_couro_end()
+
+
+func _couro_draw() -> void:
+	if _couro.is_empty() or _caca == null:
+		return
+	var cr: Dictionary = _caca.couro_de(str(_couro.uid)).get("couro", {})
+	if cr.is_empty():
+		return
+	var ui := _sub_ui
+	var s := ui.size
+	if str(_couro.fase) == "corte":
+		# a linha pontilhada do que falta cortar e a faca na ponta
+		var t0 := float(cr.corte)
+		var n := 24
+		for k in n:
+			var a := t0 + (1.0 - t0) * float(k) / n
+			var b := t0 + (1.0 - t0) * (float(k) + 0.5) / n
+			ui.draw_line(_couro_tela(a), _couro_tela(b), Color(1, 1, 1, 0.75), 3.0, true)
+		var tip := _couro_tela(t0)
+		var pulso := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 160.0)
+		ui.draw_arc(tip, 22.0 + pulso * 6.0, 0, TAU, 28, Color(1, 0.95, 0.6, 0.85), 3.0, true)
+		# a faca (lâmina de pedra e o cabo) apontando para baixo
+		var dn := (_couro_tela(t0 + 0.05) - tip).normalized()
+		var lt := Vector2(-dn.y, dn.x)
+		var pc := tip + lt * 6.0
+		ui.draw_colored_polygon(PackedVector2Array([pc + dn * 4.0, pc - dn * 34.0 + lt * 8.0, pc - dn * 34.0 - lt * 4.0]), Color(0.55, 0.55, 0.52))
+		ui.draw_line(pc - dn * 34.0, pc - dn * 70.0, Color(0.38, 0.26, 0.14), 9.0, true)
+	else:
+		# a borda do couro e, se grudou, a marca para soltar com a faca
+		var bt := _couro_tela(_couro_borda(cr))
+		if _couro_preso(cr):
+			var pul := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 110.0)
+			ui.draw_arc(bt, 26.0 + pul * 8.0, 0, TAU, 28, Color(1, 0.2, 0.15, 0.95), 4.0, true)
+			ui.draw_line(bt + Vector2(-14, -14), bt + Vector2(14, 14), Color(1, 0.2, 0.15, 0.95), 4.0, true)
+			ui.draw_line(bt + Vector2(-14, 14), bt + Vector2(14, -14), Color(1, 0.2, 0.15, 0.95), 4.0, true)
+		else:
+			var dn2 := (_couro_tela(_couro_borda(cr) + 0.06) - bt).normalized()
+			var cor := Color(1, 0.95, 0.6, 0.85) if float(_couro.forca) >= COURO_PRECISA else Color(1, 1, 1, 0.35)
+			ui.draw_line(bt, bt + dn2 * 70.0, cor, 6.0, true)
+			ui.draw_colored_polygon(PackedVector2Array([bt + dn2 * 88.0, bt + dn2 * 66.0 + Vector2(-dn2.y, dn2.x) * 14.0, bt + dn2 * 66.0 - Vector2(-dn2.y, dn2.x) * 14.0]), cor)
+		# a barra de força ao lado do botão
+		var btn: Control = _couro_btns[0]
+		var r := Rect2(btn.get_global_rect().position - ui.get_global_rect().position + Vector2(-44, 0), Vector2(28, btn.size.y))
+		ui.draw_rect(r.grow(3), Color(0.04, 0.04, 0.03, 0.85))
+		var v := float(_couro.forca)
+		var h := r.size.y * v
+		ui.draw_rect(Rect2(Vector2(r.position.x, r.end.y - h), Vector2(r.size.x, h)), Color(0.95, 0.75, 0.2) if v >= COURO_PRECISA else Color(0.4, 0.6, 0.95))
+		var ny := r.end.y - r.size.y * COURO_PRECISA
+		ui.draw_line(Vector2(r.position.x - 8, ny), Vector2(r.end.x + 8, ny), Color(1, 1, 1, 0.95), 3.0)
+		ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
+	# o quanto já foi (corte e couro)
+	var rb := Rect2(Vector2(s.x * 0.5 - 200, 30), Vector2(400, 12))
+	ui.draw_rect(rb.grow(3), Color(0.05, 0.04, 0.03, 0.8))
+	var f := (float(cr.corte) * 0.3 + float(cr.pele) * 0.7)
+	ui.draw_rect(Rect2(rb.position, Vector2(rb.size.x * f, rb.size.y)), Color(0.7, 0.25, 0.18))
+	ui.draw_rect(rb, Color(1, 1, 1, 0.6), false, 2.0)
 
 
 # ================== ARCO E FLECHA ==================
@@ -14584,6 +14929,7 @@ func _draw_bur_ui() -> void:
 	_tranca_draw()
 	_laco_draw()
 	_tri_draw()
+	_couro_draw()
 	if _mao == "arco" and _morto < 0.0:
 		# a mira: um círculo pequeno no meio da tela (fecha quando a corda está puxada)
 		var mc := _sub_ui.size * 0.5
