@@ -10337,9 +10337,7 @@ func _mix_start(bi: int, modo: String) -> void:
 	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn, _jump_btn]:
 		(b as Control).visible = false
 	if modo == "abrir":
-		_mix.sel = 0
-		_mix.anim = 0.0                 # abre sozinho: 3 enxadadas no meio
-		_show_toast("Abrindo uma cova no meio do monte...")
+		_show_toast("Toque no losango no meio do monte e passe o dedo para baixo: a enxada cava e puxa a terra para a beira.")
 	else:
 		_show_toast("Toque num losango e passe o dedo para baixo: a enxada bate e puxa a terra molhada.")
 
@@ -10352,7 +10350,8 @@ func _mix_points() -> Array:
 	if not _mix_ok():
 		return []
 	if str(_mix.modo) == "abrir":
-		return []
+		var mb: Dictionary = _barr.montes[int(_mix.bi)]
+		return [[_barr.center(int(_mix.bi)) + Vector3.UP * 0.04, int(mb.aberto) >= Barreiros.ABRIR_GOLPES]]
 	var out := []
 	var m: Dictionary = _barr.montes[int(_mix.bi)]
 	var sp: Array = _barr.mix_spots(int(_mix.bi))
@@ -10405,8 +10404,6 @@ func _mix_input(e: InputEvent) -> bool:
 		return false
 	if (_mix.sair as Control).get_global_rect().has_point(pos):
 		return false
-	if str(_mix.modo) == "abrir":
-		return true
 	if pressed:
 		var pts := _mix_points()
 		var best := -1
@@ -10448,7 +10445,16 @@ func _mix_tick(delta: float) -> void:
 	if ph < 0.0:
 		return
 	var k := int(_mix.sel)
-	var w: Vector3 = _mix_spot(k)
+	var w: Vector3 = _mix_spot(k) if not abrir else _barr.center(bi)
+	# puxando: o barro vai se fazendo por onde a enxada passa (a terra arrastando junto)
+	var away := Vector3(w.x - _player.position.x, 0, w.z - _player.position.z).normalized()
+	var far := w + away * 0.18
+	var near := w - away * 0.32
+	if not abrir and ph >= 0.36 and ph < 0.86:
+		_mix.vivo_t = float(_mix.get("vivo_t", 0.0)) - get_process_delta_time()
+		if float(_mix.vivo_t) <= 0.0:
+			_mix.vivo_t = 0.08
+			_barr.risco_vivo(bi, far, near, smoothstep(0.0, 1.0, (ph - 0.36) / 0.5))
 	if ph >= 0.36 and not bool(_mix.get("bateu", false)):
 		_mix.bateu = true
 		Sons.play_at(self, "cavar", w, -2.0, 0.85)
@@ -10463,8 +10469,9 @@ func _mix_tick(delta: float) -> void:
 				_show_toast("Cova aberta no meio do monte! Agora jogue água (meio balde de cada vez).")
 				_mix_end()
 				return
+			_show_toast("Abrindo a cova: %d de %d. Passe o dedo para baixo de novo." % [int(_barr.montes[bi].aberto), Barreiros.ABRIR_GOLPES])
 		else:
-			var done: bool = _barr.mix_hit(bi, k)
+			var done: bool = _barr.mix_hit(bi, k, far, near)
 			if int(_barr.montes[bi].mix[k]) >= Barreiros.MIX_HITS:
 				_mix.sel = -1
 			if done:
@@ -10474,13 +10481,15 @@ func _mix_tick(delta: float) -> void:
 				return
 			_show_toast("Misturando: %d%%" % int(_barr.mix_progress(bi) * 100.0))
 	if ph >= 1.0:
-		_mix.anim = 0.0 if abrir else -1.0         # abrindo: continua sozinho
+		_mix.anim = -1.0
 		_mix.hit = false
 		_mix.bateu = false
 
 
 ## Onde a enxada bate: o losango escolhido (ou o meio do monte, abrindo a cova).
 func _mix_spot(k: int) -> Vector3:
+	if str(_mix.get("modo", "")) == "abrir":
+		return _barr.center(int(_mix.bi))
 	var sp: Array = _barr.mix_spots(int(_mix.bi))
 	return sp[clampi(k, 0, sp.size() - 1)]
 

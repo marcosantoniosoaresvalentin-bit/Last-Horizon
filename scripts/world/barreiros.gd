@@ -85,7 +85,7 @@ func add(pos: Vector3, tipo: String, vol: float) -> void:
 		for _k in MIX_SPOTS:
 			mx.append(0)
 		montes.append({"x": snappedf(pos.x, 0.001), "z": snappedf(pos.z, 0.001), "terra": 0.0, "aberto": 0, "agua": 0.0,
-			"fibra": false, "mix": mx, "pronto": false, "baldes": 0.0, "cav": 0.0})
+			"fibra": false, "mix": mx, "pronto": false, "baldes": 0.0, "cav": 0.0, "riscos": []})
 		i = montes.size() - 1
 	var m: Dictionary = montes[i]
 	var tot := float(m.terra) + float(m.baldes)
@@ -208,9 +208,22 @@ func add_fibra(i: int) -> void:
 	_rebuild()
 
 
-func mix_hit(i: int, k: int) -> bool:
+## A enxada puxando agora (o risco ainda sendo feito): de a até b, t do caminho.
+func risco_vivo(i: int, a: Vector3, b: Vector3, t: float) -> void:
+	if i < 0 or i >= montes.size():
+		return
+	montes[i]["_vivo"] = [a.x, a.z, b.x, b.z, t]
+	_rebuild()
+
+
+func mix_hit(i: int, k: int, a := Vector3.INF, b := Vector3.INF) -> bool:
 	var m: Dictionary = montes[i]
 	m.mix[k] = mini(MIX_HITS, int(m.mix[k]) + 1)
+	m.erase("_vivo")
+	if a != Vector3.INF:
+		if not m.has("riscos"):
+			m["riscos"] = []
+		(m.riscos as Array).append([snappedf(a.x, 0.001), snappedf(a.z, 0.001), snappedf(b.x, 0.001), snappedf(b.z, 0.001)])
 	var all := true
 	for v in m.mix:
 		if int(v) < MIX_HITS:
@@ -332,6 +345,9 @@ func _monte_node(i: int) -> Node3D:
 	nz2.frequency = 22.0
 	var rim_h := 0.07 * openf * (1.0 - 0.9 * mixp)
 	var sp: Array = mix_spots(i) if not pronto else []
+	var riscos: Array = (m.get("riscos", []) as Array).duplicate()
+	if m.has("_vivo"):
+		riscos.append(m._vivo)
 	# os fios de água escorrendo pela terra (direções fixas de cada monte)
 	var streaks := []
 	var nstr := 5 + seed % 3
@@ -372,15 +388,33 @@ func _monte_node(i: int) -> Node3D:
 		if pronto:
 			mud = smoothstep(1.0, 0.9, u)
 		else:
-			for k in sp.size():
-				var q: Vector3 = sp[k]
-				var dd := Vector2(x - q.x, z - q.z).length()
-				mud = maxf(mud, float(m.mix[k]) / MIX_HITS * smoothstep(0.24, 0.05, dd))
-			mud = maxf(mud, mixp * 0.6 * smoothstep(rr * 1.6, rr * 0.8, r))
+			# o monte todo vai ficando barro aos poucos (a cada puxada)
+			mud = mixp * 0.75 * smoothstep(1.0, 0.75, u)
+		# os riscos da enxada: por onde passou virou barro (um sulco liso) e a terra
+		# arrastada fica amontoada na ponta, perto de quem puxou
+		var soma := 0.0
+		var amont := 0.0
+		for st in riscos:
+			var A := Vector2(float(st[0]), float(st[1]))
+			var Bf := Vector2(float(st[2]), float(st[3]))
+			var tt: float = float(st[4]) if st.size() > 4 else 1.0
+			var B := A.lerp(Bf, tt)
+			var P := Vector2(x, z)
+			var ab := B - A
+			var L2 := maxf(ab.length_squared(), 0.0001)
+			var sp_ := clampf((P - A).dot(ab) / L2, 0.0, 1.0)
+			var d := P.distance_to(A + ab * sp_)
+			if d < 0.11:
+				var k2 := 1.0 - d / 0.11
+				soma += 0.55 * k2
+				h -= 0.008 * k2 * k2                      # o sulco da lâmina
+			var db := P.distance_to(B)
+			amont += 0.016 * exp(-pow(db / 0.07, 2.0))   # a terra puxada amontoa na ponta
+		mud = maxf(mud, minf(soma, 1.0))
+		h += minf(amont, 0.045)
 		# barro: liso, com as marcas da enxada (sulcos)
 		h += mud * (0.006 + 0.004 * sin((dx * 0.7 + dz * 0.7) * 70.0 + n1 * 3.0) + 0.004 * n1)
-		if pronto:
-			h += 0.03 * (1.0 - u * u) * smoothstep(1.0, 0.7, u)       # barro assentado, redondo
+		h += 0.03 * mixp * (1.0 - u * u) * smoothstep(1.0, 0.7, u)      # vai assentando redondo
 		return [h, wet, mud, sheen]
 	var g := 0.035
 	var N := int(ceil(R / g))
@@ -545,7 +579,8 @@ func _load(path: String) -> bool:
 			mx.append(int((e.get("mix", []) as Array)[k]) if k < (e.get("mix", []) as Array).size() else 0)
 		var m := {"x": float(e.get("x", 0.0)), "z": float(e.get("z", 0.0)), "terra": float(e.get("terra", 0.0)),
 			"aberto": int(e.get("aberto", 0)), "agua": float(e.get("agua", 0.0)), "fibra": bool(e.get("fibra", false)),
-			"mix": mx, "pronto": bool(e.get("pronto", false)), "baldes": float(e.get("baldes", 0.0)), "cav": float(e.get("cav", 0.0))}
+			"mix": mx, "pronto": bool(e.get("pronto", false)), "baldes": float(e.get("baldes", 0.0)), "cav": float(e.get("cav", 0.0)),
+			"riscos": e.get("riscos", [])}
 		# a água que estava escorrendo aqui continua (veio de outro jogador)
 		for o in old:
 			if absf(float(o.x) - float(m.x)) < 0.01 and absf(float(o.z) - float(m.z)) < 0.01:
