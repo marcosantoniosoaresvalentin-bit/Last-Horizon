@@ -190,6 +190,20 @@ const TIPOS := {
 		"area": Rect2(-0.45, -0.45, 0.9, 0.9),
 		"filtro": true,
 	},
+	# Forno de carvão: um domo de pedras do chão rebocado de barro por cima, com uma boca
+	# na frente (a porta: duas tábuas em pé de lado, que abrem e fecham) e o suspiro em
+	# cima, atrás. Enche de lenha, acende, fecha a porta: a lenha vira carvão.
+	"forno": {
+		"nome": "Forno de Carvão",
+		"desc": "Domo de pedras do chão coberto de barro, com uma porta de tábuas e o suspiro em cima. Encha de lenha, acenda com o arco de fogo e feche a porta: a lenha queima devagar, sem ar, e vira carvão.",
+		"pecas": [
+			["tabua", 0.52, Vector3(0.6, 0.15, 0.0), "z_lado", 0.14],    # 0 porta: tábua de baixo
+			["tabua", 0.52, Vector3(0.6, 0.41, 0.0), "z_lado", 0.14],    # 1 porta: tábua de cima
+		],
+		"pinos": [],
+		"area": Rect2(-0.95, -0.9, 1.75, 1.8),
+		"forno": {"pedras": 16, "barro": 4},
+	},
 }
 
 const FILTRO_FUNDO := 0.74       # em cima das tábuas do fundo da caixa
@@ -198,6 +212,12 @@ const FILTRO_CARVAO := 3
 const FILTRO_CIMA_MAX := 24.0    # litros de água que cabem em cima da areia
 const FILTRO_VAZAO := 0.06       # litros que passam pelas camadas a cada passo do relógio (6 por segundo)
 const POTE_L := {"vasilha_barro": 3.0, "bacia_barro": 8.0}
+
+const FORNO_CAP := 12            # lenhas que cabem dentro
+const FORNO_S := 360.0           # segundos de verdade com a porta fechada até virar carvão
+const FORNO_R := 0.82            # raio do domo
+const FORNO_H := 0.95            # altura do domo
+const FORNO_FRENTE := 0.55       # a parede da frente (reta, com a boca)
 
 const TORNO_MESA := 0.76         # em cima da mesa giratória do torno (m)
 const MESA_TOPO := 0.84          # em cima do tampo (m)
@@ -259,6 +279,9 @@ static func needs(tipo: String) -> Dictionary:
 	out["pino"] = (t.pinos as Array).size()
 	out["lamina"] = lamina_need(tipo)
 	out["lamina_item"] = str(t.get("lamina_item", "lamina_serra"))
+	var fz: Dictionary = t.get("forno", {})
+	out["pedra"] = int(fz.get("pedras", 0))
+	out["barro"] = int(fz.get("barro", 0))
 	return out
 
 
@@ -309,6 +332,10 @@ func complete(mi: int) -> void:
 	for j in (p.pinos as Array).size():
 		p.pinos[j] = 2
 	p.lamina = lamina_need(str(p.tipo))
+	var fz: Dictionary = TIPOS[p.tipo].get("forno", {})
+	if not fz.is_empty():
+		p["ped"] = int(fz.pedras)
+		p["bar"] = int(fz.barro)
 	_rebuild()
 
 
@@ -393,6 +420,9 @@ func done_count(mi: int) -> int:
 
 func pronta(mi: int) -> bool:
 	var p: Dictionary = plantas[mi]
+	var fz: Dictionary = TIPOS[p.tipo].get("forno", {})
+	if not fz.is_empty() and (int(p.get("ped", 0)) < int(fz.pedras) or int(p.get("bar", 0)) < int(fz.barro)):
+		return false
 	if lamina_count(mi) < lamina_need(str(p.tipo)):
 		return false
 	for b in p.pecas:
@@ -1049,6 +1079,10 @@ func _rebuild() -> void:
 			_draw_filtro(mi, root, nd)
 			_nodes[mi] = nd
 			continue
+		if t.has("forno"):
+			_draw_forno(mi, root, nd)
+			_nodes[mi] = nd
+			continue
 		if bool(t.get("torno", false)):
 			if pronta(mi):
 				nd["biela"] = _stick(Vector3(-0.2, 0.06, 0.0), Vector3(0.2, 0.06, 0.0), 0.018)
@@ -1395,6 +1429,370 @@ func _draw_filtro(mi: int, root: Node3D, nd: Dictionary) -> void:
 		nd["agua_pote"] = ap
 	_nodes[mi] = nd
 	filtro_visual(mi)
+
+
+# ---------- forno de carvão ----------
+# Estado de uso (p.fz): {lenha: [achas], aceso: bool, porta: "aberta"/"fechada",
+# t0 (relógio de verdade ao fechar), carvao: n}
+
+func forno_st(mi: int) -> Dictionary:
+	var p: Dictionary = plantas[mi]
+	if not p.has("fz"):
+		p["fz"] = {"lenha": [], "aceso": false, "porta": "aberta", "t0": -1.0, "carvao": 0}
+	return p.fz
+
+
+func _agora_real() -> float:
+	return float(_jogo.sim.real_s(float(_jogo.sim.steps)))
+
+
+## Fração do tempo de carvão que ainda falta (1 = acabou de fechar, 0 = pronto); -1 se
+## não está cozinhando.
+func forno_falta(mi: int) -> float:
+	var f := forno_st(mi)
+	if str(f.porta) != "fechada" or not bool(f.aceso) or float(f.t0) < 0.0:
+		return -1.0
+	return clampf(1.0 - (_agora_real() - float(f.t0)) / FORNO_S, 0.0, 1.0)
+
+
+## Cozinhando agora (o suspiro solta fumaça)?
+func forno_fumando(mi: int) -> bool:
+	var fl := forno_falta(mi)
+	if fl > 0.0:
+		return true
+	var f := forno_st(mi)
+	return bool(f.aceso) and str(f.porta) == "aberta" and float(f.t0) < 0.0
+
+
+## Construindo: pedra ou barro postos.
+func forno_por(mi: int, what: String) -> void:
+	var p: Dictionary = plantas[mi]
+	var k := "ped" if what == "pedra" else "bar"
+	var fz: Dictionary = TIPOS[p.tipo].forno
+	p[k] = mini(int(p.get(k, 0)) + 1, int(fz.pedras if what == "pedra" else fz.barro))
+	if what == "barro":
+		p["bar_dia"] = int(_jogo.sim.elapsed_days())
+	_rebuild()
+
+
+func forno_lenha(mi: int, acha: Dictionary) -> void:
+	(forno_st(mi).lenha as Array).append(acha)
+	_rebuild()
+
+
+func forno_acender(mi: int) -> void:
+	forno_st(mi).aceso = true
+	_rebuild()
+
+
+func forno_porta(mi: int, fechar: bool) -> void:
+	var f := forno_st(mi)
+	if fechar:
+		f.porta = "fechada"
+		if bool(f.aceso) and float(f.t0) < 0.0:
+			f.t0 = _agora_real()
+	else:
+		f.porta = "aberta"
+		if bool(f.aceso) and float(f.t0) >= 0.0 and forno_falta(mi) <= 0.0:
+			# pronto: a lenha virou carvão (uma lenha, um carvão)
+			f.carvao = int(f.carvao) + (f.lenha as Array).size()
+			f.lenha = []
+			f.aceso = false
+			f.t0 = -1.0
+	_rebuild()
+
+
+func forno_tirar(mi: int) -> int:
+	var f := forno_st(mi)
+	var n := int(f.carvao)
+	f.carvao = 0
+	_rebuild()
+	return n
+
+
+## Onde fica a boca (no mundo), para o arco de fogo.
+func forno_boca(mi: int) -> Vector3:
+	return xform(mi) * Vector3(FORNO_FRENTE + 0.25, 0.0, 0.0)
+
+
+static var _fz_mats := {}
+
+static func _fzm(k: String) -> StandardMaterial3D:
+	if _fz_mats.has(k):
+		return _fz_mats[k]
+	var m := StandardMaterial3D.new()
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	match k:
+		"pedra":
+			m.albedo_color = Color(0.3, 0.29, 0.26)
+			m.roughness = 1.0
+			m.metallic_specular = 0.05
+		"escuro":
+			m.albedo_color = Color(0.04, 0.03, 0.025)
+			m.roughness = 1.0
+		"carvao":
+			m.albedo_color = Color(0.06, 0.06, 0.065)
+			m.roughness = 0.7
+		"brasa":
+			m.albedo_color = Color(0.25, 0.05, 0.02)
+			m.emission_enabled = true
+			m.emission = Color(1.0, 0.35, 0.05)
+			m.emission_energy_multiplier = 2.5
+		"fogo":
+			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			m.vertex_color_use_as_albedo = true
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+			m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+			m.albedo_texture = load("res://scripts/world/fogueiras.gd").soft_tex()
+		"fumaca":
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+			m.vertex_color_use_as_albedo = true
+			m.albedo_texture = load("res://scripts/world/fogueiras.gd").soft_tex()
+			m.emission_enabled = true
+			m.emission = Color(0.25, 0.25, 0.24)
+			m.disable_fog = true
+	_fz_mats[k] = m
+	return m
+
+
+## Ponto na casca do domo (th: em volta, ph: de 0 no chão a PI/2 no topo); a frente
+## (x > FORNO_FRENTE) é cortada reta.
+static func _domo(th: float, ph: float, inset := 0.0) -> Vector3:
+	var R := FORNO_R - inset
+	var p := Vector3(cos(ph) * cos(th) * R - 0.1, sin(ph) * (FORNO_H - inset), cos(ph) * sin(th) * R)
+	if p.x > FORNO_FRENTE:
+		p.x = FORNO_FRENTE
+	return p
+
+
+static func _na_boca(p: Vector3) -> bool:
+	return p.x >= FORNO_FRENTE - 0.001 and absf(p.z) < 0.27 and p.y < 0.56
+
+
+## O forno: as pedras assentadas (até onde já foram postas), o barro cobrindo por cima
+## (até onde já foi rebocado), a boca escura, o suspiro, a lenha dentro, o fogo, o
+## carvão e a fumaça saindo do suspiro.
+func _draw_forno(mi: int, root: Node3D, nd: Dictionary) -> void:
+	var p: Dictionary = plantas[mi]
+	var fz: Dictionary = TIPOS[p.tipo].forno
+	var fped := float(p.get("ped", 0)) / float(fz.pedras)
+	var fbar := float(p.get("bar", 0)) / float(fz.barro)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = mi * 71 + 3
+	# as pedras: em fileiras de baixo para cima (até a altura do que já foi posto)
+	if fbar < 1.0:
+		var fileiras := 7
+		for fi in fileiras:
+			var ph := (float(fi) + 0.5) / fileiras * PI * 0.47
+			if float(fi) / fileiras >= fped:
+				break
+			var n := int(18.0 * cos(ph)) + 3
+			for k in n:
+				var th := TAU * (float(k) + 0.5 * (fi % 2)) / n
+				var pt := _domo(th, ph)
+				if _na_boca(pt) or (pt.x >= FORNO_FRENTE - 0.001 and fi > 4):
+					continue
+				var sm := SphereMesh.new()
+				var r := rng.randf_range(0.07, 0.1)
+				sm.radius = r
+				sm.height = r * 1.3
+				sm.radial_segments = 7
+				sm.rings = 4
+				var sn := MeshInstance3D.new()
+				sn.mesh = sm
+				sn.material_override = _fzm("pedra")
+				sn.position = pt
+				sn.rotation = Vector3(rng.randf(), rng.randf() * 3.0, 0)
+				root.add_child(sn)
+	# o barro: a casca do domo até a altura rebocada
+	if fbar > 0.0:
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var NT := 36
+		var NP := 12
+		var lim := fbar * PI * 0.5 + 0.001
+		var nz := FastNoiseLite.new()
+		nz.seed = mi + 5
+		nz.frequency = 3.0
+		for i in NP:
+			var ph0 := float(i) / NP * PI * 0.5
+			var ph1 := float(i + 1) / NP * PI * 0.5
+			if ph0 > lim:
+				break
+			for k in NT:
+				var th0 := TAU * k / NT
+				var th1 := TAU * (k + 1) / NT
+				var q := [_domo(th0, ph0), _domo(th1, ph0), _domo(th1, minf(ph1, lim)), _domo(th0, minf(ph1, lim))]
+				if _na_boca(q[0]) and _na_boca(q[1]) and _na_boca(q[2]) and _na_boca(q[3]):
+					continue
+				var tq := [th0, th1, th1, th0]
+				var pq := [ph0, ph0, minf(ph1, lim), minf(ph1, lim)]
+				for idx in [0, 2, 1, 0, 3, 2]:
+					var v: Vector3 = q[idx]
+					var bump := 0.02 + nz.get_noise_3d(v.x * 3.0, v.y * 3.0, v.z * 3.0) * 0.015
+					var nrm := Vector3(v.x + 0.1, v.y * 0.6, v.z).normalized()
+					if v.x >= FORNO_FRENTE - 0.001:
+						nrm = Vector3.RIGHT
+					st.set_normal(nrm)                    # liso (sem os quadradinhos)
+					st.set_uv(Vector2(float(tq[idx]) * 0.9, float(pq[idx]) * 1.8))
+					st.add_vertex(v + nrm * bump)
+		st.generate_tangents()
+		var mi2 := MeshInstance3D.new()
+		mi2.mesh = st.commit()
+		var age := int(_jogo.sim.elapsed_days()) - int(p.get("bar_dia", -99))
+		var stage := 1 if age < 3 else (2 if age < 6 else 3)       # (grosso: já começa meio seco)
+		mi2.material_override = load("res://scripts/world/construcao.gd")._mud_material(stage)
+		root.add_child(mi2)
+	if fped <= 0.0:
+		return
+	# por dentro, escuro (a boca)
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.02, 0.5, 0.5)
+	var boca := MeshInstance3D.new()
+	boca.mesh = bm
+	boca.material_override = _fzm("escuro")
+	boca.position = Vector3(FORNO_FRENTE - 0.35, 0.27, 0.0)
+	root.add_child(boca)
+	var chao := BoxMesh.new()
+	chao.size = Vector3(1.2, 0.01, 1.2)
+	var cn := MeshInstance3D.new()
+	cn.mesh = chao
+	cn.material_override = _fzm("escuro")
+	cn.position = Vector3(-0.1, 0.005, 0.0)
+	root.add_child(cn)
+	# o suspiro: um cano curto de barro em cima, atrás
+	if fbar >= 1.0:
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.06
+		cm.bottom_radius = 0.08
+		cm.height = 0.2
+		var sus := MeshInstance3D.new()
+		sus.mesh = cm
+		sus.material_override = load("res://scripts/world/construcao.gd")._mud_material(2)
+		var sp := _domo(PI, PI * 0.36)
+		sus.position = sp + Vector3(0, 0.08, 0)
+		root.add_child(sus)
+		var furo := MeshInstance3D.new()
+		var fm := CylinderMesh.new()
+		fm.top_radius = 0.04
+		fm.bottom_radius = 0.04
+		fm.height = 0.005
+		furo.mesh = fm
+		furo.material_override = _fzm("escuro")
+		furo.position = sp + Vector3(0, 0.181, 0)
+		root.add_child(furo)
+		nd["suspiro"] = sp + Vector3(0, 0.2, 0)
+	if not pronta(mi):
+		return
+	var f := forno_st(mi)
+	# a lenha dentro (as mesmas achas), deitadas em fileiras
+	var ach: Array = f.lenha
+	for k in ach.size():
+		var ln: Node3D = _arv.free_log_node(ach[k])
+		var fila := k % 4
+		var cam := k / 4
+		ln.transform = Transform3D(Basis(Vector3.UP, PI * 0.5) * Basis(Vector3.RIGHT, float(k) * 1.1),
+			Vector3(0.15 - cam * 0.27, 0.07 + cam * 0.02 + (fila % 2) * 0.03, -0.24 + fila * 0.16))
+		root.add_child(ln)
+	# o carvão pronto
+	for k in mini(int(f.carvao), 24):
+		var cb := BoxMesh.new()
+		var a := rng.randf_range(0.04, 0.07)
+		cb.size = Vector3(a * 1.5, a * 0.8, a)
+		var cv := MeshInstance3D.new()
+		cv.mesh = cb
+		cv.material_override = _fzm("carvao")
+		cv.position = Vector3(rng.randf_range(-0.55, 0.35), 0.03 + rng.randf() * 0.05, rng.randf_range(-0.35, 0.35))
+		cv.rotation = Vector3(rng.randf(), rng.randf() * 3.0, rng.randf())
+		root.add_child(cv)
+	# o fogo lá dentro (aceso com a porta aberta) e o brilho das brasas
+	var chama := CPUParticles3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.2, 0.28)
+	chama.mesh = qm
+	chama.material_override = _fzm("fogo")
+	chama.amount = 34
+	chama.lifetime = 0.7
+	chama.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	chama.emission_box_extents = Vector3(0.35, 0.05, 0.3)
+	chama.direction = Vector3.UP
+	chama.spread = 15.0
+	chama.gravity = Vector3(0, 1.0, 0)
+	chama.initial_velocity_min = 0.2
+	chama.initial_velocity_max = 0.5
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
+	grad.colors = PackedColorArray([Color(1.0, 0.85, 0.35, 0.95), Color(1.0, 0.45, 0.08, 0.8), Color(0.6, 0.1, 0.02, 0.0)])
+	chama.color_ramp = grad
+	chama.position = Vector3(-0.05, 0.12, 0)
+	chama.emitting = false
+	root.add_child(chama)
+	nd["chama"] = chama
+	var luz := OmniLight3D.new()
+	luz.light_color = Color(1.0, 0.55, 0.2)
+	luz.light_energy = 1.6
+	luz.omni_range = 4.0
+	luz.position = Vector3(FORNO_FRENTE + 0.3, 0.35, 0)
+	luz.visible = false
+	root.add_child(luz)
+	nd["luz"] = luz
+	# a fumaça do suspiro: grossa, subindo alto (dá para ver de longe)
+	var fum := CPUParticles3D.new()
+	var q2 := QuadMesh.new()
+	q2.size = Vector2(0.6, 0.6)
+	fum.mesh = q2
+	fum.material_override = _fzm("fumaca")
+	fum.amount = 60
+	fum.lifetime = 12.0
+	fum.direction = Vector3.UP
+	fum.spread = 12.0
+	fum.gravity = Vector3(0.25, 0.35, 0.05)
+	fum.initial_velocity_min = 0.7
+	fum.initial_velocity_max = 1.1
+	fum.scale_amount_min = 1.5
+	fum.scale_amount_max = 6.0
+	var sc := Curve.new()
+	sc.add_point(Vector2(0, 0.3))
+	sc.add_point(Vector2(1, 1.0))
+	fum.scale_amount_curve = sc
+	var g2 := Gradient.new()
+	g2.offsets = PackedFloat32Array([0.0, 0.1, 0.6, 1.0])
+	g2.colors = PackedColorArray([Color(0.7, 0.69, 0.67, 0.0), Color(0.66, 0.65, 0.63, 0.75), Color(0.78, 0.78, 0.77, 0.45), Color(0.85, 0.85, 0.85, 0.0)])
+	fum.color_ramp = g2
+	fum.visibility_aabb = AABB(Vector3(-8, -2, -8), Vector3(16, 40, 16))
+	fum.position = nd.get("suspiro", Vector3(-0.8, 0.9, 0))
+	fum.emitting = false
+	root.add_child(fum)
+	nd["fumaca"] = fum
+	# a porta: as duas tábuas giram na dobradiça (z = -0.27)
+	forno_visual(mi, nd)
+
+
+## O que muda com o tempo (a porta, o fogo, a fumaça).
+func forno_visual(mi: int, nd := {}) -> void:
+	if nd.is_empty():
+		if not _nodes.has(mi):
+			return
+		nd = _nodes[mi]
+	if not pronta(mi):
+		return
+	var f := forno_st(mi)
+	var aberta := str(f.porta) == "aberta"
+	var hinge := Vector3(0.6, 0.0, -0.27)
+	var ang := 1.75 if aberta else 0.0
+	for si in [0, 1]:
+		if nd.has("p_%d" % si) and is_instance_valid(nd["p_%d" % si]):
+			(nd["p_%d" % si] as Node3D).transform = Transform3D(Basis(Vector3.UP, -ang), hinge) * Transform3D(Basis(), -hinge) * (nd["t_%d" % si] as Transform3D)
+	var fum := forno_fumando(mi)
+	if nd.has("fumaca") and is_instance_valid(nd.fumaca):
+		(nd.fumaca as CPUParticles3D).emitting = fum
+	var fogo_aberto := bool(f.aceso) and aberta and float(f.t0) < 0.0
+	if nd.has("chama") and is_instance_valid(nd.chama):
+		(nd.chama as CPUParticles3D).emitting = fogo_aberto
+	if nd.has("luz") and is_instance_valid(nd.luz):
+		(nd.luz as OmniLight3D).visible = fogo_aberto
 
 
 # ---------- torno de oleiro ----------

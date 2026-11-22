@@ -2842,6 +2842,10 @@ func _update_ctx_btn() -> void:
 	elif not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1 and _crouch_job == "" and not _air:
 		_ctx_action = "guardar_lenha"
 		_ctx_btn.text = "Guardar lenha"
+	elif _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _forno_precisa_barro() >= 0:
+		var fmi := _forno_precisa_barro()
+		_ctx_action = "forno_barro"
+		_ctx_btn.text = "Rebocar o forno (%d/%d)" % [int(_maq.plantas[fmi].get("bar", 0)) + 1, int(Maquinas.TIPOS.forno.forno.barro)]
 	elif _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _reb.is_empty() and _constr and _maq.planta_near(_player.position, 2.0) < 0 and not _constr.reboco_spots(_player.position, 2.6).is_empty():
 		_ctx_action = "rebocar"
 		_ctx_btn.text = "Rebocar com barro"
@@ -2952,7 +2956,7 @@ func _ctx_press() -> void:
 					_show_toast("+1 folha seca de buriti")
 				_act_check = 0.0
 			return
-		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar":
+		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar", "forno_pedra", "forno_barro":
 			_maq_ctx_press(_ctx_action)
 			return
 		"peca":
@@ -8928,6 +8932,16 @@ func _maq_ctx() -> bool:
 			_ctx_btn.text = "Pegar %s (%d)" % ["tábua" if _maq.kind_of(sa[0]) == "tabua" else "peça", sa.size()]
 			return true
 		return false
+	var fz: Dictionary = Maquinas.TIPOS[p.tipo].get("forno", {})
+	if not fz.is_empty() and _carry.is_empty():
+		if int(p.get("ped", 0)) < int(fz.pedras) and (item_qtd("pedra") > 0 or teste):
+			_ctx_action = "forno_pedra"
+			_ctx_btn.text = "Pôr pedra (%d/%d)" % [int(p.get("ped", 0)) + 1, int(fz.pedras)]
+			return true
+		if int(p.get("ped", 0)) >= int(fz.pedras) and int(p.get("bar", 0)) < int(fz.barro) and _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro":
+			_ctx_action = "forno_barro"
+			_ctx_btn.text = "Rebocar com barro (%d/%d)" % [int(p.get("bar", 0)) + 1, int(fz.barro)]
+			return true
 	if not _carry.is_empty():
 		_ctx_action = "planta_peca"
 		_ctx_btn.text = "Pôr na planta"
@@ -8952,6 +8966,26 @@ func _maq_ctx_press(act: String) -> void:
 	if mi < 0:
 		return
 	match act:
+		"forno_pedra":
+			if not teste:
+				remove_item("pedra", 1)
+				_update_inventory()
+			_maq.forno_por(mi, "pedra")
+			Sons.play_at(self, "pedra_bate", _maq.xform(mi).origin + Vector3.UP * 0.4, -6.0, 1.1)
+			var fz2: Dictionary = Maquinas.TIPOS.forno.forno
+			var pp: Dictionary = _maq.plantas[mi]
+			_show_toast(("Pedra assentada (%d de %d)." % [int(pp.ped), int(fz2.pedras)]) + (" Agora reboque com barro por cima (balde de barro na mão)." if int(pp.ped) >= int(fz2.pedras) else ""))
+			return
+		"forno_barro":
+			_balde_carga = {}
+			_update_balde_fill(_balde_fill, _balde_carga)
+			_update_inventory()
+			_maq.forno_por(mi, "barro")
+			Sons.play_at(self, "cavar", _maq.xform(mi).origin + Vector3.UP * 0.5, -4.0, 1.3)
+			var fz3: Dictionary = Maquinas.TIPOS.forno.forno
+			var pq: Dictionary = _maq.plantas[mi]
+			_show_toast(("Barro por cima das pedras (%d de %d baldes)." % [int(pq.bar), int(fz3.barro)]) + (" Falta a porta: 2 tábuas." if int(pq.bar) >= int(fz3.barro) and not _maq.pronta(mi) else (" O forno está pronto!" if _maq.pronta(mi) else "")))
+			return
 		"planta_peca":
 			var pw: Dictionary = _maq.pending_work(mi)
 			if int(pw.furos) + int(pw.pinos) + int(pw.pontas) > 0:
@@ -10833,7 +10867,7 @@ func _fogueira_pick(i: int, acao: String) -> void:
 # a fogueira (ponha lenha logo, só o capim queima pouco).
 const ARCO_SOPROS := 4
 
-func fogo_start() -> String:
+func fogo_start(forno_mi := -1) -> String:
 	if not _arco.is_empty():
 		return ""
 	var falta := []
@@ -10850,7 +10884,9 @@ func fogo_start() -> String:
 	if _swim or _air or not _carry.is_empty():
 		return "Agora não dá: fique parado no chão, com as mãos livres."
 	var spot := _front(0.85)
-	if _fogos:
+	if forno_mi >= 0:
+		spot = _maq.forno_boca(forno_mi)       # acende a lenha na boca do forno
+	elif _fogos:
 		var fi: int = _fogos.near(spot, 1.0)
 		if fi < 0:
 			fi = _fogos.near(_player.position, 1.6)
@@ -10891,7 +10927,7 @@ func fogo_start() -> String:
 	soprar.visible = false
 	soprar.pressed.connect(_arco_soprar)
 	ui.add_child(soprar)
-	_arco = {"ui": ui, "sair": sair, "soprar": soprar, "calor": 0.0, "brasa": false, "sopros": 0, "spot": spot,
+	_arco = {"ui": ui, "sair": sair, "soprar": soprar, "calor": 0.0, "brasa": false, "sopros": 0, "spot": spot, "forno": forno_mi,
 		"x": -1.0, "dir": 0, "ida": 0.0, "giro": 0.0, "bow": 0.0, "tid": -9}
 	_face_to(spot)
 	_yaw = _face
@@ -11145,8 +11181,14 @@ func _arco_soprar() -> void:
 			remove_item("ripa", 1)          # a ripa queimou de tanto furo
 			_show_toast("A ripa da base ficou toda furada e foi embora.")
 		_update_inventory()
-	_fogos.acender(spot)
 	Sons.play_at(self, "estalo", spot, -6.0, 0.9)
+	var fmi := int(_arco.get("forno", -1))
+	if fmi >= 0:
+		_maq.forno_acender(fmi)
+		_arco_end()
+		_show_toast("O capim pegou e o fogo subiu na lenha do forno! Agora feche a porta (pelo olho).")
+		return
+	_fogos.acender(spot)
 	_arco_end()
 	_show_toast("FOGO! O capim pegou. Ponha lenha logo pelo olho da fogueira (o capim sozinho queima pouco).")
 
@@ -11188,6 +11230,134 @@ func _arco_end() -> void:
 		(_skel.get_parent() as Node3D).visible = true
 	_jump_btn.visible = true
 	_act_check = 0.0
+
+
+# ================== FORNO DE CARVÃO ==================
+
+## Forno em construção aqui perto esperando barro (as pedras já postas), ou -1.
+func _forno_precisa_barro() -> int:
+	if _maq == null:
+		return -1
+	var mi: int = _maq.planta_near(_player.position, 2.2)
+	if mi < 0 or str(_maq.plantas[mi].tipo) != "forno":
+		return -1
+	var p: Dictionary = _maq.plantas[mi]
+	var fz: Dictionary = Maquinas.TIPOS.forno.forno
+	if int(p.get("ped", 0)) >= int(fz.pedras) and int(p.get("bar", 0)) < int(fz.barro):
+		return mi
+	return -1
+# Pelo olho do forno pronto: "Pôr lenha" (as achas rachadas no cepo, até 12), cheio:
+# "Acender" (o arco de fogo na boca do forno), aceso: "Fechar a porta". Fechado, sai
+# fumaça do suspiro e, perto, aparece o relógio (o círculo vermelho diminuindo). Acabou:
+# "Abrir a porta" e "Pegar carvão" (uma lenha, um carvão).
+
+func _forno_opts(mi: int) -> Array:
+	var f: Dictionary = _maq.forno_st(mi)
+	var n := (f.lenha as Array).size()
+	var op := []
+	if int(f.carvao) > 0 and str(f.porta) == "aberta":
+		return [["forno_carvao", "Pegar carvão"]]
+	if bool(f.aceso):
+		if str(f.porta) == "aberta":
+			return [["forno_fechar", "Fechar a porta"]]
+		if _maq.forno_falta(mi) <= 0.0:
+			return [["forno_abrir", "Abrir a porta"]]
+		return []                             # cozinhando: só o relógio
+	if str(f.porta) == "fechada":
+		return [["forno_abrir", "Abrir a porta"]]
+	if n < Maquinas.FORNO_CAP:
+		op.append(["forno_lenha", "Pôr lenha"])
+	if n >= Maquinas.FORNO_CAP:
+		op.append(["forno_acender", "Acender"])
+	return op
+
+
+func _forno_pick(mi: int, acao: String) -> void:
+	var boca: Vector3 = _maq.forno_boca(mi)
+	match acao:
+		"forno_lenha":
+			var f: Dictionary = _maq.forno_st(mi)
+			var cabe: int = Maquinas.FORNO_CAP - (f.lenha as Array).size()
+			if item_qtd("lenha") <= 0:
+				_show_toast("Precisa de lenha: rache toquinhos no cepo com o machado.")
+				return
+			_lenha_fix()
+			var n := mini(cabe, item_qtd("lenha"))
+			for k in n:
+				var acha: Dictionary = _lenhas.pop_back() if not _lenhas.is_empty() else _lenha_padrao()
+				_maq.forno_lenha(mi, acha)
+			remove_item("lenha", n)
+			_update_inventory()
+			_face_to(boca)
+			Sons.play_at(self, "baque", boca, -10.0, 1.2)
+			var tem: int = (f.lenha as Array).size()
+			_show_toast(("Lenha no forno (%d de %d)." % [tem, Maquinas.FORNO_CAP]) + (" Cheio! Agora acenda (pelo olho)." if tem >= Maquinas.FORNO_CAP else " Traga mais lenha."))
+		"forno_acender":
+			_face_to(boca)
+			_yaw = _face
+			var msg := fogo_start(mi)
+			if msg != "":
+				_show_toast(msg)
+		"forno_fechar":
+			_maq.forno_porta(mi, true)
+			Sons.play_at(self, "baque", boca, -6.0, 0.8)
+			_show_toast("Porta fechada: a lenha vai queimando devagar, sem ar, e virando carvão. Veja o relógio em cima do forno.")
+		"forno_abrir":
+			_maq.forno_porta(mi, false)
+			Sons.play_at(self, "baque", boca, -8.0, 1.0)
+			var c: int = int(_maq.forno_st(mi).carvao)
+			_show_toast("Porta aberta." + (" A lenha virou %d carvões!" % c if c > 0 else ""))
+		"forno_carvao":
+			var nc: int = _maq.forno_tirar(mi)
+			if nc > 0:
+				add_item("carvao", nc)
+				_update_inventory()
+				Sons.play_at(self, "pedra_bate", boca, -10.0, 1.6)
+				_show_toast("+%d carvão." % nc)
+	_act_check = 0.0
+
+
+## O relógio dos fornos cozinhando perto: um círculo vermelho que vai diminuindo até
+## ficar pronto (só de perto, como o olho).
+func _draw_fornos() -> void:
+	if _maq == null:
+		return
+	var font := ThemeDB.fallback_font
+	for mi in _maq.plantas.size():
+		if str(_maq.plantas[mi].tipo) != "forno" or not _maq.pronta(mi):
+			continue
+		var fl: float = _maq.forno_falta(mi)
+		if fl < 0.0:
+			continue
+		var w: Vector3 = _maq.xform(mi) * Vector3(-0.1, 1.45, 0.0)
+		if w.distance_to(_player.position) > 8.0 or _cam.is_position_behind(w):
+			continue
+		var c := _cam.unproject_position(w)
+		var R := 34.0
+		_sub_ui.draw_circle(c, R + 6.0, Color(0.04, 0.035, 0.03, 0.8))
+		_sub_ui.draw_arc(c, R + 6.0, 0, TAU, 40, Color(0.86, 0.7, 0.38, 0.6), 2.0, true)
+		if fl > 0.0:
+			# o pedaço que falta: vermelho, começando cheio e diminuindo (sentido do relógio)
+			var pts := PackedVector2Array([c])
+			var seg := maxi(3, int(48 * fl))
+			for k in seg + 1:
+				var a := -PI * 0.5 + TAU * fl * float(k) / seg
+				pts.append(c + Vector2(cos(a), sin(a)) * R)
+			var col := Color(0.85, 0.12, 0.08).lerp(Color(1.0, 0.55, 0.15), 1.0 - fl)
+			_sub_ui.draw_colored_polygon(pts, col)
+			var seg_left := int(ceil(fl * Maquinas.FORNO_S))
+			var tx := "%d:%02d" % [seg_left / 60, seg_left % 60]
+			var tw := font.get_string_size(tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+			_sub_ui.draw_string(font, c + Vector2(-tw * 0.5, R + 26), tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.95, 0.85))
+		else:
+			_sub_ui.draw_circle(c, R, Color(0.2, 0.7, 0.3))
+			var tx2 := "Pronto!"
+			var tw2 := font.get_string_size(tx2, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+			_sub_ui.draw_string(font, c + Vector2(-tw2 * 0.5, R + 26), tx2, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 1.0, 0.8))
+		# os ponteirinhos do relógio
+		_sub_ui.draw_line(c, c + Vector2(0, -R * 0.75), Color(1, 1, 1, 0.9), 3.0, true)
+		_sub_ui.draw_line(c, c + Vector2(R * 0.5, 0), Color(1, 1, 1, 0.9), 3.0, true)
+		_sub_ui.draw_circle(c, 4.0, Color(1, 1, 1))
 
 
 # ================== PENEIRA DE ÁGUA (FILTRO) ==================
@@ -11337,6 +11507,9 @@ func _filtro_tick(delta: float) -> void:
 		return
 	_filtro_t = 0.15
 	for mi in _maq.plantas.size():
+		if str(_maq.plantas[mi].tipo) == "forno":
+			_maq.forno_visual(mi)            # a fumaça para quando a lenha vira carvão
+			continue
 		if str(_maq.plantas[mi].tipo) != "filtro_agua" or not _maq.plantas[mi].has("filtro"):
 			continue
 		var c: Vector3 = _maq.xform(mi).origin
@@ -12275,21 +12448,38 @@ func _olho_tick() -> void:
 	if not _olho_free():
 		_olho = {}
 		return
-	var p: Dictionary = _buritis.palm_near(_player.position, 2.2)
-	if p.is_empty():
-		p = _buritis.caido_near(_player.position, 2.6)      # a copa do buriti derrubado
-	if p.is_empty() and _maq:
+	# todos os que estão perto e têm o que fazer; fica o mais perto do jogador
+	var pp := Vector2(_player.position.x, _player.position.z)
+	var cands := []
+	var bp2: Dictionary = _buritis.palm_near(_player.position, 2.2)
+	if not bp2.is_empty():
+		cands.append([bp2, pp.distance_to(Vector2(float(bp2.x), float(bp2.z)))])
+	var cp: Dictionary = _buritis.caido_near(_player.position, 2.6)      # a copa do buriti derrubado
+	if not cp.is_empty():
+		var co: Vector3 = _buritis.crown_xf(cp).origin
+		cands.append([cp, pp.distance_to(Vector2(co.x, co.z))])
+	if _maq:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
-		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua"] and _maq.pronta(mi):
-			p = {"maq": mi}
-	if p.is_empty() and _fogos:
+		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno"] and _maq.pronta(mi):
+			var mo: Vector3 = _maq.xform(mi).origin
+			cands.append([{"maq": mi}, maxf(0.0, pp.distance_to(Vector2(mo.x, mo.z)) - 0.8)])
+	if _fogos:
 		var fgi: int = _fogos.near(_player.position, 1.8)
 		if fgi >= 0:
-			p = {"fogueira": fgi}
-	if p.is_empty() and _barr:
+			var fc: Vector3 = _fogos.center(fgi)
+			cands.append([{"fogueira": fgi}, pp.distance_to(Vector2(fc.x, fc.z))])
+	if _barr:
 		var bi: int = _barr.near(_player.position, 2.6)
-		if bi >= 0 and Vector2(float(_barr.montes[bi].x) - _player.position.x, float(_barr.montes[bi].z) - _player.position.z).length() < _barr.radius(bi) + 1.1:
-			p = {"barreiro": bi}
+		if bi >= 0:
+			var bd := Vector2(float(_barr.montes[bi].x), float(_barr.montes[bi].z)).distance_to(pp)
+			if bd < _barr.radius(bi) + 1.1:
+				cands.append([{"barreiro": bi}, maxf(0.0, bd - _barr.radius(bi))])
+	var p := {}
+	var melhor := 1e9
+	for c in cands:
+		if float(c[1]) < melhor and not _olho_opts(c[0]).is_empty():
+			melhor = float(c[1])
+			p = c[0]
 	if p.is_empty() or _olho_opts(p).is_empty():
 		_olho = {}
 		return
@@ -12301,6 +12491,8 @@ func _olho_tick() -> void:
 func _olho_opts(p: Dictionary) -> Array:
 	var out := []
 	if p.has("maq"):
+		if str(_maq.plantas[int(p.maq)].tipo) == "forno":
+			return _forno_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "filtro_agua":
 			return _filtro_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "torno_ceramica":
@@ -12331,6 +12523,8 @@ func _olho_opts(p: Dictionary) -> Array:
 ## Onde o olho fica: no tronco (na altura do peito), do lado de quem está olhando.
 func _olho_world(p: Dictionary) -> Vector3:
 	if p.has("maq"):
+		if str(_maq.plantas[int(p.maq)].tipo) == "forno":
+			return _maq.xform(int(p.maq)) * Vector3(0.75, 0.75, 0.0)
 		if str(_maq.plantas[int(p.maq)].tipo) == "filtro_agua":
 			return _maq.xform(int(p.maq)) * Vector3(0.0, 1.2, 0.0)
 		if str(_maq.plantas[int(p.maq)].tipo) == "torno_ceramica":
@@ -12372,6 +12566,7 @@ func _olho_layout() -> Dictionary:
 
 
 func _draw_bur_ui() -> void:
+	_draw_fornos()
 	var font := ThemeDB.fallback_font
 	var L := _olho_layout() if _olho_free() and _bur.is_empty() else {}
 	if not L.is_empty():
@@ -12535,6 +12730,9 @@ func _olho_pick(acao: String) -> void:
 			return
 		"modelar":
 			_torno_start(int(p.maq))
+			return
+		"forno_lenha", "forno_acender", "forno_fechar", "forno_abrir", "forno_carvao":
+			_forno_pick(int(p.maq), acao)
 			return
 		"pedrinhas", "carvao", "areia", "tela", "vasilha", "agua_filtro", "encher_limpa":
 			_filtro_pick(int(p.maq), acao)
