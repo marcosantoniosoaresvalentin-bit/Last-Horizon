@@ -1063,9 +1063,22 @@ uniform vec3 casco1;
 uniform vec3 casco2;
 uniform vec3 casco3;
 uniform float r_casco;
+uniform vec3 rabo0;
+uniform vec3 rabo1;
+uniform vec3 rabo2;
+uniform vec3 rabo3;
+uniform vec3 rabo4;
+uniform vec3 rabo5;
+uniform float r_rabo;
+uniform float com_rabo;
 varying vec3 p;
 varying vec3 nn;
 void vertex() { p = VERTEX; nn = NORMAL; }
+float seg(vec3 q, vec3 a, vec3 b) {
+	vec3 ab = b - a;
+	float t = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
+	return distance(q, a + ab * t);
+}
 float hh(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
 float ruido(vec3 q) {
 	vec3 i = floor(q); vec3 f = fract(q); f = f * f * (3.0 - 2.0 * f);
@@ -1075,7 +1088,12 @@ float ruido(vec3 q) {
 void fragment() {
 	float u = (y_rabo - p.y) / (y_rabo - y_pescoco);
 	bool cab = u > 0.92;
-	if (cab) {
+	float dr = min(min(seg(p, rabo1, rabo2), seg(p, rabo2, rabo3)), min(seg(p, rabo3, rabo4), seg(p, rabo4, rabo5)));
+	dr = min(dr, seg(p, rabo0, rabo1) + r_rabo * 0.35);
+	bool rabo = dr < r_rabo;
+	if (rabo) {
+		if (com_rabo < 0.5) { discard; }      // o rabo inteiro fica numa banda só
+	} else if (cab) {
 		if (com_cabeca < 0.5) { discard; }
 	} else if (p.x * lado < 0.0) {
 		discard;
@@ -1203,6 +1221,13 @@ func _banda_mat(n: Node3D, c: Dictionary, lado: float, cab: bool) -> ShaderMater
 	sm.set_shader_parameter("r_casco", 0.1 / m_por_u)
 	for i in 4:
 		sm.set_shader_parameter("casco%d" % i, rf.cascos[i])
+	# o rabo: os ossos e a ponta (um pouco além do último)
+	var rb: Array = rf.rabo
+	for i in 5:
+		sm.set_shader_parameter("rabo%d" % i, rb[i])
+	sm.set_shader_parameter("rabo5", (rb[4] as Vector3) + ((rb[4] as Vector3) - (rb[3] as Vector3)) * 1.2)
+	sm.set_shader_parameter("r_rabo", 0.075 / m_por_u)
+	sm.set_shader_parameter("com_rabo", 0.0 if cab else 1.0)     # o rabo vai com a banda sem a cabeça
 	return sm
 
 
@@ -2109,7 +2134,8 @@ func _couro_ref(n: Node3D) -> Dictionary:
 	var y_pes: float = (pos.call("Neck") as Vector3).y
 	var y_ini: float = (pos.call("BackUpLeg_R") as Vector3).y
 	return {"mi": mi, "y_rabo": y_rabo, "y_pescoco": y_pes, "u_ini": (y_rabo - y_ini) / (y_rabo - y_pes), "u_ubere": (y_rabo - (-0.004)) / (y_rabo - y_pes),
-		"cascos": [pos.call("BackFoot_R"), pos.call("BackFoot_L"), pos.call("FrontFoot_R"), pos.call("FrontFoot_L")]}
+		"cascos": [pos.call("BackFoot_R"), pos.call("BackFoot_L"), pos.call("FrontFoot_R"), pos.call("FrontFoot_L")],
+		"rabo": [pos.call("Back"), pos.call("Tail1"), pos.call("Tail2"), pos.call("Tail3"), pos.call("Tail4")]}
 
 
 ## O couro na pele (o corte e a carne aparecendo). Faz o material da carcaça na primeira vez.
