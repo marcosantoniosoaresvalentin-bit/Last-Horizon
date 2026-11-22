@@ -1723,12 +1723,14 @@ void fragment() {
 	}
 	if (garg > 0.5 && u > 0.93 && u < 0.99 && nn.z < 0.2) { rasgo = true; }
 	// aberta: o interior (a cavidade vermelho-escura, as costelas brancas no peito)
+	bool dentro = false;
+	vec3 cav = vec3(0.0);
 	if (aberto > 0.0 && u > ab_y && u < 1.0 && nn.z < 0.15) {
 		float tt = (u - ab_y) / (1.0 - ab_y);
 		float wo = wa + abre_w * aberto * sin(3.14159 * clamp(tt, 0.0, 1.0));
 		if (abs(p.x) < wo) {
 			float fundo = 1.0 - abs(p.x) / max(wo, 0.0001);
-			vec3 cav = mix(vec3(0.34, 0.05, 0.04), vec3(0.12, 0.015, 0.012), fundo * 0.8);
+			cav = mix(vec3(0.34, 0.05, 0.04), vec3(0.12, 0.015, 0.012), fundo * 0.8);
 			if (tt > 0.45) {
 				float cost = abs(sin(q.y * 3.14159 / 0.085));
 				float c2 = smoothstep(0.72, 0.93, cost) * smoothstep(0.45, 0.55, tt);
@@ -1736,13 +1738,14 @@ void fragment() {
 			}
 			float beira = smoothstep(0.75, 1.0, 1.0 - fundo);
 			cav = mix(cav, vec3(0.6, 0.12, 0.09), beira * 0.6);
-			ALBEDO = cav;
-			ROUGHNESS = 0.4;
-			SPECULAR = 0.35;
-			return;
+			dentro = true;
 		}
 	}
-	if (rasgo) {
+	if (dentro) {
+		ALBEDO = cav;
+		ROUGHNESS = 0.4;
+		SPECULAR = 0.35;
+	} else if (rasgo) {
 		ALBEDO = mix(vec3(0.3, 0.012, 0.012), vec3(0.16, 0.015, 0.012), aberto);
 		ROUGHNESS = 0.25;
 		SPECULAR = 0.5;
