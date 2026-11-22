@@ -10858,8 +10858,8 @@ func _evis_start(mi: int, uid: String) -> void:
 	if _skel:
 		(_skel.get_parent() as Node3D).visible = false
 	_caca.couro_visual(uid)
-	if float(ev.get("puxa", 0.0)) > 0.0:
-		_caca.evis_puxa(uid, float(ev.puxa))
+	if float(ev.get("barriga", 0.0)) > 0.0:
+		_caca.evis_puxa(uid, float(ev.get("puxa", 0.0)), _evis_pes())
 	_act_check = 0.0
 
 
@@ -10999,6 +10999,8 @@ func _evis_input(e: InputEvent) -> bool:
 			var i := EVIS_FASES.find(fase)
 			_evis.fase = EVIS_FASES[i + 1]
 		_caca.couro_visual(uid)
+		if fase == "barriga" or fase == "garganta":
+			_caca.evis_puxa(uid, 0.0, _evis_pes())
 		return true
 	# puxando as vísceras para baixo
 	if d.y <= 0.0 or float(_evis.forca) < EVIS_PRECISA:
@@ -11006,7 +11008,7 @@ func _evis_input(e: InputEvent) -> bool:
 	var p0 := float(ev.get("puxa", 0.0))
 	var p1 := minf(1.0, p0 + d.y / 420.0 * 0.5)
 	ev.puxa = p1
-	_caca.evis_puxa(uid, p1)
+	_caca.evis_puxa(uid, p1, _evis_pes())
 	_caca.couro_visual(uid)
 	if int(p1 * 10.0) != int(p0 * 10.0):
 		Sons.play_at(self, "fibra_puxa", _cam.global_position - _cam.global_transform.basis.z * 1.5, -6.0, 0.55)
@@ -11014,6 +11016,15 @@ func _evis_input(e: InputEvent) -> bool:
 		_caca.evis_solta(uid)
 		_evis_end()
 	return true
+
+
+## Onde as vísceras caem: nos pés do jogador (um pouco na frente, para o lado da vaca).
+func _evis_pes() -> Vector3:
+	var fw := -_cam.global_transform.basis.z
+	fw.y = 0.0
+	fw = fw.normalized() if fw.length() > 0.1 else Vector3.FORWARD
+	var p := _player.position + fw * 0.7
+	return Vector3(p.x, ground_at(p.x, p.z), p.z)
 
 
 func _evis_forca() -> void:

@@ -1170,23 +1170,84 @@ func evis_centro(uid: String) -> Vector3:
 	return mi.global_transform * Vector3(0, y, _barriga_z(mi, y) + 0.006)
 
 
-## As vísceras saindo (k 0..1): aparecem na abertura e vão descendo para fora.
-func evis_puxa(uid: String, k: float) -> void:
+## As vísceras saindo (k 0..1). Com a barriga aberta já saltam um pouco para fora do
+## corte; puxando a garganta (a goela e a traqueia, cortadas lá em cima) para baixo, a
+## ponta vem na mão e tudo sai junto pela barriga, descendo até os pés do jogador (alvo).
+## Um tubo liga a garganta ao monte e outro, a membrana, liga o monte ao lado de dentro.
+func evis_puxa(uid: String, k: float, alvo: Vector3) -> void:
 	var nd: Dictionary = _nodes.get(uid, {})
 	if nd.is_empty() or not is_instance_valid(nd.node):
 		return
 	var n: Node3D = nd.node
 	var c: Dictionary = nd.c
 	var vn: Node3D = n.get_meta("visc") if n.has_meta("visc") and is_instance_valid(n.get_meta("visc")) else null
+	var p: Dictionary = c.get("p", {})
+	var s := float(p.get("s", 1.0))
 	if vn == null:
-		var p: Dictionary = c.get("p", {})
-		vn = visceras_no(float(p.get("s", 1.0)), not bool(p.get("touro", false)), int(p.get("seed", 1)))
+		vn = visceras_no(s, not bool(p.get("touro", false)), int(p.get("seed", 1)))
 		add_child(vn)
 		n.set_meta("visc", vn)
+		var tb := MeshInstance3D.new()
+		tb.name = "tubos"
+		var mt := StandardMaterial3D.new()
+		mt.albedo_color = Color(0.72, 0.42, 0.42)
+		mt.roughness = 0.45
+		mt.cull_mode = BaseMaterial3D.CULL_DISABLED
+		tb.material_override = mt
+		add_child(tb)
+		n.set_meta("tubos", tb)
+	var tb2: MeshInstance3D = n.get_meta("tubos")
+	var ev: Dictionary = c.get("evis", {})
 	var fr := couro_frente(uid)
 	var c0 := evis_centro(uid)
-	vn.global_position = c0 + fr * lerpf(-0.12, 0.45, k) + Vector3.DOWN * k * 0.55
-	vn.visible = k > 0.02
+	var gl: Array = evis_linha(uid, "garganta", 9)
+	var tg: Vector3 = gl[4] if gl.size() > 4 else c0 + Vector3.UP
+	# saltando pela abertura (já aberta), saindo, descendo até os pés
+	var salto := 0.12 * clampf(float(ev.get("barriga", 0.0)) * 1.5 - 0.3, 0.0, 1.0)
+	var sai := smoothstep(0.1, 0.55, k)
+	var desce := smoothstep(0.35, 1.0, k)
+	var fora := c0 + fr * (lerpf(-0.18 * s, 0.35, sai) + salto)
+	var chao := alvo + Vector3.UP * 0.3 * s
+	var pos := fora.lerp(chao, desce)
+	vn.global_position = pos
+	vn.visible = salto > 0.0 or k > 0.0
+	# a mão com a ponta da garganta: sai da garganta e desce junto, um pouco acima do monte
+	var mao := tg.lerp(pos + Vector3.UP * 0.55 * s + fr * 0.12, smoothstep(0.0, 0.35, k)) if k > 0.0 else tg
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var topo := pos + Vector3.UP * 0.32 * s
+	if float(ev.get("garganta", 0.0)) >= 1.0 or k > 0.0:
+		_tubo_curvo(st, mao, topo, 0.028 * s, fr * 0.1)
+		_tubo_curvo(st, mao + Vector3(0.05, 0, 0) * s, topo + Vector3(0.06, -0.05, 0) * s, 0.02 * s, fr * 0.06)
+	if k > 0.0 and k < 0.97:
+		_tubo_curvo(st, pos + Vector3.UP * 0.1 * s, c0 - fr * 0.05, lerpf(0.06, 0.01, k) * s, Vector3.DOWN * 0.1)
+	st.generate_normals()
+	tb2.mesh = st.commit()
+	tb2.visible = vn.visible
+
+
+## Um tubo de a até b, barrigudo para o lado de "curva" (as tripas da garganta).
+static func _tubo_curvo(st: SurfaceTool, a: Vector3, b: Vector3, r: float, curva: Vector3) -> void:
+	var pts := []
+	for i in 13:
+		var t := float(i) / 12.0
+		pts.append(a.lerp(b, t) + curva * sin(t * PI))
+	var lados := 7
+	for i in pts.size() - 1:
+		var p0: Vector3 = pts[i]
+		var p1: Vector3 = pts[i + 1]
+		var d := (p1 - p0).normalized()
+		if d.length() < 0.5:
+			continue
+		var ax := d.cross(Vector3(0.3, 0.9, 0.2).normalized()).normalized()
+		var bx := d.cross(ax).normalized()
+		for j in lados:
+			var t0 := TAU * j / lados
+			var t1 := TAU * (j + 1) / lados
+			var q := [p0 + (ax * cos(t0) + bx * sin(t0)) * r, p1 + (ax * cos(t0) + bx * sin(t0)) * r,
+				p1 + (ax * cos(t1) + bx * sin(t1)) * r, p0 + (ax * cos(t1) + bx * sin(t1)) * r]
+			for jj in [0, 1, 2, 0, 2, 3]:
+				st.add_vertex(q[jj])
 
 
 ## Saíram todas: o monte cai no chão (e fica); o úbere sai da carcaça.
@@ -1200,12 +1261,16 @@ func evis_solta(uid: String) -> void:
 	_evis_aplica(n, c)
 	var vn: Node3D = n.get_meta("visc") if n.has_meta("visc") else null
 	n.remove_meta("visc")
+	if n.has_meta("tubos"):
+		var tb: Node = n.get_meta("tubos")
+		if is_instance_valid(tb):
+			tb.queue_free()
+		n.remove_meta("tubos")
 	if vn == null or not is_instance_valid(vn):
 		return
 	vn.set_meta("uid", uid)
 	vn.set_meta("tipo", "buchada")
-	var fr := couro_frente(uid)
-	_caindo.append({"node": vn, "vel": fr * 0.7 + Vector3.DOWN * 0.5, "ang": Vector3(_rng.randf_range(-1, 1), 0.2, _rng.randf_range(-1, 1)).normalized() * 1.5,
+	_caindo.append({"node": vn, "vel": Vector3.DOWN * 0.8, "ang": Vector3(_rng.randf_range(-1, 1), 0.2, _rng.randf_range(-1, 1)).normalized() * 0.8,
 		"uid": uid, "tipo": "buchada", "chao": 0.0, "r": 0.3})
 	Sons.play_at(_jogo, "baque", vn.global_position, 4.0, 0.6)
 	_fonte(n, evis_centro(uid), Vector3.DOWN, 14.0, 0.8)
@@ -1624,6 +1689,7 @@ uniform float y_off;
 uniform float garg;
 uniform float aberto;
 uniform float u_ini2;
+uniform float abre_w;
 varying vec3 p;
 varying vec3 nn;
 void vertex() {
@@ -1656,6 +1722,26 @@ void fragment() {
 		}
 	}
 	if (garg > 0.5 && u > 0.93 && u < 0.99 && nn.z < 0.2) { rasgo = true; }
+	// aberta: o interior (a cavidade vermelho-escura, as costelas brancas no peito)
+	if (aberto > 0.0 && u > ab_y && u < 1.0 && nn.z < 0.15) {
+		float tt = (u - ab_y) / (1.0 - ab_y);
+		float wo = wa + abre_w * aberto * sin(3.14159 * clamp(tt, 0.0, 1.0));
+		if (abs(p.x) < wo) {
+			float fundo = 1.0 - abs(p.x) / max(wo, 0.0001);
+			vec3 cav = mix(vec3(0.34, 0.05, 0.04), vec3(0.12, 0.015, 0.012), fundo * 0.8);
+			if (tt > 0.45) {
+				float cost = abs(sin(q.y * 3.14159 / 0.085));
+				float c2 = smoothstep(0.72, 0.93, cost) * smoothstep(0.45, 0.55, tt);
+				cav = mix(cav, vec3(0.86, 0.78, 0.72), c2 * 0.85);
+			}
+			float beira = smoothstep(0.75, 1.0, 1.0 - fundo);
+			cav = mix(cav, vec3(0.6, 0.12, 0.09), beira * 0.6);
+			ALBEDO = cav;
+			ROUGHNESS = 0.4;
+			SPECULAR = 0.35;
+			return;
+		}
+	}
 	if (rasgo) {
 		ALBEDO = mix(vec3(0.3, 0.012, 0.012), vec3(0.16, 0.015, 0.012), aberto);
 		ROUGHNESS = 0.25;
@@ -1806,7 +1892,8 @@ func couro_visual(uid: String) -> void:
 	sm.set_shader_parameter("y_d", float(ev.get("y_d", 0.0)))
 	sm.set_shader_parameter("y_off", 0.13 / m_por_u)
 	sm.set_shader_parameter("garg", 1.0 if float(ev.get("garganta", 0.0)) >= 1.0 else 0.0)
-	sm.set_shader_parameter("aberto", clampf(float(ev.get("puxa", 0.0)) * 2.0, 0.0, 1.0))
+	sm.set_shader_parameter("aberto", 1.0 if bool(ev.get("feito", false)) else clampf(float(ev.get("puxa", 0.0)) * 1.5, 0.0, 1.0))
+	sm.set_shader_parameter("abre_w", 0.12 / m_por_u)
 
 
 ## A linha do corte na barriga, no mundo (n pontos, dos pés de trás até o pescoço).
