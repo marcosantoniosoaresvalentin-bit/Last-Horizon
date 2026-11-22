@@ -1,9 +1,9 @@
 {
-  "version": 172,
-  "file": "update_172.zip",
-  "size": 5010601,
-  "sha256": "6c79eed0a3566b96eccc9a2809595d9e62c975d58e9a92551bab00e8108d8cb3",
+  "version": 173,
+  "file": "update_173.zip",
+  "size": 5011549,
+  "sha256": "ed7b542222f49f2bf675f4b39a150ed187b2590198a86d2911fb2e19db4dc234",
   "min_build": 1,
-  "notes": "Forno de carvão nas plantas: pedras, barro e porta; lenha vira carvão com a porta fechada, relógio e fumaça no suspiro",
+  "notes": "Forno: barro primeiro, pedras encaixadas aparecendo, porta de barro, relógio só de perto",
   "date": "2026-11-22"
 }
