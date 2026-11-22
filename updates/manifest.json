@@ -1,9 +1,9 @@
 {
-  "version": 205,
-  "file": "update_205.zip",
-  "size": 5610486,
-  "sha256": "cfe6e5a51d0ca1d535c3c196d8f490d784cc2d039bdf27d226eb26fc996e1c81",
+  "version": 206,
+  "file": "update_206.zip",
+  "size": 5611352,
+  "sha256": "2164bf8f6043fa0da89a2be8fc0b995fa564e5b9ffe1e39ee3fa5dc7d9d51b00",
   "min_build": 1,
-  "notes": "Babaçu (pindovas, palmeiras, cocos e folhas secas); menu de projetos rolando",
+  "notes": "Folha de babaçu: cortar da pindova com o machado",
   "date": "2026-11-22"
 }
