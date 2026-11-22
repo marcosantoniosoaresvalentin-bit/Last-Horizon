@@ -1048,7 +1048,7 @@ func despendurar(uid: String, base: Dictionary) -> void:
 # O pedaço de baixo cai: num carrinho de mão posto embaixo fica limpo (vai para ele); na
 # terra, suja e fica impróprio para comer. c.quartos = {"e"/"d": {faca, golpes, caiu, onde}}.
 
-const QUARTO_U := 0.58          # onde parte (entre as costelas de trás)
+const QUARTO_U := 0.3           # onde parte (perto do quadril: o pedaço da anca cabe no carrinho)
 const QUARTO_GOLPES := 4
 static var _largura := {}
 
