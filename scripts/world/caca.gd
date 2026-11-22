@@ -101,6 +101,7 @@ func update(delta: float) -> void:
 		elif nd.has("cai"):
 			_cair(nd, delta)
 	_sangue_tick(delta)
+	_caindo_tick(delta)
 	# poças de sangue crescendo
 	for p in _poças.duplicate():
 		p.r = move_toward(float(p.r), float(p.alvo), delta * 0.03)
@@ -918,7 +919,7 @@ func pes_tras(uid: String) -> Vector3:
 		return n.global_position
 	var sk: Skeleton3D = n.get_meta("sk")
 	var soma := Vector3.ZERO
-	for nm in ["BackFoot_R", "BackFoot_L"]:
+	for nm in ["BackLowLeg_R", "BackLowLeg_L"]:
 		var bi := sk.find_bone(nm)
 		soma += sk.global_transform * sk.get_bone_global_pose(bi).origin
 	return soma * 0.5
@@ -938,11 +939,8 @@ func base_pendura(uid: String) -> Dictionary:
 	return {"yaw": atan2(-bx.z, bx.x), "c0": [c0.x, c0.z], "xf0": _xf_json(n.global_transform)}
 
 
-## A pose de pendurada nos ossos (uma vez): devolve os pontos dela no corpo.
-func _rig(n: Node3D) -> Dictionary:
-	if n.has_meta("rig"):
-		return n.get_meta("rig")
-	var sk: Skeleton3D = n.get_meta("sk")
+## A pose de pendurada: as pernas de trás esticadas, as da frente soltas, a cabeça caída.
+static func _pose_pendurada(sk: Skeleton3D) -> void:
 	sk.reset_bone_poses()
 	for sd in ["_R", "_L"]:
 		VacaModelo._dobra(sk, "BackUpLeg" + sd, 1.5)
@@ -952,10 +950,21 @@ func _rig(n: Node3D) -> Dictionary:
 	VacaModelo._dobra(sk, "Neck", 0.55)
 	VacaModelo._dobra(sk, "Head", 0.35)
 	VacaModelo._dobra(sk, "Tail1", -0.6)
+
+
+## A pose de pendurada nos ossos (uma vez): devolve os pontos dela no corpo.
+func _rig(n: Node3D) -> Dictionary:
+	if n.has_meta("rig"):
+		return n.get_meta("rig")
+	var sk: Skeleton3D = n.get_meta("sk")
+	_pose_pendurada(sk)
+	for uid0 in _nodes:
+		if _nodes[uid0].node == n:
+			_cortes_escala(sk, _nodes[uid0].c)
 	VacaModelo._cascos(sk)
 	var inv := n.global_transform.affine_inverse()
 	var pk := Vector3.ZERO
-	for nm in ["BackFoot_R", "BackFoot_L"]:
+	for nm in ["BackLowLeg_R", "BackLowLeg_L"]:
 		pk += inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(nm)).origin) * 0.5
 	var ph: Vector3 = inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Head")).origin)
 	var cr: Vector3 = inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Body")).origin)
@@ -1016,11 +1025,365 @@ func despendurar(uid: String, base: Dictionary) -> void:
 			var ap: AnimationPlayer = n.get_meta("ap")
 			ap.play(VacaModelo.ANIMS.morrer)
 			ap.advance(ap.current_animation_length)
+			_cortes_escala(n.get_meta("sk"), nd.c)
 			VacaModelo._cascos(n.get_meta("sk"))
 	if (base.get("xf0", []) as Array).size() >= 12:
 		n.global_transform = _xf_de(base.xf0)
 	if (nd.c as Dictionary).has("couro"):
 		couro_visual(uid)
+
+
+# ---------- patas e cabeça (com o machado) ----------
+# Pendurada, as canelas (do jarrete/joelho para baixo, com o casco) e a cabeça saem a
+# machadadas. A parte cortada vira um pedaço separado (a mesma malha da vaca, só daquela
+# parte, na pose de pendurada) que cai, quica e fica no chão; na carcaça fica o toco
+# (carne vermelha com o osso branco no meio). c.cortes = [tipo...]; c.partes = [{tipo, xf}].
+
+const PARTES := {
+	"pe_td": {"ossos": ["BackLowLeg_R", "BackFoot_R"], "de": "BackLowLeg_R", "ate": "BackFoot_R", "golpes": 3, "r": 0.05},
+	"pe_te": {"ossos": ["BackLowLeg_L", "BackFoot_L"], "de": "BackLowLeg_L", "ate": "BackFoot_L", "golpes": 3, "r": 0.05},
+	"pe_fd": {"ossos": ["FrontLowLeg_R", "FrontFoot_R"], "de": "FrontLowLeg_R", "ate": "FrontFoot_R", "golpes": 3, "r": 0.045},
+	"pe_fe": {"ossos": ["FrontLowLeg_L", "FrontFoot_L"], "de": "FrontLowLeg_L", "ate": "FrontFoot_L", "golpes": 3, "r": 0.045},
+	"cabeca": {"ossos": ["Head"], "de": "Head", "ate": "", "golpes": 7, "r": 0.1},
+}
+static var _partes_cache := {}
+var _caindo: Array = []            # pedaços caindo: {node, vel, ang, uid, tipo, chao}
+
+
+## Os ossos cortados ficam do tamanho de nada (a parte some da carcaça).
+static func _cortes_escala(sk: Skeleton3D, c: Dictionary) -> void:
+	for t in c.get("cortes", []):
+		if PARTES.has(str(t)):
+			var bi := sk.find_bone(str(PARTES[str(t)].de))
+			if bi >= 0:
+				sk.set_bone_pose_scale(bi, Vector3.ONE * 0.001)
+
+
+## Onde corta (na malha) e para onde a parte sai: [ponto, direção].
+static func _corte_ref(sk: Skeleton3D, tipo: String) -> Array:
+	var pt: Dictionary = PARTES[tipo]
+	var a: Vector3 = sk.get_bone_global_pose(sk.find_bone(str(pt.de))).origin
+	var b: Vector3
+	if str(pt.ate) != "":
+		b = sk.get_bone_global_pose(sk.find_bone(str(pt.ate))).origin
+	else:
+		b = a + (a - sk.get_bone_global_pose(sk.find_bone("Neck")).origin)
+	return [a, (b - a).normalized()]
+
+
+## A malha da parte (na pose de pendurada, nas medidas de dentro da malha), feita uma vez.
+func parte_malha(c: Dictionary, tipo: String) -> Dictionary:
+	var p: Dictionary = c.get("p", {})
+	var key := "%s_%s_%s_%d" % [tipo, str(p.get("cor", "branca")), str(p.get("touro", false)), int(p.get("seed", 1))]
+	if _partes_cache.has(key):
+		return _partes_cache[key]
+	var tmp: Node3D = VacaModelo.build(1.0, str(p.get("cor", "branca")), bool(p.get("touro", false)), int(p.get("seed", 1)))
+	if not tmp.has_meta("sk"):
+		tmp.free()
+		return {}
+	var sk: Skeleton3D = tmp.get_meta("sk")
+	_pose_pendurada(sk)
+	VacaModelo._cascos(sk)
+	var mi := _malha(tmp)
+	var skin: Skin = mi.skin
+	var ossos: Array = PARTES[tipo].ossos
+	var mats := []
+	var guarda := {}
+	if skin == null:
+		tmp.free()
+		return {}
+	for b in skin.get_bind_count():
+		var bi := skin.get_bind_bone(b)
+		if bi < 0:
+			bi = sk.find_bone(skin.get_bind_name(b))
+		mats.append(sk.get_bone_global_pose(bi) * skin.get_bind_pose(b))
+		if bi >= 0 and sk.get_bone_name(bi) in ossos:
+			guarda[b] = true
+	var am := ArrayMesh.new()
+	var idx := []
+	var soma := Vector3.ZERO
+	var nv := 0
+	for k in mi.mesh.get_surface_count():
+		var a: Array = mi.mesh.surface_get_arrays(k)
+		var vs: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+		var ns: PackedVector3Array = a[Mesh.ARRAY_NORMAL]
+		var bo: PackedInt32Array = a[Mesh.ARRAY_BONES]
+		var we: PackedFloat32Array = a[Mesh.ARRAY_WEIGHTS]
+		var nb := bo.size() / maxi(vs.size(), 1)
+		var pv := PackedVector3Array()
+		var pn := PackedVector3Array()
+		var dom := PackedByteArray()
+		pv.resize(vs.size())
+		pn.resize(vs.size())
+		dom.resize(vs.size())
+		for i in vs.size():
+			var v := Vector3.ZERO
+			var nn := Vector3.ZERO
+			var wmax := -1.0
+			var bmax := 0
+			for j in nb:
+				var w := we[i * nb + j]
+				if w <= 0.0:
+					continue
+				var bb := bo[i * nb + j]
+				var m: Transform3D = mats[bb]
+				v += (m * vs[i]) * w
+				nn += (m.basis * ns[i]) * w
+				if w > wmax:
+					wmax = w
+					bmax = bb
+			pv[i] = v
+			pn[i] = nn.normalized()
+			dom[i] = 1 if guarda.has(bmax) else 0
+		var ix: PackedInt32Array = a[Mesh.ARRAY_INDEX] if a[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+		if ix.is_empty():
+			for i in vs.size():
+				ix.append(i)
+		var ov := PackedVector3Array()
+		var on := PackedVector3Array()
+		for t in range(0, ix.size() - 2, 3):
+			if int(dom[ix[t]]) + int(dom[ix[t + 1]]) + int(dom[ix[t + 2]]) < 2:
+				continue
+			for q in 3:
+				ov.append(pv[ix[t + q]])
+				on.append(pn[ix[t + q]])
+				soma += pv[ix[t + q]]
+				nv += 1
+		if ov.is_empty():
+			continue
+		var arr := []
+		arr.resize(Mesh.ARRAY_MAX)
+		arr[Mesh.ARRAY_VERTEX] = ov
+		arr[Mesh.ARRAY_NORMAL] = on
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		idx.append(k)
+	# os chifres presos na cabeça
+	var extras := []
+	for ba in sk.find_children("*", "BoneAttachment3D", false, false):
+		if str((ba as BoneAttachment3D).bone_name) in ossos:
+			var bg := sk.get_bone_global_pose(sk.find_bone(str((ba as BoneAttachment3D).bone_name)))
+			for ch in ba.get_children():
+				if ch is MeshInstance3D:
+					extras.append([(ch as MeshInstance3D).mesh, bg * (ch as MeshInstance3D).transform, (ch as MeshInstance3D).material_override])
+	var ref := _corte_ref(sk, tipo)
+	var out := {"mesh": am, "idx": idx, "extras": extras, "centro": soma / maxf(nv, 1), "corte": ref[0], "dir": ref[1]}
+	tmp.free()
+	_partes_cache[key] = out
+	return out
+
+
+## O toco: carne vermelha com o osso branco no meio (um disco), virado para dir.
+static func _toco(r: float, cor_osso := Color(0.92, 0.88, 0.8)) -> Node3D:
+	var root := Node3D.new()
+	var carne := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = r
+	cm.bottom_radius = r
+	cm.height = r * 0.12
+	cm.radial_segments = 14
+	carne.mesh = cm
+	var mc := StandardMaterial3D.new()
+	mc.albedo_color = Color(0.45, 0.04, 0.035)
+	mc.roughness = 0.3
+	carne.material_override = mc
+	root.add_child(carne)
+	var osso := MeshInstance3D.new()
+	var om := CylinderMesh.new()
+	om.top_radius = r * 0.38
+	om.bottom_radius = r * 0.38
+	om.height = r * 0.2
+	om.radial_segments = 10
+	osso.mesh = om
+	var mo := StandardMaterial3D.new()
+	mo.albedo_color = cor_osso
+	mo.roughness = 0.6
+	osso.material_override = mo
+	root.add_child(osso)
+	return root
+
+
+## Base com o eixo y apontando para d.
+static func _base_para(d: Vector3) -> Basis:
+	var y := d.normalized()
+	var x := y.cross(Vector3(0.3, 0.1, 0.9)).normalized()
+	return Basis(x, y, x.cross(y))
+
+
+## Os tocos na carcaça (onde já cortou).
+func _tocos(uid: String) -> void:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return
+	var n: Node3D = nd.node
+	var mi := _malha(n)
+	if mi == null:
+		return
+	for ch in mi.get_children():
+		if ch.has_meta("toco"):
+			ch.queue_free()
+	var m_por_u: float = mi.global_transform.basis.get_scale().x
+	for t in nd.c.get("cortes", []):
+		var pm := parte_malha(nd.c, str(t))
+		if pm.is_empty():
+			continue
+		var tc := _toco(float(PARTES[str(t)].r) / m_por_u)
+		tc.set_meta("toco", true)
+		mi.add_child(tc)
+		tc.transform = Transform3D(_base_para(pm.dir), pm.corte)
+
+
+## Põe a parte cortada no mundo (caindo, ou já parada com o xf salvo).
+func _parte_no(uid: String, tipo: String, xf_salvo := []) -> Node3D:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return null
+	var n: Node3D = nd.node
+	var mi := _malha(n)
+	var pm := parte_malha(nd.c, tipo)
+	if pm.is_empty() or mi == null:
+		return null
+	var m_por_u: float = mi.global_transform.basis.get_scale().x
+	var mxf: Transform3D = mi.global_transform
+	var wc: Vector3 = mxf * (pm.centro as Vector3)
+	var par := Node3D.new()
+	par.name = "parte_" + tipo
+	add_child(par)
+	par.global_transform = Transform3D(Basis(), wc)
+	var rel := Transform3D(mxf.basis, mxf.origin - wc)
+	var pmi := MeshInstance3D.new()
+	pmi.mesh = pm.mesh
+	for i in (pm.idx as Array).size():
+		var mat := mi.get_surface_override_material(int(pm.idx[i]))
+		if mat:
+			pmi.set_surface_override_material(i, mat)
+	pmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	par.add_child(pmi)
+	pmi.transform = rel
+	for e in pm.extras:
+		var em := MeshInstance3D.new()
+		em.mesh = e[0]
+		em.material_override = e[2]
+		par.add_child(em)
+		em.transform = rel * (e[1] as Transform3D)
+	var tc := _toco(float(PARTES[tipo].r) / m_por_u)
+	par.add_child(tc)
+	tc.transform = rel * Transform3D(_base_para(-(pm.dir as Vector3)), pm.corte)
+	par.set_meta("uid", uid)
+	par.set_meta("tipo", tipo)
+	if xf_salvo.size() >= 12:
+		par.global_transform = _xf_de(xf_salvo)
+	return par
+
+
+## As partes já cortadas que ficaram no chão (ao montar a carcaça).
+func _partes_monta(uid: String) -> void:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty():
+		return
+	for ch in get_children():
+		if ch.has_meta("tipo") and str(ch.get_meta("uid", "")) == uid:
+			ch.queue_free()
+	for e in nd.c.get("partes", []):
+		_parte_no(uid, str(e.tipo), e.xf)
+	_tocos(uid)
+
+
+## Onde a parte vai ser cortada, no mundo (para o machado mirar).
+func parte_ponto(uid: String, tipo: String) -> Vector3:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return Vector3.ZERO
+	var mi := _malha(nd.node)
+	var pm := parte_malha(nd.c, tipo)
+	if pm.is_empty() or mi == null:
+		return Vector3.ZERO
+	return mi.global_transform * (pm.corte as Vector3)
+
+
+## A machadada na parte: o sangue espirra; devolve true se ela soltou (caiu).
+func machadada(uid: String, tipo: String, golpe: int) -> bool:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node) or not PARTES.has(tipo):
+		return false
+	var c: Dictionary = nd.c
+	var w := parte_ponto(uid, tipo)
+	_pinga(w)
+	if _rng.randf() < 0.6:
+		_respingo(Vector3(w.x + _rng.randf_range(-0.3, 0.3), 0, w.z + _rng.randf_range(-0.3, 0.3)), _rng.randf_range(0.06, 0.14), "gota")
+	if golpe < int(PARTES[tipo].golpes):
+		Sons.play_at(_jogo, "machado_osso", w, 0.0, _rng.randf_range(0.92, 1.08))
+		return false
+	Sons.play_at(_jogo, "osso_quebra", w, 2.0, _rng.randf_range(0.95, 1.05))
+	if not c.has("cortes"):
+		c["cortes"] = []
+	if tipo in c.cortes:
+		return false
+	var par := _parte_no(uid, tipo)
+	(c.cortes as Array).append(tipo)
+	var n: Node3D = nd.node
+	var sk: Skeleton3D = n.get_meta("sk")
+	_cortes_escala(sk, c)
+	VacaModelo._cascos(sk)
+	_tocos(uid)
+	if par:
+		var fora := par.global_position - n.global_position
+		fora.y = 0.0
+		fora = fora.normalized() if fora.length() > 0.01 else Vector3.RIGHT
+		_caindo.append({"node": par, "vel": fora * _rng.randf_range(0.3, 0.9) + Vector3.UP * _rng.randf_range(0.0, 0.6),
+			"ang": Vector3(_rng.randf_range(-1, 1), _rng.randf_range(-1, 1), _rng.randf_range(-1, 1)).normalized() * _rng.randf_range(3.0, 7.0),
+			"uid": uid, "tipo": tipo, "chao": 0.0, "r": float(PARTES[tipo].r)})
+		# o toco e a parte pingando um pouco
+		_fonte(par, par.global_position, Vector3.DOWN, 6.0, 0.5)
+		_fonte(n, w, Vector3.DOWN, 10.0, 0.6)
+	return true
+
+
+## As partes caindo: gravidade, girando; no chão quicam, rolam um pouco e param.
+func _caindo_tick(delta: float) -> void:
+	for f in _caindo.duplicate():
+		var nd: Node3D = f.node
+		if not is_instance_valid(nd):
+			_caindo.erase(f)
+			continue
+		var vel: Vector3 = f.vel
+		vel.y -= G * delta
+		var ang: Vector3 = f.ang
+		var p := nd.global_position + vel * delta
+		var b := nd.global_transform.basis
+		if ang.length() > 0.001:
+			b = Basis(ang.normalized(), ang.length() * delta) * b
+		nd.global_transform = Transform3D(b.orthonormalized(), p)
+		# o ponto mais baixo (os cantos da caixa da malha)
+		var low := 1e9
+		var lowp := p
+		for ch in nd.get_children():
+			if ch is MeshInstance3D and (ch as MeshInstance3D).mesh:
+				var bx: AABB = (ch as MeshInstance3D).get_aabb()
+				for i in 8:
+					var wpt: Vector3 = (ch as MeshInstance3D).global_transform * bx.get_endpoint(i)
+					if wpt.y < low:
+						low = wpt.y
+						lowp = wpt
+		var gy: float = _jogo.ground_at(lowp.x, lowp.z)
+		if low < gy:
+			nd.global_position.y += gy - low
+			if vel.y < -1.2:
+				Sons.play_at(_jogo, "baque", lowp, -10.0 + minf(-vel.y, 5.0), 1.3 if str(f.tipo) != "cabeca" else 0.85)
+				_respingo(Vector3(lowp.x, 0, lowp.z), _rng.randf_range(0.08, 0.16), "gota")
+			vel.y = -vel.y * 0.22 if vel.y < -0.6 else 0.0
+			vel.x *= 0.55
+			vel.z *= 0.55
+			ang *= 0.5
+			f.chao = float(f.chao) + delta
+		f.vel = vel
+		f.ang = ang
+		if float(f.chao) > 0.5 and vel.length() < 0.25 and ang.length() < 0.6:
+			_caindo.erase(f)
+			var cc: Dictionary = _nodes.get(str(f.uid), {}).get("c", {})
+			if not cc.is_empty():
+				if not cc.has("partes"):
+					cc["partes"] = []
+				(cc.partes as Array).append({"tipo": str(f.tipo), "xf": _xf_json(nd.global_transform)})
 
 
 # ---------- o couro ----------
@@ -1065,12 +1428,13 @@ void fragment() {
 	if (dc < r_casco || u > 1.0) { discard; }
 	vec3 q = p * esc;
 	if (u < pele) {
-		float n1 = ruido(q * 7.0);
-		float n2 = ruido(q * 19.0 + vec3(3.1, 1.7, 5.3));
-		float fio = abs(sin((q.y * 40.0 + n1 * 3.0)));
-		vec3 carne = mix(vec3(0.36, 0.035, 0.03), vec3(0.58, 0.1, 0.075), n1 * 0.7 + fio * 0.3);
-		float gord = smoothstep(0.58, 0.74, n2 * 0.65 + n1 * 0.35);
-		vec3 col = mix(carne, vec3(0.83, 0.76, 0.64), gord * 0.75);
+		float n1 = ruido(q * 11.0);
+		float n2 = ruido(q * 34.0 + vec3(3.1, 1.7, 5.3));
+		float n3 = ruido(q * 70.0 + vec3(7.7, 2.2, 0.4));
+		float fio = abs(sin((q.y * 90.0 + n1 * 4.0)));
+		vec3 carne = mix(vec3(0.22, 0.02, 0.018), vec3(0.4, 0.045, 0.035), n1 * 0.6 + fio * 0.25 + n3 * 0.15);
+		float gord = smoothstep(0.66, 0.8, n2 * 0.7 + n3 * 0.3);
+		vec3 col = mix(carne, vec3(0.74, 0.66, 0.55), gord * 0.5);
 		float borda = smoothstep(pele - 0.05, pele, u);
 		col = mix(col, vec3(0.82, 0.74, 0.7), borda * 0.7);
 		ALBEDO = col;
@@ -1247,6 +1611,8 @@ func _monta(c: Dictionary) -> Node3D:
 				var ap: AnimationPlayer = n.get_meta("ap")
 				ap.play(VacaModelo.ANIMS.morrer)
 				ap.advance(ap.current_animation_length)
+				_cortes_escala(n.get_meta("sk"), c)
+				VacaModelo._cascos(n.get_meta("sk"))
 		"tamandua":
 			n = TamModelo.build(float(p.get("s", 1.0)))
 			add_child(n)
@@ -1331,14 +1697,24 @@ func _rebuild() -> void:
 			if is_instance_valid(_nodes[uid].node):
 				(_nodes[uid].node as Node).queue_free()
 			_nodes.erase(uid)
+	for ch in get_children():
+		if ch.has_meta("tipo") and not tem.has(str(ch.get_meta("uid", ""))):
+			ch.queue_free()                  # (as patas e a cabeça somem com a carcaça)
 	for uid in tem:
 		if _nodes.has(uid):
 			# (veio de outro celular: os dados novos, o mesmo desenho)
 			var cv: Dictionary = tem[uid]
 			var mudou: bool = JSON.stringify(cv.get("couro", {})) != JSON.stringify((_nodes[uid].c as Dictionary).get("couro", {}))
+			var cortou: bool = JSON.stringify(cv.get("cortes", [])) != JSON.stringify((_nodes[uid].c as Dictionary).get("cortes", [])) or (cv.get("partes", []) as Array).size() != ((_nodes[uid].c as Dictionary).get("partes", []) as Array).size()
 			_nodes[uid].c = cv
 			if mudou:
 				couro_visual(str(uid))
+			if cortou:
+				var n0: Node3D = _nodes[uid].node
+				if is_instance_valid(n0) and n0.has_meta("sk"):
+					_cortes_escala(n0.get_meta("sk"), cv)
+					VacaModelo._cascos(n0.get_meta("sk"))
+				_partes_monta(str(uid))
 			continue
 		var c: Dictionary = tem[uid]
 		if (c.get("xf", []) as Array).size() < 12:
@@ -1348,6 +1724,7 @@ func _rebuild() -> void:
 			_nodes[uid] = {"node": n, "c": c}
 			if c.has("couro"):
 				couro_visual(str(uid))
+			_partes_monta(str(uid))
 	_mortes_locais()
 
 

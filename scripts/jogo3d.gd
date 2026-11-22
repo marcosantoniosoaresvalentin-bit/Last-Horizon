@@ -842,6 +842,7 @@ void fragment() {
 	_laco_btns = [mk.call("Laçar", -290, -146, _laco_lancar), mk.call("Força", -290, -146, _laco_forca), mk.call("Soltar", -480, -146, _laco_soltar)]
 	(_laco_btns[1] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_couro_btns = [mk.call("Força", -290, -146, _couro_forca), mk.call("Parar", -480, -146, _couro_end)]
+	_mach_btns = [mk.call("Parar", -480, -146, _mach_end)]
 	(_couro_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_tri_btns = [mk.call("Força", -290, -146, _tri_forca), mk.call("Soltar", -480, -146, _tri_soltar), mk.call("Amarrar", -290, -286, _tri_amarrar_estaca)]
 	(_tri_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
@@ -3122,6 +3123,9 @@ func _update_chop(delta: float) -> void:
 ## de cima delas ou recolher uma forquilha.
 func _update_ctx_btn() -> void:
 	_ctx_action = ""
+	if not _couro.is_empty() or not _mach.is_empty():
+		_ctx_btn.visible = false
+		return
 	if _empurra >= 0:
 		_car_ctx()
 	elif not _carry.is_empty() and _carry.has("lenha") and not _drag and _crouch_job == "" and not _air and _cepo_near(1.6, false) >= 0:
@@ -6119,6 +6123,9 @@ func _move_player(delta: float) -> void:
 	if not _couro.is_empty():
 		_couro_move(delta)
 		return
+	if not _mach.is_empty():
+		_mach_move(delta)
+		return
 	if not _mesa.is_empty():
 		_mesa_move(delta)
 		return
@@ -6500,6 +6507,8 @@ func _input(e: InputEvent) -> void:
 		return
 	if not _couro.is_empty() and _couro_input(e):
 		return
+	if not _mach.is_empty() and _mach_input(e):
+		return
 	if not _mix.is_empty() and _mix_input(e):
 		return
 	if not _reb.is_empty() and _reb_input(e):
@@ -6526,7 +6535,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _mach_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -10046,6 +10055,10 @@ func _tri_ctx(mi: int) -> bool:
 	var est: Vector3 = _maq.tri_estaca(mi)
 	var perto_estaca := Vector2(_player.position.x - est.x, _player.position.z - est.z).length() < 1.6
 	if bool(ic.get("fixo", false)):
+		if (item_qtd("machado") > 0 or teste) and _mach_pode(mi) != "" and not perto_estaca:
+			_ctx_action = "tri_mach"
+			_ctx_btn.text = "Cortar patas e cabeça"
+			return true
 		if (item_qtd("faca") > 0 or teste) and _couro_pode(mi) != "" and not perto_estaca:
 			var cc: Dictionary = _caca.couro_de(str(ic.uid))
 			_ctx_action = "tri_couro"
@@ -10140,6 +10153,10 @@ func _tri_press(act: String) -> void:
 			_tri = {"mi": mi, "fase": "puxa", "forca": 0.8 if act == "tri_desestaca" else 0.6}
 			_tri_ajusta_corda(mi)
 			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -8.0, 1.0)
+		"tri_mach":
+			var uid3 := _mach_pode(mi)
+			if uid3 != "":
+				_mach_start(mi, uid3)
 		"tri_couro":
 			var uid2 := _couro_pode(mi)
 			if uid2 != "":
@@ -10608,19 +10625,29 @@ func _couro_passa(cr: Dictionary, d: Vector2, at: Vector2) -> void:
 		if not bool(_couro.cortando):
 			return
 		var t0 := float(cr.corte)
-		var a := _couro_tela(t0)
-		var b := _couro_tela(minf(1.0, t0 + 0.15))
-		var dir := (b - a).normalized() if b.distance_to(a) > 8.0 else (_couro_tela(1.0) - _couro_tela(0.0)).normalized()
-		if at.distance_to(a) > 140.0:
+		# o ponto da linha mais perto do dedo (na tela): o corte vai até ali
+		var lin: Array = _caca.couro_linha(str(_couro.uid), 33)
+		var best := 1e9
+		var tp := t0
+		for k in lin.size() - 1:
+			var a2: Vector2 = _cam.unproject_position(lin[k])
+			var b2: Vector2 = _cam.unproject_position(lin[k + 1])
+			var ab := b2 - a2
+			var f := clampf((at - a2).dot(ab) / maxf(ab.length_squared(), 1.0), 0.0, 1.0)
+			var dd := at.distance_to(a2 + ab * f)
+			var tk := (float(k) + f) / (lin.size() - 1)
+			if dd < best and tk > t0 - 0.1 and tk < t0 + 0.2:
+				best = dd
+				tp = tk
+		if best > 110.0:
 			_couro.cortando = false               # o dedo saiu da linha
 			return
-		var anda := d.dot(dir)
-		if anda <= 0.0:
+		if tp <= t0:
 			return
 		if item_qtd("faca") <= 0 and not teste:
 			_couro.cortando = false
 			return
-		var t1 := minf(1.0, t0 + anda / total)
+		var t1 := minf(1.0, tp)
 		cr.corte = t1
 		_couro.faca = 1.0
 		if int(t1 * 8.0) != int(t0 * 8.0):
@@ -10742,6 +10769,210 @@ func _couro_draw() -> void:
 	var f := (float(cr.corte) * 0.3 + float(cr.pele) * 0.7)
 	ui.draw_rect(Rect2(rb.position, Vector2(rb.size.x * f, rb.size.y)), Color(0.7, 0.25, 0.18))
 	ui.draw_rect(rb, Color(1, 1, 1, 0.6), false, 2.0)
+
+
+# ================== PATAS E CABEÇA (MACHADO) ==================
+# Com a vaca pendurada e esfolada e o machado na mochila: "Cortar patas e cabeça". De
+# frente para a vaca, cada parte tem a sua marca (as quatro canelas e a cabeça); tocando
+# na marca, o machado desce ali. Umas machadadas (a cabeça leva mais) e a parte solta, cai
+# no chão e fica lá; na carcaça fica o toco.
+
+var _mach := {}                   # {mi, uid, golpes: {tipo: n}, anim, alvo, treme, fim}
+var _mach_btns: Array = []        # [Parar]
+var _mach_axe: MeshInstance3D = null
+
+
+func _mach_pode(mi: int) -> String:
+	var ic: Dictionary = _maq.plantas[mi].get("ice", {})
+	if ic.is_empty() or not bool(ic.get("fixo", false)) or _caca == null:
+		return ""
+	var uid := str(ic.uid)
+	var c: Dictionary = _caca.couro_de(uid)
+	if c.is_empty() or not bool(c.get("esfolada", false)):
+		return ""
+	if (c.get("cortes", []) as Array).size() >= _caca.PARTES.size():
+		return ""
+	var pe: Vector3 = _caca.pes_tras(uid)
+	if pe.y - ground_at(pe.x, pe.z) < 1.4:
+		return ""
+	if Vector2(pe.x - _player.position.x, pe.z - _player.position.z).length() > 2.6:
+		return ""
+	return uid
+
+
+func _mach_start(mi: int, uid: String) -> void:
+	if _mao != "":
+		equip("")
+	_mach = {"mi": mi, "uid": uid, "golpes": {}, "anim": -1.0, "alvo": "", "treme": 0.0, "fim": -1.0}
+	_olho = {}
+	_bur = {}
+	_jump_btn.visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false
+	if _mach_axe == null:
+		_mach_axe = MeshInstance3D.new()
+		_mach_axe.mesh = Corte.axe_mesh()
+		_mach_axe.material_override = Corte.axe_material()
+		_mach_axe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_cam.add_child(_mach_axe)
+	_mach_axe.visible = true
+	_act_check = 0.0
+
+
+func _mach_end() -> void:
+	if _mach.is_empty():
+		return
+	_mach = {}
+	for b in _mach_btns:
+		(b as Control).visible = false
+	if _mach_axe:
+		_mach_axe.visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
+## As partes que ainda faltam cortar.
+func _mach_faltam() -> Array:
+	var c: Dictionary = _caca.couro_de(str(_mach.uid))
+	var out := []
+	for t in _caca.PARTES:
+		if not (str(t) in c.get("cortes", [])):
+			out.append(str(t))
+	return out
+
+
+func _mach_move(delta: float) -> void:
+	var uid := str(_mach.uid)
+	var mi := int(_mach.mi)
+	if _caca == null or _caca.couro_de(uid).is_empty() or mi >= _maq.plantas.size() or (_maq.plantas[mi].get("ice", {}) as Dictionary).is_empty():
+		_mach_end()
+		return
+	# de frente para a vaca, pegando dos pés de trás até a cabeça
+	var pe: Vector3 = _caca.pes_tras(uid)
+	var cab: Vector3 = _caca.parte_ponto(uid, "cabeca")
+	var meio := (pe + cab) * 0.5
+	var fr: Vector3 = _caca.couro_frente(uid)
+	fr.y = 0.0
+	fr = fr.normalized() if fr.length() > 0.1 else Vector3.RIGHT
+	var eye := meio + fr * 2.7 + Vector3.UP * 0.15
+	_player.position = Vector3(eye.x, ground_at(eye.x, eye.z), eye.z)
+	_air = false
+	_vy = 0.0
+	_face = atan2(fr.x, fr.z)
+	_yaw = _face
+	_player.rotation.y = _face
+	_play("Idle")
+	var tr := float(_mach.treme)
+	_mach.treme = maxf(0.0, tr - delta * 6.0)
+	var sacode := Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.012 * tr
+	_cam.global_transform = Transform3D(Basis.looking_at(meio - eye, Vector3.UP), eye + sacode)
+	# o machado: parado embaixo à direita; no golpe sobe e desce na marca
+	var a := float(_mach.anim)
+	var th := 0.35
+	if a >= 0.0:
+		a += delta
+		if a < 0.13:
+			th = lerpf(0.35, 1.25, a / 0.13)                     # levanta
+		elif a < 0.24:
+			th = lerpf(1.25, -1.35, (a - 0.13) / 0.11)          # desce com força
+		else:
+			th = lerpf(-1.35, 0.35, clampf((a - 0.24) / 0.3, 0.0, 1.0))
+		if float(_mach.anim) < 0.24 and a >= 0.24:
+			_mach_bate()
+		_mach.anim = a if a < 0.56 else -1.0
+	var giro := 0.0
+	if str(_mach.alvo) != "" and _caca.PARTES.has(str(_mach.alvo)):
+		var d: Vector3 = _cam.global_transform.basis.inverse() * (_caca.parte_ponto(uid, str(_mach.alvo)) - _cam.global_position)
+		giro = clampf(atan2(-d.x, -d.z), -0.6, 0.6)
+	if _mach_axe:
+		_mach_axe.transform = Transform3D(Basis(Vector3.UP, giro * 0.8) * Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25), Vector3(0.3, -0.5, -0.6))
+	if float(_mach.fim) >= 0.0:
+		_mach.fim = float(_mach.fim) + delta
+		if float(_mach.fim) > 1.6:
+			_mach_end()
+			return
+	(_mach_btns[0] as Control).visible = true
+	_jump_btn.visible = false
+	_ctx_btn.visible = false
+	if _sub_ui:
+		_sub_ui.queue_redraw()
+
+
+## A lâmina chega na parte: conta o golpe, o machado gasta, a câmera treme.
+func _mach_bate() -> void:
+	var t := str(_mach.alvo)
+	if t == "" or _caca == null:
+		return
+	var g: Dictionary = _mach.golpes
+	g[t] = int(g.get(t, 0)) + 1
+	_mach.treme = 1.0
+	var caiu: bool = _caca.machadada(str(_mach.uid), t, int(g[t]))
+	if wear("machado", 1):
+		_update_inventory()
+	if caiu:
+		_mach.alvo = ""
+		if _mach_faltam().is_empty():
+			_mach.fim = 0.0
+
+
+func _mach_input(e: InputEvent) -> bool:
+	if _mach.is_empty():
+		return false
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var pos := Vector2.INF
+	var pressed := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		pressed = e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		pressed = e.pressed
+	if pos == Vector2.INF:
+		return e is InputEventScreenDrag or e is InputEventMouseMotion
+	for b in _mach_btns:
+		if (b as Control).visible and (b as Control).get_global_rect().has_point(pos):
+			return false
+	if not pressed or float(_mach.anim) >= 0.0 or float(_mach.fim) >= 0.0:
+		return true
+	if item_qtd("machado") <= 0 and not teste:
+		return true
+	var best := ""
+	var bd := 95.0
+	for t in _mach_faltam():
+		var w: Vector3 = _caca.parte_ponto(str(_mach.uid), t)
+		if _cam.is_position_behind(w):
+			continue
+		var d := pos.distance_to(_cam.unproject_position(w))
+		if d < bd:
+			bd = d
+			best = t
+	if best != "":
+		_mach.alvo = best
+		_mach.anim = 0.0
+	return true
+
+
+func _mach_draw() -> void:
+	if _mach.is_empty() or _caca == null:
+		return
+	var ui := _sub_ui
+	var g: Dictionary = _mach.golpes
+	for t in _mach_faltam():
+		var w: Vector3 = _caca.parte_ponto(str(_mach.uid), t)
+		if _cam.is_position_behind(w):
+			continue
+		var p := _cam.unproject_position(w)
+		var sel: bool = str(_mach.alvo) == t
+		var r := 30.0 if t != "cabeca" else 38.0
+		ui.draw_arc(p, r, 0, TAU, 32, Color(0, 0, 0, 0.45), 6.0, true)
+		ui.draw_arc(p, r, 0, TAU, 32, Color(1, 0.95, 0.7, 0.95) if sel else Color(1, 1, 1, 0.8), 3.0, true)
+		var f := float(g.get(t, 0)) / float(_caca.PARTES[t].golpes)
+		if f > 0.0:
+			ui.draw_arc(p, r + 7.0, -PI * 0.5, -PI * 0.5 + TAU * f, 32, Color(0.85, 0.15, 0.1, 0.95), 5.0, true)
+		ui.draw_line(p + Vector2(-9, 0), p + Vector2(9, 0), Color(1, 1, 1, 0.8), 2.0, true)
 
 
 # ================== ARCO E FLECHA ==================
@@ -14931,6 +15162,7 @@ func _draw_bur_ui() -> void:
 	_laco_draw()
 	_tri_draw()
 	_couro_draw()
+	_mach_draw()
 	if _mao == "arco" and _morto < 0.0:
 		# a mira: um círculo pequeno no meio da tela (fecha quando a corda está puxada)
 		var mc := _sub_ui.size * 0.5
