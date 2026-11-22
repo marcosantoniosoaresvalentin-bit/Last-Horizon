@@ -231,6 +231,24 @@ const TIPOS := {
 		"area": Rect2(-0.95, -0.32, 1.95, 0.64),
 		"carrinho": {"eixo": 1, "roda": 1, "cipo": 0},
 	},
+	# Cavalete de trançar corda: de cada lado duas varas finas cruzadas em X (os pés
+	# abertos no chão, as pontas passando um pouco do cruzamento) e, deitada no V de
+	# cima, a vara comprida atravessada. Os cruzamentos são amarrados com cipó. No meio
+	# da vara de cima prende a ponta dos cipós, que vão sendo trançados para baixo.
+	"trancador": {
+		"nome": "Cavalete de Trançar",
+		"desc": "Cavalete de varas amarradas com cipó para trançar cipó em corda.",
+		"pecas": [
+			["tora", 1.75, Vector3(0.8, 0.8, 0.2), "y_t-", 0.05],      # 0 perna (pé para fora em +z)
+			["tora", 1.75, Vector3(0.8, 0.8, -0.2), "y_t+", 0.05],     # 1 perna
+			["tora", 1.75, Vector3(-0.8, 0.8, 0.2), "y_t-", 0.05],     # 2 perna
+			["tora", 1.75, Vector3(-0.8, 0.8, -0.2), "y_t+", 0.05],    # 3 perna
+			["tora", 1.95, Vector3(0.0, 1.43, 0.0), "x", 0.05],        # 4 a vara de cima
+		],
+		"pinos": [],
+		"area": Rect2(-1.0, -0.55, 2.0, 1.1),
+		"amarrar": {"n": 4, "nos": [Vector3(0.8, 1.38, 0.0), Vector3(-0.8, 1.38, 0.0)]},
+	},
 	"forno": {
 		"nome": "Forno de Carvão",
 		"desc": "Domo de barro com pedras do chão encaixadas, uma porta de barro e o suspiro em cima. Primeiro levante as paredes de barro, depois encaixe as pedras e por último faça a porta de barro. Encha de lenha, acenda com o arco de fogo e tampe a boca: a lenha queima devagar, sem ar, e vira carvão.",
@@ -321,7 +339,7 @@ static func needs(tipo: String) -> Dictionary:
 	var ca: Dictionary = t.get("carrinho", {})
 	out["galho"] = int(ca.get("eixo", 0))
 	out["rodela"] = int(ca.get("roda", 0))
-	out["cipo"] = int(ca.get("cipo", 0))
+	out["cipo"] = int(ca.get("cipo", 0)) + int((t.get("amarrar", {}) as Dictionary).get("n", 0))
 	out["pedra"] = int(fz.get("pedras", 0))
 	out["barro"] = int(fz.get("barro", 0)) + int(fz.get("porta", 0))
 	return out
@@ -374,6 +392,8 @@ func complete(mi: int) -> void:
 	for j in (p.pinos as Array).size():
 		p.pinos[j] = 2
 	p.lamina = lamina_need(str(p.tipo))
+	if TIPOS[p.tipo].has("amarrar"):
+		p["amarras"] = int(TIPOS[p.tipo].amarrar.n)
 	if TIPOS[p.tipo].has("carrinho"):
 		p["eixo"] = true
 		if (p.get("roda", {}) as Dictionary).is_empty():
@@ -414,6 +434,8 @@ static func slot_basis(dir: String) -> Basis:
 		"y": return Basis(Vector3.BACK, PI * 0.5)
 		"x_lado": return Basis(Vector3.RIGHT, PI * 0.5)                       # tábua em pé de lado
 		"z_lado": return Basis(Vector3.UP, PI * 0.5) * Basis(Vector3.RIGHT, PI * 0.5)
+		"y_t+": return Basis(Vector3.RIGHT, 0.36) * Basis(Vector3.BACK, PI * 0.5)     # em pé, inclinada
+		"y_t-": return Basis(Vector3.RIGHT, -0.36) * Basis(Vector3.BACK, PI * 0.5)
 	return Basis()
 
 
@@ -474,6 +496,8 @@ func pronta(mi: int) -> bool:
 	if lamina_count(mi) < lamina_need(str(p.tipo)):
 		return false
 	if TIPOS[p.tipo].has("carrinho") and carrinho_etapa(mi) != "":
+		return false
+	if int(p.get("amarras", 0)) < int((TIPOS[p.tipo].get("amarrar", {}) as Dictionary).get("n", 0)):
 		return false
 	for b in p.pecas:
 		if not bool(b):
@@ -1141,6 +1165,10 @@ func _rebuild() -> void:
 			_draw_forno(mi, root, nd)
 			_nodes[mi] = nd
 			continue
+		if t.has("amarrar"):
+			_draw_amarras(mi, root, nd)
+			_nodes[mi] = nd
+			continue
 		if t.has("carrinho"):
 			_draw_carrinho(mi, root, nd)
 			_nodes[mi] = nd
@@ -1256,6 +1284,209 @@ func _animate(mi: int, dy: float) -> void:
 		var butt := Vector3(-2.0, 2.66, 0.0)
 		var ph := asin(clampf(dy / 2.0, -0.9, 0.9))
 		(nd.p_5 as Node3D).transform = Transform3D(Basis(Vector3.BACK, ph), butt) * Transform3D(Basis(), -butt) * (nd.t_5 as Transform3D)
+
+
+# ---------- cavalete de trançar ----------
+
+## Falta amarrar? (todas as varas no lugar e ainda faltam amarras de cipó)
+func amarras_falta(mi: int) -> int:
+	var p: Dictionary = plantas[mi]
+	var am: Dictionary = TIPOS[p.tipo].get("amarrar", {})
+	if am.is_empty():
+		return 0
+	for b in p.pecas:
+		if not bool(b):
+			return 0
+	return maxi(0, int(am.n) - int(p.get("amarras", 0)))
+
+
+func amarrar(mi: int) -> void:
+	plantas[mi]["amarras"] = int(plantas[mi].get("amarras", 0)) + 1
+	_rebuild()
+
+
+## A corda sendo feita: {alvo (m), feito (m), cipo (cipós já postos)} ou {}.
+func corda_of(mi: int) -> Dictionary:
+	var c = plantas[mi].get("corda", {})
+	return c if c is Dictionary else {}
+
+
+static var _cipo_mat: StandardMaterial3D
+
+static func cipo_mat() -> StandardMaterial3D:
+	if _cipo_mat == null:
+		_cipo_mat = StandardMaterial3D.new()
+		_cipo_mat.vertex_color_use_as_albedo = true
+		_cipo_mat.vertex_color_is_srgb = true
+		_cipo_mat.roughness = 0.8
+	return _cipo_mat
+
+
+## Um fio de cipó: tubo fino por uma lista de pontos, com a cor variando pelo comprimento
+## (cipó-titica: castanho-esverdeado com nós e partes mais claras).
+static func fio_cipo(st: SurfaceTool, pts: Array, r: float, tom := 0.0) -> void:
+	var lados := 5
+	var rows := []
+	for i in pts.size():
+		var p: Vector3 = pts[i]
+		var q: Vector3 = pts[mini(i + 1, pts.size() - 1)]
+		var o: Vector3 = pts[maxi(i - 1, 0)]
+		var d := (q - o).normalized()
+		if d.length() < 0.5:
+			d = Vector3.UP
+		var a := d.cross(Vector3(0.31, 0.77, 0.55)).normalized()
+		var b := d.cross(a).normalized()
+		var row := []
+		for k in lados:
+			var t := TAU * k / lados
+			row.append(p + (a * cos(t) + b * sin(t)) * r)
+		rows.append(row)
+	var base := Color(0.3, 0.23, 0.1).lerp(Color(0.26, 0.26, 0.11), tom)
+	for i in rows.size() - 1:
+		var c0 := base.darkened(0.12 * sin(float(i) * 1.7) + 0.06 * sin(float(i) * 0.37 + tom * 9.0))
+		for k in lados:
+			var qq := [rows[i][k], rows[i + 1][k], rows[i + 1][(k + 1) % lados], rows[i][(k + 1) % lados]]
+			var sh := 0.85 + 0.15 * float(k % 2)
+			for j in [0, 2, 1, 0, 3, 2]:
+				st.set_color(Color(c0.r * sh, c0.g * sh, c0.b * sh))
+				st.add_vertex(qq[j])
+
+
+## A amarração de um cruzamento: voltas de cipó apertadas em volta da vara de cima (dos
+## dois lados das pernas) e voltas em X passando pelo cruzamento das pernas.
+static func amarra_mesh(cheia: bool) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var R := 0.058
+	var r := 0.0085
+	var voltas := 6 if cheia else 3
+	# as voltas em volta da vara de cima, dos dois lados
+	for lado in [-1.0, 1.0]:
+		var pts := []
+		var n := voltas * 14
+		for i in n + 1:
+			var u := float(i) / n
+			var a := u * TAU * voltas
+			pts.append(Vector3(lado * (0.045 + u * 0.07), 0.05 + cos(a) * R, sin(a) * R))
+		fio_cipo(st, pts, r, 0.2 if lado > 0 else 0.5)
+	# as voltas em X pelo cruzamento das pernas (por baixo da vara)
+	var nx := 3 if cheia else 1
+	for k in nx:
+		for sg in [-1.0, 1.0]:
+			var pts2 := []
+			for i in 25:
+				var a2 := float(i) / 24.0 * TAU
+				var raio := 0.075 + k * 0.012
+				var c := Vector3(0, -0.01, 0)
+				var v := Vector3(0, cos(a2) * raio, sin(a2) * raio * 0.9)
+				pts2.append(c + Basis(Vector3.RIGHT, sg * 0.75) * v + Vector3(sin(a2) * 0.03 * sg, 0, 0))
+			fio_cipo(st, pts2, r * 0.95, 0.7 + k * 0.1)
+	# o nó
+	var no := []
+	for i in 9:
+		var a3 := float(i) / 8.0 * TAU
+		no.append(Vector3(0.12 + cos(a3) * 0.015, 0.05 + sin(a3) * 0.015, 0.06))
+	fio_cipo(st, no, r * 1.1, 0.3)
+	st.generate_normals()
+	return st.commit()
+
+
+func _draw_amarras(mi: int, root: Node3D, nd: Dictionary) -> void:
+	var p: Dictionary = plantas[mi]
+	var am: Dictionary = TIPOS[p.tipo].amarrar
+	var nos: Array = am.nos
+	var feitas := int(p.get("amarras", 0))
+	var por := int(am.n) / maxi(1, nos.size())
+	for i in nos.size():
+		var k := feitas - i * por
+		if k <= 0:
+			continue
+		var m := MeshInstance3D.new()
+		m.mesh = amarra_mesh(k >= por)
+		m.material_override = cipo_mat()
+		m.position = nos[i]
+		root.add_child(m)
+	if not pronta(mi):
+		return
+	# a ponta dos cipós amarrada no meio da vara de cima e a corda já trançada
+	var tr := Node3D.new()
+	tr.name = "tranca"
+	tr.position = Vector3(0, 1.43, 0)
+	root.add_child(tr)
+	nd["tranca"] = tr
+	var cd := corda_of(mi)
+	var mt := MeshInstance3D.new()
+	mt.name = "corda"
+	mt.material_override = cipo_mat()
+	tr.add_child(mt)
+	mt.mesh = tranca_mesh(float(cd.get("feito", 0.0)) * 4.0, -1, 0.0, not cd.is_empty())
+	# o rolo de corda que já ficou pronta (no chão, embaixo)
+	if not cd.is_empty() and float(cd.get("feito", 0.0)) > 0.05:
+		var rolo := MeshInstance3D.new()
+		rolo.name = "rolo"
+		rolo.mesh = rolo_mesh(float(cd.feito))
+		rolo.material_override = cipo_mat()
+		rolo.position = Vector3(0.25, 0.0, 0.32)
+		root.add_child(rolo)
+
+
+## A trança pendurada (de cima para baixo): três fios de cipó em trança (cada fio cruza
+## por cima do do meio, um lado de cada vez), embaixo os três soltos. fase: quanto já
+## trançou (move o desenho); movendo (0..1): o fio "lado" passando para o meio.
+static func tranca_mesh(fase: float, lado: int, movendo: float, com_fios: bool) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var topo := 0.0
+	var fim := -0.62                         # onde a trança acaba (o resto solto)
+	var passo := 0.055                       # comprimento de um cruzamento
+	var a := 0.018
+	var b := 0.012
+	if com_fios:
+		for i in 3:
+			var pts := []
+			var n := 60
+			for j in n + 1:
+				var u := float(j) / n
+				var y := lerpf(topo, fim, u)
+				var th := (topo - y) / passo * PI * 0.5 + fase * PI * 0.5 + TAU * i / 3.0
+				pts.append(Vector3(sin(th) * a * 2.0, y, sin(th * 2.0) * b))
+			# o fio solto descendo (cada um para o seu lado)
+			var pf: Vector3 = pts[pts.size() - 1]
+			var lado_i: float = [-1.0, 0.0, 1.0][i]
+			var ponta := Vector3(lado_i * 0.13, fim - 0.32, 0.06)
+			if lado != -1 and ((lado == 0 and i == 0) or (lado == 1 and i == 2)):
+				ponta = ponta.lerp(Vector3(0, fim - 0.3, 0.1), movendo)
+			for j in 10:
+				var u2 := float(j + 1) / 10.0
+				pts.append(pf.lerp(ponta, u2) + Vector3(0, 0, sin(u2 * PI) * 0.03))
+			fio_cipo(st, pts, 0.011, float(i) * 0.35)
+	# o nó no alto da vara
+	var no := []
+	for j in 13:
+		var a3 := float(j) / 12.0 * TAU
+		no.append(Vector3(cos(a3) * 0.065, sin(a3) * 0.065, 0.0))
+	fio_cipo(st, no, 0.012, 0.4)
+	st.generate_normals()
+	return st.commit()
+
+
+## O rolo de corda (em voltas, deitado): mais voltas quanto mais comprida.
+static func rolo_mesh(metros: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var voltas := clampi(int(round(metros * 0.6)) + 2, 3, 34)
+	var R := clampf(0.1 + metros * 0.002, 0.1, 0.2)
+	var pts := []
+	var n := voltas * 18
+	for i in n + 1:
+		var u := float(i) / n
+		var a := u * TAU * voltas
+		var camada: float = floor(u * voltas / 6.0)
+		var rr: float = R + 0.012 * fmod(u * voltas, 6.0) / 6.0
+		pts.append(Vector3(cos(a) * rr, 0.012 + camada * 0.022, sin(a) * rr))
+	fio_cipo(st, pts, 0.011, 0.3)
+	st.generate_normals()
+	return st.commit()
 
 
 # ---------- carrinho de mão ----------

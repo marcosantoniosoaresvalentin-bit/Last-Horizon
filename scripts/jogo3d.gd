@@ -838,6 +838,7 @@ void fragment() {
 	_buck_btns = [mk.call("Cortar aqui", -290, -146, _buck_go), mk.call("Sair", -430, -426, _buck_stop)]
 	_sub_btns = [mk.call("Sair", -430, -146, _bur_sair)]
 	_desf_btns = [mk.call("Puxar", -290, -146, _desf_puxar), mk.call("Levantar", -430, -146, _desf_end)]
+	_tranca_btns = [mk.call("Parar", -290, -146, _tranca_end)]
 	_sub_ui = Control.new()
 	_sub_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_sub_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2083,6 +2084,11 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 		mi.mesh = _banda_mesh(L, float(dur[1]) if dur.size() >= 3 else 0.12, float(dur[2]) if dur.size() >= 3 else 0.1)
 		mi.rotation.y = float(dur[3]) if dur.size() >= 4 else 0.0
 		node.add_child(mi)
+	elif id.begins_with("corda_"):
+		var mi := MeshInstance3D.new()
+		mi.mesh = Maquinas.rolo_mesh(float(id.substr(6)))
+		mi.material_override = Maquinas.cipo_mat()
+		node.add_child(mi)
 	elif id == "flecha":
 		# cravada no chão, inclinada (como caiu)
 		var mi := MeshInstance3D.new()
@@ -2699,7 +2705,7 @@ func _morrer() -> void:
 	_morto = MORTO_S
 	_vida = 0.0
 	_cancel_chop()
-	for fn in [_mix_end, _reb_end, _desf_end, _mesa_end, _torno_end, _arco_end]:
+	for fn in [_mix_end, _reb_end, _desf_end, _mesa_end, _torno_end, _arco_end, _tranca_end]:
 		fn.call()
 	if not _carry.is_empty():
 		_arvores.drop_log(_carry, _player.position + Vector3(0.8, 0, 0), _face)
@@ -3008,6 +3014,9 @@ func _update_chop(delta: float) -> void:
 	if not _desf.is_empty():
 		_desf_tick(delta)
 		return
+	if not _tranca.is_empty():
+		_tranca_tick(delta)
+		return
 	if not _mesa.is_empty():
 		_mesa_tick(delta)
 		return
@@ -3235,7 +3244,7 @@ func _ctx_press() -> void:
 					_show_toast("+1 folha seca de buriti")
 				_act_check = 0.0
 			return
-		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar", "forno_pedra", "forno_barro", "car_eixo", "car_roda", "car_cipo":
+		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar", "forno_pedra", "forno_barro", "car_eixo", "car_roda", "car_cipo", "amarrar_cipo":
 			_maq_ctx_press(_ctx_action)
 			return
 		"car_soltar", "car_lenha", "car_balde", "car_encher", "car_empurrar":
@@ -6093,6 +6102,9 @@ func _move_player(delta: float) -> void:
 	if not _desf.is_empty():
 		_desf_move(delta)
 		return
+	if not _tranca.is_empty():
+		_tranca_move(delta)
+		return
 	if not _mesa.is_empty():
 		_mesa_move(delta)
 		return
@@ -6467,6 +6479,8 @@ func _input(e: InputEvent) -> void:
 	if not _racha.is_empty() and _racha_input(e):
 		return
 	if not _desf.is_empty() and _desf_input(e):
+		return
+	if not _tranca.is_empty() and _tranca_input(e):
 		return
 	if not _mix.is_empty() and _mix_input(e):
 		return
@@ -9235,6 +9249,310 @@ func _proj_place() -> void:
 
 
 ## Decide o botão de contexto perto de uma planta/máquina. true se pôs algum.
+# ================== TRANÇAR CORDA (no cavalete) ==================
+# Pelo olho do cavalete pronto: "Fazer corda" e escolhe o comprimento. Em pé na frente
+# do cavalete, com a ponta dos cipós amarrada na vara de cima, o jogador tranca: a seta
+# mostra qual fio vai passar por cima do do meio (o da esquerda vai para a direita, o da
+# direita para a esquerda, um de cada vez); passando o dedo para esse lado, a trança
+# desce um cruzamento. Cada 2 m de corda gasta 1 cipó; acabou o cipó da mochila, o
+# trabalho fica parado no cavalete (volta com mais cipó e "Continuar corda"). Pronta,
+# vira um rolo de corda na mochila (o peso depende do comprimento).
+
+const CORDAS := [5, 10, 20, 30, 50]       # metros
+const CORDA_M_CIPO := 2.0                 # metros de corda por cipó
+const CORDA_PASSO := 0.25                 # metros por cruzamento (cada passada de dedo)
+var _tranca := {}                         # {mi, lado (0 esquerda→direita, 1 direita→esquerda), anim, drag, dx}
+var _tranca_btns: Array = []
+var _corda_ui: Control = null
+
+
+func _corda_opts(mi: int) -> Array:
+	var cd: Dictionary = _maq.corda_of(mi)
+	if not cd.is_empty() and float(cd.feito) < float(cd.alvo):
+		return [["corda_continuar", "Continuar corda"]]
+	return [["corda_fazer", "Fazer corda"]]
+
+
+func _corda_pick(mi: int, acao: String) -> void:
+	match acao:
+		"corda_fazer":
+			_corda_escolher(mi)
+		"corda_continuar":
+			_tranca_start(mi)
+
+
+## Escolher o comprimento da corda (com quantos cipós vai gastar).
+func _corda_escolher(mi: int) -> void:
+	if _corda_ui:
+		_corda_ui.queue_free()
+	var pn := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.08, 0.07, 0.05, 0.88)
+	sb.set_corner_radius_all(14)
+	sb.content_margin_left = 18
+	sb.content_margin_right = 18
+	sb.content_margin_top = 14
+	sb.content_margin_bottom = 14
+	pn.add_theme_stylebox_override("panel", sb)
+	pn.set_anchors_preset(Control.PRESET_CENTER)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	pn.add_child(vb)
+	var tt := Label.new()
+	tt.text = "CORDA"
+	tt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tt.add_theme_font_size_override("font_size", 24)
+	tt.add_theme_color_override("font_color", Color(0.95, 0.88, 0.7))
+	vb.add_child(tt)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 10)
+	vb.add_child(hb)
+	for m in CORDAS:
+		var b := Button.new()
+		b.text = "%d m\n%d cipós" % [m, int(ceil(m / CORDA_M_CIPO))]
+		b.custom_minimum_size = Vector2(118, 96)
+		b.add_theme_font_size_override("font_size", 22)
+		var bs := StyleBoxFlat.new()
+		bs.bg_color = Color(0.3, 0.24, 0.14)
+		bs.set_corner_radius_all(10)
+		bs.border_color = Color(0.7, 0.58, 0.32)
+		bs.set_border_width_all(2)
+		b.add_theme_stylebox_override("normal", bs)
+		b.add_theme_stylebox_override("hover", bs)
+		var bp := bs.duplicate()
+		bp.bg_color = Color(0.45, 0.36, 0.2)
+		b.add_theme_stylebox_override("pressed", bp)
+		b.pressed.connect(func():
+			_corda_ui.queue_free()
+			_corda_ui = null
+			_maq.plantas[mi]["corda"] = {"alvo": m, "feito": 0.0, "cipo": 0}
+			_maq._rebuild()
+			_tranca_start(mi))
+		hb.add_child(b)
+	var x := Button.new()
+	x.text = "Voltar"
+	x.add_theme_font_size_override("font_size", 20)
+	x.pressed.connect(func():
+		_corda_ui.queue_free()
+		_corda_ui = null)
+	vb.add_child(x)
+	_hud.add_child(pn)
+	pn.position = (_hud.get_viewport().get_visible_rect().size - pn.get_combined_minimum_size()) * 0.5
+	_corda_ui = pn
+
+
+func _tranca_start(mi: int) -> void:
+	var cd: Dictionary = _maq.corda_of(mi)
+	if cd.is_empty():
+		return
+	if _mao != "":
+		equip("")
+	_tranca = {"mi": mi, "lado": int(round(float(cd.feito) / CORDA_PASSO)) % 2, "anim": -1.0, "drag": -9, "dx": 0.0, "erro": 0.0}
+	_olho = {}
+	_bur = {}
+	_jump_btn.visible = false
+	(_tranca_btns[0] as Control).visible = true
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = false
+	_pitch = 0.42
+	_tranca_desenha()
+
+
+func _tranca_no() -> MeshInstance3D:
+	var nd: Dictionary = _maq._nodes.get(int(_tranca.mi), {})
+	if nd.has("tranca") and is_instance_valid(nd.tranca):
+		return (nd.tranca as Node3D).get_node_or_null("corda")
+	return null
+
+
+func _tranca_desenha() -> void:
+	var mt := _tranca_no()
+	if mt == null:
+		return
+	var cd: Dictionary = _maq.corda_of(int(_tranca.mi))
+	var fase := float(cd.get("feito", 0.0)) / CORDA_PASSO
+	var mov := 0.0
+	if float(_tranca.anim) >= 0.0:
+		mov = clampf(float(_tranca.anim) / 0.3, 0.0, 1.0)
+		fase += mov
+	mt.mesh = Maquinas.tranca_mesh(fase, int(_tranca.lado), mov, true)
+
+
+func _tranca_move(delta: float) -> void:
+	var mi := int(_tranca.mi)
+	if mi >= _maq.plantas.size():
+		_tranca_end()
+		return
+	var xf: Transform3D = _maq.xform(mi)
+	# em pé de frente para o cavalete, as mãos na trança
+	_player.position = xf * Vector3(0.0, 0.0, 0.95)
+	_player.position.y = ground_at(_player.position.x, _player.position.z)
+	_air = false
+	_vy = 0.0
+	var fz: Vector3 = xf.basis.z
+	_face = atan2(fz.x, fz.z)
+	_yaw = _face
+	_player.rotation.y = _face
+	_play("Idle")
+	var eye: Vector3 = xf * Vector3(0.0, 1.5, 0.82)
+	var alvo: Vector3 = xf * Vector3(0.0, 0.98, 0.0)
+	_cam.global_transform = Transform3D(Basis.looking_at(alvo - eye, Vector3.UP), eye)
+
+
+func _tranca_input(e: InputEvent) -> bool:
+	if _tranca.is_empty():
+		return false
+	if (e is InputEventMouseButton or e is InputEventMouseMotion) and e.device == InputEvent.DEVICE_ID_EMULATION:
+		return false
+	var pos := Vector2.INF
+	var idx := -9
+	var pressed := false
+	if e is InputEventScreenTouch:
+		pos = e.position
+		idx = e.index
+		pressed = e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		idx = -1
+		pressed = e.pressed
+	if pos != Vector2.INF:
+		for b in _tranca_btns:
+			if (b as Control).visible and (b as Control).get_global_rect().has_point(pos):
+				return false
+		if pressed:
+			_tranca.drag = idx
+			_tranca.dx = 0.0
+		elif int(_tranca.drag) == idx:
+			_tranca.drag = -9
+		return true
+	var d := Vector2.ZERO
+	if e is InputEventScreenDrag and e.index == int(_tranca.drag):
+		d = e.relative
+	elif e is InputEventMouseMotion and int(_tranca.drag) == -1:
+		d = e.relative
+	else:
+		return e is InputEventScreenDrag or e is InputEventMouseMotion
+	_tranca.dx = float(_tranca.dx) + d.x
+	if absf(float(_tranca.dx)) > 80.0:
+		var sent := 1 if float(_tranca.dx) > 0.0 else -1
+		_tranca.dx = -1e9 if sent > 0 else 1e9     # uma passada por arrasto
+		_tranca_passada(sent)
+	return true
+
+
+## Passou o dedo: para o lado certo, o fio cruza e a trança desce um ponto.
+func _tranca_passada(sentido: int) -> void:
+	if float(_tranca.anim) >= 0.0:
+		return
+	var certo := 1 if int(_tranca.lado) == 0 else -1
+	var mi := int(_tranca.mi)
+	var at: Vector3 = _maq.xform(mi) * Vector3(0, 1.0, 0)
+	if sentido != certo:
+		_tranca.erro = 0.35                  # o fio escapa: treme e volta
+		Sons.play_at(self, "fibra_bate", at, -14.0, 0.7)
+		return
+	var cd: Dictionary = _maq.corda_of(mi)
+	# o cipó: cada 2 m de corda precisa de mais um cipó
+	var precisa := int(floor((float(cd.feito) + CORDA_PASSO - 0.001) / CORDA_M_CIPO)) + 1
+	if int(cd.cipo) < precisa:
+		if item_qtd("cipo") <= 0 and not teste:
+			_tranca_end()                    # acabou o cipó: o trabalho fica parado aqui
+			return
+		if not teste:
+			remove_item("cipo", 1)
+			_update_inventory()
+		cd.cipo = int(cd.cipo) + 1
+	_tranca.anim = 0.0
+	Sons.play_at(self, "fibra_puxa", at, -6.0, randf_range(0.9, 1.1))
+
+
+func _tranca_tick(delta: float) -> void:
+	for b in [_log_btn, _ctx_btn, _chop_btn, _pick_btn, _plant_btn, _work_btn, _vine_btn, _seed_btn, _bld_btn, _jump_btn]:
+		(b as Control).visible = false
+	if _tiro_btn:
+		_tiro_btn.visible = false
+	_tranca.erro = maxf(0.0, float(_tranca.erro) - delta)
+	if float(_tranca.anim) >= 0.0:
+		_tranca.anim = float(_tranca.anim) + delta
+		if float(_tranca.anim) >= 0.3:
+			_tranca.anim = -1.0
+			var mi := int(_tranca.mi)
+			var cd: Dictionary = _maq.corda_of(mi)
+			cd.feito = minf(float(cd.alvo), float(cd.feito) + CORDA_PASSO)
+			_tranca.lado = 1 - int(_tranca.lado)
+			if float(cd.feito) >= float(cd.alvo) - 0.001:
+				_corda_pronta(mi)
+				return
+			if int(round(float(cd.feito) / CORDA_PASSO)) % 8 == 0:
+				_maq._rebuild()              # o rolo no chão cresce
+		_tranca_desenha()
+	if _sub_ui:
+		_sub_ui.queue_redraw()
+
+
+func _corda_pronta(mi: int) -> void:
+	var cd: Dictionary = _maq.corda_of(mi)
+	var id := "corda_%d" % int(cd.alvo)
+	_maq.plantas[mi].erase("corda")
+	_maq._rebuild()
+	var caiu := add_item(id, 1)
+	if caiu > 0:
+		var xf: Transform3D = _maq.xform(mi)
+		var q: Vector3 = xf * Vector3(0.3, 0, 0.5)
+		_add_ground(id, 1, q.x, q.z)
+	_update_inventory()
+	Sons.play_at(self, "folha_cai", _player.position + Vector3.UP, -8.0, 1.2)
+	_tranca_end()
+
+
+func _tranca_end() -> void:
+	if _tranca.is_empty():
+		return
+	var mi := int(_tranca.mi)
+	_tranca = {}
+	for b in _tranca_btns:
+		(b as Control).visible = false
+	if _skel:
+		(_skel.get_parent() as Node3D).visible = true
+	if mi < _maq.plantas.size():
+		_maq._rebuild()
+		var out: Vector3 = _maq.xform(mi) * Vector3(0.0, 0.0, 1.4)
+		_player.position = _ground_pos(Vector2(out.x, out.z))
+	_jump_btn.visible = true
+	_act_check = 0.0
+
+
+## Na tela: a seta do fio que vai cruzar agora e a barrinha de quanto já trançou.
+func _tranca_draw() -> void:
+	if _tranca.is_empty():
+		return
+	var ui := _sub_ui
+	var s := ui.size
+	var cd: Dictionary = _maq.corda_of(int(_tranca.mi))
+	if cd.is_empty():
+		return
+	var c := Vector2(s.x * 0.5, s.y * 0.72)
+	var dir := 1.0 if int(_tranca.lado) == 0 else -1.0
+	var tre := sin(Time.get_ticks_msec() / 25.0) * 6.0 * float(_tranca.erro) / 0.35
+	var a := c + Vector2(-dir * 110 + tre, 0)
+	var b := c + Vector2(dir * 110 + tre, 0)
+	var col := Color(1, 0.9, 0.55, 0.9) if float(_tranca.erro) <= 0.0 else Color(1, 0.35, 0.25, 0.9)
+	ui.draw_line(a, b, Color(0, 0, 0, 0.5), 14.0, true)
+	ui.draw_line(a, b, col, 8.0, true)
+	ui.draw_colored_polygon(PackedVector2Array([b + Vector2(dir * 26, 0), b + Vector2(-dir * 6, -22), b + Vector2(-dir * 6, 22)]), col)
+	ui.draw_circle(a, 12.0, col)
+	# a barra
+	var r := Rect2(Vector2(s.x * 0.5 - 220, s.y - 92), Vector2(440, 26))
+	ui.draw_rect(r.grow(4), Color(0.05, 0.04, 0.03, 0.82))
+	var f := clampf(float(cd.feito) / float(cd.alvo), 0.0, 1.0)
+	ui.draw_rect(Rect2(r.position, Vector2(r.size.x * f, r.size.y)), Color(0.45, 0.72, 0.25))
+	ui.draw_rect(r, Color(1, 1, 1, 0.6), false, 2.0)
+	var font := ThemeDB.fallback_font
+	var tx := "%.1f / %d m" % [float(cd.feito), int(cd.alvo)]
+	var tw := font.get_string_size(tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x
+	ui.draw_string(font, Vector2(s.x * 0.5 - tw * 0.5, r.position.y - 10), tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 0.95, 0.85))
+
+
 # ================== ARCO E FLECHA ==================
 # Com o arco na mão (Mochila → EQUIPAR) e flechas na mochila: segurando "Atirar" a corda
 # vai sendo puxada (a mira fecha), soltando a flecha sai para onde a mira aponta, mais
@@ -9671,6 +9989,11 @@ func _maq_ctx() -> bool:
 			_ctx_action = "forno_pedra"
 			_ctx_btn.text = "Encaixar pedra (%d/%d)" % [int(p.get("ped", 0)) + 1, int(fz.pedras)]
 			return true
+	if _maq.amarras_falta(mi) > 0 and _carry.is_empty() and (item_qtd("cipo") > 0 or teste):
+		_ctx_action = "amarrar_cipo"
+		var am: Dictionary = Maquinas.TIPOS[p.tipo].amarrar
+		_ctx_btn.text = "Amarrar com cipó (%d/%d)" % [int(p.get("amarras", 0)) + 1, int(am.n)]
+		return true
 	if Maquinas.TIPOS[p.tipo].has("carrinho") and _carry.is_empty():
 		match _maq.carrinho_etapa(mi):
 			"eixo":
@@ -9712,6 +10035,14 @@ func _maq_ctx_press(act: String) -> void:
 	if mi < 0:
 		return
 	match act:
+		"amarrar_cipo":
+			if not teste:
+				remove_item("cipo", 1)
+				_update_inventory()
+			_maq.amarrar(mi)
+			Sons.play_at(self, "fibra_puxa", _maq.xform(mi).origin + Vector3.UP * 1.3, -6.0, 1.0)
+			_act_check = 0.0
+			return
 		"car_eixo", "car_roda", "car_cipo":
 			var at: Vector3 = _maq.xform(mi) * Maquinas.CAR_EIXO
 			if act == "car_eixo":
@@ -13289,7 +13620,7 @@ func _olho_tick() -> void:
 		cands.append([cp, pp.distance_to(Vector2(co.x, co.z))])
 	if _maq:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
-		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho"] and _maq.pronta(mi):
+		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho", "trancador"] and _maq.pronta(mi) and _tranca.is_empty():
 			var mo: Vector3 = _maq.xform(mi).origin
 			cands.append([{"maq": mi}, maxf(0.0, pp.distance_to(Vector2(mo.x, mo.z)) - 0.8)])
 	if _fogos:
@@ -13324,6 +13655,8 @@ func _olho_opts(p: Dictionary) -> Array:
 			return _forno_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "carrinho":
 			return _car_opts(int(p.maq))
+		if str(_maq.plantas[int(p.maq)].tipo) == "trancador":
+			return _corda_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "filtro_agua":
 			return _filtro_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "torno_ceramica":
@@ -13398,6 +13731,7 @@ func _olho_layout() -> Dictionary:
 
 func _draw_bur_ui() -> void:
 	_draw_fornos()
+	_tranca_draw()
 	if _mao == "arco" and _morto < 0.0:
 		# a mira: um círculo pequeno no meio da tela (fecha quando a corda está puxada)
 		var mc := _sub_ui.size * 0.5
@@ -13574,6 +13908,9 @@ func _olho_pick(acao: String) -> void:
 			return
 		"car_despejar", "car_pegar_lenha", "car_tirar_itens":
 			_car_pick(int(p.maq), acao)
+			return
+		"corda_fazer", "corda_continuar":
+			_corda_pick(int(p.maq), acao)
 			return
 		"pedrinhas", "carvao", "areia", "tela", "vasilha", "agua_filtro", "encher_limpa":
 			_filtro_pick(int(p.maq), acao)

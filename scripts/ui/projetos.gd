@@ -191,11 +191,11 @@ func _draw_plan() -> void:
 	var s := _draw.size
 	var sc := minf(s.x / 6.6, s.y / 3.2)
 	var o := Vector2(s.x * 0.5, s.y - 18)
-	if t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho"):
+	if t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho") or t.has("amarrar"):
 		sc = minf(s.x / 2.8, s.y / 1.25)          # máquina pequena: desenho maior
 	var P := func(x: float, y: float) -> Vector2:
 		return o + Vector2(x * sc, -y * sc)
-	var small := t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho")
+	var small := t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho") or t.has("amarrar")
 	_draw.draw_line(P.call(-3.2 if not small else -1.2, 0), P.call(3.2 if not small else 0.9, 0), C_DIM, 1.5)
 	for pc in t.pecas:
 		var c: Vector3 = pc[2]
@@ -207,7 +207,7 @@ func _draw_plan() -> void:
 			hh = r * 0.9                              # tábua em pé de lado: a largura é a altura
 		match str(pc[3]):
 			"x", "x_lado": rect = Rect2(c.x - L * 0.5, c.y - hh, L, hh * 2.0)
-			"y": rect = Rect2(c.x - r, c.y - L * 0.5, r * 2.0, L)
+			"y", "y_t+", "y_t-": rect = Rect2(c.x - r, c.y - L * 0.5, r * 2.0, L)
 			_: rect = Rect2(c.x - r, c.y - hh, r * 2.0, hh * 2.0)
 		var a: Vector2 = P.call(rect.position.x, rect.position.y)
 		var b: Vector2 = P.call(rect.end.x, rect.end.y)
@@ -227,6 +227,13 @@ func _draw_plan() -> void:
 		_draw.draw_string(font, P.call(-0.95, 1.15), "SUSPIRO", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
 		_draw.draw_string(font, P.call(-0.7, 0.45), "BARRO E PEDRAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
 		_draw.draw_string(font, P.call(0.62, 0.3), "PORTA DE BARRO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_DIM)
+		return
+	if t.has("amarrar"):
+		for q in t.amarrar.nos:
+			_draw.draw_circle(P.call(q.x, q.y), 0.09 * sc, C_HI)
+		_draw.draw_string(font, P.call(-0.6, 1.62), "AMARRAS DE CIPÓ", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
+		_draw.draw_line(P.call(0, 1.38), P.call(0, 0.7), C_DIM, 3.0)
+		_draw.draw_string(font, P.call(0.06, 0.95), "TRANÇA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_DIM)
 		return
 	if t.has("carrinho"):
 		# a roda (rodela) no eixo, na ponta dos braços

@@ -394,6 +394,31 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_line(c + Vector2(-40, 38) * u, c + Vector2(40, -38) * u, Color(0.35, 0.24, 0.13), 9 * u, true)
 			ci.draw_line(c + Vector2(-40, 38) * u, c + Vector2(40, -38) * u, Color(0.6, 0.44, 0.26), 6 * u, true)
 			ci.draw_circle(c + Vector2(40, -38) * u, 4.5 * u, Color(0.82, 0.68, 0.48))
+		"corda_5", "corda_10", "corda_20", "corda_30", "corda_50", "acao_corda_fazer", "acao_corda_continuar":
+			# o rolo de corda de cipó trançado: voltas em elipse (mais voltas, mais comprida)
+			var m := 20
+			if id.begins_with("corda_"):
+				m = int(id.substr(6))
+			var voltas := clampi(3 + m / 8, 3, 9)
+			var cor := Color(0.55, 0.45, 0.22)
+			for k in voltas:
+				var rx := 40.0 - k * 2.2
+				var ry := 26.0 - k * 1.4
+				var off := Vector2(0, 6 - k * 1.2)
+				var pts := PackedVector2Array()
+				for i in 33:
+					var a := TAU * i / 32.0
+					pts.append(c + (off + Vector2(cos(a) * rx, sin(a) * ry)) * u)
+				ci.draw_polyline(pts, Color(0.22, 0.16, 0.07), 8.5 * u, true)
+				ci.draw_polyline(pts, cor.darkened(0.08 * (k % 2)), 6.0 * u, true)
+				# a trança: tracinhos inclinados ao longo da volta
+				for i in range(0, 32, 2):
+					var a2 := TAU * i / 32.0
+					var p0 := c + (off + Vector2(cos(a2) * rx, sin(a2) * ry)) * u
+					ci.draw_line(p0 + Vector2(-2, -2.5) * u, p0 + Vector2(2, 2.5) * u, Color(0.3, 0.22, 0.1), 1.4 * u, true)
+			# a ponta solta saindo do rolo
+			ci.draw_line(c + Vector2(30, 10) * u, c + Vector2(46, 36) * u, Color(0.22, 0.16, 0.07), 8.0 * u, true)
+			ci.draw_line(c + Vector2(30, 10) * u, c + Vector2(46, 36) * u, cor, 5.5 * u, true)
 		"arco", "acao_atirar":
 			# o arco envergado (vareta) com a corda de cipó trançado
 			var pa := PackedVector2Array()
