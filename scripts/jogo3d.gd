@@ -1175,6 +1175,7 @@ func _on_world_ready() -> void:
 	_goiab.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/goiabeiras.json" if _world_id != "" else "")
 	_escav.water_mat = _water_mat
 	_escav.sea_m = MundoSim.SEA * HS
+	_escav.rio_fn = _rio_nivel
 	_escav_steps = sim.steps
 	for m in [_terrain_mat, _grass_mat]:
 		m.set_shader_parameter("dig_mask", _escav.mask_tex)
@@ -2285,6 +2286,9 @@ func _water_spot() -> Vector3:
 		var lv := _water_surface(w.x, w.z)
 		if lv > -1e8 and lv - height_at(w.x, w.z) >= BALDE_AGUA_MIN:
 			return Vector3(w.x, lv, w.z)
+		var hl := _hole_level(w.x, w.z)
+		if hl > -1e8 and hl - ground_at(w.x, w.z) >= BALDE_AGUA_MIN:
+			return Vector3(w.x, hl, w.z)          # água do poço / da valeta
 	return Vector3.INF
 
 
@@ -2303,6 +2307,9 @@ func _cab_spot() -> Vector3:
 		var lv := _water_surface(w.x, w.z)
 		if lv > -1e8 and lv - height_at(w.x, w.z) >= CABACA_FUNDO and not _is_sea(w.x, w.z):
 			return Vector3(w.x, lv, w.z)
+		var hl := _hole_level(w.x, w.z)
+		if hl > -1e8 and hl - ground_at(w.x, w.z) >= CABACA_FUNDO and hl > MundoSim.SEA * HS + 0.05:
+			return Vector3(w.x, hl, w.z)          # água do poço / da valeta
 	return Vector3.INF
 
 
@@ -2729,6 +2736,19 @@ func _water_surface(x: float, z: float) -> float:
 		if float(sim.ter[cell.y * MundoSim.W + cell.x]) < MundoSim.SEA:
 			lv = maxf(lv, MundoSim.SEA * HS)      # no mar
 	return lv
+
+
+## Nível da água doce (rio, lagoa, nascente) em cima do chão em (x, z), ou -1e9.
+func _rio_nivel(x: float, z: float) -> float:
+	var cell := Vector2i(int(x / CELL), int(z / CELL))
+	if _water_level.size() != MundoSim.W * MundoSim.H or cell.x < 0 or cell.y < 0 or cell.x >= MundoSim.W or cell.y >= MundoSim.H:
+		return -1e9
+	if float(sim.ter[cell.y * MundoSim.W + cell.x]) < MundoSim.SEA + 0.05:
+		return -1e9                    # o mar já é tratado à parte
+	var lv: float = _water_level[cell.y * MundoSim.W + cell.x]
+	if lv > height_at(x, z) + 0.03:
+		return lv
+	return -1e9
 
 
 ## É água do mar (salgada)?
@@ -6438,6 +6458,11 @@ func _tick_hole_water(delta: float) -> void:
 	var evap: float = 0.02 if sim.raining else lerpf(0.6, 0.25, sim.wetness()) * (0.3 + 1.4 * sim.sun())
 	evap += lerpf(1.6, 0.15, sim.wetness())   # a terra seca chupa a água do fundo; na chuva ela já está encharcada
 	_escav.water_tick(minf(hrs, 24.0 * 30.0), rain, evap)
+
+
+## Nível da água dos buracos cavados (poço, valeta) no ponto, ou -1e9.
+func _hole_level(x: float, z: float) -> float:
+	return _escav.water_level_at(x, z) if _escav else -1e9
 
 
 ## Profundidade da água dos buracos cavados no ponto.

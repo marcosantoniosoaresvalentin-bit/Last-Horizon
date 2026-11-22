@@ -346,6 +346,13 @@ var _basins := {}                # chave -> {pts: [pontos], rim (m), low (m), le
 var _water_mi: MeshInstance3D = null
 var water_mat: Material
 var _basins_dirty := true
+var _murk_old := {}
+## (x, z) -> nível da água doce (rio, lagoa) que está em cima do chão ali, ou -1e9.
+var rio_fn := Callable()
+const RIO_TAU := 0.12            # horas do jogo: buraco aberto no rio enche depressa
+const LENCOL_TAU := 1.5          # horas do jogo: perto do rio a água vem minando pelo chão
+const LENCOL_R := 30.0           # até quantos metros do rio a terra fica úmida por baixo
+const LENCOL_CAI := 0.04         # o lençol desce 4 cm por metro longe do rio
 
 
 func _ground_k(k: Vector2i) -> float:
@@ -372,6 +379,9 @@ func _find_basins() -> void:
 	for key in old:
 		if not old_n.has(key) or int(old_n[key]) <= 1:
 			old_n[key] = 1
+	_murk_old = {}
+	for key in _basins:
+		_murk_old[key] = float(_basins[key].get("murk", 0.85))
 	_basins = {}
 	_basin_of = {}
 	_gc = {}
@@ -395,22 +405,38 @@ func _find_basins() -> void:
 				todo.append(k + nb)
 		# borda: o ponto mais baixo em volta do buraco (por ali a água transborda)
 		var rim := 1e9
+		var borda := {}
 		for k in pts:
 			for nb in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 				var n: Vector2i = k + nb
 				if not seen.has(n) or _v(n) > -0.03:
 					rim = minf(rim, _gk(n))
+					borda[n] = true
 		var vol := 0.0
+		var mk := 0.85                   # buraco novo: a água que entrar vem barrenta
 		for k in pts:
 			var ob = old_of.get(k)
 			if ob != null and old.has(ob):
 				vol += float(old[ob]) / maxf(float(old_n.get(ob, 1)), 1.0)
+				mk = float(_murk_old.get(ob, mk))
 			_basin_of[k] = low_k
 		var gs := PackedFloat32Array()
 		for k in pts:
 			gs.append(_gk(k))
 		gs.sort()
-		_basins[low_k] = {"pts": pts, "g": gs, "rim": rim, "low": _gk(low_k), "level": -1e9}
+		# o centro (para achar o rio mais perto) e a borda (uns pontos, para ver se abriu no rio)
+		var cx := 0.0
+		var cz := 0.0
+		for k in pts:
+			cx += k.x
+			cz += k.y
+		var bl: Array = borda.keys()
+		var passo := maxi(1, bl.size() / 60)
+		var amostra := []
+		for i in range(0, bl.size(), passo):
+			amostra.append(bl[i])
+		_basins[low_k] = {"pts": pts, "g": gs, "rim": rim, "low": _gk(low_k), "level": -1e9, "murk": mk,
+			"c": Vector2(cx / pts.size() * RES, cz / pts.size() * RES), "borda": amostra}
 		water[low_k] = vol
 	_basins_dirty = false
 
@@ -467,6 +493,27 @@ func water_tick(hours: float, rain_mmh: float, evap_mmh: float) -> void:
 		vol -= evap_mmh / 1000.0 * hours * wet_area   # sol e a terra chupando
 		if float(b.low) < sea_m:
 			vol = maxf(vol, _vol_at(b, minf(sea_m, float(b.rim))))   # o mar entra pelo chão
+		if rio_fn.is_valid():
+			vol = _agua_do_rio(b, vol, hours)
+		# o barro da água: a do rio entra clara, a que mina pelo chão vem filtrada; a chuva
+		# escorrendo turva; parada, o barro assenta no fundo devagar
+		var mk := float(b.get("murk", 0.85))
+		var alvo_mk := 0.3
+		var tau := 8.0
+		if b.get("fonte", "") == "rio":
+			alvo_mk = 0.15
+			tau = 0.3
+		elif rain_mmh > 0.5:
+			alvo_mk = 0.85
+			tau = 1.0
+		elif b.get("fonte", "") == "lencol":
+			alvo_mk = 0.2
+			tau = 4.0
+		mk += (alvo_mk - mk) * (1.0 - exp(-hours / tau))
+		if absf(mk - float(b.get("murk_d", -1.0))) > 0.05:
+			b.murk_d = mk
+			redraw = true
+		b.murk = mk
 		vol = clampf(vol, 0.0, full)
 		water[key] = vol
 		var nl: float = _level_for(b, vol) if vol > 0.0005 else -1e9
@@ -475,6 +522,63 @@ func water_tick(hours: float, rain_mmh: float, evap_mmh: float) -> void:
 			redraw = true
 	if redraw:
 		_draw_water()
+
+
+## O rio e o lençol: buraco aberto até a água do rio enche até o nível dele (a valeta
+## leva a água por onde for cavada, se o fundo dela estiver abaixo do rio) e esvazia
+## de volta se ficar acima. Buraco fechado perto do rio, mais fundo que o lençol, enche
+## devagar minando pelo chão (o poço / a cacimba).
+func _agua_do_rio(b: Dictionary, vol: float, hours: float) -> float:
+	# 1) aberto no rio: algum ponto da borda (ou do fundo) está debaixo da água do rio
+	var Lr := -1e9
+	var rim_seco := 1e9
+	for k in b.borda:
+		var x := float(k.x) * RES
+		var z := float(k.y) * RES
+		var lv: float = rio_fn.call(x, z)
+		if lv > _gk(k) + 0.01:
+			Lr = maxf(Lr, lv)
+		else:
+			rim_seco = minf(rim_seco, _gk(k))
+	if Lr < -1e8:
+		# cavado dentro do próprio rio
+		var kl := _basin_low_k(b)
+		var lv2: float = rio_fn.call(float(kl.x) * RES, float(kl.y) * RES)
+		if lv2 > float(b.low):
+			Lr = lv2
+	if Lr > float(b.low):
+		b.fonte = "rio"
+		var alvo := _vol_at(b, minf(Lr, rim_seco))
+		return vol + (alvo - vol) * (1.0 - exp(-hours / RIO_TAU))
+	# 2) lençol: a água do rio perto vem minando pelo chão
+	var wt := -1e9
+	var c: Vector2 = b.c
+	var passo := 5.0
+	var r := ceili(LENCOL_R / passo)
+	for ix in range(-r, r + 1):
+		for iz in range(-r, r + 1):
+			var off := Vector2(ix, iz) * passo
+			var dist := off.length()
+			if dist > LENCOL_R:
+				continue
+			var lv3: float = rio_fn.call(c.x + off.x, c.y + off.y)
+			if lv3 > -1e8:
+				wt = maxf(wt, lv3 - dist * LENCOL_CAI)
+	b.fonte = ""
+	if wt > float(b.low):
+		b.fonte = "lencol"
+		var alvo2 := _vol_at(b, minf(wt, float(b.rim)))
+		if alvo2 > vol:
+			return vol + (alvo2 - vol) * (1.0 - exp(-hours / LENCOL_TAU))
+	return vol
+
+
+func _basin_low_k(b: Dictionary) -> Vector2i:
+	var best: Vector2i = (b.pts as Array)[0]
+	for k in b.pts:
+		if _gk(k) < _gk(best):
+			best = k
+	return best
 
 
 ## Nível da água no ponto (ou -1e9 se não tem água de buraco ali).
@@ -527,7 +631,7 @@ func _draw_water() -> void:
 					var dep := L - _gk(kk)
 					wet = wet or dep > 0.0
 					p.append(Vector3(kk.x * RES, L, kk.y * RES))
-					cols.append(_jogo._wcol(0.85, dep))
+					cols.append(_jogo._wcol(float(b.get("murk", 0.85)), dep))
 				if not wet:
 					continue
 				any = true
