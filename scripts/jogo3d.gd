@@ -10443,6 +10443,30 @@ func _tri_draw() -> void:
 	ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
 
 
+## De onde olhar a vaca pendurada sem uma perna do tripé na frente: gira em volta dela
+## (a partir da barriga) até a linha da câmera passar longe das pernas.
+func _vista_livre(mi: int, meio: Vector3, fr: Vector3, dist: float) -> Vector3:
+	var xf: Transform3D = _maq.xform(mi)
+	var topo: Vector3 = xf * Vector3(0, Maquinas.TRI_H, 0)
+	var pes := []
+	for a in Maquinas.TRI_ANG:
+		pes.append(xf * Vector3(cos(float(a)) * Maquinas.TRI_R, 0, sin(float(a)) * Maquinas.TRI_R))
+	var melhor := meio + fr * dist
+	var folga_max := -1.0
+	for ang in [0.0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4]:
+		var e: Vector3 = meio + fr.rotated(Vector3.UP, ang) * dist + Vector3.UP * 0.05
+		var folga := 1e9
+		for pe in pes:
+			var cp := Geometry3D.get_closest_points_between_segments(e, meio, pe, topo)
+			folga = minf(folga, (cp[0] as Vector3).distance_to(cp[1]))
+		if folga > 0.35:
+			return e
+		if folga > folga_max:
+			folga_max = folga
+			melhor = e
+	return melhor
+
+
 # ================== TIRAR O COURO ==================
 # Com a vaca pendurada no tripé e amarrada na estaca, e a faca na mochila: "Tirar o
 # couro". De frente para a barriga: primeiro passa o dedo de cima para baixo em cima da
@@ -10532,11 +10556,12 @@ func _couro_move(delta: float) -> void:
 	if fr.length() < 0.1:
 		fr = Vector3.RIGHT
 	fr = fr.normalized()
-	var eye := meio + fr * 1.75 + Vector3.UP * 0.05
+	var eye := _vista_livre(mi, meio, fr, 1.75)
 	_player.position = Vector3(eye.x, ground_at(eye.x, eye.z), eye.z)
 	_air = false
 	_vy = 0.0
-	_face = atan2(-(-fr).x, -(-fr).z)
+	var olha := meio - eye
+	_face = atan2(-olha.x, -olha.z)
 	_yaw = _face
 	_player.rotation.y = _face
 	_play("Idle")
@@ -10867,11 +10892,12 @@ func _evis_move(delta: float) -> void:
 	var fr: Vector3 = _caca.couro_frente(uid)
 	fr.y = 0.0
 	fr = fr.normalized() if fr.length() > 0.1 else Vector3.RIGHT
-	var eye := meio + fr * 2.0 + Vector3.UP * 0.05
+	var eye := _vista_livre(mi, meio, fr, 2.0)
 	_player.position = Vector3(eye.x, ground_at(eye.x, eye.z), eye.z)
 	_air = false
 	_vy = 0.0
-	_face = atan2(fr.x, fr.z)
+	var olha2 := meio - eye
+	_face = atan2(-olha2.x, -olha2.z)
 	_yaw = _face
 	_player.rotation.y = _face
 	_play("Idle")

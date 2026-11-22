@@ -1106,9 +1106,9 @@ static func visceras_no(s: float, ubere: bool, seed_v: int) -> Node3D:
 		root.add_child(m)
 		return m
 	# a buchada (rúmen) grande e o barrete
-	bola.call(Color(0.36, 0.38, 0.28), Vector3(0.36, 0.3, 0.28), Vector3(0, 0, 0), 0.55)
-	bola.call(Color(0.42, 0.42, 0.33), Vector3(0.2, 0.18, 0.17), Vector3(0.28, 0.12, 0.1), 0.55)
-	bola.call(Color(0.33, 0.34, 0.26), Vector3(0.16, 0.15, 0.14), Vector3(-0.25, 0.16, -0.1), 0.55)
+	bola.call(Color(0.26, 0.26, 0.2), Vector3(0.36, 0.3, 0.28), Vector3(0, 0, 0), 0.6)
+	bola.call(Color(0.32, 0.3, 0.24), Vector3(0.2, 0.18, 0.17), Vector3(0.28, 0.12, 0.1), 0.6)
+	bola.call(Color(0.24, 0.24, 0.19), Vector3(0.16, 0.15, 0.14), Vector3(-0.25, 0.16, -0.1), 0.6)
 	# o fígado e os bofes, o coração
 	bola.call(Color(0.28, 0.05, 0.05), Vector3(0.22, 0.07, 0.15), Vector3(0.12, 0.3, 0.12), 0.25)
 	bola.call(Color(0.68, 0.3, 0.34), Vector3(0.18, 0.14, 0.12), Vector3(-0.15, 0.36, 0.05), 0.5)
