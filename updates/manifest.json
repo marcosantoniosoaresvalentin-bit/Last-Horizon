@@ -1,9 +1,9 @@
 {
-  "version": 178,
-  "file": "update_178.zip",
-  "size": 5073292,
-  "sha256": "a6aa440f60241700681d946203305929ac254c53a39fc37f7d4727488404d5a3",
+  "version": 179,
+  "file": "update_179.zip",
+  "size": 5074772,
+  "sha256": "c9348bf743ba9485ae1719002fb37dec5f02a00cfb7e9bdf05958346c35ac450",
   "min_build": 1,
-  "notes": "Sem textos de ajuda na mochila, craft e projetos",
+  "notes": "Água de verdade nos buracos: valeta leva a água do rio, poço perto do rio mina água",
   "date": "2026-11-22"
 }
