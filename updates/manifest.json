@@ -1,9 +1,9 @@
 {
-  "version": 181,
-  "file": "update_181.zip",
-  "size": 5076419,
-  "sha256": "ff646ddd2a23d683e8dae8616e92cea89ca74ec4f39dc305a04049b53d7aa036",
+  "version": 182,
+  "file": "update_182.zip",
+  "size": 5083878,
+  "sha256": "544c65e667525b1f2d5a5b8dcdf5c0bdd243b8695a2ad54a1e03b81f70f7f31b",
   "min_build": 1,
-  "notes": "Buraco na beira da lagoa/rio enche até o nível da água",
+  "notes": "Carrinho de mão; carvão do forno com balde; lenha na mão",
   "date": "2026-11-22"
 }
