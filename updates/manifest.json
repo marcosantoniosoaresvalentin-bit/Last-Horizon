@@ -1,9 +1,9 @@
 {
-  "version": 206,
-  "file": "update_206.zip",
-  "size": 5611352,
-  "sha256": "2164bf8f6043fa0da89a2be8fc0b995fa564e5b9ffe1e39ee3fa5dc7d9d51b00",
+  "version": 207,
+  "file": "update_207.zip",
+  "size": 5612232,
+  "sha256": "4310a28a22f633ff1dd6fa24029dddcec4cf225761b4df4019ee80bcf42304be",
   "min_build": 1,
-  "notes": "Folha de babaçu: cortar da pindova com o machado",
+  "notes": "Tripé: forro de folha de babaçu no chão",
   "date": "2026-11-22"
 }
