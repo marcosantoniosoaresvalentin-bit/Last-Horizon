@@ -1,9 +1,9 @@
 {
-  "version": 176,
-  "file": "update_176.zip",
-  "size": 5012895,
-  "sha256": "de1bcbc54c32dde6c5248809de3f85dd796e45cf72ebc33f46fe7b3fae894ad1",
+  "version": 177,
+  "file": "update_177.zip",
+  "size": 5073389,
+  "sha256": "1a648b1c0c8980d0678f43231577c5963473d7d632158238021d2ae1540710bc",
   "min_build": 1,
-  "notes": "Sem mensagens de ajuda nem dicas: o jogador aprende sozinho",
+  "notes": "Morte de verdade; doença da água suja; goiabeira, goiaba e chá das folhas",
   "date": "2026-11-22"
 }
