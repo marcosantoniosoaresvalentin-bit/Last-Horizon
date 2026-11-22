@@ -1,9 +1,9 @@
 {
-  "version": 173,
-  "file": "update_173.zip",
-  "size": 5011549,
-  "sha256": "ed7b542222f49f2bf675f4b39a150ed187b2590198a86d2911fb2e19db4dc234",
+  "version": 174,
+  "file": "update_174.zip",
+  "size": 5013057,
+  "sha256": "c3a00c5f0ce53f19f8822e603f263a7332432c7d0849766a8fb70ea74f53a5f8",
   "min_build": 1,
-  "notes": "Forno: barro primeiro, pedras encaixadas aparecendo, porta de barro, relógio só de perto",
+  "notes": "Forno: fumaça cinza de verdade, sem as bolas verdes",
   "date": "2026-11-22"
 }
