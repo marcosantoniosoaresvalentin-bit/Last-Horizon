@@ -1,9 +1,9 @@
 {
-  "version": 174,
-  "file": "update_174.zip",
-  "size": 5013057,
-  "sha256": "c3a00c5f0ce53f19f8822e603f263a7332432c7d0849766a8fb70ea74f53a5f8",
+  "version": 175,
+  "file": "update_175.zip",
+  "size": 5012977,
+  "sha256": "805da5c97a18af9ee98202fe4db49a326a1cb895c3c300b5403175be71607fe5",
   "min_build": 1,
-  "notes": "Forno: fumaça cinza de verdade, sem as bolas verdes",
+  "notes": "Bolas verdes paradas no ar corrigidas (forno, fogueira, chamas, chuva)",
   "date": "2026-11-22"
 }
