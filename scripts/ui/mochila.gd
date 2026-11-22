@@ -468,6 +468,10 @@ func _use() -> void:
 		_say(_game.comer(str(it.id)))
 		_refresh()
 		return
+	if it.id == "cha_goiabeira" and _game:
+		_say(_game.tomar_cha())
+		_refresh()
+		return
 	if it.id == "remedio_cobra" and _game:
 		_say(_game.tomar_remedio())
 		_refresh()

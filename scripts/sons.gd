@@ -43,12 +43,15 @@ const FILES := {
 	"cobra_chiado": ["cobra_chiado1", "cobra_chiado2", "cobra_chiado3"],
 	"cobra_rabo": ["cobra_rabo1", "cobra_rabo2"],
 	"cobra_bote": ["cobra_bote1", "cobra_bote2"],
+	# a doença da água suja (sintetizados: tools/sintetizar_doenca.py)
+	"barriga_ronco": ["barriga_ronco1", "barriga_ronco2", "barriga_ronco3"],
+	"gases": ["gases1", "gases2", "gases3"],
 }
 ## Volume de cada som (dB): passos baixos e a água bem baixinha.
 const VOLUME := {"machado": 0.0, "corrida": -12.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0, "serra": -9.0, "pedra_bate": -4.0, "pedra_lasca": -3.0, "pedra_racha": 0.0,
 	"arara_voo": 2.0, "arara_alarme": 3.0, "arara_resmungo": -8.0, "macaco_assobio": -6.0, "macaco_trinado": -7.0,
 	"macaco_alarme": -1.0, "macaco_guincho": -2.0, "folha_cai": 2.0, "talo_corte": -2.0, "fibra_puxa": -1.0, "fibra_bate": -2.0, "serra_corte": -1.0, "pedal_range": -6.0,
-	"cobra_chiado": -4.0, "cobra_rabo": -6.0, "cobra_bote": -2.0}
+	"cobra_chiado": -4.0, "cobra_rabo": -6.0, "cobra_bote": -2.0, "barriga_ronco": -6.0, "gases": -8.0}
 
 static var _cache := {}
 

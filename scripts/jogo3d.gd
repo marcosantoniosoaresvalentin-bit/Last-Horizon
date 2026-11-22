@@ -43,6 +43,7 @@ const Olaria := preload("res://scripts/world/olaria.gd")
 const Vitais := preload("res://scripts/ui/vitais.gd")
 const Cobras := preload("res://scripts/world/cobras.gd")
 const Taias := preload("res://scripts/world/taias.gd")
+const Goiabeiras := preload("res://scripts/world/goiabeiras.gd")
 const Capins := preload("res://scripts/world/capins.gd")
 const Fogueiras := preload("res://scripts/world/fogueiras.gd")
 const SerraCtrl := preload("res://scripts/ui/serra_ctrl.gd")
@@ -405,6 +406,7 @@ var _cupins: Node3D = null
 var _tamanduas: Node3D = null
 var _cobras: Node3D = null         # jararacas (de tocaia nas moitas)
 var _taias: Node3D = null          # jararaca-taia (a planta do remédio)
+var _goiab: Node3D = null          # goiabeiras (goiaba e o chá das folhas)
 var _veneno := -1.0                # picado de cobra: segundos desde a picada (-1 = não)
 var _embaca: ColorRect = null      # a vista embaçando com o veneno
 var teste := false                 # modo de teste (Configurações): tudo de graça e rápido
@@ -1168,6 +1170,9 @@ func _on_world_ready() -> void:
 	_taias = Taias.new()
 	add_child(_taias)
 	_taias.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/taias.json" if _world_id != "" else "")
+	_goiab = Goiabeiras.new()
+	add_child(_goiab)
+	_goiab.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/goiabeiras.json" if _world_id != "" else "")
 	_escav.water_mat = _water_mat
 	_escav.sea_m = MundoSim.SEA * HS
 	_escav_steps = sim.steps
@@ -1546,6 +1551,8 @@ func _process(delta: float) -> void:
 			_cobras.update(delta)
 		if _taias and Engine.get_process_frames() % 120 == 30:
 			_taias.dia(int(sim.elapsed_days()))
+		if _goiab and Engine.get_process_frames() % 120 == 60:
+			_goiab.dia(int(sim.elapsed_days()))
 		if _araras:
 			_araras.tick()
 			_araras.update(delta)
@@ -1646,6 +1653,8 @@ func _save_world() -> void:
 		_cobras.save(Mundos.dir(_world_id) + "/cobras.json")
 	if _taias:
 		_taias.save(Mundos.dir(_world_id) + "/taias.json")
+	if _goiab:
+		_goiab.save(Mundos.dir(_world_id) + "/goiabeiras.json")
 	if _constr:
 		_constr.save(Mundos.dir(_world_id) + "/construcao.json")
 	if _maq:
@@ -1677,7 +1686,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", []), "uid": g.get("uid", "")})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja, "vida": _vida, "fome": _fome, "sede": _sede, "frutos_dia": _frutos_dia, "lenhas": _lenhas, "veneno": _veneno}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja, "vida": _vida, "fome": _fome, "sede": _sede, "frutos_dia": _frutos_dia, "lenhas": _lenhas, "veneno": _veneno, "doenca": _doenca, "alivio": _alivio}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1736,6 +1745,8 @@ func _load_player() -> void:
 	_frutos_dia = d.get("frutos_dia", {})
 	_lenhas = d.get("lenhas", [])
 	_veneno = float(d.get("veneno", -1.0))
+	_doenca = d.get("doenca", {}) if d.get("doenca", {}) is Dictionary else {}
+	_alivio = float(d.get("alivio", 0.0))
 	var bc = d.get("balde_carga", {})
 	_balde_carga = bc if bc is Dictionary and bc.has("vol") else {}
 	equip(str(d.get("mao", "")))
@@ -2331,6 +2342,7 @@ func beber_cabaca(id := "moringa_agua") -> String:
 	var suja := id == "moringa_agua"
 	if suja:
 		_agua_suja += 1
+		_contaminar(0.12)
 	_sede = minf(100.0, _sede + 12.0)                # um gole
 	l[0] = int(l[0]) - 1
 	Sons.play_at(self, "agua", _player.position + Vector3.UP * 1.5, -14.0, 1.9)
@@ -2395,14 +2407,130 @@ func _vitais_tick(delta: float) -> void:
 	if _sede <= 0.0 or _fome <= 0.0:
 		var n := (1.0 if _sede <= 0.0 else 0.0) + (1.0 if _fome <= 0.0 else 0.0)
 		_vida = maxf(0.0, _vida - 100.0 / MORRE_S * delta * n)
-	elif _sede > 40.0 and _fome > 40.0 and _veneno < 0.0:
+	elif _sede > 40.0 and _fome > 40.0 and _veneno < 0.0 and not _doente():
 		_vida = minf(100.0, _vida + 100.0 / CURA_S * delta)
+	_doenca_tick(delta)
 	if _vida <= 0.0:
-		if teste:
-			_vida = 1.0                     # modo de teste: não morre
-		else:
-			_morrer()
+		_morrer()
+		_vitais_mostrar()
+		return
 	_vitais_mostrar()
+
+
+# ================== DOENÇA DA ÁGUA SUJA ==================
+# Água sem filtrar (do rio com a mão ou da cabaça) pode trazer bactérias ou parasitas. Não
+# dá na hora: fica incubando uns minutos e os sintomas vão aparecendo, cada um na sua
+# hora e sorteados (nem todo mundo tem todos): diarreia (a sede vai embora rápido),
+# cólicas (dobra de dor e anda devagar), gases, náusea (a vista balança; difícil comer) e
+# visão turva. Passa sozinha depois de um tempo, mas a diarreia sem água mata. O chá das
+# folhas de goiabeira alivia a diarreia, as cólicas e os gases por um tempo (não cura).
+const SINTOMAS := ["diarreia", "colica", "gases", "nausea", "visao"]
+const ALIVIO_S := 600.0
+var _doenca := {}                   # {inc (s até começar), t (s doente), dur, sint: {nome: começa em}}
+var _alivio := 0.0                  # segundos que o chá ainda alivia
+var _colica := 0.0                  # crise de cólica agora (s)
+var _prox_ep := 25.0                # s até a próxima crise (ronco, gases, cólica)
+
+
+func _contaminar(chance: float) -> void:
+	if not _doenca.is_empty() or randf() >= chance:
+		return
+	var dur := randf_range(1200.0, 2100.0)
+	var lst: Array = SINTOMAS.duplicate()
+	lst.shuffle()
+	var sint := {}
+	for k in randi_range(2, 5):
+		sint[lst[k]] = randf_range(0.0, dur * 0.45)
+	_doenca = {"inc": randf_range(300.0, 720.0), "t": 0.0, "dur": dur, "sint": sint}
+
+
+func _doente() -> bool:
+	return not _doenca.is_empty() and float(_doenca.get("inc", 0.0)) <= 0.0
+
+
+## Força de um sintoma agora (0 a 1): vai chegando devagar e some no fim da doença.
+func _sint(nome: String) -> float:
+	if not _doente():
+		return 0.0
+	var sint: Dictionary = _doenca.get("sint", {})
+	if not sint.has(nome):
+		return 0.0
+	var t := float(_doenca.t)
+	var dur := float(_doenca.dur)
+	var v := clampf((t - float(sint[nome])) / 90.0, 0.0, 1.0) * clampf((dur - t) / (dur * 0.25), 0.0, 1.0)
+	if nome in ["diarreia", "colica", "gases"] and _alivio > 0.0:
+		v *= 0.3                     # o chá de goiabeira acalma a barriga
+	return v
+
+
+func _doenca_tick(delta: float) -> void:
+	_alivio = maxf(0.0, _alivio - delta)
+	if _doenca.is_empty():
+		return
+	if float(_doenca.get("inc", 0.0)) > 0.0:
+		_doenca.inc = float(_doenca.inc) - delta
+		return
+	_doenca.t = float(_doenca.t) + delta
+	if float(_doenca.t) >= float(_doenca.dur):
+		_doenca = {}
+		_colica = 0.0
+		return
+	var dia := _sint("diarreia")
+	if dia > 0.0:
+		_sede = maxf(0.0, _sede - 100.0 / SEDE_S * 2.2 * dia * delta)
+		_fome = maxf(0.0, _fome - 100.0 / FOME_S * 0.6 * dia * delta)
+	_colica = maxf(0.0, _colica - delta)
+	_prox_ep -= delta
+	if _prox_ep <= 0.0:
+		var forte := maxf(maxf(dia, _sint("colica")), _sint("gases"))
+		_prox_ep = randf_range(18.0, 45.0) / maxf(0.35, forte)
+		var cands := []
+		for k in ["diarreia", "colica", "gases"]:
+			if _sint(k) > 0.15:
+				cands.append(k)
+		if not cands.is_empty():
+			var ep: String = cands[randi() % cands.size()]
+			var at := _player.position + Vector3.UP * 0.9
+			match ep:
+				"gases":
+					Sons.play_at(self, "gases", at, -2.0, randf_range(0.85, 1.15), 20.0, 3.0)
+				"colica":
+					Sons.play_at(self, "barriga_ronco", at, 0.0, 0.9, 15.0, 3.0)
+					_colica = randf_range(4.0, 8.0) * _sint("colica")
+				_:
+					Sons.play_at(self, "barriga_ronco", at, -2.0, 1.0, 15.0, 3.0)
+
+
+## Andando doente: a cólica dobra de dor (bem devagar); fraco da diarreia, um pouco devagar.
+func _doente_lento() -> float:
+	var f := 1.0
+	if _colica > 0.0:
+		f *= 0.4
+	f *= 1.0 - 0.25 * _sint("diarreia")
+	return f
+
+
+## O que a doença faz com a vista: (abaixa a cabeça, balança para os lados, inclina).
+func _mal_camera() -> Vector3:
+	if not _doente():
+		return Vector3.ZERO
+	var t := Time.get_ticks_msec() / 1000.0
+	var n := _sint("nausea")
+	var dobra := clampf(_colica, 0.0, 1.0) * 0.35
+	return Vector3(dobra + sin(t * 0.7) * 0.02 * n, sin(t * 0.43) * 0.05 * n + sin(t * 1.1) * 0.015 * n, sin(t * 0.61) * 0.07 * n + sin(t * 1.7) * 0.02 * n)
+
+
+## Toma o chá de goiabeira (USAR). Devolve a mensagem.
+func tomar_cha() -> String:
+	if item_qtd("cha_goiabeira") <= 0:
+		return ""
+	remove_item("cha_goiabeira", 1)
+	add_item("vasilha_barro", 1)
+	_update_inventory()
+	_sede = minf(100.0, _sede + 15.0)
+	_alivio = ALIVIO_S
+	Sons.play_at(self, "agua", _player.position + Vector3.UP * 1.5, -14.0, 1.5)
+	return "Você tomou o chá de folha de goiabeira."
 
 
 const VENENO_S := 30.0              # picado: sem o remédio, a vida some em uns 30 s (1,5 hora do jogo)
@@ -2448,6 +2576,7 @@ func _vitais_mostrar() -> void:
 		var alvo := 0.0
 		if _veneno >= 0.0:
 			alvo = clampf(0.25 + _veneno / VENENO_S * 1.1, 0.0, 1.0)
+		alvo = maxf(alvo, 0.55 * _sint("visao"))      # a vista turva da doença
 		var cur := float(_embaca.material.get_shader_parameter("forca"))
 		cur = move_toward(cur, alvo, get_process_delta_time() * (0.6 if alvo > cur else 0.15))
 		_embaca.material.set_shader_parameter("forca", cur)
@@ -2472,15 +2601,19 @@ func _draw_dano() -> void:
 	_dano_ui.draw_polygon(PackedVector2Array([Vector2(0, 0), Vector2(b, b), Vector2(b, s.y - b), Vector2(0, s.y)]), PackedColorArray([col, clear, clear, col]))
 	_dano_ui.draw_polygon(PackedVector2Array([Vector2(s.x, 0), Vector2(s.x, s.y), Vector2(s.x - b, s.y - b), Vector2(s.x - b, b)]), PackedColorArray([col, col, clear, clear]))
 	if _morto >= 0.0:
-		_dano_ui.draw_rect(Rect2(Vector2.ZERO, s), Color(0, 0, 0, 0.55))
+		_dano_ui.draw_rect(Rect2(Vector2.ZERO, s), Color(0, 0, 0, clampf(0.55 + (MORTO_S - _morto) * 0.25, 0.0, 0.92)))
 		var font := ThemeDB.fallback_font
-		var t := "Você desmaiou..."
+		var t := "Você morreu"
 		var w := font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 44).x
 		_dano_ui.draw_string(font, Vector2((s.x - w) * 0.5, s.y * 0.45), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 44, Color(1, 0.85, 0.8))
 
 
+const MORTO_S := 6.0
+
+## Morreu (veneno, sede, fome, doença): tudo o que tinha fica no chão, onde caiu.
 func _morrer() -> void:
-	_morto = 4.0
+	_morto = MORTO_S
+	_vida = 0.0
 	_cancel_chop()
 	for fn in [_mix_end, _reb_end, _desf_end, _mesa_end, _torno_end, _arco_end]:
 		fn.call()
@@ -2488,21 +2621,31 @@ func _morrer() -> void:
 		_arvores.drop_log(_carry, _player.position + Vector3(0.8, 0, 0), _face)
 		_soltar_carga()
 	Sons.play_at(self, "baque", _player.position, -4.0, 0.7)
-	if _veneno >= 0.0:
-		_show_toast("O veneno da cobra foi demais: você desmaiou.")
-	else:
-		_show_toast("A " + ("sede" if _sede <= 0.0 else "fome") + " foi demais: você desmaiou.")
+	_balde_carga = {}
+	_pa_full = false
+	if _mao != "":
+		equip("")
+	for id in _itens.keys().duplicate():
+		var q := int(_itens.get(id, 0))
+		if q > 0:
+			drop_item(str(id), q)
+	_itens.clear()
+	_lenhas.clear()
+	_rodelas.clear()
+	_update_inventory()
 	_veneno = -1.0
+	_doenca = {}
+	_alivio = 0.0
+	_colica = 0.0
 
 
-## Acorda no começo do mapa, fraco (mas com o que tinha na mochila).
+## Nasce de novo no começo do mapa, sem nada (o que tinha ficou onde morreu).
 func _acordar() -> void:
 	_morto = -1.0
-	_vida = 45.0
-	_fome = maxf(_fome, 45.0)
-	_sede = maxf(_sede, 45.0)
+	_vida = 100.0
+	_fome = 70.0
+	_sede = 70.0
 	_player.position = _ground_pos(Vector2((sim.spawn.x + 0.5) * CELL, (sim.spawn.y + 0.5) * CELL))
-	_show_toast("Você acordou fraco, longe de onde estava. Coma e beba água.")
 
 
 ## Come (USAR na mochila). Devolve a mensagem.
@@ -2512,6 +2655,8 @@ func comer(id: String) -> String:
 		return "Isso não dá para comer."
 	if _fome >= 99.5:
 		return "Você está de barriga cheia."
+	if _sint("nausea") > 0.5 and randf() < 0.7:
+		return "Você está enjoado demais para comer."
 	remove_item(id, 1)
 	_update_inventory()
 	_fome = minf(100.0, _fome + float(it.fome))
@@ -2780,6 +2925,13 @@ func _update_chop(delta: float) -> void:
 	if _act_check > 0.0:
 		return
 	_act_check = 0.25
+	if _morto >= 0.0:
+		# morto: nada de botões de ação
+		for b in [_pick_btn, _chop_btn, _ctx_btn, _plant_btn, _vine_btn, _dig_btn, _seed_btn, _work_btn]:
+			if b:
+				b.visible = false
+		_ctx_action = ""
+		return
 	var gi := _nearest_ground(1.8)
 	_pick_btn.visible = gi >= 0
 	if gi >= 0:
@@ -2860,6 +3012,12 @@ func _update_ctx_btn() -> void:
 	elif _crouch_job == "" and not _air and not _swim and _carry.is_empty() and not _frutos_perto().is_empty():
 		_ctx_action = "frutos"
 		_ctx_btn.text = "Pegar frutos caídos"
+	elif _goiab and _crouch_job == "" and not _air and not _swim and _carry.is_empty() and _goiab.tem_goiaba(_goiab.nearest(_player.position, 1.9), int(sim.elapsed_days())):
+		_ctx_action = "goiaba"
+		_ctx_btn.text = "Pegar goiabas"
+	elif _goiab and _crouch_job == "" and not _air and not _swim and _carry.is_empty() and _goiab.tem_folha(_goiab.nearest(_player.position, 1.9), int(sim.elapsed_days())):
+		_ctx_action = "folha_goiabeira"
+		_ctx_btn.text = "Pegar folhas de goiabeira"
 	elif _taias and _crouch_job == "" and not _air and not _swim and _carry.is_empty() and _taias.nearest(_player.position, 1.3) >= 0:
 		_ctx_action = "taia"
 		_ctx_btn.text = "Arrancar jararaca-taia"
@@ -3044,6 +3202,23 @@ func _ctx_press() -> void:
 				_lenhas.append(acha)              # a mesma acha (formato, grossura, casca)
 			_update_inventory()
 			_show_toast("+1 lenha na mochila" + (" (mochila cheia: caiu no chão)" if caiu > 0 else ""))
+			_act_check = 0.0
+			return
+		"goiaba", "folha_goiabeira":
+			var gi2: int = _goiab.nearest(_player.position, 1.9)
+			if gi2 < 0:
+				return
+			_face_to(_goiab.point_of(gi2))
+			var dia := int(sim.elapsed_days())
+			var gid := "goiaba" if _ctx_action == "goiaba" else "folha_goiabeira"
+			var ng: int = _goiab.pegar_goiabas(gi2, dia) if gid == "goiaba" else _goiab.pegar_folhas(gi2, dia)
+			if ng <= 0:
+				return
+			var caiu2 := add_item(gid, ng)
+			if caiu2 > 0:
+				_add_ground(gid, caiu2, _player.position.x, _player.position.z)
+			_update_inventory()
+			Sons.play_at(self, "folha_cai", _goiab.point_of(gi2) + Vector3.UP * 1.6, -8.0, 1.3)
 			_act_check = 0.0
 			return
 		"taia":
@@ -3588,6 +3763,7 @@ func _update_crouch(delta: float) -> void:
 		elif _crouch_job == "beber":
 			_sede = minf(100.0, _sede + 22.0)
 			_agua_suja += 1
+			_contaminar(0.18)
 			Sons.play_at(self, "agua", _crouch_target.agua, -6.0, 1.6)
 			_show_toast("Você bebeu água do rio com a mão (mata a sede, mas sem filtrar pode fazer mal).")
 		elif _crouch_job == "capim":
@@ -5833,7 +6009,7 @@ func _move_player(delta: float) -> void:
 		var running := amount > 0.85 and _carry.is_empty()
 		if _mao == "balde" and not _balde_carga.is_empty() and float(_balde_carga.vol) * float(DENS.get(_balde_carga.tipo, 1500.0)) >= 8.0:
 			running = false      # com balde pesado não dá para correr
-		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow
+		var sp := (RUN_SPEED if running else WALK_SPEED) * water_slow * _doente_lento()
 		if _swim:
 			sp = SWIM_SPEED          # nadando: braçada (sem correr)
 		if not _carry.is_empty():
@@ -5919,6 +6095,8 @@ func _move_player(delta: float) -> void:
 		p = _bacabas.push_out(p)          # nem o tronco das palmeiras
 	if _buritis:
 		p = _buritis.push_out(p)
+	if _goiab:
+		p = _goiab.push_out(p)            # nem o tronco da goiabeira
 	if _apoios:
 		p = _apoios.push_out(p)           # nem as forquilhas e a tora em cima delas
 	if _constr or _cupins or _maq:
@@ -6099,7 +6277,8 @@ func _fp_camera(delta: float, moved: float) -> void:
 		work = 0.85 if (not _chop_log.is_empty() or not _chop_branch.is_empty()) else 0.6
 	if work > -1.0:
 		_pitch = lerpf(_pitch, work, minf(1.0, delta * 3.0))
-	var cam_basis := Basis.from_euler(Vector3(-_pitch, _yaw, 0.0))
+	var mal := _mal_camera()
+	var cam_basis := Basis.from_euler(Vector3(-_pitch - mal.x, _yaw + mal.y, mal.z))
 	_cam.global_transform = Transform3D(cam_basis, _eye_smooth)
 	if _chop_pose:
 		var speed := moved / maxf(delta, 0.001)
@@ -8287,7 +8466,7 @@ func _bld_place() -> void:
 var _sync_hash := {}               # parte -> hash do que todos já têm
 var _sync_t := {}                  # parte -> tempo até conferir de novo
 const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
-	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0}
+	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0, "goiabeiras": 1.0}
 const SYNC_ONLY_HOST := ["bacabas", "cobras"]        # só o dono manda (os bichos comem os frutos); buritis: degraus e folhas cortadas vêm de todos
 
 
@@ -8347,6 +8526,8 @@ func _sync_uids(nome: String) -> void:
 			_uid_fix(_capins.items)
 		"taias":
 			_uid_fix(_taias.items)
+		"goiabeiras":
+			_uid_fix(_goiab.items)
 
 
 ## O estado da parte, em texto (o mesmo formato do arquivo salvo do mundo).
@@ -8399,6 +8580,7 @@ func _sync_mod(nome: String):
 		"fogueiras": return _fogos
 		"cobras": return _cobras
 		"taias": return _taias
+		"goiabeiras": return _goiab
 	return null
 
 
@@ -10803,6 +10985,8 @@ func _fogueira_opts(i: int) -> Array:
 	var op := []
 	if _fogos.acesa(i):
 		op.append(["por_lenha", "Pôr lenha"])
+		if item_qtd("folha_goiabeira") >= 3 and item_qtd("vasilha_barro") > 0 and (item_qtd("moringa_agua") > 0 or item_qtd("moringa_limpa") > 0):
+			op.append(["cha", "Fazer chá de goiabeira"])
 	elif _fogos.brasa(i):
 		op.append(["por_capim", "Pôr capim seco"])
 		op.append(["por_lenha", "Pôr lenha"])
@@ -10853,6 +11037,30 @@ func _fogueira_pick(i: int, acao: String) -> void:
 			var msg := fogo_start()
 			if msg != "":
 				_show_toast(msg)
+		"cha":
+			# a vasilha com 2 goles de água e as folhas, fervendo no fogo
+			var mid := "moringa_limpa" if item_qtd("moringa_limpa") > 0 else "moringa_agua"
+			if item_qtd("folha_goiabeira") < 3 or item_qtd("vasilha_barro") <= 0 or item_qtd(mid) <= 0:
+				return
+			for k in 2:
+				var l := _dur_fix(mid)
+				if l.is_empty():
+					break
+				l[0] = int(l[0]) - 1
+				if int(l[0]) <= 0:
+					l.pop_front()
+					_dur[mid] = l
+					remove_item(mid, 1)
+					add_item("moringa_barro", 1)
+				else:
+					_dur[mid] = l
+			_dur_fix(mid)
+			remove_item("folha_goiabeira", 3)
+			remove_item("vasilha_barro", 1)
+			add_item("cha_goiabeira", 1)
+			_update_inventory()
+			_face_to(c)
+			Sons.play_at(self, "agua", c, -10.0, 0.7)
 		"pegar_carvao":
 			var nc: int = _fogos.tirar_carvao(i)
 			if nc > 0:

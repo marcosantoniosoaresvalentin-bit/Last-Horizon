@@ -316,6 +316,60 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				ci.draw_circle(c + Vector2(-2 + (k % 2) * 4, -34 + k * 8) * u, 2.5 * u, Color(0.14, 0.15, 0.11))
 			for k in 6:
 				ci.draw_circle(c + Vector2(-18 + k * 7, 4 + (k % 2) * 8) * u, 1.6 * u, Color(0.6, 0.48, 0.32))
+		"goiaba":
+			# duas goiabas maduras (amarelas, um pouco de pera) e uma cortada (polpa rosa)
+			for q in [[-20, 6, 26.0], [18, 12, 24.0]]:
+				var gc := c + Vector2(q[0], q[1]) * u
+				var gp := PackedVector2Array()
+				for i in 24:
+					var a := TAU * i / 24.0
+					var r := float(q[2]) * (1.0 + 0.12 * sin(a))
+					gp.append(gc + Vector2(cos(a) * r * 0.92, sin(a) * r) * u)
+				ci.draw_colored_polygon(gp, Color(0.85, 0.8, 0.3))
+				ci.draw_polyline(gp + PackedVector2Array([gp[0]]), ink, 2.0 * u, true)
+				ci.draw_circle(gc + Vector2(-7, -9) * u, 5.0 * u, Color(0.95, 0.92, 0.6))
+				ci.draw_circle(gc + Vector2(0, float(q[2]) * 0.95) * u, 3.0 * u, Color(0.3, 0.25, 0.12))
+			var mc := c + Vector2(0, -26) * u
+			ci.draw_circle(mc, 17.0 * u, Color(0.8, 0.76, 0.3))
+			ci.draw_circle(mc, 14.0 * u, Color(0.95, 0.5, 0.5))
+			ci.draw_circle(mc, 7.0 * u, Color(0.9, 0.38, 0.4))
+			for k in 6:
+				ci.draw_circle(mc + Vector2(cos(k * 1.05), sin(k * 1.05)) * 9.0 * u, 1.6 * u, Color(0.98, 0.9, 0.75))
+		"folha_goiabeira":
+			# três folhas ovais com a nervura do meio e as laterais
+			for q in [[-0.5, -8.0], [0.0, 0.0], [0.55, 8.0]]:
+				var ang := float(q[0]) - PI * 0.5
+				var d := Vector2(cos(ang), sin(ang))
+				var sd := Vector2(-d.y, d.x)
+				var b := c + Vector2(float(q[1]), 38) * u
+				var fp := PackedVector2Array()
+				for i in 21:
+					var t := float(i) / 20.0
+					fp.append(b + (d * t * 76.0 + sd * sin(t * PI) * 17.0) * u)
+				for i in range(19, 0, -1):
+					var t := float(i) / 20.0
+					fp.append(b + (d * t * 76.0 - sd * sin(t * PI) * 17.0) * u)
+				ci.draw_colored_polygon(fp, Color(0.36, 0.55, 0.2))
+				ci.draw_polyline(fp + PackedVector2Array([fp[0]]), ink, 1.8 * u, true)
+				ci.draw_line(b, b + d * 76.0 * u, Color(0.7, 0.8, 0.45), 1.6 * u, true)
+				for k in range(1, 6):
+					var p0 := b + d * (k * 12.0) * u
+					ci.draw_line(p0, p0 + (d * 7.0 + sd * 12.0) * u, Color(0.55, 0.7, 0.35), 1.0 * u, true)
+					ci.draw_line(p0, p0 + (d * 7.0 - sd * 12.0) * u, Color(0.55, 0.7, 0.35), 1.0 * u, true)
+		"cha_goiabeira", "acao_cha":
+			# a vasilha de barro com o chá (cor de mate) e o vapor
+			var vp := PackedVector2Array(P.call([[-40, -6], [40, -6], [32, 22], [18, 34], [-18, 34], [-32, 22]]))
+			ci.draw_colored_polygon(vp, Color(0.66, 0.38, 0.22))
+			ci.draw_polyline(vp + PackedVector2Array([vp[0]]), ink, 2.0 * u, true)
+			ci.draw_rect(Rect2(c + Vector2(-38, -10) * u, Vector2(76, 7) * u), Color(0.55, 0.42, 0.18))
+			ci.draw_line(c + Vector2(-14, -2) * u, c + Vector2(-2, -6) * u, Color(0.36, 0.55, 0.2), 4.0 * u, true)
+			for k in 3:
+				var x0 := -18.0 + k * 18.0
+				var pts := PackedVector2Array()
+				for i in 9:
+					var t := float(i) / 8.0
+					pts.append(c + Vector2(x0 + sin(t * TAU) * 5.0, -16.0 - t * 30.0) * u)
+				ci.draw_polyline(pts, Color(0.9, 0.9, 0.9, 0.8), 2.5 * u, true)
 		"remedio_cobra":
 			# a cuia com a pasta verde-amarelada e a gota
 			var cu := PackedVector2Array()
