@@ -1,9 +1,9 @@
 {
-  "version": 198,
-  "file": "update_198.zip",
-  "size": 5498960,
-  "sha256": "380eec2dd4b97a33801d6873fec68c6c93c73d8818a4784ba4825e8d1e59e54b",
+  "version": 199,
+  "file": "update_199.zip",
+  "size": 5503980,
+  "sha256": "8bd592d32f950225a506ac1b00bf8825e1293124691709e5e62fb55a8164bbdc",
   "min_build": 1,
-  "notes": "Corda torcida de verdade, sem frestas",
+  "notes": "Laço para laçar e puxar a vaca",
   "date": "2026-11-22"
 }
