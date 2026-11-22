@@ -7244,7 +7244,7 @@ func _mp_start() -> void:
 		_rede.pedir_mundo_atual()
 		_sync_hash = {})            # manda tudo de novo (o que mudou enquanto estava fora)
 	_rede.voltou.connect(func(novo: int, antigo: int):
-		for dd in [_sync_snap, _sync_recv_h]:
+		for dd in [_sync_snap, _sync_recv_h, _sync_last_r]:
 			for nome in dd:
 				if (dd[nome] as Dictionary).has(antigo):
 					dd[nome][novo] = dd[nome][antigo]
@@ -8631,6 +8631,7 @@ func _sync_baseline() -> void:
 
 var _sync_sent := {}               # parte -> [[hash, versão]] as últimas que mandei
 var _sync_recv_h := {}             # parte -> {id -> hash da última versão recebida dele}
+var _sync_last_r := {}             # parte -> {id -> a última versão recebida dele}
 var _sync_snap := {}               # (dono) parte -> {id -> o mundo que foi para ele ao entrar}
 var _sync_base0 := {}              # parte -> versão do começo (quem entrou: o que baixou)
 const SYNC_GUARDA := 12
@@ -8647,13 +8648,18 @@ func _sync_send(nome: String, txt: String) -> void:
 	_rede.mandar_parte(nome, txt, (_sync_recv_h.get(nome, {}) as Dictionary).duplicate())
 
 
-## A versão minha que quem mandou já tinha junta (o ponto comum).
+## O ponto comum (o que os dois já tinham igual): a versão minha que quem mandou já
+## tinha junta; se ele nunca recebeu nada meu dessa parte, a última versão que eu
+## recebi dele (o que tenho aqui é ela mais o que mudei).
 func _sync_base_for(nome: String, quem: int, visto: Dictionary):
 	var h = visto.get(_my_id(), visto.get(str(_my_id())))
 	if h != null:
 		for e in _sync_sent.get(nome, []):
 			if int(e[0]) == int(h):
 				return e[1]
+	var prev = (_sync_last_r.get(nome, {}) as Dictionary).get(quem)
+	if prev != null and (h == null or _sync_sent.get(nome, []).is_empty()):
+		return prev
 	if (_sync_snap.get(nome, {}) as Dictionary).has(quem):
 		return _sync_snap[nome][quem]
 	return _sync_base0.get(nome)
@@ -8669,6 +8675,9 @@ func _sync_receive(nome: String, txt: String, quem := 1, visto := {}) -> void:
 		_sync_recv_h[nome] = {}
 	_sync_recv_h[nome][quem] = txt.hash()
 	var base = _sync_base_for(nome, quem, visto)
+	if not _sync_last_r.has(nome):
+		_sync_last_r[nome] = {}
+	_sync_last_r[nome][quem] = r
 	var l = JSON.parse_string(_sync_get(nome))
 	var m = r
 	if base != null and l != null:
