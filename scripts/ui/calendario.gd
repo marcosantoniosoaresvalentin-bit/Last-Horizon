@@ -44,6 +44,9 @@ var _paper := Paper.new()
 var _prev: Button
 var _next: Button
 var _menu: Control
+## Modo de teste: avançar o tempo (o jogo passa a função que recebe os dias).
+var avancar_cb := Callable()
+var _avanco: VBoxContainer = null
 
 
 func _ready() -> void:
@@ -67,6 +70,27 @@ func _ready() -> void:
 
 func abrir(sim: Node, path: String) -> void:
 	_path = path
+	if avancar_cb.is_valid() and _avanco == null:
+		# (só no modo de teste) os botões de avançar o tempo
+		_avanco = VBoxContainer.new()
+		_avanco.add_theme_constant_override("separation", 8)
+		_avanco.position = Vector2(20, 20)
+		add_child(_avanco)
+		var tt := Label.new()
+		tt.text = "MODO DE TESTE\nAvançar o tempo"
+		tt.add_theme_font_size_override("font_size", 20)
+		tt.add_theme_color_override("font_color", Color(1, 0.8, 0.45))
+		_avanco.add_child(tt)
+		for op in [["+1 dia", 1], ["+1 semana", 7], ["+1 mês", 30], ["+6 meses", 182], ["+1 ano", 365], ["+5 anos", 1826], ["+10 anos", 3652]]:
+			var b := Button.new()
+			b.text = str(op[0])
+			b.custom_minimum_size = Vector2(170, 52)
+			b.add_theme_font_size_override("font_size", 22)
+			var dias := int(op[1])
+			b.pressed.connect(func():
+				fechar()
+				avancar_cb.call(dias))
+			_avanco.add_child(b)
 	_start = Time.get_datetime_dict_from_unix_time(MundoSim.start_unix())
 	_last_year = maxi(int(sim.year()), int(_start.year))
 	_load()

@@ -1690,6 +1690,7 @@ func _process(delta: float) -> void:
 	_pesca_tick(delta)
 	_peixes_amb_tick(delta)
 	_dormir_tick(delta)
+	_avanco_tick(delta)
 	_laco_tick(delta)
 	_tri_tick(delta)
 	if _caca:
@@ -6793,6 +6794,8 @@ func _open_calendar() -> void:
 	_look_id = -1
 	_cal = Calendario.new()
 	_hud.add_child(_cal)
+	if teste:
+		_cal.avancar_cb = _avancar_tempo
 	_cal.abrir(sim, Mundos.dir(_world_id) + "/calendario.json" if _world_id != "" else "")
 	_cal.closed.connect(func(): _cal = null)
 
@@ -13153,6 +13156,63 @@ func _arco_fp_pose(puxa: float, com_flecha: bool) -> void:
 	var tre := sin(Time.get_ticks_msec() / 40.0) * 0.002 * smoothstep(0.85, 1.0, puxa)
 	r.position = Vector3(-0.14 + puxa * 0.06 + tre, -0.06 + puxa * 0.02, -0.62)
 	r.rotation = Vector3(0, 0.08 - puxa * 0.05, 0.3 - puxa * 0.1)
+
+
+# ================== AVANÇAR O TEMPO (MODO DE TESTE) ==================
+# Pelo Calendário, com o modo de teste ligado: pula dias, meses ou anos. O relógio vai
+# de 20 em 20 dias por quadro, e cada parte do mundo vive esses dias (as vacas nascem,
+# crescem e morrem, as árvores e palmeiras crescem e dão fruto, as carcaças apodrecem).
+
+const AVANCO_PASSO := 20             # dias por quadro
+var _avanco := {}                    # {falta, total}
+var _avanco_ui: ColorRect = null
+
+
+func _avancar_tempo(dias: int) -> void:
+	if not teste or not _avanco.is_empty() or not _sono.is_empty():
+		return
+	if _mp_client():
+		_show_toast("No multiplayer, só quem abriu o mundo pode avançar o tempo.")
+		return
+	_avanco = {"falta": dias, "total": dias}
+	if _avanco_ui == null:
+		_avanco_ui = ColorRect.new()
+		_avanco_ui.color = Color(0, 0, 0, 0.75)
+		_avanco_ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_avanco_ui.mouse_filter = Control.MOUSE_FILTER_STOP
+		_avanco_ui.draw.connect(_avanco_draw)
+		_hud.add_child(_avanco_ui)
+	_avanco_ui.visible = true
+
+
+func _avanco_tick(_delta: float) -> void:
+	if _avanco.is_empty():
+		return
+	var falta := int(_avanco.falta)
+	if falta <= 0:
+		_avanco = {}
+		_avanco_ui.visible = false
+		_act_check = 0.0
+		_save_world()
+		return
+	var n := mini(AVANCO_PASSO, falta)
+	sim.steps += n * MundoSim.STEPS_DAY
+	_avanco.falta = falta - n
+	_avanco_ui.queue_redraw()
+
+
+func _avanco_draw() -> void:
+	if _avanco.is_empty():
+		return
+	var font := ThemeDB.fallback_font
+	var sz := _avanco_ui.size
+	var tx := "Avançando o tempo...  %d de %s de %d" % [sim.day(), sim.month_name(), sim.year()]
+	var tw := font.get_string_size(tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
+	_avanco_ui.draw_string(font, Vector2((sz.x - tw) * 0.5, sz.y * 0.5 - 10), tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1, 0.95, 0.85))
+	var f := 1.0 - float(_avanco.falta) / maxf(float(_avanco.total), 1.0)
+	var r := Rect2(Vector2(sz.x * 0.5 - 220, sz.y * 0.5 + 20), Vector2(440, 20))
+	_avanco_ui.draw_rect(r.grow(3), Color(0.05, 0.04, 0.03))
+	_avanco_ui.draw_rect(Rect2(r.position, Vector2(r.size.x * f, r.size.y)), Color(0.45, 0.72, 0.25))
 
 
 # ================== A CAMA E O SONO ==================
