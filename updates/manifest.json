@@ -1,9 +1,9 @@
 {
-  "version": 223,
-  "file": "update_223.zip",
-  "size": 5873904,
-  "sha256": "8fe26ac550a1404b8b6228244bb9f014c1b2e877ea56fb3bf0f8cd5b8d59abbc",
+  "version": 224,
+  "file": "update_224.zip",
+  "size": 5885201,
+  "sha256": "f7e521e4357415e080236f1ccf60a5fa6d79fe7ed9f751b683ac3a30bc467bb5",
   "min_build": 1,
-  "notes": "Com a lenha na mão, chegando no fogão, no forno de carvão ou na fogueira, o olho aparece com 'Pôr lenha' e a acha da mão vai para o fogo (antes o olho sumia com a lenha na mão). Sem lenha, a mensagem diz para trazer a acha na mão.",
+  "notes": "Livro do Sobrevivente: ensina o jogo todo (abre na primeira vez; depois nas Configurações)",
   "date": "2026-11-23"
 }
