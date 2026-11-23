@@ -470,10 +470,46 @@ func _spawn(v: Dictionary) -> void:
 	node.rotation.y = a.yaw
 
 
+## Os cascos batendo no chão quando ela trota ou corre (perto de quem ouve): uma
+## pisada a cada passada, mais forte quanto mais depressa; as pequenas, mais agudas.
+static var _cascos_t := 0.0
+static var _cascos_n := 0
+
+func _cascos(a: Dictionary, pp: Vector3, delta: float) -> void:
+	var node: Node3D = a.node
+	var cur := node.position
+	var ant: Vector3 = a.get("pp", cur)
+	a.pp = cur
+	var d := Vector2(cur.x - ant.x, cur.z - ant.z).length()
+	if delta <= 0.0 or d > 3.0:
+		return
+	var vel := d / delta
+	if vel < 2.0:
+		a.passo = 0.0
+		return
+	if Vector2(cur.x - pp.x, cur.z - pp.z).length() > 45.0:
+		return
+	a.passo = float(a.get("passo", 0.0)) + d
+	var s := float(a.s)
+	if float(a.passo) < 0.95 * s:
+		return
+	a.passo = 0.0
+	# (no máximo umas 10 pisadas por segundo no rebanho todo: não pesa no celular)
+	var agora := Time.get_ticks_msec() / 1000.0
+	if agora - _cascos_t > 0.1:
+		_cascos_t = agora
+		_cascos_n = 0
+	if _cascos_n >= 1:
+		return
+	_cascos_n += 1
+	Sons.play_at(_jogo, "casco", cur + Vector3.UP * 0.1, -6.0 + minf(vel - 2.0, 4.0) * 1.5, 1.0 / sqrt(s), 50.0, 7.0)
+
+
 func _step(v: Dictionary, a: Dictionary, pp: Vector3, h: float, delta: float) -> void:
 	var node: Node3D = a.node
 	a.t = float(a.t) + delta
 	_voz(v, a, delta)
+	_cascos(a, pp, delta)
 	if int(v.id) == laco_id:
 		return                               # laçada: quem mexe nela é o laço
 	if _jogo._mp_client():

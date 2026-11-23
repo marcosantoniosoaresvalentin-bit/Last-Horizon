@@ -58,6 +58,13 @@ const FILES := {
 	"touro_berro": ["touro_berro1", "touro_berro2"],
 	"bezerro": ["bezerro1", "bezerro2", "bezerro3"],
 	"vaca_bufo": ["vaca_bufo1", "vaca_bufo2"],
+	# a pesca (bolhas e respingos) e o galope do gado (sintetizados: tools/sintetizar_peixe.py)
+	"peixe_pulo": ["peixe_pulo1", "peixe_pulo2", "peixe_pulo3", "peixe_pulo4"],
+	"boia_toc": ["boia_toc1", "boia_toc2", "boia_toc3"],
+	"fisgada": ["fisgada1", "fisgada2", "fisgada3"],
+	"peixe_briga": ["peixe_briga1", "peixe_briga2", "peixe_briga3"],
+	"peixe_debate": ["peixe_debate1", "peixe_debate2", "peixe_debate3"],
+	"casco": ["casco1", "casco2", "casco3", "casco4", "casco5", "casco6"],
 }
 ## Volume de cada som (dB): passos baixos e a água bem baixinha.
 const VOLUME := {"machado": 0.0, "corrida": -12.0, "estalo": 0.0, "queda": 2.0, "cavar": -2.0, "passo": -10.0, "agua": -18.0, "baque": -3.0, "serra": -9.0, "pedra_bate": -4.0, "pedra_lasca": -3.0, "pedra_racha": 0.0,

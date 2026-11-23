@@ -281,6 +281,65 @@ static func _novo(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			_pau(ci, arc, 4.5, Color(0.42, 0.29, 0.17), u, 2)
 			ci.draw_polyline(P.call([[-44, -6], [-2, -4], [6, 2], [40, -6]]), Color(0.5, 0.44, 0.22), 2.0 * u, true)
 			return true
+		"osso":
+			# o osso da canela: a haste lisa e as duas pontas largas (as juntas), branco-amarelado
+			var corpo: PackedVector2Array = P.call([[-30, 18], [26, -22], [30, -14], [-24, 26]])
+			_poly(ci, corpo, Color(0.9, 0.86, 0.74))
+			for q in [[-32, 26], [-38, 16], [30, -24], [36, -14]]:
+				var bc := c + Vector2(q[0], q[1]) * u
+				var cc := PackedVector2Array()
+				for k in 16:
+					var a := TAU * k / 16.0
+					cc.append(bc + Vector2(cos(a) * 11.0, sin(a) * 10.0) * u)
+				_poly(ci, cc, Color(0.92, 0.88, 0.77))
+				ci.draw_polyline(cc + PackedVector2Array([cc[0]]), ink, 1.8 * u, true)
+			_poly(ci, corpo, Color(0.9, 0.86, 0.74))
+			ci.draw_line(c + Vector2(-22, 16) * u, c + Vector2(20, -17) * u, Color(1, 1, 0.95, 0.8), 2.5 * u, true)
+			ci.draw_line(c + Vector2(-24, 26) * u, c + Vector2(30, -14) * u, ink, 1.8 * u, true)
+			ci.draw_line(c + Vector2(-30, 18) * u, c + Vector2(26, -22) * u, ink, 1.8 * u, true)
+			return true
+		"anzol_osso":
+			# o anzol em J de osso, com a farpa e o furinho/entalhe onde amarra a linha
+			var jc := c + Vector2(6, 14) * u
+			var pts := PackedVector2Array()
+			pts.append(c + Vector2(-10, -42) * u)
+			for k in 17:
+				var a := PI - PI * k / 16.0          # a curva do J: da esquerda, por baixo, à direita
+				pts.append(jc + Vector2(cos(a) * 16.0, -sin(a) * -16.0) * u)
+			pts.append(c + Vector2(22, -6) * u)
+			ci.draw_polyline(pts, ink, 11.0 * u, true)
+			ci.draw_polyline(pts, Color(0.9, 0.85, 0.72), 8.0 * u, true)
+			var hl := PackedVector2Array()
+			for q in pts:
+				hl.append(q + Vector2(-1.5, -1.5) * u)
+			ci.draw_polyline(hl, Color(1, 1, 0.95, 0.7), 2.0 * u, true)
+			var farpa: PackedVector2Array = P.call([[20, -4], [14, 4], [24, 2]])
+			_poly(ci, farpa, Color(0.9, 0.85, 0.72))
+			ci.draw_polyline(farpa, ink, 1.5 * u, true)
+			ci.draw_line(c + Vector2(-14, -36) * u, c + Vector2(-6, -36) * u, ink, 2.0 * u, true)
+			ci.draw_polyline(P.call([[-10, -42], [-8, -50], [2, -56]]), Color(0.75, 0.66, 0.46), 1.6 * u, true)
+			return true
+		"anzol_forquilha":
+			# o galhinho em V: o lado comprido para a linha e o curtinho apontado (a farpa)
+			_pau(ci, P.call([[-2, 40], [-8, 0], [-14, -40]]), 6.0, Color(0.5, 0.36, 0.2), u, 1)
+			_pau(ci, P.call([[-2, 40], [10, 22], [18, 8]]), 5.0, Color(0.5, 0.36, 0.2), u)
+			var ponta: PackedVector2Array = P.call([[15, 10], [24, -2], [20, 12]])
+			_poly(ci, ponta, Color(0.85, 0.72, 0.5))
+			ci.draw_polyline(ponta, ink, 1.4 * u, true)
+			for k in 4:
+				ci.draw_line(c + Vector2(-16, -34 + k * 3) * u, c + Vector2(-10, -36 + k * 3) * u, Color(0.75, 0.66, 0.46), 1.6 * u, true)
+			ci.draw_polyline(P.call([[-14, -40], [-10, -48], [0, -54]]), Color(0.75, 0.66, 0.46), 1.6 * u, true)
+			return true
+		"isca_carne":
+			# os pedacinhos de carne crua cortados para a isca
+			for q in [[-18, 6, 0.3], [6, 12, -0.5], [20, -8, 0.8], [-4, -12, 1.4], [-24, -14, -0.2]]:
+				var o := c + Vector2(q[0], q[1]) * u
+				var rr := float(q[2])
+				var cb := PackedVector2Array([o + Vector2(-9, -6).rotated(rr) * u, o + Vector2(9, -7).rotated(rr) * u, o + Vector2(10, 6).rotated(rr) * u, o + Vector2(-8, 8).rotated(rr) * u])
+				_poly(ci, cb, Color(0.68, 0.12, 0.1))
+				ci.draw_line(o + Vector2(-9, -6).rotated(rr) * u, o + Vector2(9, -7).rotated(rr) * u, Color(0.95, 0.88, 0.75), 2.4 * u, true)
+				ci.draw_polyline(cb + PackedVector2Array([cb[0]]), ink, 1.4 * u, true)
+			return true
 		"couro_vaca", "couro_boi":
 			# o couro esticado: a forma do bicho aberto, o pelo por cima (malhado na vaca,
 			# castanho no boi), o lado de dentro aparecendo na borda

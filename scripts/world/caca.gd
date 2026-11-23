@@ -4275,6 +4275,55 @@ func comer(key: String, kg0: float) -> void:
 				e["comido"] = minf(1.0, float(e.get("comido", 0.0)) + kg / maxf(_parte_kg(c, ps[2]), 0.2))
 
 
+## Quantos ossos bons para anzol dá a ossada de cada bicho.
+const OSSOS_MAX := {"vaca": 6, "tamandua": 2}
+
+## Um osso para pegar perto: a pata cortada no chão (com a carne ainda: precisa da faca) ou
+## a ossada de um bicho que já virou esqueleto. {uid, tipo ("pata"/"ossada"), parte, faca}
+## ou {}.
+func osso_perto(pos: Vector3, r: float) -> Dictionary:
+	for uid in _nodes:
+		var nd: Dictionary = _nodes[uid]
+		var c: Dictionary = nd.c
+		var n: Node3D = nd.node
+		if not is_instance_valid(n):
+			continue
+		for e in c.get("partes", []):
+			if not str(e.tipo).begins_with("pe_") or not (e as Dictionary).has("xf"):
+				continue
+			var pn := _parte_node(str(uid), str(e.tipo))
+			if pn == null:
+				continue
+			var cp := _centro_bicho(pn)
+			if Vector2(cp.x - pos.x, cp.z - pos.z).length() < r:
+				return {"uid": str(uid), "tipo": "pata", "parte": str(e.tipo), "faca": not pn.has_meta("ossos")}
+		if n.has_meta("ossos") and _inteira(c) and int(c.get("ossos_tirados", 0)) < int(OSSOS_MAX.get(str(c.esp), 0)):
+			var cc := _centro_bicho(n)
+			if Vector2(cc.x - pos.x, cc.z - pos.z).length() < r + 1.0:
+				return {"uid": str(uid), "tipo": "ossada", "parte": "", "faca": false}
+	return {}
+
+
+## Tira o osso (a pata some do chão; da ossada, conta um a menos). Quantos saíram.
+func osso_tirar(o: Dictionary) -> int:
+	var nd: Dictionary = _nodes.get(str(o.uid), {})
+	if nd.is_empty():
+		return 0
+	var c: Dictionary = nd.c
+	if str(o.tipo) == "pata":
+		for e in (c.get("partes", []) as Array).duplicate():
+			if str(e.tipo) == str(o.parte):
+				(c.partes as Array).erase(e)
+				var pn := _parte_node(str(o.uid), str(o.parte))
+				if pn:
+					pn.queue_free()
+				_partes_mapa_f = -1
+				return 1
+		return 0
+	c["ossos_tirados"] = int(c.get("ossos_tirados", 0)) + 1
+	return 1
+
+
 ## Um bicho que morreu sozinho (fome, velhice): fica a carcaça deitada onde caiu.
 func morte_natural(esp: String, id: int, params: Dictionary, pos: Vector3, yaw: float) -> void:
 	if _jogo == null or _jogo._mp_client():

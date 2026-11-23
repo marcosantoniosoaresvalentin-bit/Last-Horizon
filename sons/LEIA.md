@@ -18,3 +18,4 @@ Todos os sons são gravações em domínio público (CC0), baixadas do OpenGameA
 Os arquivos `.somog` são OGG Vorbis (só a extensão é outra, para a Godot não tentar
 importar; o jogo carrega direto com AudioStreamOggVorbis.load_from_buffer).
 Foram cortados, com o volume ajustado e um fade curto no fim.
+| peixe_pulo, boia_toc, fisgada, peixe_briga, peixe_debate, casco | Sintetizados para este jogo (tools/sintetizar_peixe.py): bolhas com o tom subindo (ressonância de Minnaert) e respingos; os cascos do gado no trote | do próprio jogo |

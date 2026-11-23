@@ -1688,6 +1688,7 @@ func _process(delta: float) -> void:
 	_car_tick(delta)
 	_flecha_tick(delta)
 	_pesca_tick(delta)
+	_peixes_amb_tick(delta)
 	_laco_tick(delta)
 	_tri_tick(delta)
 	if _caca:
@@ -2469,7 +2470,7 @@ static func _eh_erro(t: String) -> bool:
 	for p in ERRO_INICIO:
 		if t.begins_with(p):
 			return true
-	return t.contains(" precisa de ") or t.contains(" não cabe")
+	return t.contains(" precisa de ") or t.contains(" não cabe") or t.ends_with("quebrou!")
 
 
 func _show_toast(text: String) -> void:
@@ -3377,6 +3378,10 @@ func _update_ctx_btn_2() -> void:
 	elif _babacu and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and (item_qtd("machado") > 0 or teste) and _pindova_cortavel():
 		_ctx_action = "babacu_cortar"
 		_ctx_btn.text = "Cortar folha de babaçu"
+	elif _caca and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _caca.osso_perto(_player.position, 1.3).is_empty():
+		var oi: Dictionary = _caca.osso_perto(_player.position, 1.3)
+		_ctx_action = "osso"
+		_ctx_btn.text = "Tirar o osso da pata" if str(oi.tipo) == "pata" else "Pegar osso"
 	elif _coq and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _coq.coco_near(_player.position, 1.3) >= 0:
 		_ctx_action = "coco"
 		_ctx_btn.text = "Pegar coco"
@@ -3450,6 +3455,25 @@ func _ctx_press() -> void:
 			if _babacu.golpe_folha(pb, _player.position):
 				Sons.play_at(self, "talo_corte", at, 0.0, 1.0)
 				Sons.play_at(self, "folha_cai", at, 0.0, 0.9)
+			_act_check = 0.0
+			return
+		"osso":
+			var oi: Dictionary = _caca.osso_perto(_player.position, 1.3)
+			if oi.is_empty():
+				return
+			if bool(oi.faca) and item_qtd("faca") <= 0 and not teste:
+				_show_toast("Precisa da faca na mochila para limpar a carne da pata e tirar o osso.")
+				return
+			if _bag_total() + Itens.kg("osso") > BAG_MAX:
+				_show_toast("A mochila está cheia: não cabe o osso.")
+				return
+			var no: int = _caca.osso_tirar(oi)
+			if no > 0:
+				add_item("osso", no)
+				if bool(oi.faca):
+					wear("faca", 1)
+				_update_inventory()
+				Sons.play_at(self, "osso_quebra" if bool(oi.faca) else "baque", _player.position + Vector3.UP * 0.4, -10.0, 1.3)
 			_act_check = 0.0
 			return
 		"coco":
@@ -13039,6 +13063,17 @@ const PEIXES := {
 	"peixe_traira": {"peso": 0.16, "forca": 0.5, "L": 0.4, "H": 0.21, "W": 0.14, "costa": Color(0.26, 0.21, 0.13), "barriga": Color(0.62, 0.54, 0.4)},
 	"peixe_tucunare": {"peso": 0.12, "forca": 0.66, "L": 0.46, "H": 0.28, "W": 0.12, "costa": Color(0.33, 0.4, 0.16), "barriga": Color(0.9, 0.78, 0.36)},
 }
+## Os anzóis: o de forquilha (o primeiro, de vareta) gasta logo e solta mais o peixe; o de
+## osso (lascado com o sílex) é forte e dura.
+const ANZOIS := {"anzol_osso": {"escapa": 1.0}, "anzol_forquilha": {"escapa": 1.45}}
+## As iscas (na ordem em que são usadas) e os peixes que cada uma chama mais.
+const ISCAS := {
+	"isca_carne": {"peixe_piranha": 3.0, "peixe_traira": 2.5, "peixe_tucunare": 2.2},
+	"massa_coco": {"peixe_pacu": 2.0, "peixe_curimata": 2.0},
+	"goiaba": {"peixe_pacu": 3.0},
+	"fruto_buriti": {"peixe_pacu": 3.0, "peixe_curimata": 1.3},
+	"fruto_bacaba": {"peixe_pacu": 2.5, "peixe_curimata": 1.5},
+}
 var _pesca := {}                   # {fase, ...}: "" parado, puxando, voa, agua, belisca, fisgou, briga, tira, volta
 var _pesca_btns: Array = []        # [Arremessar, Força, Recolher]
 var _vara_fp: Node3D = null        # a vara na frente da câmera
@@ -13061,8 +13096,29 @@ func _pesca_fase() -> String:
 	return str(_pesca.get("fase", ""))
 
 
+## O anzol e a isca que vão na linha (o melhor que tem na mochila), ou "".
+func _pesca_anzol() -> String:
+	for id in ["anzol_osso", "anzol_forquilha"]:
+		if item_qtd(id) > 0:
+			return id
+	return ""
+
+
+func _pesca_isca() -> String:
+	for id in ISCAS:
+		if item_qtd(str(id)) > 0:
+			return str(id)
+	return ""
+
+
 func _pesca_carrega() -> void:
 	if _mao != "vara_pesca" or _pesca_fase() != "":
+		return
+	if _pesca_anzol() == "" and not teste:
+		_show_toast("Precisa de um anzol na mochila: no craft, o anzol de forquilha (uma vareta, com a faca) ou o de osso (um osso, com uma lasca de sílex).")
+		return
+	if _pesca_isca() == "" and not teste:
+		_show_toast("Precisa de isca na mochila: isca de carne (no craft, da carne crua ou suja, com a faca), goiaba, fruto de buriti ou de bacaba, ou massa de coco.")
 		return
 	_pesca = {"fase": "puxando", "t": 0.0}
 
@@ -13081,17 +13137,20 @@ func _pesca_arremessa() -> void:
 	var alvo := _player.position + dir * dist
 	alvo.y = maxf(height_at(alvo.x, alvo.z), _water_surface(alvo.x, alvo.z))
 	var de := _vara_ponta()
-	_pesca = {"fase": "voa", "t": 0.0, "T": 0.45 + dist * 0.045, "de": de, "para": alvo, "dist": dist, "lanca": 0.0}
+	_pesca = {"fase": "voa", "t": 0.0, "T": 0.45 + dist * 0.045, "de": de, "para": alvo, "dist": dist, "lanca": 0.0,
+		"anzol": _pesca_anzol(), "isca": _pesca_isca()}
 	Sons.play_at(self, "fibra_bate", _player.position + Vector3.UP * 1.5, -8.0, 1.9)
 
 
 func _pesca_forca() -> void:
 	match _pesca_fase():
 		"belisca":
-			_show_toast("Puxou cedo demais: o peixe só beliscou a isca e fugiu. Espere a boia afundar de vez.")
-			_pesca_agua_de_novo()
+			_show_toast("Puxou cedo demais: o peixe comeu a isca e fugiu. Espere a boia afundar de vez.")
+			_pesca_come_isca()
+			_pesca_volta()
 		"fisgou":
 			var id := str(_pesca.peixe)
+			_pesca_come_isca()
 			var dir: Vector3 = _pesca.boia - _player.position
 			dir.y = 0.0
 			_pesca.merge({"fase": "briga", "forca": 0.55, "escapa": 0.0, "dist": dir.length(), "ang": atan2(dir.x, dir.z), "corre": 0.0, "corre_t": randf_range(0.8, 2.0), "t": 0.0}, true)
@@ -13099,16 +13158,26 @@ func _pesca_forca() -> void:
 			_pesca_peixe = _peixe_no(id)
 			add_child(_pesca_peixe)
 			_pesca_respingo(_pesca.boia, 0.8)
-			Sons.play_at(self, "agua", _pesca.boia, -4.0, 1.3)
+			Sons.play_at(self, "peixe_briga", _pesca.boia, -4.0, 1.0 / sqrt(maxf(Itens.kg(id), 0.3)) * 1.1, 70.0, 8.0)
 		"briga":
 			_pesca.forca = minf(1.0, float(_pesca.forca) + 0.12)
 		"agua":
 			_pesca.tranco = 0.25                 # só dá um tranquinho na linha
 
 
+## O peixe levou a isca.
+func _pesca_come_isca() -> void:
+	var isca := str(_pesca.get("isca", ""))
+	if isca != "" and not teste and item_qtd(isca) > 0:
+		remove_item(isca, 1)
+		_update_inventory()
+	_pesca.isca = ""
+
+
 func _pesca_recolher() -> void:
 	if _pesca_fase() == "belisca":
-		_show_toast("Puxou cedo demais: o peixe só beliscou a isca e fugiu. Espere a boia afundar de vez.")
+		_show_toast("Puxou cedo demais: o peixe comeu a isca e fugiu. Espere a boia afundar de vez.")
+		_pesca_come_isca()
 	if _pesca_fase() in ["agua", "belisca", "fisgou"]:
 		_pesca_volta()
 
@@ -13139,12 +13208,13 @@ func _pesca_agua_de_novo() -> void:
 
 
 func _pesca_sorteia() -> String:
+	var pref: Dictionary = ISCAS.get(str(_pesca.get("isca", "")), {})
 	var tot := 0.0
 	for id in PEIXES:
-		tot += float(PEIXES[id].peso)
+		tot += float(PEIXES[id].peso) * float(pref.get(id, 1.0))
 	var r := randf() * tot
 	for id in PEIXES:
-		r -= float(PEIXES[id].peso)
+		r -= float(PEIXES[id].peso) * float(pref.get(id, 1.0))
 		if r <= 0.0:
 			return str(id)
 	return "peixe_piranha"
@@ -13233,18 +13303,20 @@ func _pesca_tick(delta: float) -> void:
 					y -= 0.025 * sin(ph / 0.15 * PI)
 				if ph < delta * 1.5:
 					_pesca_onda(Vector3(b0.x, lv, b0.z), 0.35)
+					Sons.play_at(self, "boia_toc", Vector3(b0.x, lv, b0.z), -10.0, randf_range(0.9, 1.15), 40.0, 5.0)
 				if float(_pesca.t) >= 0.6 * int(_pesca.n):
 					_pesca.fase = "fisgou"
 					_pesca.t = 0.0
 					_pesca_onda(Vector3(b0.x, lv, b0.z), 0.8)
-					Sons.play_at(self, "agua", Vector3(b0.x, lv, b0.z), -6.0, 1.6)
+					Sons.play_at(self, "fisgada", Vector3(b0.x, lv, b0.z), -3.0, randf_range(0.9, 1.1), 50.0, 6.0)
 			else:
 				y -= minf(float(_pesca.t) * 0.6, 0.12)        # afundou
 				curva = 0.25
 				esticada = 1.0
 				if float(_pesca.t) > 1.6:
-					_show_toast("O peixe soltou a isca: quando a boia afundar, toque em Força na hora.")
-					_pesca_agua_de_novo()
+					_show_toast("O peixe levou a isca e soltou: quando a boia afundar, toque em Força na hora.")
+					_pesca_come_isca()
+					_pesca_volta()
 			boia = Vector3(b0.x, y, b0.z)
 		"briga":
 			_pesca_briga(delta)
@@ -13294,6 +13366,33 @@ func _pesca_tick(delta: float) -> void:
 		_sub_ui.queue_redraw()
 
 
+## Peixe pulando lá na água (rio ou lagoa funda perto): o "tchibum" e a roda abrindo na
+## água; mais vezes de manhãzinha e no fim da tarde.
+var _amb_peixe_t := 6.0
+
+func _peixes_amb_tick(delta: float) -> void:
+	_amb_peixe_t -= delta
+	if _amb_peixe_t > 0.0:
+		return
+	var h := fmod(_agora_h(), 24.0)
+	var bom := (h >= 5.0 and h < 8.5) or (h >= 16.0 and h < 19.0)
+	_amb_peixe_t = randf_range(5.0, 14.0) * (0.55 if bom else 1.0)
+	if _water_level.size() != MundoSim.W * MundoSim.H:
+		return
+	for k in 8:
+		var a := randf() * TAU
+		var d := randf_range(6.0, 30.0)
+		var q := _player.position + Vector3(cos(a), 0, sin(a)) * d
+		var lv := _water_surface(q.x, q.z)
+		if lv < -1e8 or lv - height_at(q.x, q.z) < 0.5 or _is_sea(q.x, q.z):
+			continue
+		var p := Vector3(q.x, lv, q.z)
+		Sons.play_at(self, "peixe_pulo", p, -8.0, randf_range(0.85, 1.2), 70.0, 9.0)
+		_pesca_onda(p, randf_range(0.6, 1.1))
+		_pesca_onda(p, randf_range(0.3, 0.5))
+		return
+
+
 ## O anzol chegou: na água funda (rio ou lagoa) fica boiando; senão volta.
 func _pesca_caiu() -> void:
 	var p: Vector3 = _pesca.para
@@ -13333,7 +13432,7 @@ func _pesca_briga(delta: float) -> void:
 			_pesca.corre = 1.0                       # uma corrida: puxa forte uns instantes
 			_pesca.corre_t = randf_range(0.6, 1.1)
 			_pesca_respingo(_pesca.boia, 0.6)
-			Sons.play_at(self, "agua", _pesca.boia, -8.0, 1.4)
+			Sons.play_at(self, "peixe_briga", _pesca.boia, -5.0, randf_range(0.9, 1.15), 70.0, 8.0)
 		else:
 			_pesca.corre = 0.0
 			_pesca.corre_t = randf_range(1.2, 2.8)
@@ -13345,7 +13444,7 @@ func _pesca_briga(delta: float) -> void:
 		_pesca.escapa = maxf(0.0, float(_pesca.escapa) - delta * 0.35)
 	else:
 		_pesca.dist = float(_pesca.dist) + (precisa - f) * 2.2 * delta
-		_pesca.escapa = float(_pesca.escapa) + (precisa - f) * delta * 1.3
+		_pesca.escapa = float(_pesca.escapa) + (precisa - f) * delta * 1.3 * float(ANZOIS.get(str(_pesca.get("anzol", "")), {"escapa": 1.0}).escapa)
 	# o peixe nada de um lado para o outro (sem sair da água funda)
 	var ang := float(_pesca.ang)
 	var funda := func(a: float) -> bool:
@@ -13366,12 +13465,17 @@ func _pesca_briga(delta: float) -> void:
 		_pesca_peixe.rotation = Vector3(0, ang - PI * 0.5 + sin(float(_pesca.t) * 9.0) * 0.25, 0)
 	if float(_pesca.escapa) >= 1.0 or float(_pesca.dist) > float(LINHA_M) + 0.5:
 		_show_toast("O peixe escapou: faltou força. Na briga, toque em Força sem parar enquanto ele puxa.")
+		var anz := str(_pesca.get("anzol", ""))
 		_pesca_volta()
+		if anz != "" and item_qtd(anz) > 0:
+			wear(anz, 1)
+			_update_inventory()
 		return
 	# chegou na beira (acabou a água funda ou está pertinho): a vara sobe e ele sai
 	if float(_pesca.dist) < 1.6 or not funda.call(ang):
 		_pesca_respingo(Vector3(pos.x, lv if lv > -1e8 else pos.y, pos.z), 1.1)
-		Sons.play_at(self, "agua", pos, -4.0, 1.1)
+		Sons.play_at(self, "peixe_briga", pos, -2.0, 1.0, 70.0, 8.0)
+		Sons.play_at(self, "peixe_debate", pos, -6.0, randf_range(0.95, 1.1), 40.0, 5.0)
 		_pesca.fase = "tira"
 		_pesca.t = 0.0
 		_pesca.de = pos
@@ -13379,7 +13483,11 @@ func _pesca_briga(delta: float) -> void:
 
 func _pesca_pegou() -> void:
 	var id := str(_pesca.peixe)
+	var anz := str(_pesca.get("anzol", ""))
 	_pesca = {}
+	if anz != "" and item_qtd(anz) > 0:
+		wear(anz, 1)
+	Sons.play_at(self, "peixe_debate", _player.position + Vector3.UP * 1.2, -4.0, randf_range(0.95, 1.1), 30.0, 4.0)
 	_pesca_sem_peixe()
 	var caiu := add_item(id, 1)
 	if caiu > 0:

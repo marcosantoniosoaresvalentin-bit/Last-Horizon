@@ -182,7 +182,7 @@ const ACAO_ITEM := [
 	["beber água", "moringa_limpa"], ["pegar água", "balde"], ["encher o balde", "balde"], ["despejar", "balde"],
 	["pegar a carne", "carne_crua"], ["soltar a carne", "carne_crua"], ["enrolar o couro", "couro_vaca"], ["pegar o couro", "couro_vaca"],
 	["pôr no cepo", "lenha"], ["rebocar", "argila"], ["furar", "pino"], ["pegar peça", "tabua"], ["pegar tábua", "tabua"],
-	["arremessar", "vara_pesca"], ["recolher", "linha_pesca"], ["pegar a corda", "corda_10"], ["puxar a corda", "corda_10"],
+	["tirar o osso", "osso"], ["pegar osso", "osso"], ["arremessar", "vara_pesca"], ["recolher", "linha_pesca"], ["pegar a corda", "corda_10"], ["puxar a corda", "corda_10"],
 ]
 
 
