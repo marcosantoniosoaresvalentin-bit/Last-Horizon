@@ -1817,9 +1817,27 @@ func _draw_tripe(mi: int, root: Node3D, nd: Dictionary) -> void:
 			lf.mesh = _forro_mesh
 			lf.material_override = fm
 			var c := Vector3(cos(a), 0, sin(a)) * 0.95
-			var wc := xform(mi) * c
-			c.y = float(_jogo.surface_at(wc.x, wc.z)) - float(p.y)
-			lf.transform = Transform3D(Basis(Vector3.UP, -a).scaled(Vector3(0.62, 1.0, 1.15)), c + Vector3.UP * (0.03 + i * 0.004))
+			# a folha deita no chão ponto a ponto (no morro ela dobra junto, não fica no ar)
+			var tl := Transform3D(Basis(Vector3.UP, -a).scaled(Vector3(0.62, 1.0, 1.15)), c)
+			var xw := xform(mi)
+			var arr: Array = _forro_mesh.surface_get_arrays(0)
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var nv := PackedVector3Array()
+			nv.resize(vs.size())
+			for k2 in vs.size():
+				var lp := tl * vs[k2]
+				var wp := xw * Vector3(lp.x, 0.0, lp.z)
+				lp.y = float(_jogo.surface_at(wp.x, wp.z)) - float(p.y) + vs[k2].y * 0.25 + 0.03 + i * 0.004
+				nv[k2] = lp
+			arr[Mesh.ARRAY_VERTEX] = nv
+			arr[Mesh.ARRAY_NORMAL] = null
+			var stg := SurfaceTool.new()
+			var am := ArrayMesh.new()
+			am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+			stg.create_from(am, 0)
+			stg.generate_normals()
+			lf.mesh = stg.commit()
+			lf.transform = Transform3D.IDENTITY
 			lf.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			root.add_child(lf)
 	var k := int(p.get("amarras", 0))
