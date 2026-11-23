@@ -3425,6 +3425,7 @@ const FOGAO_H := 0.38             # a altura da chapa em cima do chão do fogão
 const FOGAO_W := 0.6              # meia largura (x)
 const FOGAO_D := 0.33             # meia fundura (z); a frente é +z
 const FOGAO_CAP := 5              # lenhas que cabem na boca
+var _fg_fino := {}                # índice -> lenha queimando (a conta fina, só aqui)
 const FOGAO_LARG := 0.22          # a acha mais grossa que passa pela boca (m): a acha comum cabe; o toquinho inteiro não
 const FOGAO_BOCAS := [Vector3(0.24, 0.0, 0.02), Vector3(-0.22, 0.0, 0.02)]
 const FOGAO_R_BOCA := 0.11
@@ -3487,7 +3488,8 @@ func fogao_lenha(mi: int, acha: Dictionary) -> void:
 	var g := fogao_st(mi)
 	(g.lenha as Array).append(acha)
 	if bool(g.aceso):
-		g.f = float(g.f) + 1.0
+		g.f = float(_fg_fino.get(mi, float(g.f))) + 1.0
+		_fg_fino[mi] = float(g.f)
 	_rebuild()
 
 
@@ -3514,8 +3516,14 @@ func fogao_panela_mundo(mi: int, k: int) -> Vector3:
 func fogao_tick(mi: int, dh: float) -> void:
 	var g := fogao_st(mi)
 	if not bool(g.aceso):
+		_fg_fino.erase(mi)
 		return
-	var f := float(g.f) - dh / 0.22                 # uma lenha fina queima em uns 13 min do jogo
+	# (a conta fina aqui; o salvo/enviado muda de pouco em pouco)
+	var f0 := float(_fg_fino.get(mi, float(g.f)))
+	if absf(f0 - float(g.f)) > 0.1:
+		f0 = float(g.f)                               # (mudou por fora)
+	var f := f0 - dh / 0.22                           # uma lenha fina queima em uns 13 min do jogo
+	_fg_fino[mi] = f
 	var n := (g.lenha as Array).size()
 	while n > 0 and f < float(n) - 1.0:
 		(g.lenha as Array).pop_front()
@@ -3524,9 +3532,11 @@ func fogao_tick(mi: int, dh: float) -> void:
 		g.f = 0.0
 		g.aceso = false
 		g.lenha = []
+		_fg_fino.erase(mi)
 		_rebuild()
 		return
-	g.f = f
+	if absf(f - float(g.f)) >= 0.05:
+		g.f = snappedf(f, 0.01)
 
 
 func fogao_calor(mi: int, k: int) -> float:

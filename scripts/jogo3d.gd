@@ -1577,7 +1577,10 @@ func _process(delta: float) -> void:
 	_update_sky(delta)
 	if not _ready_world:
 		return
-	_arruma_botoes()
+	_arruma_t -= delta
+	if _arruma_t <= 0.0:
+		_arruma_t = 0.1
+		_arruma_botoes()
 	_finish_water()
 	_water_timer -= delta
 	if _water_timer <= 0.0:
@@ -17684,6 +17687,7 @@ func _leaf_fall(bp: Dictionary, li: int, land_at := Vector3.INF, yaw_at := INF, 
 # vai para o lugar livre mais perto (na mesma grade); quando o lugar dele vaga, volta.
 
 const BTN_COLS := [-150, -290, -430, -570, -710]
+var _arruma_t := 0.0
 const BTN_ROWS := [-146, -286, -426, -566]
 
 
@@ -18000,6 +18004,7 @@ void fragment() {
 const COZ_H := {"cozinhar": 0.5, "fritar": 0.3}     # horas do jogo na boca quente, fogo médio
 const FRITA_MEXER_H := 0.08                         # sem mexer mais que isso, a fritura gruda e queima
 var _fogao_nos := {}                                # "mi:k" -> Node3D (a vasilha na boca)
+var _fogao_fino := {}                               # "mi:k" -> [p, q] (a conta fina, só aqui)
 
 
 ## Fogão em construção aqui perto esperando essa etapa (ou -1).
@@ -18198,6 +18203,7 @@ func _fogao_tick(delta: float) -> void:
 			var key := "%d:%d" % [mi, k]
 			var b: Dictionary = bocas[k]
 			if b.is_empty():
+				_fogao_fino.erase(key)
 				if _fogao_nos.has(key):
 					if is_instance_valid(_fogao_nos[key]):
 						(_fogao_nos[key] as Node).queue_free()
@@ -18205,13 +18211,21 @@ func _fogao_tick(delta: float) -> void:
 				continue
 			var cal: float = _maq.fogao_calor(mi, k)
 			if not _mp_client() and cal > 0.0:
+				# (a conta fina fica aqui; o que vai para os outros celulares, de pouco em pouco)
+				var fino: Array = _fogao_fino.get(key, [float(b.p), float(b.get("q", 0.0))])
+				if absf(float(fino[0]) - float(b.p)) > 0.05 or absf(float(fino[1]) - float(b.get("q", 0.0))) > 0.05:
+					fino = [float(b.p), float(b.get("q", 0.0))]      # (mudou por fora: o salvo ou outro jogador)
 				var T := float(COZ_H.get(str(b.modo), 0.5))
-				b.p = float(b.p) + cal * dh / T
+				fino[0] = float(fino[0]) + cal * dh / T
 				if str(b.modo) == "cozinhar":
-					if float(b.p) > 2.0:
-						b.q = float(b.get("q", 0.0)) + cal * dh / 0.3      # a água secou: queima
+					if float(fino[0]) > 2.0:
+						fino[1] = float(fino[1]) + cal * dh / 0.3      # a água secou: queima
 				elif _agora_h() - float(b.get("mexe", 0.0)) > FRITA_MEXER_H:
-					b.q = float(b.get("q", 0.0)) + cal * dh / 0.25         # sem mexer: gruda e queima
+					fino[1] = float(fino[1]) + cal * dh / 0.25         # sem mexer: gruda e queima
+				_fogao_fino[key] = fino
+				if absf(float(fino[0]) - float(b.p)) >= 0.02 or absf(float(fino[1]) - float(b.get("q", 0.0))) >= 0.02 or float(fino[0]) >= 1.0 and float(b.p) < 1.0:
+					b.p = snappedf(float(fino[0]), 0.001)
+					b.q = snappedf(float(fino[1]), 0.001)
 			var no: Node3D = _fogao_nos.get(key, null)
 			if no == null or not is_instance_valid(no):
 				no = _panela_no(str(b.modo))

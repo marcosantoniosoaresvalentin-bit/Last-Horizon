@@ -88,7 +88,7 @@ func update(delta: float) -> void:
 		return
 	_t_sites -= delta
 	if _t_sites <= 0.0:
-		_t_sites = 2.0
+		_t_sites = 4.0
 		_acha_sites()
 	var dh := delta / maxf(float(_jogo.sim.real_s_por_hora()), 1.0)
 	for s in _sites.values():
@@ -129,7 +129,7 @@ func _acha_sites() -> void:
 	var tot := _aves.size()
 	for k in _sites:
 		var s: Dictionary = _sites[k]
-		s.t = float(s.t) + 2.0
+		s.t = float(s.t) + 4.0
 		var quer := clampi(roundi(pow(maxf(float(s.kg), 0.5), 0.4) / 1.4), 1, 8)
 		var tem := 0
 		for a in _aves:
@@ -545,7 +545,7 @@ class Urubu:
 		_corpo = Node3D.new()
 		add_child(_corpo)
 		_mi(_corpo, _m.corpo, _m.pena, Transform3D.IDENTITY)
-		_mi(_corpo, _m.gola, _m.pena, Transform3D(Basis(), Vector3(0, 0.045, -0.15)))
+		_detalhes.append(_mi(_corpo, _m.gola, _m.pena, Transform3D(Basis(), Vector3(0, 0.045, -0.15))))
 		_rabo = Node3D.new()
 		_rabo.position = Vector3(0, 0.01, 0.14)
 		_corpo.add_child(_rabo)
@@ -558,9 +558,9 @@ class Urubu:
 		_cab.position = Vector3(0, 0.0, -0.085)
 		_pesc.add_child(_cab)
 		_mi(_cab, _m.cabeca, _m.pele, Transform3D.IDENTITY)
-		_mi(_cab, _m.bico, _m.bico_mat, Transform3D.IDENTITY)
+		_detalhes.append(_mi(_cab, _m.bico, _m.bico_mat, Transform3D.IDENTITY))
 		for sg in [-1.0, 1.0]:
-			_mi(_cab, _m.olho, _m.olho_mat, Transform3D(Basis().scaled(Vector3.ONE * 0.0085), Vector3(sg * 0.0165, 0.012, -0.022)))
+			_detalhes.append(_mi(_cab, _m.olho, _m.olho_mat, Transform3D(Basis().scaled(Vector3.ONE * 0.0085), Vector3(sg * 0.0165, 0.012, -0.022))))
 			# a asa: o braço (com as secundárias) e a mão (as primárias)
 			var braco := Node3D.new()
 			braco.position = Vector3(sg * 0.075, 0.055, -0.06)
@@ -579,8 +579,8 @@ class Urubu:
 			perna.position = Vector3(sg * 0.045, -0.055, 0.03)
 			_corpo.add_child(perna)
 			_mi(perna, _m.perna, _m.perna_mat, Transform3D.IDENTITY)
-			_mi(perna, _m.dedos, _m.perna_mat, Transform3D(Basis(), Vector3(0, -0.145, 0)))
-			_mi(perna, _m.unhas, _m.unha_mat, Transform3D(Basis(), Vector3(0, -0.145, 0)))
+			_detalhes.append(_mi(perna, _m.dedos, _m.perna_mat, Transform3D(Basis(), Vector3(0, -0.145, 0))))
+			_detalhes.append(_mi(perna, _m.unhas, _m.unha_mat, Transform3D(Basis(), Vector3(0, -0.145, 0))))
 			_pernas.append(perna)
 		ereto()
 
@@ -884,7 +884,30 @@ void fragment() {
 		_ac[nome] = v
 		return v
 
-	func _process(delta: float) -> void:
+	var _detalhes := []                # as partes pequenas (somem de longe)
+	var _longe := false
+	var _lod_t := 0.0
+	var _pula := 0
+	var _acum := 0.0
+
+	func _process(delta0: float) -> void:
+		# de longe: some o miúdo (olhos, pés, bico, gola) e anima menos vezes
+		_lod_t -= delta0
+		if _lod_t <= 0.0:
+			_lod_t = 0.5
+			var cam := get_viewport().get_camera_3d()
+			var lg := cam != null and cam.global_position.distance_to(global_position) > 30.0
+			if lg != _longe:
+				_longe = lg
+				for d in _detalhes:
+					if is_instance_valid(d):
+						(d as Node3D).visible = not lg
+		_acum += delta0
+		_pula += 1
+		if _longe and _pula % 3 != 0:
+			return
+		var delta := _acum
+		_acum = 0.0
 		_t += delta
 		abre = maxf(0.0, abre - delta)
 		levanta = maxf(0.0, levanta - delta)

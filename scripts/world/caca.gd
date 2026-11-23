@@ -1278,9 +1278,13 @@ func _peca_lugar(uid: String, pc: Dictionary) -> void:
 		"carrinho", "mesa":
 			var host: Transform3D = _jogo._peca_host_xf(int(pc.get("maq", -1)))
 			if host != Transform3D.IDENTITY and (pc.get("rel", []) as Array).size() >= 12:
-				no.global_transform = host * _xf_de(pc.rel)
+				var xf := host * _xf_de(pc.rel)
+				if not no.global_transform.is_equal_approx(xf):
+					no.global_transform = xf          # (só mexe quando o carrinho/mesa mexeu)
 		"costas":
-			no.global_transform = _jogo._peca_costas_xf(uid, int(pc.id))
+			var xc: Transform3D = _jogo._peca_costas_xf(uid, int(pc.id))
+			if not no.global_transform.is_equal_approx(xc):
+				no.global_transform = xc
 		"chao":
 			if (pc.get("xf", []) as Array).size() >= 12:
 				no.global_transform = _xf_de(pc.xf)
@@ -4034,9 +4038,18 @@ func _podre_tick() -> void:
 		if not is_instance_valid(n) or nd.has("corre") or nd.has("cai"):
 			continue
 		var k := float(PODRE_K.get(str(c.esp), 1.0))
+		var longe := n.global_position.distance_to(cam_p) > 140.0
+		if longe and not n.has_meta("podre_longe_ok"):
+			pass
+		elif longe:
+			continue                                 # (longe: o desenho espera; o tempo conta igual)
 		if _inteira(c):
 			var pr := podre_de(c, float(c.get("comido", 0.0)), k)
 			_podre_no(nd, n, float(pr[0]), float(pr[1]), c, cam_p)
+			if longe:
+				n.set_meta("podre_longe_ok", true)
+		elif longe:
+			n.set_meta("podre_longe_ok", true)
 		# os pedaços de carne (onde estiverem) e as partes no chão
 		for pc in c.get("pecas", []):
 			var pn := peca_no(str(uid), int(pc.id))
@@ -4068,11 +4081,20 @@ func _podre_tick() -> void:
 				Podre.atualiza(pn2, minf(float(pr3[0]), 3.3), float(pr3[1]))
 
 
+var _partes_mapa := {}
+var _partes_mapa_f := -1
+
 func _parte_node(uid: String, tipo: String) -> Node3D:
-	for ch in get_children():
-		if ch is Node3D and ch.has_meta("tipo") and str(ch.get_meta("uid", "")) == uid and str(ch.get_meta("tipo")) == tipo:
-			return ch
-	return null
+	# (o mapa das partes soltas é feito uma vez por quadro, não procura em tudo de novo)
+	var f := Engine.get_process_frames()
+	if f != _partes_mapa_f:
+		_partes_mapa_f = f
+		_partes_mapa.clear()
+		for ch in get_children():
+			if ch is Node3D and ch.has_meta("tipo") and is_instance_valid(ch) and not ch.is_queued_for_deletion():
+				_partes_mapa[str(ch.get_meta("uid", "")) + "|" + str(ch.get_meta("tipo"))] = ch
+	var nd = _partes_mapa.get(uid + "|" + tipo, null)
+	return nd if nd != null and is_instance_valid(nd) else null
 
 
 ## A carcaça no estágio dela: a passada de podre, o inchaço, as moscas, a mancha e, no
@@ -4120,8 +4142,8 @@ func _podre_no(nd: Dictionary, n: Node3D, est: float, cons: float, c: Dictionary
 	if nd.has("moscas") and is_instance_valid(nd.moscas):
 		var mo2: CPUParticles3D = nd.moscas
 		mo2.global_position = _centro_bicho(n) + Vector3.UP * r * 0.4
-		mo2.emitting = com_mosca
 		var perto := mo2.global_position.distance_to(cam_p) < 14.0
+		mo2.emitting = com_mosca and mo2.global_position.distance_to(cam_p) < 45.0
 		if com_mosca and perto:
 			if not nd.has("zum") or not is_instance_valid(nd.zum):
 				var z := AudioStreamPlayer3D.new()
@@ -4226,9 +4248,17 @@ func _parte_kg(c: Dictionary, tipo: String) -> float:
 
 
 ## Um urubu comeu kg do que tem em key (só no dono do mundo: os outros recebem).
-func comer(key: String, kg: float) -> void:
+var _comer_acc := {}
+
+func comer(key: String, kg0: float) -> void:
 	if _jogo and _jogo._mp_client():
 		return
+	# (junta aqui e só passa para os dados de 1 kg em 1 kg: menos coisa para salvar/enviar)
+	var kg := float(_comer_acc.get(key, 0.0)) + kg0
+	if kg < 1.0:
+		_comer_acc[key] = kg
+		return
+	_comer_acc.erase(key)
 	var ps := key.split(":")
 	var c := couro_de(ps[0])
 	if c.is_empty():
