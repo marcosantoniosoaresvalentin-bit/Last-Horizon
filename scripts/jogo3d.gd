@@ -1689,6 +1689,7 @@ func _process(delta: float) -> void:
 	_flecha_tick(delta)
 	_pesca_tick(delta)
 	_peixes_amb_tick(delta)
+	_dormir_tick(delta)
 	_laco_tick(delta)
 	_tri_tick(delta)
 	if _caca:
@@ -2215,6 +2216,9 @@ func _add_ground(id: String, qtd: int, x: float, z: float, r := 0.0, dur := []) 
 		var xx := up.cross(zz).normalized()
 		var ponta := 0.1 if not mi.has_meta("deitada") else -0.4
 		mi.transform = Transform3D(Basis(xx, zz.cross(xx), zz), dir * ponta + (Vector3.UP * 0.01 if mi.has_meta("deitada") else Vector3.ZERO))
+	elif id == "cama":
+		node.add_child(_cama_no())
+		node.rotation.y = r
 	elif id in ["machado", "cavadeira", "serra", "marreta"]:
 		var mi := MeshInstance3D.new()
 		mi.mesh = Corte.axe_mesh() if id == "machado" else (Corte.digger_mesh() if id == "cavadeira" else (Corte.saw_mesh() if id == "serra" else Corte.marreta_mesh()))
@@ -2459,7 +2463,7 @@ func _update_inventory() -> void:
 
 ## Sem mensagens de ajuda na tela: é sobrevivência, o jogador aprende sozinho.
 ## As mensagens: só as de ERRO aparecem (o que falta, por que não deu); as dicas não.
-const ERRO_INICIO := ["Acabou a fibra", "Acabou o cipó", "Você não tem", "Puxou cedo", "O peixe", "A linha", "Água rasa", "Precisa", "Falta", "Não ", "Você não", "Você já", "Para ", "A mochila está cheia", "Pesada demais",
+const ERRO_INICIO := ["Só dá para dormir", "No multiplayer", "Acabou a fibra", "Acabou o cipó", "Você não tem", "Puxou cedo", "O peixe", "A linha", "Água rasa", "Precisa", "Falta", "Não ", "Você não", "Você já", "Para ", "A mochila está cheia", "Pesada demais",
 	"Essa ", "Esse ", "Sua lenha", "Está chovendo", "Agora não", "Ponha a enxada", "Ponha lenha no fogão", "Pegue o balde vazio",
 	"Longe", "Tora grossa demais", "Comprido demais", "Fina demais", "Rodela só", "Tem galho", "Tem outra peça", "Termine",
 	"Tire antes", "O balde está com", "O balde já está cheio", "O outro balde", "Já tem", "Acabaram", "Acabou o barro",
@@ -3378,6 +3382,9 @@ func _update_ctx_btn_2() -> void:
 	elif _babacu and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and (item_qtd("machado") > 0 or teste) and _pindova_cortavel():
 		_ctx_action = "babacu_cortar"
 		_ctx_btn.text = "Cortar folha de babaçu"
+	elif _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _cama_perto() >= 0:
+		_ctx_action = "dormir"
+		_ctx_btn.text = "Dormir"
 	elif _caca and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and not _caca.osso_perto(_player.position, 1.3).is_empty():
 		var oi: Dictionary = _caca.osso_perto(_player.position, 1.3)
 		_ctx_action = "osso"
@@ -3456,6 +3463,9 @@ func _ctx_press() -> void:
 				Sons.play_at(self, "talo_corte", at, 0.0, 1.0)
 				Sons.play_at(self, "folha_cai", at, 0.0, 0.9)
 			_act_check = 0.0
+			return
+		"dormir":
+			_dormir_comeca()
 			return
 		"osso":
 			var oi: Dictionary = _caca.osso_perto(_player.position, 1.3)
@@ -4730,6 +4740,8 @@ func start_placing(id: String) -> bool:
 		_ghost.mesh = Balde.mesh()
 	elif id == "tabua":
 		_ghost.mesh = _board_mesh(false, 0)
+	elif id == "cama":
+		_ghost.mesh = _cama_malha_fantasma()
 	else:
 		var bm := BoxMesh.new()
 		bm.size = Vector3(0.22, 0.12, 0.18)
@@ -4824,7 +4836,7 @@ func _place_now(t: Dictionary) -> void:
 	if id == "forquilha":
 		_apoios.place(pos, float(t.yaw))
 	else:
-		_add_ground(id, 1, pos.x, pos.z)
+		_add_ground(id, 1, pos.x, pos.z, -float(t.yaw) if id == "cama" else 0.0)
 		var g: Dictionary = _chao[_chao.size() - 1]
 		(g.node as Node3D).rotation.y = -float(t.yaw)
 	Sons.play_at(self, "baque", pos, -12.0, 1.3)
@@ -13044,6 +13056,241 @@ func _arco_fp_pose(puxa: float, com_flecha: bool) -> void:
 	var tre := sin(Time.get_ticks_msec() / 40.0) * 0.002 * smoothstep(0.85, 1.0, puxa)
 	r.position = Vector3(-0.14 + puxa * 0.06 + tre, -0.06 + puxa * 0.02, -0.62)
 	r.rotation = Vector3(0, 0.08 - puxa * 0.05, 0.3 - puxa * 0.1)
+
+
+# ================== A CAMA E O SONO ==================
+# A cama (craft: estrado de galhos amarrado com cipó e o colchão de folha de babaçu e
+# capim) é posta no chão onde o jogador quiser (COLOCAR, gira). Deitado nela de noite
+# ("Dormir"), a tela escurece e a noite passa depressa até o dia clarear (6h). Dormir
+# descansa (a vida volta) mas dá fome e sede. No multiplayer só quem abriu o mundo dorme
+# (o relógio é dele e passa para todos).
+
+const DORMIR_DE := 18.0
+const DORMIR_ATE := 5.0
+const ACORDA := 6.0
+var _sono := {}                    # {fase: fecha/dorme/abre, t, h0}
+var _sono_ui: ColorRect = null
+
+
+func _cama_perto() -> int:
+	for i in _chao.size():
+		var g: Dictionary = _chao[i]
+		if str(g.id) == "cama" and Vector2(float(g.x) - _player.position.x, float(g.z) - _player.position.z).length() < 1.7:
+			return i
+	return -1
+
+
+func _dormir_comeca() -> void:
+	if not _sono.is_empty():
+		return
+	var h: float = sim.hour()
+	if h < DORMIR_DE and h >= DORMIR_ATE:
+		_show_toast("Só dá para dormir de noite (das 18h às 5h): agora são %02d:%02d." % [int(h), int(fmod(h, 1.0) * 60.0)])
+		return
+	if _mp_client():
+		_show_toast("No multiplayer, só quem abriu o mundo pode dormir para passar a noite (o relógio é dele).")
+		return
+	var ci := _cama_perto()
+	if ci < 0:
+		return
+	if _mao != "":
+		equip("")
+	var g: Dictionary = _chao[ci]
+	# deita na cama: a cabeça na cabeceira, olhando para cima
+	_player.position = Vector3(float(g.x), (g.node as Node3D).global_position.y + 0.45, float(g.z))
+	_sono = {"fase": "fecha", "t": 0.0, "h0": float(sim.steps), "cama": ci}
+	if _sono_ui == null:
+		_sono_ui = ColorRect.new()
+		_sono_ui.color = Color(0, 0, 0, 0)
+		_sono_ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_sono_ui.mouse_filter = Control.MOUSE_FILTER_STOP
+		_sono_ui.draw.connect(_sono_draw)
+		_hud.add_child(_sono_ui)
+	_sono_ui.visible = true
+
+
+func _dormir_tick(delta: float) -> void:
+	if _sono.is_empty():
+		return
+	_sono.t = float(_sono.t) + delta
+	if str(_sono.fase) != "abre":
+		var ci := int(_sono.cama)
+		if ci < _chao.size() and str(_chao[ci].id) == "cama":
+			_player.position.x = float(_chao[ci].x)
+			_player.position.z = float(_chao[ci].z)
+	for b in [_ctx_btn, _pick_btn, _jump_btn, _work_btn, _chop_btn]:
+		if b:
+			(b as Control).visible = false
+	match str(_sono.fase):
+		"fecha":
+			_sono_ui.color.a = clampf(float(_sono.t) / 1.2, 0.0, 1.0)
+			if float(_sono.t) >= 1.2:
+				_sono.fase = "dorme"
+				_sono.t = 0.0
+				sim.pressa = 400.0                    # a noite passa depressa
+		"dorme":
+			_sono_ui.color.a = 1.0
+			var h: float = sim.hour()
+			if (h >= ACORDA and h < DORMIR_DE) or float(_sono.t) > 90.0:
+				sim.pressa = 1.0
+				# a noite de sono: descansou (a vida volta), mas deu fome e sede
+				_fome = maxf(0.0, _fome - 14.0)
+				_sede = maxf(0.0, _sede - 20.0)
+				if _fome > 0.0 and _sede > 0.0 and not _doente() and _veneno < 0.0:
+					_vida = minf(100.0, _vida + 45.0)
+				_vitais_mostrar()
+				_sono.fase = "abre"
+				_sono.t = 0.0
+				_save_world()
+		"abre":
+			_sono_ui.color.a = clampf(1.0 - float(_sono.t) / 1.5, 0.0, 1.0)
+			if float(_sono.t) >= 1.5:
+				_sono = {}
+				_sono_ui.visible = false
+				_act_check = 0.0
+				return
+	_sono_ui.queue_redraw()
+
+
+func _sono_draw() -> void:
+	if _sono.is_empty():
+		return
+	var a := _sono_ui.color.a
+	var font := ThemeDB.fallback_font
+	var h: float = sim.hour()
+	var tx := "Dormindo...  %02d:%02d" % [int(h), int(fmod(h, 1.0) * 60.0)]
+	var tw := font.get_string_size(tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
+	_sono_ui.draw_string(font, _sono_ui.size * 0.5 + Vector2(-tw * 0.5, 10), tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(0.85, 0.85, 0.95, a * 0.9))
+	# a lua
+	var c := _sono_ui.size * 0.5 + Vector2(0, -70)
+	_sono_ui.draw_circle(c, 26.0, Color(0.92, 0.92, 0.82, a * 0.85))
+	_sono_ui.draw_circle(c + Vector2(11, -7), 23.0, Color(0, 0, 0, a))
+
+
+## A cama em 3D: quatro pés de forquilha, as duas varas compridas dos lados, as travessas
+## de galho amarradas com cipó e por cima o colchão (capim seco e as folhas de babaçu).
+func _cama_no() -> Node3D:
+	var root := Node3D.new()
+	var mad := StandardMaterial3D.new()
+	mad.albedo_color = Color(0.3, 0.2, 0.11)
+	mad.roughness = 0.9
+	var cip := StandardMaterial3D.new()
+	cip.albedo_color = Color(0.3, 0.24, 0.12)
+	var cap := StandardMaterial3D.new()
+	cap.albedo_color = Color(0.6, 0.5, 0.3)
+	cap.roughness = 1.0
+	var fol := StandardMaterial3D.new()
+	fol.albedo_color = Color(0.22, 0.34, 0.12)
+	fol.roughness = 0.85
+	fol.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var pau := func(a: Vector3, b: Vector3, r: float, m: Material) -> void:
+		var mi := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = r
+		cm.bottom_radius = r * 1.1
+		cm.height = a.distance_to(b)
+		cm.radial_segments = 7
+		cm.rings = 1
+		mi.mesh = cm
+		mi.material_override = m
+		var y := (b - a).normalized()
+		var x := y.cross(Vector3.FORWARD if absf(y.z) < 0.9 else Vector3.RIGHT).normalized()
+		mi.transform = Transform3D(Basis(x, y, x.cross(y)), (a + b) * 0.5)
+		root.add_child(mi)
+	var L := 1.0
+	var W := 0.45
+	var H := 0.32
+	# os pés
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			pau.call(Vector3(sx * (L - 0.08), -0.05, sz * W), Vector3(sx * (L - 0.08), H, sz * W), 0.035, mad)
+	# as varas dos lados e as das pontas
+	for sz in [-1.0, 1.0]:
+		pau.call(Vector3(-L, H, sz * W), Vector3(L, H, sz * W), 0.035, mad)
+	for sx in [-1.0, 1.0]:
+		pau.call(Vector3(sx * (L - 0.08), H - 0.06, -W - 0.04), Vector3(sx * (L - 0.08), H - 0.06, W + 0.04), 0.03, mad)
+	# as travessas e as amarras
+	var n := 11
+	for k in n:
+		var x := lerpf(-L + 0.12, L - 0.12, float(k) / (n - 1))
+		pau.call(Vector3(x, H + 0.035, -W - 0.03), Vector3(x + 0.02, H + 0.035, W + 0.03), 0.022, mad)
+		if k % 2 == 0:
+			for sz in [-1.0, 1.0]:
+				var am := MeshInstance3D.new()
+				var tm := TorusMesh.new()
+				tm.inner_radius = 0.03
+				tm.outer_radius = 0.045
+				tm.rings = 8
+				tm.ring_segments = 4
+				am.mesh = tm
+				am.material_override = cip
+				am.position = Vector3(x, H + 0.01, sz * W)
+				am.rotation = Vector3(PI * 0.5, 0, 0.6)
+				root.add_child(am)
+	# o colchão de capim seco (um pouco irregular)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var nx := 14
+	var nz := 6
+	var alt := func(i: int, j: int) -> float:
+		var borda := minf(minf(i, nx - i), minf(j, nz - j))
+		return H + 0.06 + 0.07 * clampf(float(borda) / 2.0, 0.0, 1.0) + 0.012 * sin(i * 2.3 + j * 1.7)
+	for i in nx:
+		for j in nz:
+			var q := []
+			for d in [[0, 0], [1, 0], [1, 1], [0, 1]]:
+				var ii: int = i + int(d[0])
+				var jj: int = j + int(d[1])
+				q.append(Vector3(lerpf(-L + 0.05, L - 0.05, float(ii) / nx), alt.call(ii, jj), lerpf(-W - 0.02, W + 0.02, float(jj) / nz)))
+			for t in [0, 1, 2, 0, 2, 3]:
+				st.add_vertex(q[t])
+	st.generate_normals()
+	var col := MeshInstance3D.new()
+	col.mesh = st.commit()
+	col.material_override = cap
+	root.add_child(col)
+	# as folhas de babaçu por cima, no comprido (uns folíolos verdes)
+	var st2 := SurfaceTool.new()
+	st2.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for k in 26:
+		var z := rng.randf_range(-W + 0.04, W - 0.04)
+		var x0 := rng.randf_range(-L + 0.1, 0.2)
+		var len := rng.randf_range(0.6, 1.2)
+		var w := rng.randf_range(0.03, 0.05)
+		var y := H + 0.14 + rng.randf_range(0.0, 0.015)
+		var a0 := Vector3(x0, y, z - w)
+		var b0 := Vector3(minf(x0 + len, L - 0.1), y, z - w * 0.3)
+		var c0 := Vector3(minf(x0 + len, L - 0.1), y, z + w * 0.3)
+		var d0 := Vector3(x0, y, z + w)
+		for v in [a0, b0, c0, a0, c0, d0]:
+			st2.add_vertex(v)
+	st2.generate_normals()
+	var fl := MeshInstance3D.new()
+	fl.mesh = st2.commit()
+	fl.material_override = fol
+	root.add_child(fl)
+	# o travesseiro de capim na cabeceira
+	var tr := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.16
+	sm.height = 0.14
+	tr.mesh = sm
+	tr.material_override = cap
+	tr.position = Vector3(L - 0.25, H + 0.2, 0)
+	tr.scale = Vector3(1.0, 0.7, 1.9)
+	root.add_child(tr)
+	return root
+
+
+## A forma da cama para a prévia de onde colocar.
+func _cama_malha_fantasma() -> Mesh:
+	var bm := BoxMesh.new()
+	bm.size = Vector3(2.0, 0.45, 0.95)
+	var st := SurfaceTool.new()
+	st.append_from(bm, 0, Transform3D(Basis(), Vector3(0, 0.225, 0)))
+	return st.commit()
 
 
 # ================== PESCA ==================

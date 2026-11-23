@@ -38,10 +38,10 @@ var converted := false      # o mundo salvo era antigo (sem mar) e acabou de vir
 const STEPS_PER_SEC := 6.0
 const STEP_MULT := 5.0
 const STEPS_DAY := 2880           # um dia de jogo = 24 horas do jogo (2880 passos de 30 s do jogo)
-## Quanto dura de verdade: o claro (6h às 18h) leva 2 horas; a noite (18h às 6h), 30 minutos.
-## O relógio do jogo anda mais devagar de dia e mais depressa de noite.
+## Quanto dura de verdade: o claro (6h às 18h) leva 2 horas e a noite (18h às 6h) também
+## 2 horas (dormindo na cama, a noite passa depressa).
 const DIA_REAL_S := 7200.0
-const NOITE_REAL_S := 1800.0
+const NOITE_REAL_S := 7200.0
 const DIA_DE := 6.0
 const DIA_ATE := 18.0
 const START_HOUR := 7.0
@@ -112,6 +112,8 @@ var spawn := Vector2i(W / 2, H / 2)
 var is_ready := false
 ## No modo leve a simulação roda menos vezes por segundo (com passos maiores).
 var steps_per_sec := STEPS_PER_SEC
+## Dormindo: o relógio corre muitas vezes mais depressa (a noite passa em segundos).
+var pressa := 1.0
 var step_mult := STEP_MULT
 
 ## Pasta do mundo salvo ("" = não salva) e semente para gerar um mundo novo.
@@ -494,10 +496,11 @@ func _sim_loop() -> void:
 	var loops := 0
 	while not _quit:
 		var now := Time.get_ticks_usec()
-		acc += (now - t_last) / 1000000.0 * steps_per_sec / STEPS_PER_SEC * passos_por_s()
+		acc += (now - t_last) / 1000000.0 * steps_per_sec / STEPS_PER_SEC * passos_por_s() * pressa
 		t_last = now
-		var n := mini(int(acc), 4)
-		acc = minf(acc - n, 4.0)
+		var cap := 4 if pressa <= 1.0 else 60
+		var n := mini(int(acc), cap)
+		acc = minf(acc - n, float(cap))
 		for k in n:
 			_weather_step()
 			_step(raining, step_mult)

@@ -281,6 +281,29 @@ static func _novo(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			_pau(ci, arc, 4.5, Color(0.42, 0.29, 0.17), u, 2)
 			ci.draw_polyline(P.call([[-44, -6], [-2, -4], [6, 2], [40, -6]]), Color(0.5, 0.44, 0.22), 2.0 * u, true)
 			return true
+		"cama":
+			# a cama: o estrado de galhos em quatro pés, o colchão de capim e as folhas por cima
+			for q in [[-40, 8], [36, 8], [-30, 20], [44, 18]]:
+				_pau(ci, P.call([[q[0], q[1]], [q[0], q[1] + 18]]), 4.0, Color(0.42, 0.29, 0.17), u)
+			_pau(ci, P.call([[-46, 6], [42, 6]]), 4.5, Color(0.45, 0.31, 0.18), u)
+			_pau(ci, P.call([[-36, 18], [50, 16]]), 4.5, Color(0.45, 0.31, 0.18), u)
+			var col: PackedVector2Array = P.call([[-44, 4], [40, 4], [52, 14], [-34, 16], [-38, 8]])
+			col = P.call([[-46, 2], [-40, -8], [42, -8], [52, 2], [48, 14], [-36, 14]])
+			_poly(ci, col, Color(0.8, 0.7, 0.42))
+			for k in 9:
+				var x := -36.0 + k * 9.0
+				ci.draw_line(c + Vector2(x, -6) * u, c + Vector2(x + 6, 12) * u, Color(0.6, 0.5, 0.28, 0.7), 1.2 * u, true)
+			for k in 5:
+				var y := -6.0 + k * 3.5
+				ci.draw_line(c + Vector2(-30 + k * 2, y) * u, c + Vector2(30 + k * 3, y + 1) * u, Color(0.36, 0.5, 0.2), 2.6 * u, true)
+			var tv := PackedVector2Array()
+			for k in 16:
+				var a := TAU * k / 16.0
+				tv.append(c + Vector2(36 + cos(a) * 11.0, -8 + sin(a) * 6.0) * u)
+			_poly(ci, tv, Color(0.84, 0.75, 0.48))
+			ci.draw_polyline(tv + PackedVector2Array([tv[0]]), ink, 1.4 * u, true)
+			ci.draw_polyline(col + PackedVector2Array([col[0]]), ink, 1.8 * u, true)
+			return true
 		"osso":
 			# o osso da canela: a haste lisa e as duas pontas largas (as juntas), branco-amarelado
 			var corpo: PackedVector2Array = P.call([[-30, 18], [26, -22], [30, -14], [-24, 26]])
