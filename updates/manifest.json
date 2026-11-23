@@ -1,9 +1,9 @@
 {
-  "version": 214,
-  "file": "update_214.zip",
-  "size": 5722897,
-  "sha256": "ec3c6d03b840640f0c9edd74f57356dfefdfc485300ae7fe4f4506e53166fe9c",
+  "version": 215,
+  "file": "update_215.zip",
+  "size": 5850401,
+  "sha256": "32cec9dfa805bb5daeb4952440f1ef7edd7f36c9295f406ec7bb8a63d1953b7c",
   "min_build": 1,
-  "notes": "Decomposição dos bichos mortos com o tempo: incha e esverdeia, estoura (bicheiras comendo, moscas zumbindo, líquido escuro no chão), vira couro seco e no fim só os ossos (o esqueleto completo da vaca). Urubus: aparecem horas depois da morte, rondam em círculos lá em cima, pousam quando não tem ninguém perto, chegam aos pulinhos e comem a carcaça, os pedaços de carne, a buchada, as patas e a cabeça no chão; fogem batendo as asas quando alguém chega e vão embora à noite. Vaca que morre de fome ou velhice agora fica caída no pasto.",
+  "notes": "Urubus mais realistas: penas, pescoço pelado enrugado, bico com gancho, asas com as pontas abertas; pousam freando, ficam atentos, andam e pulam, poucos comem de cada vez (os outros esperam, tomam sol de asas abertas e brigam pelo lugar), puxam a carne aos trancos, correm batendo as asas para decolar. Vozes do gado: mugido da vaca, berro do touro, bezerro chamando a mãe (ela responde), bufo de susto. Bicho morto no morro agora deita acompanhando o chão (nem flutua nem entra na terra) e escorrega morro abaixo se for íngreme.",
   "date": "2026-11-23"
 }
