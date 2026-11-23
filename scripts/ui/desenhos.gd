@@ -1334,13 +1334,11 @@ static func coco(ci: CanvasItem, c: Vector2, s: float, aberto: bool) -> void:
 			var r := Vector2(34.0, 44.0) * (1.0 + 0.06 * cos(3.0 * a))
 			pts.append(c + Vector2(cos(a) * r.x, sin(a) * r.y * (1.0 + 0.12 * sin(a))) * u)
 		_poly(ci, pts, Color(0.5, 0.5, 0.2))
-		# a parte de cima marrom (secando) e as fibras
+		# a parte de cima marrom (secando): o mesmo contorno, cortado embaixo
 		var top := PackedVector2Array()
-		for k in 19:
-			var a2 := PI + PI * k / 18.0
-			top.append(c + Vector2(cos(a2) * 33.0, sin(a2) * 46.0) * u)
-		top.append(c + Vector2(20, -18) * u)
-		top.append(c + Vector2(-22, -16) * u)
+		for q in pts:
+			if q.y < c.y - 14.0 * u:
+				top.append(q)
 		_poly(ci, top, Color(0.55, 0.4, 0.2, 0.75))
 		for k in 7:
 			var x := -24.0 + k * 8.0
@@ -1355,41 +1353,76 @@ static func coco(ci: CanvasItem, c: Vector2, s: float, aberto: bool) -> void:
 		_poly(ci, PackedVector2Array([c + Vector2(-6, -44) * u, c + Vector2(6, -44) * u, c + Vector2(4, -52) * u, c + Vector2(-4, -52) * u]), Color(0.36, 0.25, 0.12))
 		ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 2.0 * u, true)
 		return
-	# as duas metades, uma de pé (de frente, vendo a massa) e a outra deitada atrás
-	for lado in [1, 0]:
-		var o := c + (Vector2(16, 8) if lado == 1 else Vector2(-14, -6)) * u
-		var R := 34.0 if lado == 1 else 28.0
-		var sq := 0.62 if lado == 1 else 0.5
-		# a casca de fibra marrom por fora (a borda grossa)
-		var casca := PackedVector2Array()
-		for k in 32:
-			var a := TAU * k / 32.0
-			casca.append(o + Vector2(cos(a) * R, sin(a) * R * sq) * u)
-		_poly(ci, casca, Color(0.5, 0.36, 0.18))
-		for k in 10:
-			var a3 := TAU * k / 10.0
-			ci.draw_line(o + Vector2(cos(a3) * R * 0.86, sin(a3) * R * sq * 0.86) * u, o + Vector2(cos(a3) * R, sin(a3) * R * sq) * u, Color(0.35, 0.24, 0.1, 0.7), 1.4 * u, true)
-		# a parede dura (quengo) escura
-		var quengo := PackedVector2Array()
-		for k in 32:
-			var a := TAU * k / 32.0
-			quengo.append(o + Vector2(cos(a) * R * 0.8, sin(a) * R * sq * 0.8) * u)
-		_poly(ci, quengo, Color(0.26, 0.17, 0.09))
-		# a massa branca
-		var massa := PackedVector2Array()
-		for k in 32:
-			var a := TAU * k / 32.0
-			massa.append(o + Vector2(cos(a) * R * 0.72, sin(a) * R * sq * 0.72) * u)
-		_poly(ci, massa, Color(0.97, 0.95, 0.9))
-		# o fundo (a cavidade): um pouco de sombra e a água brilhando
-		var fundo := PackedVector2Array()
-		for k in 32:
-			var a := TAU * k / 32.0
-			fundo.append(o + Vector2(cos(a) * R * 0.5, sin(a) * R * sq * 0.5 + R * sq * 0.06) * u)
-		_poly(ci, fundo, Color(0.84, 0.86, 0.85))
-		if lado == 1:
-			ci.draw_arc(o + Vector2(-4, 2) * u, R * 0.3 * u, PI * 1.1, PI * 1.6, 8, Color(1, 1, 1, 0.9), 2.5 * u, true)
-		ci.draw_polyline(casca + PackedVector2Array([casca[0]]), ink, 2.0 * u, true)
+	# a metade de trás: virada para baixo, mostrando a casca marrom peluda e os três
+	# "olhinhos" do coco
+	var ob := c + Vector2(-20, -16) * u
+	var dome := PackedVector2Array()
+	for k in 25:
+		var a := PI + PI * k / 24.0
+		dome.append(ob + Vector2(cos(a) * 30.0, sin(a) * 26.0) * u)
+	for k in 13:
+		var a := PI * k / 12.0
+		dome.append(ob + Vector2(cos(a) * 30.0, sin(a) * 9.0) * u)
+	_poly(ci, dome, Color(0.42, 0.28, 0.14))
+	_fibras(ci, ob + Vector2(0, -10) * u, Vector2(26, 18) * u, 18, 5)
+	for q in [[-6, -14], [4, -15], [-1, -6]]:
+		ci.draw_circle(ob + Vector2(q[0], q[1]) * u, 3.2 * u, Color(0.16, 0.1, 0.05))
+	ci.draw_polyline(dome + PackedVector2Array([dome[0]]), ink, 2.0 * u, true)
+	# a metade da frente, de boca para cima: o bojo de casca de fibra por fora
+	var o := c + Vector2(8, 6) * u
+	var R := 42.0
+	var ry := 15.0
+	var bojo := PackedVector2Array()
+	for k in 25:
+		var a := PI * k / 24.0                  # de 0 a PI: a borda da frente e o fundo redondo
+		bojo.append(o + Vector2(cos(a) * R, sin(a) * 40.0) * u)
+	for k in 25:
+		var a := PI + PI * k / 24.0
+		bojo.append(o + Vector2(cos(a) * R, sin(a) * ry) * u)
+	_poly(ci, bojo, Color(0.47, 0.31, 0.15))
+	_fibras(ci, o + Vector2(0, 18) * u, Vector2(36, 18) * u, 30, 9)
+	# a boca: a fibra cortada (marrom-clara), a casca dura escura e a massa branca grossa
+	var anel := func(f: float, cor: Color) -> PackedVector2Array:
+		var pts := PackedVector2Array()
+		for k in 36:
+			var a := TAU * k / 36.0
+			pts.append(o + Vector2(cos(a) * R * f, sin(a) * ry * f) * u)
+		_poly(ci, pts, cor)
+		return pts
+	var borda: PackedVector2Array = anel.call(1.0, Color(0.66, 0.5, 0.3))
+	anel.call(0.8, Color(0.22, 0.13, 0.06))
+	anel.call(0.72, Color(0.97, 0.95, 0.9))
+	# o fundo da cavidade: a parede de dentro (sombra em cima) e a água de coco brilhando
+	var fundo := PackedVector2Array()
+	for k in 36:
+		var a := TAU * k / 36.0
+		fundo.append(o + Vector2(cos(a) * R * 0.52, sin(a) * ry * 0.52 + 1.5) * u)
+	_poly(ci, fundo, Color(0.8, 0.82, 0.8))
+	var sombra := PackedVector2Array()
+	for k in 19:
+		var a := PI + PI * k / 18.0
+		sombra.append(o + Vector2(cos(a) * R * 0.52, sin(a) * ry * 0.52 + 1.5) * u)
+	for k in 19:
+		var a := TAU - PI * k / 18.0
+		sombra.append(o + Vector2(cos(a) * R * 0.5, sin(a) * ry * 0.15 + 1.5) * u)
+	_poly(ci, sombra, Color(0.62, 0.64, 0.62))
+	ci.draw_arc(o + Vector2(-6, 3) * u, 9.0 * u, PI * 0.15, PI * 0.75, 8, Color(1, 1, 1, 0.95), 2.2 * u, true)
+	ci.draw_polyline(borda + PackedVector2Array([borda[0]]), ink, 1.6 * u, true)
+	ci.draw_polyline(bojo, ink, 2.0 * u, true)
+
+
+## Fiapos de fibra de coco (traços curtos claros e escuros) dentro de uma elipse.
+static func _fibras(ci: CanvasItem, c: Vector2, r: Vector2, n: int, seed_: int) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_
+	for k in n:
+		var a := rng.randf() * TAU
+		var d := sqrt(rng.randf())
+		var p := c + Vector2(cos(a) * r.x, sin(a) * r.y) * d
+		var ang := rng.randf_range(-0.5, 0.5) + PI * 0.5
+		var L := rng.randf_range(0.18, 0.32) * r.y
+		var col := Color(0.62, 0.45, 0.25, 0.8) if k % 2 == 0 else Color(0.26, 0.16, 0.07, 0.7)
+		ci.draw_line(p, p + Vector2(cos(ang), sin(ang)) * L, col, maxf(1.0, r.y * 0.04), true)
 
 
 ## A semente do cedrinho (Cedrela): o caroço achatado na ponta de uma asa fina e larga,
