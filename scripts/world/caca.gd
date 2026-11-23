@@ -1111,6 +1111,7 @@ func _peca_monta(uid: String, pc: Dictionary) -> Node3D:
 	var mi := _malha(no)
 	if mi:
 		mi.mesh = VacaModelo.malha_sem_ubere(mi.mesh)
+		malha_cab(mi, no.get_meta("sk"))
 	var sk: Skeleton3D = no.get_meta("sk")
 	_pose_pendurada(sk)
 	_cortes_escala(sk, c)
@@ -1679,6 +1680,7 @@ func _quarto_no(uid: String, lado: String, xf_salvo: Array, sujo: bool) -> Node3
 	var mi2 := _malha(pc)
 	if mi2:
 		mi2.mesh = VacaModelo.malha_sem_ubere(mi2.mesh)
+		malha_cab(mi2, pc.get_meta("sk"))
 	var sk2: Skeleton3D = pc.get_meta("sk")
 	_pose_pendurada(sk2)
 	_cortes_escala(sk2, c)
@@ -1747,6 +1749,7 @@ uniform vec3 rabo5;
 uniform float r_rabo;
 uniform float com_rabo;
 uniform vec3 cab_p;
+uniform vec3 cab_d;
 uniform float r_cab;
 uniform float corte_q;
 uniform float q_faca;
@@ -1757,13 +1760,16 @@ uniform float q_w;
 uniform float zb;
 uniform float zt;
 uniform float sujo;
+uniform float zt_u[24];             // as costas e a barriga (z na malha) de u = -0.25 até 1
+uniform float zb_u[24];
 uniform vec4 pl[12];                // cortes da mesa: fica onde dot(n, p) >= w
 uniform int n_pl = 0;
 varying vec3 p;
 varying vec3 nn;
 varying vec3 cam_l;
+varying float wcab;
 void vertex() {
-	p = VERTEX; nn = NORMAL;
+	p = VERTEX; nn = NORMAL; wcab = UV2.x;
 	cam_l = (inverse(MODEL_MATRIX) * vec4(CAMERA_POSITION_WORLD, 1.0)).xyz;
 }
 // o raio do olho até o ponto entra no lado que fica deste plano em t (o maior é a tampa)
@@ -1785,6 +1791,117 @@ float ruido(vec3 q) {
 	vec3 i = floor(q); vec3 f = fract(q); f = f * f * (3.0 - 2.0 * f);
 	return mix(mix(mix(hh(i), hh(i + vec3(1,0,0)), f.x), mix(hh(i + vec3(0,1,0)), hh(i + vec3(1,1,0)), f.x), f.y),
 		mix(mix(hh(i + vec3(0,0,1)), hh(i + vec3(1,0,1)), f.x), mix(hh(i + vec3(0,1,1)), hh(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float perf(float u, bool topo) {
+	float f = clamp((u + 0.25) / 1.25, 0.0, 1.0) * 23.0;
+	int i = int(min(floor(f), 22.0));
+	float t = f - float(i);
+	return topo ? mix(zt_u[i], zt_u[i + 1], t) : mix(zb_u[i], zb_u[i + 1], t);
+}
+// A banda vista no corte do meio (pela espinha): de cima para baixo, os espinhos das
+// vértebras com a carne entre eles, o canal da medula, os corpos das vértebras serrados
+// (osso esponjoso, com os discos), o filé (lombo) e a gordura do rim embaixo da espinha
+// e, no peito, as costelas por dentro (brancas, curvas, com a pleura brilhando) até o
+// esterno; na anca, o osso da bacia. Devolve a cor; rg = a aspereza.
+vec3 anatomia(vec3 P, float uP, out float rg) {
+	float ztt = perf(uP, true);
+	float zbb = perf(uP, false);
+	float H = max((ztt - zbb) * esc, 0.05);
+	float f = clamp((ztt - P.z) * esc / H, 0.0, 1.2);
+	float ym = P.y * esc;
+	vec3 qc = P * esc;
+	float n1 = ruido(qc * 11.0);
+	float n2 = ruido(qc * 26.0 + vec3(2.3, 0.7, 4.1));
+	float n3 = ruido(qc * 90.0);
+	vec3 carne = mix(vec3(0.36, 0.035, 0.03), vec3(0.54, 0.075, 0.055), n1);
+	vec3 osso = mix(vec3(0.86, 0.8, 0.7), vec3(0.95, 0.9, 0.82), n2);
+	vec3 esponja = mix(vec3(0.78, 0.55, 0.48), vec3(0.93, 0.85, 0.74), smoothstep(0.35, 0.7, n3));
+	vec3 gordura = mix(vec3(0.86, 0.8, 0.66), vec3(0.95, 0.9, 0.78), n2);
+	vec3 cor = carne;
+	rg = 0.45;
+	bool peito = uP > 0.45 && uP < 0.93;
+	bool lombo = uP >= 0.1 && uP <= 0.45;
+	bool pescoco = uP >= 0.93;
+	// a espessura das partes da espinha (fração da altura do corpo)
+	float esp_top = peito ? 0.2 : (pescoco ? 0.09 : 0.1);
+	float can0 = esp_top;
+	float can1 = esp_top + 0.035;
+	float cor1 = can1 + (peito ? 0.1 : 0.11);
+	// a capa de gordura das costas
+	if (f < 0.025 + 0.015 * n2) {
+		cor = gordura; rg = 0.6;
+	} else if (uP < -0.12) {
+		// o rabo e a ponta da anca: carne
+		cor = carne;
+	} else if (f < can0) {
+		// os espinhos: lâminas de osso inclinadas para trás, carne entre elas
+		float s1 = fract((ym + f * H * 0.45) / 0.055);
+		float lam = 1.0 - smoothstep(0.22, 0.32, abs(s1 - 0.5));
+		if (uP < 0.1) { lam = 0.0; }
+		cor = mix(carne * 0.9, osso, lam);
+		rg = mix(0.5, 0.35, lam);
+	} else if (f < can1) {
+		// o canal com a medula (branca rosada, as bordas escuras)
+		float m = abs((f - can0) / (can1 - can0) - 0.5) * 2.0;
+		cor = mix(vec3(0.9, 0.78, 0.74), vec3(0.45, 0.12, 0.1), smoothstep(0.55, 1.0, m));
+		rg = 0.3;
+	} else if (f < cor1) {
+		// os corpos das vértebras serrados: osso esponjoso; os discos entre eles
+		float s2 = fract(ym / (pescoco ? 0.07 : 0.052));
+		float disco = 1.0 - smoothstep(0.035, 0.075, min(s2, 1.0 - s2));
+		float casca = smoothstep(0.75, 0.95, abs((f - can1) / (cor1 - can1) - 0.5) * 2.0);
+		cor = mix(esponja, osso, casca * 0.8);
+		if (uP > -0.12 && uP < 0.1) { disco = 0.0; }          // o sacro: tudo grudado
+		cor = mix(cor, vec3(0.62, 0.4, 0.38), disco);
+		rg = 0.55;
+	} else if (lombo || uP <= 0.1 || pescoco) {
+		if (lombo && f < cor1 + 0.16) {
+			// o filé mignon embaixo da espinha (mais escuro e liso)
+			cor = mix(vec3(0.3, 0.03, 0.04), vec3(0.42, 0.05, 0.06), n1);
+			rg = 0.35;
+		} else if (lombo && f < cor1 + 0.28) {
+			// a gordura do rim (sebo em gomos, com fiapos de carne)
+			float g1 = ruido(qc * 18.0);
+			cor = mix(gordura, gordura * 0.8, smoothstep(0.4, 0.6, g1));
+			cor = mix(cor, carne, smoothstep(0.72, 0.8, ruido(qc * 40.0 + vec3(5.0))) * 0.6);
+			rg = 0.7;
+		} else if (uP <= 0.1 && uP > -0.08 && f > 0.42 && f < 0.7) {
+			// a bacia serrada (osso branco em volta, esponja no meio)
+			float e = length(vec2((uP - 0.01) / 0.09, (f - 0.56) / 0.14));
+			cor = e < 0.75 ? esponja : (e < 1.0 ? osso : carne);
+		} else {
+			// a parede da barriga por dentro: carne fina com a película brilhante
+			cor = mix(carne, vec3(0.72, 0.42, 0.4), 0.25 + 0.2 * n2);
+			rg = 0.28;
+		}
+	} else {
+		// o peito por dentro: as costelas curvas, a carne entre elas e a pleura brilhando
+		float fe = 0.88;                                         // onde as costelas acabam (cartilagem)
+		float s3 = (ym - f * H * 0.32 - sin(f * 3.14159) * 0.025) / 0.075;
+		float r = fract(s3);
+		float lar = 0.13 + 0.035 * sin(floor(s3) * 2.7) + 0.02 * n1;
+		float dr = abs(r - 0.5);
+		float cost = 1.0 - smoothstep(lar, lar + 0.05, dr);
+		// a costela é redonda: clara no meio, mais escura (rosada) nas beiradas
+		float meio_c = 1.0 - smoothstep(0.0, lar, dr);
+		vec3 c_cost = mix(vec3(0.74, 0.55, 0.5), osso, 0.45 + 0.55 * meio_c);
+		c_cost = mix(c_cost, vec3(0.86, 0.8, 0.8), smoothstep(fe - 0.08, fe, f));   // a ponta de cartilagem
+		// a carne entre as costelas (o músculo, com fiapos de gordura)
+		vec3 entre = mix(carne * 0.8, vec3(0.6, 0.12, 0.1), 0.25 * n2);
+		entre = mix(entre, gordura, smoothstep(0.78, 0.9, ruido(qc * 45.0)) * 0.5);
+		cor = mix(entre, c_cost, cost * smoothstep(1.0, 0.92, f));
+		if (f > 0.92 && uP > 0.6) {
+			// o esterno serrado
+			float s4 = fract(ym / 0.09);
+			cor = mix(esponja, vec3(0.6, 0.38, 0.36), 1.0 - smoothstep(0.04, 0.09, min(s4, 1.0 - s4)));
+		}
+		// o diafragma (a fraldinha) logo atrás das costelas
+		if (uP < 0.5) {
+			cor = mix(cor, vec3(0.5, 0.1, 0.09), smoothstep(0.5, 0.46, uP));
+		}
+		rg = mix(0.22, 0.4, cost);
+	}
+	return cor;
 }
 void fragment() {
 	float u = (y_rabo - p.y) / (y_rabo - y_pescoco);
@@ -1838,27 +1955,35 @@ void fragment() {
 				vec3 carne = mix(vec3(0.34, 0.03, 0.025), vec3(0.52, 0.07, 0.05), c1);
 				float gord = smoothstep(0.68, 0.82, c2) * 0.5;
 				vec3 cor = mix(carne, vec3(0.82, 0.74, 0.62), gord);
-				// no meio da vaca: as costelas partidas e a espinha (osso branco)
-				if (abs(nm.x) > 0.9 && uP > 0.3 && uP < 0.85) {
-					float osso = smoothstep(0.82, 0.95, abs(sin(qc.y * 3.14159 / 0.07))) * (0.6 + 0.4 * c2);
-					cor = mix(cor, vec3(0.86, 0.8, 0.72), osso * 0.75);
+				float rg = 0.4;
+				// no meio da vaca (o corte da espinha): os ossos de verdade
+				if (abs(nm.x) > 0.9 && uP <= 0.99) {
+					cor = anatomia(P, uP, rg);
+				} else {
+					// um corte de través: o osso da espinha no meio, em cima
+					float ztt = perf(uP, true);
+					float zbb = perf(uP, false);
+					float f = (ztt - P.z) / max(ztt - zbb, 1e-5);
+					float lx = abs(P.x) * esc;
+					if (uP > -0.1 && uP < 0.95 && f > 0.1 && f < 0.3 && lx < 0.05) {
+						cor = mix(vec3(0.8, 0.6, 0.52), vec3(0.93, 0.87, 0.78), smoothstep(0.3, 0.7, ruido(qc * 90.0)));
+					}
 				}
 				ALBEDO = cor;
-				ROUGHNESS = 0.4;
+				ROUGHNESS = rg;
 				NORMAL = normalize((VIEW_MATRIX * (MODEL_MATRIX * vec4(-nm, 0.0))).xyz);
 			}
 		}
 		if (!tampa) {
-			// por dentro sem corte na frente (a barriga aberta): a carne e as costelas
-			vec3 carne = mix(vec3(0.3, 0.025, 0.02), vec3(0.46, 0.06, 0.045), n1);
-			float osso = smoothstep(0.55, 0.8, abs(sin(q.y * 3.14159 / 0.05))) * step(0.0, nn.z);
-			ALBEDO = mix(carne, vec3(0.88, 0.82, 0.74), osso * 0.8);
-			ROUGHNESS = 0.45;
+			// por dentro sem corte na frente (a barriga aberta): a parede por dentro
+			float rg2 = 0.45;
+			ALBEDO = anatomia(p, u, rg2) * 0.8;
+			ROUGHNESS = rg2;
 		}
 	} else if (dc < r_casco) {
 		ALBEDO = vec3(0.12, 0.1, 0.08);
 		ROUGHNESS = 0.6;
-	} else if (distance(p, cab_p) < r_cab) {
+	} else if (wcab > 0.5) {
 		ALBEDO = cor_pelo * (0.85 + 0.3 * n2);
 		ROUGHNESS = 0.85;
 	} else {
@@ -1986,8 +2111,12 @@ func _banda_mat(n: Node3D, c: Dictionary, lado: float, cab: bool) -> ShaderMater
 	sm.set_shader_parameter("rabo5", (rb[4] as Vector3) + ((rb[4] as Vector3) - (rb[3] as Vector3)) * 1.2)
 	sm.set_shader_parameter("r_rabo", 0.075 / m_por_u)
 	sm.set_shader_parameter("cab_p", rf.cab_p)
-	sm.set_shader_parameter("r_cab", 0.27 / m_por_u)
+	sm.set_shader_parameter("cab_d", rf.cab_d)
+	sm.set_shader_parameter("r_cab", 0.26 / m_por_u)
 	sm.set_shader_parameter("com_rabo", 0.0 if cab else 1.0)     # o rabo vai com a banda sem a cabeça
+	var pf := _perfil_pose(mi, n.get_meta("sk"), float(rf.y_rabo), float(rf.y_pescoco))
+	sm.set_shader_parameter("zt_u", pf[0])
+	sm.set_shader_parameter("zb_u", pf[1])
 	var yq := lerpf(float(rf.y_rabo), float(rf.y_pescoco), QUARTO_U)
 	sm.set_shader_parameter("corte_q", QUARTO_U)
 	sm.set_shader_parameter("q_w", 0.022 / ((float(rf.y_rabo) - float(rf.y_pescoco)) * m_por_u))
@@ -2022,6 +2151,9 @@ func partir_monta(uid: String) -> void:
 	if mi2 and not mi2.has_meta("sem_ubere"):
 		mi2.mesh = VacaModelo.malha_sem_ubere(mi2.mesh)
 		mi2.set_meta("sem_ubere", true)
+		mi2.remove_meta("cab_marca")
+	if mi2:
+		malha_cab(mi2, n2.get_meta("sk"))
 	var sk2: Skeleton3D = n2.get_meta("sk")
 	_pose_pendurada(sk2)
 	_cortes_escala(sk2, c)
@@ -2347,9 +2479,11 @@ func _evis_aplica(n: Node3D, c: Dictionary) -> void:
 	for k in mi.mesh.get_surface_count():
 		mats.append(mi.get_surface_override_material(k))
 	mi.mesh = VacaModelo.malha_sem_ubere(mi.mesh)
+	mi.remove_meta("cab_marca")
 	for k in mini(mats.size(), mi.mesh.get_surface_count()):
 		mi.set_surface_override_material(k, mats[k])
 	mi.set_meta("sem_ubere", true)
+	malha_cab(mi, n.get_meta("sk"))
 	for nm in ["saco", "prepucio"]:
 		for ch in n.find_children(nm, "MeshInstance3D", true, false):
 			ch.queue_free()
@@ -2866,6 +3000,7 @@ uniform vec3 casco2;
 uniform vec3 casco3;
 uniform float r_casco;
 uniform vec3 cab_p;
+uniform vec3 cab_d;
 uniform float r_cab;
 uniform float ab_y;
 uniform float ab;
@@ -2879,9 +3014,11 @@ uniform float abre_w;
 uniform float parte_u;
 varying vec3 p;
 varying vec3 nn;
+varying float wcab;
 void vertex() {
 	p = VERTEX;
 	nn = NORMAL;
+	wcab = UV2.x;
 	VERTEX += NORMAL * infla;
 }
 float hh(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
@@ -2899,7 +3036,7 @@ void fragment() {
 	} else {
 		float u = (y_rabo - p.y) / (y_rabo - y_pescoco);
 		float dc = min(min(distance(p, casco0), distance(p, casco1)), min(distance(p, casco2), distance(p, casco3)));
-		if (dc < r_casco || distance(p, cab_p) < r_cab) { discard; }   // a cabeça e os cascos ficam com o couro
+		if (dc < r_casco || wcab > 0.5) { discard; }   // a cabeça e os cascos ficam com o couro
 		vec3 q = p * esc;
 		// a vaca aberta: o corte da barriga (do pescoço até o úbere), o Y em volta do úbere
 		// (um de cada lado até as pernas de trás) e a garganta; abrindo, vira um rasgo escuro
@@ -2925,9 +3062,15 @@ void fragment() {
 				float fundo = 1.0 - abs(p.x) / max(wo, 0.0001);
 				cav = mix(vec3(0.34, 0.05, 0.04), vec3(0.12, 0.015, 0.012), fundo * 0.8);
 				if (tt > 0.45) {
-					float cost = abs(sin(q.y * 3.14159 / 0.085));
-					float c2 = smoothstep(0.72, 0.93, cost) * smoothstep(0.45, 0.55, tt);
-					cav = mix(cav, vec3(0.86, 0.78, 0.72), c2 * 0.85);
+					// as costelas por dentro: curvas (sobem para a espinha), largura variando,
+					// a carne entre elas e a pleura (a película) por cima
+					float s3 = (q.y - abs(p.x) * esc * 0.55) / 0.075;
+					float r = fract(s3);
+					float lar = 0.2 + 0.06 * sin(floor(s3) * 2.7);
+					float c2 = (1.0 - smoothstep(lar, lar + 0.07, abs(r - 0.5))) * smoothstep(0.45, 0.55, tt);
+					vec3 osso = mix(vec3(0.84, 0.76, 0.7), vec3(0.93, 0.87, 0.8), ruido(q * 40.0));
+					cav = mix(cav, osso, c2 * 0.9);
+					cav = mix(cav, vec3(0.7, 0.45, 0.45), 0.12 * (1.0 - fundo));
 				}
 				float beira = smoothstep(0.75, 1.0, 1.0 - fundo);
 				cav = mix(cav, vec3(0.6, 0.12, 0.09), beira * 0.6);
@@ -2972,6 +3115,157 @@ void fragment() {
 """
 static var _couro_sh: Shader
 static var _barriga: Array = []       # [[y, z]] a barriga por baixo (na malha, em pé)
+
+
+## A malha com a marca da cabeça (UV2.x = quanto o osso da cabeça puxa aquele ponto):
+## o couro da cabeça fica nela (nunca é tirado), certinho na pele da cabeça.
+static var _cab_cache := {}
+
+static func malha_cab(mi: MeshInstance3D, sk: Skeleton3D) -> void:
+	if mi == null or sk == null or mi.skin == null or mi.has_meta("cab_marca"):
+		return
+	var src: Mesh = mi.mesh
+	var mats := []
+	for k in src.get_surface_count():
+		mats.append(mi.get_surface_override_material(k))
+	var out: ArrayMesh
+	if _cab_cache.has(src):
+		out = _cab_cache[src]
+	else:
+		var hb := sk.find_bone("Head")
+		var eh := {}
+		for b in mi.skin.get_bind_count():
+			var bi := mi.skin.get_bind_bone(b)
+			if bi < 0:
+				bi = sk.find_bone(mi.skin.get_bind_name(b))
+			if bi == hb:
+				eh[b] = true
+		out = ArrayMesh.new()
+		for si in src.get_surface_count():
+			var arr: Array = src.surface_get_arrays(si)
+			var flags: int = src.surface_get_format(si) & Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var bo = arr[Mesh.ARRAY_BONES]
+			var we = arr[Mesh.ARRAY_WEIGHTS]
+			var uv2 := PackedVector2Array()
+			uv2.resize(vs.size())
+			if bo != null and we != null and vs.size() > 0:
+				var nb: int = (bo as PackedInt32Array).size() / vs.size()
+				for i in vs.size():
+					var w := 0.0
+					for j in nb:
+						if eh.has((bo as PackedInt32Array)[i * nb + j]):
+							w += (we as PackedFloat32Array)[i * nb + j]
+					uv2[i] = Vector2(w, 0.0)
+			arr[Mesh.ARRAY_TEX_UV2] = uv2
+			out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr, [], {}, flags)
+			out.surface_set_material(si, src.surface_get_material(si))
+		_cab_cache[src] = out
+	mi.mesh = out
+	for k in mini(mats.size(), out.get_surface_count()):
+		if mats[k] != null:
+			mi.set_surface_override_material(k, mats[k])
+	mi.set_meta("cab_marca", true)
+
+
+## As costas e a barriga na linha do meio (z), na pose de agora, de u = -0.25 até 1
+## (24 pontos): [zt, zb]. É por elas que os ossos do meio são desenhados no lugar certo.
+static var _pf_cache := {}
+
+## Interpola a altura no u (entre os pontos vizinhos; o mais alto/baixo perto dele).
+static func _interp_u(l: Array, u: float, topo: bool) -> float:
+	if l.is_empty():
+		return 0.0
+	var best := -1e9 if topo else 1e9
+	for q in l:
+		var v: Vector2 = q
+		if absf(v.x - u) < 0.03:
+			best = maxf(best, v.y) if topo else minf(best, v.y)
+	if absf(best) < 1e8:
+		return best
+	var a: Vector2 = l[0]
+	var b: Vector2 = l[l.size() - 1]
+	for q in l:
+		var v: Vector2 = q
+		if v.x <= u:
+			a = v
+		elif v.x > u:
+			b = v
+			break
+	if absf(b.x - a.x) < 1e-6:
+		return a.y
+	return lerpf(a.y, b.y, clampf((u - a.x) / (b.x - a.x), 0.0, 1.0))
+
+
+static func _perfil_pose(mi: MeshInstance3D, sk: Skeleton3D, y_rabo: float, y_pes: float) -> Array:
+	var key := str(mi.mesh.get_instance_id()) + ":" + str(snappedf(y_rabo, 0.0001)) + ":" + str(snappedf(y_pes, 0.0001))
+	if _pf_cache.has(key):
+		return _pf_cache[key]
+	var zt := PackedFloat32Array()
+	var zb := PackedFloat32Array()
+	zt.resize(24)
+	zb.resize(24)
+	for i in 24:
+		zt[i] = -1e9
+		zb[i] = 1e9
+	var skin: Skin = mi.skin
+	if skin == null or sk == null:
+		return [zt, zb]
+	var mats := []
+	for b in skin.get_bind_count():
+		var bi := skin.get_bind_bone(b)
+		if bi < 0:
+			bi = sk.find_bone(skin.get_bind_name(b))
+		mats.append(sk.get_bone_global_pose(bi) * skin.get_bind_pose(b))
+	var pts := []
+	for si in mini(2, mi.mesh.get_surface_count()):
+		var a: Array = mi.mesh.surface_get_arrays(si)
+		var vs: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+		var bo: PackedInt32Array = a[Mesh.ARRAY_BONES]
+		var we: PackedFloat32Array = a[Mesh.ARRAY_WEIGHTS]
+		var nb := bo.size() / maxi(vs.size(), 1)
+		var pv := PackedVector3Array()
+		pv.resize(vs.size())
+		for i in vs.size():
+			var v := Vector3.ZERO
+			for j in nb:
+				var w := we[i * nb + j]
+				if w > 0.0:
+					v += ((mats[bo[i * nb + j]] as Transform3D) * vs[i]) * w
+			pv[i] = v
+		# onde cada triângulo atravessa o meio (x = 0): o contorno do corpo no corte da espinha
+		var ix: PackedInt32Array = a[Mesh.ARRAY_INDEX] if a[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+		for t in range(0, ix.size() - 2, 3):
+			for e in [[0, 1], [1, 2], [2, 0]]:
+				var p0: Vector3 = pv[ix[t + int(e[0])]]
+				var p1: Vector3 = pv[ix[t + int(e[1])]]
+				if (p0.x < 0.0) == (p1.x < 0.0):
+					continue
+				var f := p0.x / (p0.x - p1.x)
+				pts.append(p0.lerp(p1, f))
+	# o de cima (costas) e o de baixo (barriga), cada um ligado ponto a ponto ao longo do corpo
+	var zm := 0.0
+	for q in pts:
+		zm += (q as Vector3).z
+	zm /= maxf(pts.size(), 1.0)
+	var cima := []
+	var baixo := []
+	for q in pts:
+		var v2: Vector3 = q
+		var u := (y_rabo - v2.y) / (y_rabo - y_pes)
+		if v2.z >= zm:
+			cima.append(Vector2(u, v2.z))
+		else:
+			baixo.append(Vector2(u, v2.z))
+	var srt := func(a2: Vector2, b2: Vector2) -> bool: return a2.x < b2.x
+	cima.sort_custom(srt)
+	baixo.sort_custom(srt)
+	for k in 24:
+		var uk := lerpf(-0.25, 1.0, float(k) / 23.0)
+		zt[k] = _interp_u(cima, uk, true)
+		zb[k] = _interp_u(baixo, uk, false)
+	_pf_cache[key] = [zt, zb]
+	return [zt, zb]
 
 
 ## A malha da vaca dentro do nó.
@@ -3039,7 +3333,9 @@ func _couro_ref(n: Node3D) -> Dictionary:
 	return {"mi": mi, "y_rabo": y_rabo, "y_pescoco": y_pes, "u_ini": (y_rabo - y_ini) / (y_rabo - y_pes), "u_ubere": (y_rabo - (-0.004)) / (y_rabo - y_pes),
 		"cascos": [pos.call("BackFoot_R"), pos.call("BackFoot_L"), pos.call("FrontFoot_R"), pos.call("FrontFoot_L")],
 		"rabo": [pos.call("Back"), pos.call("Tail1"), pos.call("Tail2"), pos.call("Tail3"), pos.call("Tail4")],
-		"cab_p": (pos.call("Head") as Vector3) + ((pos.call("Head") as Vector3) - (pos.call("Neck") as Vector3)).normalized() * 0.006}
+		# a cabeça: da junta com o pescoço para a frente (fica com o couro)
+		"cab_p": (pos.call("Head") as Vector3) - ((pos.call("Head") as Vector3) - (pos.call("Neck") as Vector3)).normalized() * 0.0015,
+		"cab_d": ((pos.call("Head") as Vector3) - (pos.call("Neck") as Vector3)).normalized()}
 
 
 ## O couro na pele (o corte e a carne aparecendo). Faz o material da carcaça na primeira vez.
@@ -3057,6 +3353,7 @@ func couro_visual(uid: String) -> void:
 	if mi == null:
 		return
 	var sm: ShaderMaterial
+	malha_cab(mi, n.get_meta("sk"))
 	if n.has_meta("couro_mat"):
 		sm = n.get_meta("couro_mat")
 	else:
@@ -3093,7 +3390,8 @@ func couro_visual(uid: String) -> void:
 	sm.set_shader_parameter("esc", m_por_u)
 	sm.set_shader_parameter("r_casco", 0.1 / m_por_u)
 	sm.set_shader_parameter("cab_p", rf.cab_p)
-	sm.set_shader_parameter("r_cab", 0.27 / m_por_u)
+	sm.set_shader_parameter("cab_d", rf.cab_d)
+	sm.set_shader_parameter("r_cab", 0.26 / m_por_u)
 	for i in 4:
 		sm.set_shader_parameter("casco%d" % i, rf.cascos[i])
 	var ev: Dictionary = c.get("evis", {})
