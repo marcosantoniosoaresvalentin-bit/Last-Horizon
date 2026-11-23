@@ -542,6 +542,7 @@ var _saw_side := 0                # último fim de curso alcançado: 1 frente, -
 const SAW_CYCLE := 1.5            # segundos por ida e volta da serra (devagar)
 var _rodelas: Array = []          # formato de cada rodela da mochila (raios em volta)
 var _lenhas: Array = []           # cada lenha da mochila como foi rachada (a mesma peça vai para o fogo)
+var _carnes := {}                 # "carne_assar"/"espeto_carne" -> [formato de cada pedaço: {a, b, h, kg, osso, sem}]
 var _dur := {}                    # durabilidade: id da ferramenta -> [usos que faltam de cada uma]
 var _walking := false             # o personagem indo sozinho até um lugar
 var _walk_target := Vector3.ZERO
@@ -1791,7 +1792,7 @@ func _save_player() -> void:
 	for g in _chao:
 		chao.append({"id": g.id, "qtd": g.qtd, "x": g.x, "z": g.z, "r": g.get("r", 0.0), "dur": g.get("dur", []), "uid": g.get("uid", "")})
 	var data := {"x": p.x, "z": p.z, "face": _face, "yaw": _yaw, "pitch": _pitch, "argila": _bag, "sementes": _seeds,
-		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja, "vida": _vida, "fome": _fome, "sede": _sede, "frutos_dia": _frutos_dia, "lenhas": _lenhas, "veneno": _veneno, "doenca": _doenca, "alivio": _alivio}
+		"itens": _itens, "mao": _mao, "chao": chao, "tora": _carry, "ganhou_cavadeira": true, "ganhou_serra": true, "ganhou_pa": true, "ganhou_balde": true, "ganhou_cunhas": true, "ganhou_cunhas2": true, "pa_cheia": _pa_full, "pa_tipo": _pa_tipo, "dur": _dur, "rodelas": _rodelas, "balde_carga": _balde_carga, "agua_suja": _agua_suja, "vida": _vida, "fome": _fome, "sede": _sede, "frutos_dia": _frutos_dia, "lenhas": _lenhas, "carnes": _carnes, "veneno": _veneno, "doenca": _doenca, "alivio": _alivio}
 	var f := FileAccess.open(Mundos.dir(_world_id) + "/jogador.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
@@ -1849,6 +1850,7 @@ func _load_player() -> void:
 	_sede = float(d.get("sede", 100.0))
 	_frutos_dia = d.get("frutos_dia", {})
 	_lenhas = d.get("lenhas", [])
+	_carnes = d.get("carnes", {}) if d.get("carnes", {}) is Dictionary else {}
 	_veneno = float(d.get("veneno", -1.0))
 	_doenca = d.get("doenca", {}) if d.get("doenca", {}) is Dictionary else {}
 	_alivio = float(d.get("alivio", 0.0))
@@ -1885,10 +1887,55 @@ func _bag_total() -> float:
 	for id in _itens:
 		if id == "rodela":
 			continue
+		if id in CARNE_FORMA:
+			t += Itens.kg("espeto") * int(_itens[id]) if id == "espeto_carne" else 0.0
+			for f in _carne_fix(id):
+				t += float((f as Dictionary).get("kg", 2.0))
+			continue
 		t += Itens.kg(id) * int(_itens[id])
 	for pf in _rodelas_fix():
 		t += Balde.rodela_kg(pf, Apoios.SLICE)
 	return t       # (o que vai dentro do balde é levado na mão, pela alça)
+
+
+## Os pedaços de carne para assar (e no espeto) guardam o formato de quando foram
+## cortados na mesa: é o mesmo pedaço que vai para o espeto e para o fogo (e o peso dele).
+const CARNE_FORMA := ["carne_assar", "espeto_carne"]
+
+
+func _carne_padrao() -> Dictionary:
+	return {"a": 0.22, "b": 0.17, "h": 0.11, "kg": 2.0, "osso": false, "sem": randi() % 100000}
+
+
+func _carne_fix(id: String) -> Array:
+	if not _carnes.has(id):
+		_carnes[id] = []
+	var l: Array = _carnes[id]
+	var q := int(_itens.get(id, 0))
+	while l.size() > q:
+		l.pop_back()
+	while l.size() < q:
+		l.append(_carne_padrao())
+	return l
+
+
+## Põe na mochila um pedaço com o formato dele.
+func _carne_add(id: String, forma: Dictionary) -> void:
+	_carne_fix(id)
+	add_item(id, 1)
+	var l := _carne_fix(id)
+	if not l.is_empty():
+		l[l.size() - 1] = forma
+
+
+## Tira da mochila um pedaço (o último) e devolve o formato dele.
+func _carne_tira(id: String) -> Dictionary:
+	var l := _carne_fix(id)
+	var f: Dictionary = l.pop_back() if not l.is_empty() else _carne_padrao()
+	_itens[id] = int(_itens.get(id, 0))
+	remove_item(id, 1)
+	_carne_fix(id)
+	return f
 
 
 ## Largura da rodela (o maior diâmetro, m).
@@ -2763,6 +2810,7 @@ func _morrer() -> void:
 			drop_item(str(id), q)
 	_itens.clear()
 	_lenhas.clear()
+	_carnes.clear()
 	_rodelas.clear()
 	_update_inventory()
 	_veneno = -1.0
@@ -12395,6 +12443,8 @@ func _mc_pegar() -> void:
 		var peso := 0.0
 		var assar := 0
 		var espetos := 0
+		var formas_a := []
+		var formas_e := []
 		var sujos := 0.0
 		for ci in _mc_pegaveis():
 			var cl: Dictionary = cel[int(ci)]
@@ -12404,17 +12454,24 @@ func _mc_pegar() -> void:
 				levou.append(ci)
 				continue
 			if str(cl.tipo) == "gde":
-				# com espeto na mochila a carne já vai espetada
+				# com espeto na mochila a carne já vai espetada (o mesmo pedaço, com o formato dele)
 				var esp := (item_qtd("espeto") - espetos) > 0
-				var it_g := "espeto_carne" if esp else "carne_assar"
-				var dk := Itens.kg(it_g) - (Itens.kg("espeto") if esp else 0.0)
+				var dk := kg
 				if _bag_total() + peso + dk > BAG_MAX:
 					continue
 				peso += dk
+				var r: Array = cl.r
+				var hh: Array = cl.h
+				var no_p: Node3D = _caca.peca_no(uid, id)
+				var sn: float = no_p.global_transform.basis.get_scale().x if no_p else 1.0
+				var forma := {"a": (float(r[2]) - float(r[0])) * sn, "b": (float(r[3]) - float(r[1])) * sn, "h": (float(hh[1]) - float(hh[0])) * sn,
+					"kg": kg, "osso": bool(cl.osso), "sem": int(ci) * 7919 + absi(hash(uid)) % 1000}
 				if esp:
 					espetos += 1
+					formas_e.append(forma)
 				else:
 					assar += 1
+					formas_a.append(forma)
 				levou.append(ci)
 				continue
 			# pequenos: na vasilha (enche uma, passa para a próxima)
@@ -12434,11 +12491,12 @@ func _mc_pegar() -> void:
 		if usadas > 0:
 			remove_item("vasilha_barro", usadas)
 			add_item("vasilha_carne", usadas)
-		if assar > 0:
-			add_item("carne_assar", assar)
+		for fa in formas_a:
+			_carne_add("carne_assar", fa)
 		if espetos > 0:
 			remove_item("espeto", espetos)
-			add_item("espeto_carne", espetos)
+			for fe in formas_e:
+				_carne_add("espeto_carne", fe)
 		if sujos > 0.0:
 			add_item("carne_suja", maxi(1, roundi(sujos)))
 		_update_inventory()
@@ -15149,9 +15207,9 @@ func _fogueira_pick(i: int, acao: String) -> void:
 		"assar":
 			if item_qtd("espeto_carne") <= 0 or (_fogos.items[i] as Dictionary).has("assa"):
 				return
-			remove_item("espeto_carne", 1)
+			var forma := _carne_tira("espeto_carne")
 			_update_inventory()
-			(_fogos.items[i] as Dictionary)["assa"] = {"l": [0.0, 0.0], "baixo": 0}
+			(_fogos.items[i] as Dictionary)["assa"] = {"l": [0.0, 0.0], "baixo": 0, "f": forma}
 			_face_to(c)
 			Sons.play_at(self, "baque", c + Vector3.UP * 0.5, -14.0, 1.3)
 		"virar_espeto":
@@ -15171,13 +15229,18 @@ func _fogueira_pick(i: int, acao: String) -> void:
 				item = "carne_queimada"
 			elif minf(float(ls[0]), float(ls[1])) >= 1.0:
 				item = "carne_assada"
-			var kg_tot := Itens.kg(item) + (Itens.kg("espeto") if item != "espeto_carne" else 0.0)
+			var forma2: Dictionary = (fo2.assa as Dictionary).get("f", _carne_padrao())
+			var kg_tot := Itens.kg(item) + Itens.kg("espeto")
+			if item == "espeto_carne":
+				kg_tot = float(forma2.get("kg", 2.0)) + Itens.kg("espeto")
 			if _bag_total() + kg_tot > BAG_MAX:
 				return
 			fo2.erase("assa")
 			# a carne assada e o espeto vão separados (o espeto serve de novo)
-			add_item(item, 1)
-			if item != "espeto_carne":
+			if item == "espeto_carne":
+				_carne_add("espeto_carne", forma2)
+			else:
+				add_item(item, 1)
 				add_item("espeto", 1)
 			_update_inventory()
 			_face_to(c)
@@ -17643,7 +17706,7 @@ func _assar_tick(delta: float) -> void:
 					(a.l as Array)[s2] = snappedf(float(lv[s2]), 0.02)   # (para os outros celulares, de pouco em pouco)
 		var no: Node3D = _assa_nos.get(i, null)
 		if no == null or not is_instance_valid(no):
-			no = _espeto_no()
+			no = _espeto_no(a.get("f", {}))
 			add_child(no)
 			_assa_nos[i] = no
 			no.global_position = _fogos.center(i)
@@ -17729,15 +17792,15 @@ func espetar() -> String:
 		return ""
 	if item_qtd("espeto") <= 0:
 		return "Precisa de um espeto (faça com uma vareta e a faca)."
-	remove_item("carne_assar", 1)
+	var f := _carne_tira("carne_assar")
 	remove_item("espeto", 1)
-	add_item("espeto_carne", 1)
+	_carne_add("espeto_carne", f)
 	_update_inventory()
 	return "A carne está no espeto. Leve até uma fogueira acesa."
 
 
 ## O espeto: duas forquilhas fincadas dos lados do fogo, a vara atravessada e a carne.
-func _espeto_no() -> Node3D:
+func _espeto_no(forma: Dictionary = {}) -> Node3D:
 	var root := Node3D.new()
 	var madeira := StandardMaterial3D.new()
 	madeira.albedo_color = Color(0.36, 0.25, 0.15)
@@ -17779,20 +17842,24 @@ func _espeto_no() -> Node3D:
 	vara.material_override = madeira
 	vara.rotation.z = PI * 0.5
 	giro.add_child(vara)
+	# o mesmo pedaço cortado na mesa (o bloco, do tamanho dele, com o osso se tinha),
+	# atravessado pelo espeto no comprido
 	var carne := MeshInstance3D.new()
 	carne.name = "carne"
-	var sm := SphereMesh.new()
-	sm.radius = 0.5
-	sm.height = 1.0
-	sm.radial_segments = 12
-	sm.rings = 8
-	carne.mesh = sm
-	carne.scale = Vector3(0.26, 0.15, 0.17)
+	var fa := float(forma.get("a", 0.22))
+	var fb := float(forma.get("b", 0.17))
+	var fh := float(forma.get("h", 0.11))
+	var comp := maxf(fa, fb)
+	var larg := minf(fa, fb)
+	var stc := SurfaceTool.new()
+	stc.begin(Mesh.PRIMITIVE_TRIANGLES)
+	Caca._bloco(stc, Vector3(-comp * 0.5, -fh * 0.5, -larg * 0.5), Vector3(comp, 0, 0), Vector3(0, 0, larg), Vector3(0, fh, 0), bool(forma.get("osso", false)), int(forma.get("sem", 7)))
+	carne.mesh = stc.commit()
 	if _assa_sh == null:
 		_assa_sh = Shader.new()
 		_assa_sh.code = """
 shader_type spatial;
-render_mode diffuse_burley, specular_schlick_ggx;
+render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 uniform float p0 = 0.0;
 uniform float p1 = 0.0;
 varying vec3 lp;
@@ -17802,21 +17869,31 @@ float ruido(vec3 q) {
 	return mix(mix(mix(hh(i), hh(i + vec3(1,0,0)), f.x), mix(hh(i + vec3(0,1,0)), hh(i + vec3(1,1,0)), f.x), f.y),
 		mix(mix(hh(i + vec3(0,0,1)), hh(i + vec3(1,0,1)), f.x), mix(hh(i + vec3(0,1,1)), hh(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
+varying float osso;
+varying float face;
 void vertex() {
 	lp = VERTEX;
-	// o pedaço não é uma bola: calombos da carne
-	VERTEX *= 1.0 + (ruido(VERTEX * 6.0) - 0.5) * 0.25;
+	osso = UV2.x;
+	face = UV.y;
 }
 void fragment() {
-	float n = ruido(lp * 14.0);
-	float g = smoothstep(0.65, 0.8, ruido(lp * 30.0 + 4.0));
-	vec3 crua = mix(vec3(0.45, 0.06, 0.05), vec3(0.6, 0.1, 0.08), n);
-	crua = mix(crua, vec3(0.88, 0.8, 0.66), g * 0.5);
+	float n = ruido(lp * 40.0);
+	float g = smoothstep(0.8, 0.9, ruido(lp * 90.0 + 3.0) * 0.7 + ruido(lp * 25.0) * 0.3);
+	float fio = abs(sin(lp.x * 160.0 + lp.z * 60.0 + n * 5.0));
+	vec3 crua = mix(vec3(0.5, 0.05, 0.04), vec3(0.72, 0.1, 0.07), n * 0.6 + fio * 0.3);
+	crua = mix(crua, vec3(0.92, 0.86, 0.74), g * 0.7);
+	if (face > 0.5) {
+		crua = mix(crua, vec3(0.9, 0.82, 0.66), 0.6 * smoothstep(0.62, 0.75, n));
+	}
+	if (osso > 0.5 && face < 0.5) {
+		float b = smoothstep(0.62, 0.66, ruido(lp * 18.0 + 7.0));
+		crua = mix(crua, vec3(0.92, 0.86, 0.76), b);
+	}
 	vec3 assada = mix(vec3(0.42, 0.22, 0.09), vec3(0.58, 0.34, 0.14), n);
 	assada = mix(assada, vec3(0.75, 0.55, 0.25), g * 0.6);
 	vec3 queim = mix(vec3(0.05, 0.035, 0.025), vec3(0.16, 0.08, 0.04), n);
 	// cada metade (de um lado do espeto) assa do seu jeito
-	float p = mix(p1, p0, smoothstep(-0.05, 0.05, lp.y));
+	float p = mix(p1, p0, smoothstep(-0.01, 0.01, lp.y));
 	vec3 c = mix(crua, assada, smoothstep(0.1, 1.0, p));
 	c = mix(c, queim, smoothstep(1.3, 1.75, p));
 	ALBEDO = c;
