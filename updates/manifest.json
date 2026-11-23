@@ -1,9 +1,9 @@
 {
-  "version": 228,
-  "file": "update_228.zip",
-  "size": 5910108,
-  "sha256": "7f41636f5b9ccec64c64d33b4b825603fcc54726240786850e39d9cd0caf1aa0",
+  "version": 229,
+  "file": "update_229.zip",
+  "size": 6096715,
+  "sha256": "d29f1030b75801618c444ab3c45359d978a483c371093c70822fe1dc3b23fb73",
   "min_build": 1,
-  "notes": "Ícone novo do coco aberto (massa de coco)",
+  "notes": "Anzóis (forquilha e osso), isca, sons realistas do peixe e galope das vacas",
   "date": "2026-11-23"
 }
