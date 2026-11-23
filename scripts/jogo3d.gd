@@ -9330,7 +9330,7 @@ func _proj_tick() -> void:
 			if _water_level.size() == MundoSim.W * MundoSim.H and cell.x >= 0 and cell.y >= 0 and cell.x < MundoSim.W and cell.y < MundoSim.H:
 				if _water_level[cell.y * MundoSim.W + cell.x] > height_at(w.x, w.z) + 0.02:
 					why = "Tem água embaixo."
-	if hs.max() - hs.min() > 0.45:
+	if hs.max() - hs.min() > (2.5 if str(_proj.tipo) == "tripe" else 0.45):
 		why = "O chão é torto demais aqui (procure um lugar mais plano)."
 	if _maq.planta_near(c, 4.0) >= 0:
 		why = "Muito perto de outra planta."
@@ -12428,7 +12428,7 @@ func _arco_soltar() -> void:
 func _flecha_tick(delta: float) -> void:
 	var com := _mao == "arco" and _morto < 0.0 and not _swim and _carry.is_empty()
 	if _tiro_btn:
-		_tiro_btn.visible = com and item_qtd("flecha") > 0
+		_tiro_btn.visible = com and item_qtd("flecha") > 0 and _proj.is_empty() and _bld.is_empty()
 		if com and _chop_btn:
 			_chop_btn.visible = false
 	if not com:

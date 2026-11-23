@@ -490,6 +490,17 @@ func add_planta(tipo: String, x: float, z: float, yaw: float) -> void:
 		sob.append(0.0)
 	plantas.append({"tipo": tipo, "x": x, "y": _jogo.surface_at(x, z), "z": z, "yaw": yaw, "pecas": pcs, "pinos": am,
 		"sobra": sob, "lamina": false, "tora": {}, "prog": 0.0, "saida": [], "versao": int(t.get("versao", 1))})
+	if tipo == "tripe":
+		# o chão em cada pé e na estaca (o tripé fica em pé no chão torto)
+		var q: Dictionary = plantas[plantas.size() - 1]
+		var xf := xform(plantas.size() - 1)
+		var dy := []
+		for a in TRI_ANG:
+			var w := xf * Vector3(cos(float(a)) * TRI_R, 0, sin(float(a)) * TRI_R)
+			dy.append(snappedf(float(_jogo.surface_at(w.x, w.z)) - float(q.y), 0.01))
+		var we := xf * Vector3(TRI_ESTACA.x, 0, TRI_ESTACA.z)
+		dy.append(snappedf(float(_jogo.surface_at(we.x, we.z)) - float(q.y), 0.01))
+		q["tri_dy"] = dy
 	_rebuild()
 
 
@@ -529,6 +540,28 @@ static func slot_pos(pc: Array) -> Vector3:
 		var a: float = TRI_ANG[i]
 		return Vector3(cos(a) * TRI_R, -0.05, sin(a) * TRI_R) + tri_dir(i) * float(pc[1]) * 0.5
 	return pc[2]
+
+
+## A peça si da planta mi: o tamanho (L), o meio (pos) e a direção (b). No tripé cada
+## perna vai do chão dela (mais baixo: perna mais comprida) até o cruzamento lá em cima.
+func peca_geo(mi: int, si: int) -> Dictionary:
+	var p: Dictionary = plantas[mi]
+	var pc: Array = TIPOS[p.tipo].pecas[si]
+	var d := str(pc[3])
+	var dy: Array = p.get("tri_dy", [])
+	if d.begins_with("tri") and dy.size() >= 4:
+		var i := int(d.substr(3))
+		var a: float = TRI_ANG[i]
+		var F := Vector3(cos(a) * TRI_R, float(dy[i]) - 0.05, sin(a) * TRI_R)
+		var C := Vector3(cos(a) * 0.075, TRI_H, sin(a) * 0.075)
+		var u := (C - F).normalized()
+		var L := snappedf(F.distance_to(C) + 0.3, 0.05)
+		var up := Vector3.UP - u * u.y
+		var zz := u.cross(up.normalized()).normalized()
+		return {"L": L, "pos": F + u * L * 0.5, "b": Basis(u, zz.cross(u), zz)}
+	if str(p.tipo) == "tripe" and si == 3 and dy.size() >= 4:
+		return {"L": float(pc[1]), "pos": (pc[2] as Vector3) + Vector3(0, float(dy[3]), 0), "b": slot_basis(d)}
+	return {"L": float(pc[1]), "pos": slot_pos(pc), "b": slot_basis(d)}
 
 
 ## A madeira que a peça da planta usa (no tamanho dela).
@@ -625,21 +658,22 @@ func slot_for(mi: int, fl: Dictionary, pos: Vector3) -> Dictionary:
 		if str(pc[0]) != kind:
 			continue
 		any_kind = true
-		if L < float(pc[1]) - 0.02:
-			short = maxf(short, float(pc[1]))
+		var pLs := float(peca_geo(mi, i).L)
+		if L < pLs - 0.02:
+			short = maxf(short, pLs)
 			continue
 		if kind == "tora" and r > float(pc[4]) * 2.6:
 			continue                   # tora grossa demais para essa peça
 		if pc.size() > 5 and r < float(pc[5]):
 			thin = float(pc[5]) if thin <= 0.0 else minf(thin, float(pc[5]))
 			continue                   # fina demais (a rodela da mesa e o volante são de tora grossa)
-		var w := xf * slot_pos(pc)
+		var w: Vector3 = xf * (peca_geo(mi, i).pos as Vector3)
 		var d := Vector2(w.x - pos.x, w.z - pos.z).length()
 		if d < bd:
 			bd = d
 			best = i
 	if best >= 0:
-		return {"i": best, "sobra": maxf(0.0, L - float(t.pecas[best][1]))}
+		return {"i": best, "sobra": maxf(0.0, L - float(peca_geo(mi, best).L))}
 	if not any_kind:
 		return {"i": -1, "why": "A planta não precisa de mais %s." % NOMES.get(kind, kind)}
 	if thin > 0.0:
@@ -692,10 +726,11 @@ func piece_log(mi: int, si: int, Lw: float) -> Dictionary:
 func sobra_info(mi: int, si: int) -> Dictionary:
 	var t: Dictionary = TIPOS[plantas[mi].tipo]
 	var pc: Array = t.pecas[si]
-	var b := slot_basis(str(pc[3]))
-	var L := float(pc[1])
+	var geo := peca_geo(mi, si)
+	var b: Basis = geo.b
+	var L := float(geo.L)
 	var e := float(plantas[mi].sobra[si])
-	var c: Vector3 = slot_pos(pc)
+	var c: Vector3 = geo.pos
 	var xf := xform(mi)
 	var cut := c + b.x * (L * 0.5)
 	return {"pos": xf * cut, "mid": xf * (cut + b.x * e * 0.5), "deitada": str(pc[3]) != "y", "len": e}
@@ -1193,18 +1228,21 @@ func _rebuild() -> void:
 		var nd := {"root": root}
 		for si in (t.pecas as Array).size():
 			var pc: Array = t.pecas[si]
-			var b := slot_basis(str(pc[3]))
+			var geo := peca_geo(mi, si)
+			var b: Basis = geo.b
+			var pL := float(geo.L)
+			var ppos: Vector3 = geo.pos
 			if bool(p.pecas[si]):
 				var sob: Array = p.get("sobra", [])
 				var e: float = float(sob[si]) if si < sob.size() else 0.0
-				var wfl := piece_log(mi, si, float(pc[1]) + e)
+				var wfl := piece_log(mi, si, pL + e)
 				var n: Node3D = _arv.free_log_node(wfl)
 				root.add_child(n)
 				# a sobra fica para fora numa ponta
 				var bb := b
 				if str(pc[0]) == "tabua":
 					bb = b * Basis(Vector3.RIGHT, PI)      # a tábua virada: a face rachada (reta) para cima
-				n.transform = Transform3D(bb, slot_pos(pc) + b.x * e * 0.5)
+				n.transform = Transform3D(bb, ppos + b.x * e * 0.5)
 				if t.has("carrinho") and str(pc[0]) == "tabua":
 					# a tábua aparelhada na largura e na grossura da peça: fica rente à outra
 					var ex0: Vector2 = _arv._sec_ext(slot_log(pc))
@@ -1225,17 +1263,17 @@ func _rebuild() -> void:
 					holes.append([inv * (sg[0] as Vector3), inv * (sg[1] as Vector3), 0.022])
 				var ex: Vector2 = _arv._sec_ext(wfl)
 				var rr: float = _arv.free_log_max_radius(wfl)
-				Furo.apply(n, holes, Vector3((float(pc[1]) + e) * 0.5, ex.x * rr, ex.y * rr))
+				Furo.apply(n, holes, Vector3((pL + e) * 0.5, ex.x * rr, ex.y * rr))
 			else:
 				var mi2 := MeshInstance3D.new()
 				var bm := BoxMesh.new()
 				var r := float(pc[4])
-				bm.size = Vector3(float(pc[1]), r * (2.0 if str(pc[0]) == "tora" else (1.0 if str(pc[0]) == "meia" else 0.5)), r * 2.0)
+				bm.size = Vector3(pL, r * (2.0 if str(pc[0]) == "tora" else (1.0 if str(pc[0]) == "meia" else 0.5)), r * 2.0)
 				mi2.mesh = bm
 				mi2.material_override = _ghost_mat
 				mi2.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				root.add_child(mi2)
-				mi2.transform = Transform3D(b, slot_pos(pc))
+				mi2.transform = Transform3D(b, ppos)
 		# juntas: com o pino batido, ou esperando o pino (bolinha amarela)
 		for ji in (t.pinos as Array).size():
 			var at: Vector3 = t.pinos[ji][1]
@@ -1705,7 +1743,8 @@ func tri_roldana(mi: int) -> Vector3:
 
 ## A cabeça da estaca no mundo.
 func tri_estaca(mi: int) -> Vector3:
-	return xform(mi) * TRI_ESTACA
+	var dy: Array = plantas[mi].get("tri_dy", [])
+	return xform(mi) * (TRI_ESTACA + Vector3(0, float(dy[3]) if dy.size() >= 4 else 0.0, 0))
 
 
 ## O lado da roldana para onde vai a estaca (o lado de puxar), no mundo.
@@ -1778,6 +1817,8 @@ func _draw_tripe(mi: int, root: Node3D, nd: Dictionary) -> void:
 			lf.mesh = _forro_mesh
 			lf.material_override = fm
 			var c := Vector3(cos(a), 0, sin(a)) * 0.95
+			var wc := xform(mi) * c
+			c.y = float(_jogo.surface_at(wc.x, wc.z)) - float(p.y)
 			lf.transform = Transform3D(Basis(Vector3.UP, -a).scaled(Vector3(0.62, 1.0, 1.15)), c + Vector3.UP * (0.03 + i * 0.004))
 			lf.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			root.add_child(lf)
