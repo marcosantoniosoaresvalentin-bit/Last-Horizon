@@ -1,4 +1,5 @@
 extends Node3D
+const Sons := preload("res://scripts/sons.gd")
 ## Vacas selvagens (gado zebu asselvajado) e o pasto que elas comem.
 ##
 ## O PASTO
@@ -472,6 +473,7 @@ func _spawn(v: Dictionary) -> void:
 func _step(v: Dictionary, a: Dictionary, pp: Vector3, h: float, delta: float) -> void:
 	var node: Node3D = a.node
 	a.t = float(a.t) + delta
+	_voz(v, a, delta)
 	if int(v.id) == laco_id:
 		return                               # laçada: quem mexe nela é o laço
 	if _jogo._mp_client():
@@ -625,6 +627,53 @@ func _morder(v: Dictionary, a: Dictionary) -> void:
 			capins.comer(ci, true)
 
 
+## A voz: de vez em quando muge (a vaca), berra (o touro, grave e rouco) ou chama (o
+## bezerro, agudo). O bezerro longe da mãe chama sem parar e ela responde; a laçada berra
+## e muge muito; assustada, bufa. Cada uma com a voz um pouco diferente (o tom).
+func _voz(v: Dictionary, a: Dictionary, delta: float) -> void:
+	var node: Node3D = a.node
+	if not is_instance_valid(node):
+		return
+	var ag := age(v)
+	var tipo := "vaca_mugido"
+	if ag < ADULTA / 2:
+		tipo = "bezerro"
+	elif str(v.sexo) == "m" and ag >= ADULTA:
+		tipo = "touro_berro"
+	var tom := 0.93 + float(absi(hash(int(v.id))) % 100) / 100.0 * 0.14
+	var cab: Vector3 = node.global_position + Vector3.UP * 1.1 * float(a.get("s", 1.0))
+	# o bufo de susto
+	if a.has("bufo"):
+		a.bufo = float(a.bufo) - delta
+		if float(a.bufo) <= 0.0:
+			a.erase("bufo")
+			Sons.play_at(_jogo, "vaca_bufo", cab, 0.0, tom, 60.0, 6.0)
+	if not a.has("voz"):
+		a["voz"] = _rng.randf_range(10.0, 120.0)
+	a.voz = float(a.voz) - delta
+	if float(a.voz) > 0.0:
+		return
+	var h: float = _jogo.sim.hour() if _jogo and _jogo.sim else 12.0
+	var noite := h < 5.5 or h > 19.5
+	var prox := _rng.randf_range(60.0, 220.0) if tipo != "bezerro" else _rng.randf_range(30.0, 110.0)
+	if noite:
+		prox *= 2.5
+	# o bezerro longe da mãe: chama e ela responde
+	var mae := _find(int(v.mae)) if int(v.mae) >= 0 else {}
+	if tipo == "bezerro" and not mae.is_empty():
+		var dm := Vector2(float(mae.x) - float(v.x), float(mae.z) - float(v.z)).length()
+		if dm > 12.0:
+			prox = _rng.randf_range(5.0, 14.0)
+			if _agents.has(int(mae.id)):
+				_agents[int(mae.id)]["voz"] = _rng.randf_range(1.0, 3.0)
+	if int(v.id) == laco_id:
+		prox = _rng.randf_range(3.0, 8.0)          # laçada: berra muito
+	a.voz = prox
+	if str(a.modo) == "deitar" and _rng.randf() < 0.7:
+		return                                     # deitada quase não muge
+	Sons.play_at(_jogo, tipo, cab, 0.0, tom, 260.0 if tipo != "bezerro" else 160.0, 14.0 if tipo != "bezerro" else 9.0)
+
+
 func _assusta(reb: int, pp: Vector3) -> void:
 	for v in vacas:
 		if int(v.reb) != reb or not _agents.has(int(v.id)):
@@ -636,6 +685,8 @@ func _assusta(reb: int, pp: Vector3) -> void:
 		var away := Vector3(pos.x - pp.x, 0, pos.z - pp.z)
 		if away.length() > 35.0:
 			continue
+		if str(a.modo) != "fugir" and _rng.randf() < 0.4:
+			a["bufo"] = _rng.randf_range(0.05, 0.6)       # um bufo de susto (logo)
 		away = away.normalized() if away.length() > 0.01 else Vector3(1, 0, 0)
 		var lado := Vector3(-away.z, 0, away.x) * _rng.randf_range(-0.4, 0.4)
 		a.alvo = pos + (away + lado).normalized() * _rng.randf_range(20.0, 30.0)

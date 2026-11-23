@@ -101,6 +101,8 @@ func update(delta: float) -> void:
 			_correr(nd, delta)
 		elif nd.has("cai"):
 			_cair(nd, delta)
+		elif nd.has("desliza"):
+			_desliza(nd, delta)
 	_sangue_tick(delta)
 	_caindo_tick(delta)
 	_pecas_tick()
@@ -487,6 +489,12 @@ func _cair(nd: Dictionary, delta: float) -> void:
 		n.global_transform = Transform3D(de.basis.slerp(deitado, smoothstep(0.0, 1.0, k)), pos)
 	if k >= 1.0:
 		nd.erase("cai")
+		# deitado: o corpo acompanha o chão (morro) e, se for íngreme, escorrega
+		if esp != "cobra":
+			n.set_meta("base_b", n.global_transform.basis)
+			_acomoda(n)
+			nd["desliza"] = {"v": 0.0, "t": 0.0, "andou": 0.0}
+			c["acomodada"] = true
 		c.xf = _xf_json(n.global_transform)
 		for fo in _fontes:
 			if is_instance_valid(fo.pai) and (fo.pai == n or n.is_ancestor_of(fo.pai)):
@@ -3503,6 +3511,12 @@ func _monta(c: Dictionary) -> Node3D:
 	var xf: Array = c.get("xf", [])
 	if xf.size() >= 12:
 		n.global_transform = _xf_de(xf)
+		# (as de antes, salvas retas: deita no chão agora)
+		if esp != "cobra" and not bool(c.get("acomodada", false)):
+			n.set_meta("base_b", n.global_transform.basis)
+			_acomoda(n)
+			c["acomodada"] = true
+			c.xf = _xf_json(n.global_transform)
 	for w in c.get("feridas", []):
 		var pai := _prender(n, Vector3.ZERO, str(w[6])) if w.size() > 6 and str(w[6]) != "" else n
 		var ponto: Vector3 = pai.global_transform * Vector3(w[0], w[1], w[2])
@@ -4197,4 +4211,144 @@ func morte_natural(esp: String, id: int, params: Dictionary, pos: Vector3, yaw: 
 	carcacas.append({"uid": uid, "esp": esp, "id": id, "p": params, "dia": int(_jogo.sim.elapsed_days()), "t0": agora_h(),
 		"feridas": [], "xf": _xf_json(xf), "natural": true})
 	_rebuild()
+
+
+# ================== O CORPO NO CHÃO (morro) ==================
+# Morto, o corpo não fica reto no ar: deita acompanhando o chão (inclina com o morro, todo
+# encostado, nem flutuando nem enterrado). Num morro íngreme ele escorrega morro abaixo
+# até parar onde o chão fica mais manso (ou o atrito segura).
+
+## Pontos da pele do bicho (no espaço do nó), uma vez: a malha na pose de morto.
+func _pts_corpo(n: Node3D) -> Array:
+	if n.has_meta("pts_corpo"):
+		return n.get_meta("pts_corpo")
+	var out := []
+	var inv := n.global_transform.affine_inverse()
+	for m in n.find_children("*", "MeshInstance3D", true, false):
+		var mi := m as MeshInstance3D
+		if mi.mesh == null or not mi.visible or mi.has_meta("ossada"):
+			continue
+		var sk: Skeleton3D = null
+		if mi.skin != null and mi.get_node_or_null(mi.skeleton) is Skeleton3D:
+			sk = mi.get_node(mi.skeleton) as Skeleton3D
+		var mats := []
+		if sk:
+			for b in mi.skin.get_bind_count():
+				var bi := mi.skin.get_bind_bone(b)
+				if bi < 0:
+					bi = sk.find_bone(mi.skin.get_bind_name(b))
+				mats.append(sk.global_transform * sk.get_bone_global_pose(maxi(bi, 0)) * mi.skin.get_bind_pose(b))
+		for si in mi.mesh.get_surface_count():
+			var a: Array = mi.mesh.surface_get_arrays(si)
+			var vs: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+			var bo = a[Mesh.ARRAY_BONES]
+			var we = a[Mesh.ARRAY_WEIGHTS]
+			var nb: int = (bo as PackedInt32Array).size() / maxi(vs.size(), 1) if bo != null else 0
+			var passo := maxi(1, vs.size() / 160)
+			for i in range(0, vs.size(), passo):
+				var w := Vector3.ZERO
+				if sk and nb > 0:
+					for j in nb:
+						var wt: float = (we as PackedFloat32Array)[i * nb + j]
+						if wt > 0.0:
+							w += ((mats[(bo as PackedInt32Array)[i * nb + j]] as Transform3D) * vs[i]) * wt
+				else:
+					w = mi.global_transform * vs[i]
+				out.append(inv * w)
+	n.set_meta("pts_corpo", out)
+	return out
+
+
+## Deita o corpo no chão: inclina com o plano do chão embaixo dele e encosta.
+func _acomoda(n: Node3D) -> void:
+	var loc := _pts_corpo(n)
+	if loc.size() < 4:
+		return
+	var base: Basis = n.get_meta("base_b") if n.has_meta("base_b") else n.global_transform.basis
+	var org := n.global_transform.origin
+	var xf0 := Transform3D(base, org)
+	# o plano do chão embaixo do corpo (mínimos quadrados: h = a x + b z + d)
+	var cen := Vector3.ZERO
+	var ws := []
+	for q in loc:
+		var w: Vector3 = xf0 * (q as Vector3)
+		ws.append(w)
+		cen += w
+	cen /= ws.size()
+	var sxx := 0.0
+	var szz := 0.0
+	var sxz := 0.0
+	var sxh := 0.0
+	var szh := 0.0
+	var hm := 0.0
+	var hs := []
+	for w in ws:
+		var h: float = _jogo.ground_at((w as Vector3).x, (w as Vector3).z)
+		hs.append(h)
+		hm += h
+	hm /= ws.size()
+	for i in ws.size():
+		var dx: float = (ws[i] as Vector3).x - cen.x
+		var dz: float = (ws[i] as Vector3).z - cen.z
+		var dh: float = float(hs[i]) - hm
+		sxx += dx * dx
+		szz += dz * dz
+		sxz += dx * dz
+		sxh += dx * dh
+		szh += dz * dh
+	var det := sxx * szz - sxz * sxz
+	var ga := 0.0
+	var gb := 0.0
+	if absf(det) > 1e-6:
+		ga = (sxh * szz - szh * sxz) / det
+		gb = (szh * sxx - sxh * sxz) / det
+	var nrm := Vector3(-ga, 1.0, -gb).normalized()
+	# gira o corpo (em volta do meio dele) para o chão dele ficar no plano
+	var rot := Basis(Quaternion(Vector3.UP, nrm))
+	var nb := rot * base
+	var no := cen + rot * (org - cen)
+	# encosta: o ponto mais baixo (em relação ao chão de cada um) no chão; um pouco de
+	# folga para dentro (o corpo pesado afunda no capim)
+	var folgas := []
+	for q in loc:
+		var w2: Vector3 = Transform3D(nb, no) * (q as Vector3)
+		folgas.append(w2.y - float(_jogo.ground_at(w2.x, w2.z)))
+	folgas.sort()
+	var k := mini(2, folgas.size() - 1)
+	no.y -= float(folgas[k]) + 0.01
+	n.global_transform = Transform3D(nb, no)
+
+
+## No morro íngreme: escorrega morro abaixo (arrastando), devagar até parar.
+func _desliza(nd: Dictionary, delta: float) -> void:
+	var n: Node3D = nd.node
+	var d: Dictionary = nd.desliza
+	if not is_instance_valid(n):
+		nd.erase("desliza")
+		return
+	d.t = float(d.t) + delta
+	var p := n.global_position
+	var e := 0.6
+	var gx: float = (float(_jogo.ground_at(p.x + e, p.z)) - float(_jogo.ground_at(p.x - e, p.z))) / (2.0 * e)
+	var gz: float = (float(_jogo.ground_at(p.x, p.z + e)) - float(_jogo.ground_at(p.x, p.z - e))) / (2.0 * e)
+	var s := Vector2(gx, gz).length()
+	var ang := atan(s)
+	var mu := 0.55
+	var a := G * (sin(ang) - mu * cos(ang))
+	var v := float(d.v)
+	if a > 0.0:
+		v += a * delta
+	else:
+		v = maxf(0.0, v + a * delta)
+	v = minf(v, 4.0)
+	d.v = v
+	if v > 0.01 and s > 0.01:
+		var dir := Vector3(-gx, 0, -gz) / s
+		var mov := dir * v * delta
+		n.global_position = p + mov
+		d.andou = float(d.andou) + mov.length()
+		_acomoda(n)
+	if (v <= 0.01 and float(d.t) > 0.3) or float(d.andou) > 8.0 or float(d.t) > 8.0:
+		nd.erase("desliza")
+		(nd.c as Dictionary).xf = _xf_json(n.global_transform)
 
