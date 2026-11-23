@@ -1,9 +1,9 @@
 {
-  "version": 231,
-  "file": "update_231.zip",
-  "size": 6103263,
-  "sha256": "cb35d53b756c3ae600f153e4e597ef21c4f8ff9efd7b3c9d718b4c03620ce84d",
+  "version": 232,
+  "file": "update_232.zip",
+  "size": 6104238,
+  "sha256": "500ab1f18aabc4f082133d93d3d6b1bed5e1923f1a4be8956d8290720abb5dfc",
   "min_build": 1,
-  "notes": "Domar vacas: amarrar, capim verde, tratar até ficar mansa e criar no curral",
+  "notes": "Modo de teste: avançar dias, meses e anos pelo Calendário",
   "date": "2026-11-23"
 }
