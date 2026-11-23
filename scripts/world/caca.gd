@@ -1234,6 +1234,8 @@ func _peca_monta(uid: String, pc: Dictionary) -> Node3D:
 	if (pc.get("xf", []) as Array).size() >= 12:
 		no.global_transform = _xf_de(pc.xf)
 	_peca_lugar(uid, pc)
+	if pc.has("grade"):
+		_grade_visual(uid, pc)
 	return no
 
 
@@ -1409,12 +1411,14 @@ func _dentro_meia(uid: String, lado: String, no: Node3D) -> Array:
 	var mi: MeshInstance3D = rf.mi
 	var sg := 1.0 if lado == "e" else -1.0
 	var out := []
+	var pf := _perfil_pose(mi, no.get_meta("sk"), float(rf.y_rabo), float(rf.y_pescoco))
 	for iu in 32:
-		var u := lerpf(-0.25, 1.0, (float(iu) + 0.5) / 32.0)
+		var u := lerpf(0.0, 0.97, (float(iu) + 0.5) / 32.0)
 		var y := lerpf(float(rf.y_rabo), float(rf.y_pescoco), u)
-		var zb := _barriga_z(mi, y)
-		var zt := _costas_z(mi, y)
-		var wx := _meia_largura(mi, y)
+		var pe := _perfil_em(pf, u)
+		var zt := float(pe[0])
+		var zb := float(pe[1])
+		var wx := float(pe[2])
 		var zc := (zb + zt) * 0.5
 		var hz := maxf((zt - zb) * 0.5, 1e-4)
 		for ix in 6:
@@ -1777,6 +1781,11 @@ uniform float zt_u[24];             // as costas e a barriga (z na malha) de u =
 uniform float zb_u[24];
 uniform vec4 pl[12];                // cortes da mesa: fica onde dot(n, p) >= w
 uniform int n_pl = 0;
+uniform vec4 g_a;                   // a grade de corte da mesa: o quadradinho (a, b) do ponto
+uniform vec4 g_b;
+uniform float g_nx = 0.0;
+uniform float g_nz = 0.0;
+uniform float g_r[96];              // 1: esse quadradinho já foi cortado (saiu da peça)
 varying vec3 p;
 varying vec3 nn;
 varying vec3 cam_l;
@@ -1935,6 +1944,14 @@ void fragment() {
 	}
 	for (int i = 0; i < 12; i++) {
 		if (i < n_pl && dot(pl[i].xyz, p) < pl[i].w) { discard; }
+	}
+	if (g_nx > 0.5) {
+		float ga = floor(dot(p, g_a.xyz) + g_a.w);
+		float gb = floor(dot(p, g_b.xyz) + g_b.w);
+		if (ga >= 0.0 && ga < g_nx && gb >= 0.0 && gb < g_nz) {
+			int gk = int(gb * g_nx + ga);
+			if (gk < 96 && g_r[gk] > 0.5) { discard; }
+		}
 	}
 	vec3 q = p * esc;
 	float n1 = ruido(q * 11.0);
@@ -3185,6 +3202,18 @@ static func malha_cab(mi: MeshInstance3D, sk: Skeleton3D) -> void:
 ## (24 pontos): [zt, zb]. É por elas que os ossos do meio são desenhados no lugar certo.
 static var _pf_cache := {}
 
+## O perfil (na pose de agora) no u: [zt, zb, meia largura].
+static func _perfil_em(pf: Array, u: float) -> Array:
+	var f := clampf((u + 0.25) / 1.25, 0.0, 1.0) * 23.0
+	var i := mini(int(f), 22)
+	var t := f - i
+	var out := []
+	for k in 3:
+		var arr: PackedFloat32Array = pf[k]
+		out.append(lerpf(arr[i], arr[i + 1], t))
+	return out
+
+
 ## Interpola a altura no u (entre os pontos vizinhos; o mais alto/baixo perto dele).
 static func _interp_u(l: Array, u: float, topo: bool) -> float:
 	if l.is_empty():
@@ -3231,6 +3260,7 @@ static func _perfil_pose(mi: MeshInstance3D, sk: Skeleton3D, y_rabo: float, y_pe
 			bi = sk.find_bone(skin.get_bind_name(b))
 		mats.append(sk.get_bone_global_pose(bi) * skin.get_bind_pose(b))
 	var pts := []
+	var todos := []
 	for si in mini(2, mi.mesh.get_surface_count()):
 		var a: Array = mi.mesh.surface_get_arrays(si)
 		var vs: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
@@ -3246,6 +3276,7 @@ static func _perfil_pose(mi: MeshInstance3D, sk: Skeleton3D, y_rabo: float, y_pe
 				if w > 0.0:
 					v += ((mats[bo[i * nb + j]] as Transform3D) * vs[i]) * w
 			pv[i] = v
+			todos.append(v)
 		# onde cada triângulo atravessa o meio (x = 0): o contorno do corpo no corte da espinha
 		var ix: PackedInt32Array = a[Mesh.ARRAY_INDEX] if a[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
 		for t in range(0, ix.size() - 2, 3):
@@ -3277,8 +3308,21 @@ static func _perfil_pose(mi: MeshInstance3D, sk: Skeleton3D, y_rabo: float, y_pe
 		var uk := lerpf(-0.25, 1.0, float(k) / 23.0)
 		zt[k] = _interp_u(cima, uk, true)
 		zb[k] = _interp_u(baixo, uk, false)
-	_pf_cache[key] = [zt, zb]
-	return [zt, zb]
+	# a meia largura (o x mais longe do meio) em cada u, entre as costas e a barriga
+	var wx := PackedFloat32Array()
+	wx.resize(24)
+	for v3 in todos:
+		var vv: Vector3 = v3
+		var u2 := (y_rabo - vv.y) / (y_rabo - y_pes)
+		var k2 := roundi((u2 + 0.25) / 1.25 * 23.0)
+		if k2 < 0 or k2 > 23 or vv.z < zb[k2] - 0.001 or vv.z > zt[k2] + 0.001:
+			continue
+		wx[k2] = maxf(wx[k2], absf(vv.x))
+	for i3 in 24:
+		if wx[i3] <= 0.0:
+			wx[i3] = wx[i3 - 1] if i3 > 0 else 0.008
+	_pf_cache[key] = [zt, zb, wx]
+	return [zt, zb, wx]
 
 
 ## A malha da vaca dentro do nó.
@@ -4351,4 +4395,413 @@ func _desliza(nd: Dictionary, delta: float) -> void:
 	if (v <= 0.01 and float(d.t) > 0.3) or float(d.andou) > 8.0 or float(d.t) > 8.0:
 		nd.erase("desliza")
 		(nd.c as Dictionary).xf = _xf_json(n.global_transform)
+
+
+# ================== A GRADE DE CORTE DA MESA ==================
+# Na mesa, o jogador escolhe o corte: pedaços pequenos (cubos de uns 8 cm, para cozinhar
+# ou fritar) ou grandes (uns 22 cm, para assar). A peça ganha uma grade de quadradinhos
+# (deitada na mesa, cada quadradinho uma coluna de cima a baixo da carne). Cada um é
+# cortado no lugar (a faca e, se tem osso, o machado): sai da peça e vira um pedaço de
+# carne de verdade (um bloco, com a gordura em cima e o osso serrado, se tiver). Um
+# pedaço grande cortado ainda pode ser picado em pequenos.
+# pc.grade = {tipo, A, B, U (eixos no nó), a0, b0, c (lado, no nó), nx, nz,
+#   cel: [{r: [a0, b0, a1, b1], h: [u0, u1], kg, osso, est (0 inteiro, 1 cortado,
+#   2 pego, 3 picado), orig (quadradinho da grade, -1 nos picados), tipo}]}
+
+const GRADE_LADO := {"peq": 0.08, "gde": 0.22}
+const GRADE_MAX := 96
+
+
+static func _v3(a: Array) -> Vector3:
+	return Vector3(float(a[0]), float(a[1]), float(a[2]))
+
+
+static func _a3(v: Vector3) -> Array:
+	return [v.x, v.y, v.z]
+
+
+## Pontos de dentro da peça, bem juntos (para pesar cada quadradinho), na malha.
+func _dentro_denso(uid: String, pc: Dictionary, no: Node3D) -> Array:
+	var rf := _couro_ref(no)
+	var mi: MeshInstance3D = rf.mi
+	var sg := 1.0 if str(pc.lado) == "e" else -1.0
+	var pls: Array = pc.get("pl", [])
+	var out := []
+	var u0 := maxf(float(pc.u0), 0.0)               # (antes do 0 é o rabo e as pernas)
+	var u1 := minf(float(pc.u1), 0.97)
+	var nu := clampi(int((u1 - u0) / 0.008), 4, 160)
+	var m_u: float = mi.global_transform.basis.get_scale().x
+	var pf := _perfil_pose(mi, no.get_meta("sk"), float(rf.y_rabo), float(rf.y_pescoco))
+	for iu in nu:
+		var u := lerpf(u0, u1, (float(iu) + 0.5) / nu)
+		var y := lerpf(float(rf.y_rabo), float(rf.y_pescoco), u)
+		var pe := _perfil_em(pf, u)
+		var zt := float(pe[0])
+		var zb := float(pe[1])
+		var wx := float(pe[2])
+		var zc := (zb + zt) * 0.5
+		var hz := maxf((zt - zb) * 0.5, 1e-4)
+		for ix in 10:
+			var fx := (float(ix) + 0.5) / 10.0
+			for iz in 14:
+				var fz := (float(iz) + 0.5) / 14.0 * 2.0 - 1.0
+				if fx * fx + fz * fz > 1.0:
+					continue
+				var q := Vector3(sg * fx * wx, y, zc + fz * hz)
+				if _no_pl(q, pls):
+					# osso: perto do corte do meio, na espinha (beira das costas), nas
+					# costelas (o peito) e na bacia (a anca)
+					var mx := fx * wx * m_u
+					var dz := (zt - q.z) * m_u
+					var osso := mx < 0.06 and (dz < 0.17 or (u > 0.45 and u < 0.92))
+					if u > -0.08 and u < 0.14 and dz > 0.08 and dz < 0.34 and mx < 0.16:
+						osso = true                   # a bacia
+					if u <= -0.06 and absf(q.z - zc) * m_u < 0.07 and mx < 0.12:
+						osso = true                   # o fêmur, no meio da coxa
+					if u > 0.45 and u < 0.92 and mx < 0.12 and dz > (zt - zb) * m_u * 0.85:
+						osso = true                   # o esterno, embaixo do peito
+					out.append([q, osso])
+	return out
+
+
+## Faz a grade na peça (o tipo de corte escolhido).
+func peca_grade(uid: String, id: int, tipo: String) -> void:
+	var pc := peca_de(uid, id)
+	var no := peca_no(uid, id)
+	if pc.is_empty() or no == null:
+		return
+	var mi := _malha(no)
+	var to_no := no.global_transform.affine_inverse() * mi.global_transform
+	var m_por_u: float = mi.global_transform.basis.get_scale().x
+	var sn: float = no.global_transform.basis.get_scale().x
+	var U: Vector3 = (no.get_meta("fora") as Vector3).normalized()
+	var ex: Array = no.get_meta("eixo")
+	var A: Vector3 = (ex[1] as Vector3) - (ex[0] as Vector3)
+	A = (A - U * A.dot(U)).normalized()
+	if A.length() < 0.5:
+		A = U.cross(Vector3.FORWARD).normalized()
+	var B := U.cross(A).normalized()
+	var pts := _dentro_denso(uid, pc, no)
+	if pts.size() < 4:
+		return
+	var an := []
+	var amin := 1e9
+	var amax := -1e9
+	var bmin := 1e9
+	var bmax := -1e9
+	for qo in pts:
+		var w: Vector3 = to_no * (qo[0] as Vector3)
+		var e := [w.dot(A), w.dot(B), w.dot(U), bool(qo[1])]
+		an.append(e)
+		amin = minf(amin, float(e[0]))
+		amax = maxf(amax, float(e[0]))
+		bmin = minf(bmin, float(e[1]))
+		bmax = maxf(bmax, float(e[1]))
+	var c := float(GRADE_LADO[tipo]) / sn
+	var nx := maxi(1, ceili((amax - amin) / c))
+	var nz := maxi(1, ceili((bmax - bmin) / c))
+	while nx * nz > GRADE_MAX:
+		c *= 1.12
+		nx = maxi(1, ceili((amax - amin) / c))
+		nz = maxi(1, ceili((bmax - bmin) / c))
+	var cont := {}
+	for e in an:
+		var i := clampi(int((float(e[0]) - amin) / c), 0, nx - 1)
+		var j := clampi(int((float(e[1]) - bmin) / c), 0, nz - 1)
+		var k := j * nx + i
+		if not cont.has(k):
+			cont[k] = {"n": 0, "u0": 1e9, "u1": -1e9, "osso": false}
+		var ck: Dictionary = cont[k]
+		ck.n = int(ck.n) + 1
+		ck.u0 = minf(float(ck.u0), float(e[2]))
+		ck.u1 = maxf(float(ck.u1), float(e[2]))
+		if bool(e[3]):
+			ck.osso = true
+	var kg := peca_kg(uid, pc)
+	var cel := []
+	var keys := cont.keys()
+	keys.sort()
+	for k in keys:
+		var ck2: Dictionary = cont[k]
+		if int(ck2.n) < 2:
+			continue
+		var i2 := int(k) % nx
+		var j2 := int(k) / nx
+		var a0 := amin + i2 * c
+		var b0 := bmin + j2 * c
+		cel.append({"r": [a0, b0, a0 + c, b0 + c], "h": [float(ck2.u0) - c * 0.08, float(ck2.u1) + c * 0.05], "kg": kg * float(ck2.n) / pts.size(),
+			"osso": bool(ck2.osso), "est": 0, "orig": int(k), "tipo": tipo})
+	pc["grade"] = {"tipo": tipo, "A": _a3(A), "B": _a3(B), "U": _a3(U), "a0": amin, "b0": bmin, "c": c, "nx": nx, "nz": nz, "cel": cel}
+	_grade_visual(uid, pc)
+
+
+## Os 4 cantos de cima do quadradinho, no mundo (para desenhar e tocar na tela).
+func grade_quad(uid: String, id: int, ci: int) -> Array:
+	var pc := peca_de(uid, id)
+	var no := peca_no(uid, id)
+	if pc.is_empty() or no == null or not pc.has("grade"):
+		return []
+	var g: Dictionary = pc.grade
+	var cl: Dictionary = (g.cel as Array)[ci]
+	var A := _v3(g.A)
+	var B := _v3(g.B)
+	var U := _v3(g.U)
+	var r: Array = cl.r
+	var top := float((cl.h as Array)[1])
+	var xf := no.global_transform
+	var out := []
+	for e in [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]]:
+		out.append(xf * (A * float(e[0]) + B * float(e[1]) + U * top))
+	return out
+
+
+func grade_centro(uid: String, id: int, ci: int) -> Vector3:
+	var q := grade_quad(uid, id, ci)
+	if q.is_empty():
+		return Vector3.INF
+	return ((q[0] as Vector3) + (q[2] as Vector3)) * 0.5
+
+
+## Corta o quadradinho: sai da peça e vira um pedaço solto.
+func grade_cortar(uid: String, id: int, ci: int) -> void:
+	var pc := peca_de(uid, id)
+	if pc.is_empty() or not pc.has("grade"):
+		return
+	var cl: Dictionary = (pc.grade.cel as Array)[ci]
+	cl.est = 1
+	_grade_visual(uid, pc)
+
+
+## Pica um pedaço grande (já cortado) em pequenos (ainda grudados, para cortar um por um).
+func grade_picar(uid: String, id: int, ci: int) -> void:
+	var pc := peca_de(uid, id)
+	if pc.is_empty() or not pc.has("grade"):
+		return
+	var g: Dictionary = pc.grade
+	var cel: Array = g.cel
+	var cl: Dictionary = cel[ci]
+	if int(cl.est) != 1 or str(cl.tipo) != "gde":
+		return
+	var no := peca_no(uid, id)
+	var sn: float = no.global_transform.basis.get_scale().x if no else 1.0
+	var r: Array = cl.r
+	var lado := float(GRADE_LADO.peq) / sn
+	var n := clampi(roundi((float(r[2]) - float(r[0])) / lado), 1, 4)
+	var d := (float(r[2]) - float(r[0])) / n
+	var dz := (float(r[3]) - float(r[1])) / n
+	var osso_k := (n * n) / 2
+	var k := 0
+	for j in n:
+		for i in n:
+			cel.append({"r": [float(r[0]) + i * d, float(r[1]) + j * dz, float(r[0]) + (i + 1) * d, float(r[1]) + (j + 1) * dz],
+				"h": cl.h, "kg": float(cl.kg) / (n * n), "osso": bool(cl.osso) and k == osso_k, "est": 0, "orig": -1, "tipo": "peq", "bloco": true})
+			k += 1
+	cl.est = 3
+	_grade_visual(uid, pc)
+
+
+## Os quadradinhos pegos saem da mesa; a peça acabou: sai também.
+func grade_tirar(uid: String, id: int, cis: Array) -> void:
+	var pc := peca_de(uid, id)
+	if pc.is_empty() or not pc.has("grade"):
+		return
+	for ci in cis:
+		((pc.grade.cel as Array)[int(ci)] as Dictionary).est = 2
+	var resta := false
+	for cl in pc.grade.cel:
+		if int(cl.est) in [0, 1]:
+			resta = true
+	if not resta:
+		peca_tirar(uid, id)
+		return
+	_grade_visual(uid, pc)
+
+
+static var _bloco_mat: ShaderMaterial = null
+
+const BLOCO_SHADER := """
+shader_type spatial;
+render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
+uniform float sujo = 0.0;
+uniform float podre = 0.0;
+varying vec3 lp;
+varying float osso;
+varying float face;
+float hh(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float ruido(vec3 q) {
+	vec3 i = floor(q); vec3 f = fract(q); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(hh(i), hh(i + vec3(1,0,0)), f.x), mix(hh(i + vec3(0,1,0)), hh(i + vec3(1,1,0)), f.x), f.y),
+		mix(mix(hh(i + vec3(0,0,1)), hh(i + vec3(1,0,1)), f.x), mix(hh(i + vec3(0,1,1)), hh(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+void vertex() { lp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; osso = UV2.x; face = UV.y; }
+void fragment() {
+	// a carne cortada: vermelha com os fios, a gordura entremeada; em cima (o lado de fora
+	// da peça) a capa de gordura; o osso serrado (branco e esponjoso) se tiver
+	vec3 q = lp;
+	float n1 = ruido(q * 40.0);
+	float n2 = ruido(q * 90.0 + 3.0);
+	float fio = abs(sin(q.x * 160.0 + q.z * 60.0 + n1 * 5.0));
+	vec3 carne = mix(vec3(0.5, 0.05, 0.04), vec3(0.72, 0.1, 0.07), n1 * 0.6 + fio * 0.3);
+	float gord = smoothstep(0.8, 0.9, n2 * 0.7 + ruido(q * 25.0) * 0.3);
+	vec3 c = mix(carne, vec3(0.92, 0.86, 0.74), gord * 0.7);
+	if (face > 0.5) {
+		// em cima (o lado de fora da peça): uns pedaços da capa de gordura
+		c = mix(c, vec3(0.9, 0.82, 0.66), 0.6 * smoothstep(0.62, 0.75, n1));
+	}
+	if (osso > 0.5 && face < 0.5) {
+		float b = smoothstep(0.62, 0.66, ruido(q * 18.0 + 7.0));
+		vec3 osso_c = mix(vec3(0.85, 0.66, 0.58), vec3(0.95, 0.9, 0.8), smoothstep(0.3, 0.7, ruido(q * 150.0)));
+		c = mix(c, osso_c, b);
+	}
+	if (podre > 0.9) {
+		c = mix(c, vec3(0.22, 0.18, 0.1), clamp((podre - 0.9) * 0.4, 0.0, 0.7));
+	}
+	if (sujo > 0.5) {
+		c = mix(c, vec3(0.3, 0.22, 0.13), smoothstep(0.35, 0.6, ruido(q * 30.0)) * 0.8);
+	}
+	ALBEDO = c;
+	ROUGHNESS = 0.32;
+	SPECULAR = 0.4;
+}
+"""
+
+
+## Um pedaço: uma caixa com as quinas um pouco tortas (carne cortada à mão).
+static func _bloco(st: SurfaceTool, o: Vector3, ea: Vector3, eb: Vector3, eu: Vector3, osso: bool, sem: int) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = sem
+	var j := func(v: Vector3) -> Vector3:
+		return v
+	var cs := []
+	for k in 8:
+		var fa := float(k & 1)
+		var fb := float((k >> 1) & 1)
+		var fu := float((k >> 2) & 1)
+		var t := 0.12 if fu > 0.5 else 0.04
+		cs.append(o + ea * (fa + rng.randf_range(-t, t)) + eb * (fb + rng.randf_range(-t, t)) + eu * (fu * rng.randf_range(0.85, 1.0)))
+	var faces := [[0, 1, 3, 2, 0.0], [4, 6, 7, 5, 1.0], [0, 4, 5, 1, 0.0], [2, 3, 7, 6, 0.0], [0, 2, 6, 4, 0.0], [1, 5, 7, 3, 0.0]]
+	var meio := Vector3.ZERO
+	for v in cs:
+		meio += v
+	meio /= 8.0
+	for f in faces:
+		var q := [cs[f[0]], cs[f[1]], cs[f[2]], cs[f[3]]]
+		var nrm := ((q[1] as Vector3) - (q[0] as Vector3)).cross((q[3] as Vector3) - (q[0] as Vector3)).normalized()
+		var fc := ((q[0] as Vector3) + (q[1] as Vector3) + (q[2] as Vector3) + (q[3] as Vector3)) * 0.25
+		var ordem := [0, 1, 2, 0, 2, 3]
+		if nrm.dot(fc - meio) < 0.0:
+			nrm = -nrm                                # (sempre para fora)
+			ordem = [0, 2, 1, 0, 3, 2]
+		for t2 in ordem:
+			st.set_normal(nrm)
+			st.set_uv(Vector2(0.0, float(f[4])))
+			st.set_uv2(Vector2(1.0 if osso else 0.0, 0.0))
+			st.add_vertex(q[t2])
+
+
+## O desenho da grade: os quadradinhos cortados somem da peça (o shader) e viram pedaços
+## (blocos); os buracos que ficam na peça ganham as paredes de carne.
+func _grade_visual(uid: String, pc: Dictionary) -> void:
+	var no := peca_no(uid, int(pc.id))
+	if no == null or not pc.has("grade"):
+		return
+	var g: Dictionary = pc.grade
+	var mi := _malha(no)
+	var sm: ShaderMaterial = mi.material_override as ShaderMaterial
+	var A := _v3(g.A)
+	var B := _v3(g.B)
+	var U := _v3(g.U)
+	var c := float(g.c)
+	var nx := int(g.nx)
+	var nz := int(g.nz)
+	if sm:
+		var M := no.global_transform.affine_inverse() * mi.global_transform
+		var ga: Vector3 = M.basis.transposed() * A / c
+		var gb: Vector3 = M.basis.transposed() * B / c
+		sm.set_shader_parameter("g_a", Vector4(ga.x, ga.y, ga.z, (M.origin.dot(A) - float(g.a0)) / c))
+		sm.set_shader_parameter("g_b", Vector4(gb.x, gb.y, gb.z, (M.origin.dot(B) - float(g.b0)) / c))
+		sm.set_shader_parameter("g_nx", float(nx))
+		sm.set_shader_parameter("g_nz", float(nz))
+		var rr := PackedFloat32Array()
+		rr.resize(GRADE_MAX)
+		for cl in g.cel:
+			if int(cl.orig) >= 0 and int(cl.est) > 0 and int(cl.orig) < GRADE_MAX:
+				rr[int(cl.orig)] = 1.0
+		sm.set_shader_parameter("g_r", rr)
+	var old := no.get_node_or_null("grade")
+	if old:
+		old.free()
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var tem := false
+	var fora := {}
+	for cl in g.cel:
+		if int(cl.orig) >= 0 and int(cl.est) > 0:
+			fora[int(cl.orig)] = true
+	var dentro := {}
+	for cl in g.cel:
+		if int(cl.orig) >= 0 and int(cl.est) == 0:
+			dentro[int(cl.orig)] = cl
+	for i in (g.cel as Array).size():
+		var cl: Dictionary = g.cel[i]
+		var r: Array = cl.r
+		var h: Array = cl.h
+		var est := int(cl.est)
+		# o pedaço (cortado, ou um dos picados ainda grudados)
+		if est == 1 or (est == 0 and bool(cl.get("bloco", false))):
+			var folga := c * (0.06 if est == 1 else 0.015)
+			if bool(cl.get("bloco", false)):
+				folga = (float(r[2]) - float(r[0])) * (0.07 if est == 1 else 0.02)
+			var o := A * (float(r[0]) + folga) + B * (float(r[1]) + folga) + U * float(h[0])
+			_bloco(st, o, A * (float(r[2]) - float(r[0]) - folga * 2.0), B * (float(r[3]) - float(r[1]) - folga * 2.0), U * (float(h[1]) - float(h[0])), bool(cl.osso), i * 7919 + 13)
+			tem = true
+		# o buraco na peça: as paredes de carne onde o vizinho ainda está inteiro
+		if int(cl.orig) >= 0 and est > 0:
+			var oi := int(cl.orig) % nx
+			var oj := int(cl.orig) / nx
+			for e in [[-1, 0], [1, 0], [0, -1], [0, 1]]:
+				var vi: int = oi + int(e[0])
+				var vj: int = oj + int(e[1])
+				if vi < 0 or vj < 0 or vi >= nx or vj >= nz:
+					continue
+				var vk := vj * nx + vi
+				if not dentro.has(vk):
+					continue
+				var vh: Array = (dentro[vk] as Dictionary).h
+				var a_e := float(r[2]) if int(e[0]) > 0 else float(r[0])
+				var b_e := float(r[3]) if int(e[1]) > 0 else float(r[1])
+				var p0: Vector3
+				var p1: Vector3
+				if int(e[0]) != 0:
+					p0 = A * a_e + B * float(r[1])
+					p1 = A * a_e + B * float(r[3])
+				else:
+					p0 = B * b_e + A * float(r[0])
+					p1 = B * b_e + A * float(r[2])
+				var u0 := float(vh[0])
+				var u1 := float(vh[1]) - c * 0.05
+				var q := [p0 + U * u0, p1 + U * u0, p1 + U * u1, p0 + U * u1]
+				var nrm := (A * float(e[0]) + B * float(e[1])) * -1.0
+				for t2 in [0, 1, 2, 0, 2, 3]:
+					st.set_normal(nrm)
+					st.set_uv(Vector2(0.0, 0.0))
+					st.set_uv2(Vector2(0.0, 0.0))
+					st.add_vertex(q[t2])
+				tem = true
+	if not tem:
+		return
+	if _bloco_mat == null:
+		var sh := Shader.new()
+		sh.code = BLOCO_SHADER
+		_bloco_mat = ShaderMaterial.new()
+		_bloco_mat.shader = sh
+	var gm := MeshInstance3D.new()
+	gm.name = "grade"
+	gm.mesh = st.commit()
+	var bm: ShaderMaterial = _bloco_mat
+	if bool(pc.get("sujo", false)):
+		bm = _bloco_mat.duplicate()
+		bm.set_shader_parameter("sujo", 1.0)
+	gm.material_override = bm
+	no.add_child(gm)
 

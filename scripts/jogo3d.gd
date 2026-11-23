@@ -1591,6 +1591,8 @@ func _process(delta: float) -> void:
 		_barr.check()                            # monte cavado embora com a pá some
 	if _capins and Engine.get_process_frames() % 120 == 60:
 		_capins.dia(int(sim.elapsed_days()))     # o capim seca no fim do mês e rebrota
+	if _fogos:
+		_assar_tick(delta)
 	if _fogos and Engine.get_process_frames() % 6 == 0:
 		_fogos.atualizar()                       # o fogo baixa e apaga pelo relógio
 		if bool(sim.raining) and not _mp_client():
@@ -12077,7 +12079,7 @@ func _mc_start(mi: int) -> void:
 	if _mao != "":
 		equip("")
 	var lst: Array = _caca.pecas_em("mesa", mi)
-	_mc = {"mi": mi, "sel": lst[0] if not lst.is_empty() else [], "off": 0.0, "ang": -9.0, "fase": "marca", "faca": 0.0, "golpes": 0,
+	_mc = {"mi": mi, "sel": lst[0] if not lst.is_empty() else [], "off": 0.0, "ang": -9.0, "fase": "escolhe", "marc": [], "fila": [], "atual": -1, "menu": false, "faca": 0.0, "golpes": 0,
 		"anim": -1.0, "treme": 0.0, "drag": -9, "ini": Vector2.ZERO, "parte": "", "pg": {}}
 	_olho = {}
 	_bur = {}
@@ -12116,14 +12118,26 @@ func _mc_move(delta: float) -> void:
 	if sel.is_empty() or _caca.peca_de(str(sel[0]), int(sel[1])).is_empty() or str(_caca.peca_de(str(sel[0]), int(sel[1])).onde) != "mesa":
 		var lst: Array = _caca.pecas_em("mesa", mi)
 		_mc.sel = lst[0]
-		_mc.fase = "marca"
-		_mc.off = 0.0
-		_mc.ang = -9.0
-	# a pata ou a cabeça ainda na peça: tem que tirar antes de cortar a carne
+		_mc.fase = "escolhe"
+		_mc.marc = []
+		_mc.fila = []
+		_mc.menu = false
+	# a pata ou a cabeça ainda na peça: tem que tirar antes de cortar a carne; depois
+	# escolhe o corte (pequeno ou grande) e trabalha na grade de quadradinhos
 	var sel2: Array = _mc.sel
-	var falta: Array = _caca.peca_partes_falta(str(sel2[0]), _caca.peca_de(str(sel2[0]), int(sel2[1]))) if not sel2.is_empty() else []
-	if str(_mc.fase) in ["marca", "partes"] and float(_mc.anim) < 0.0:
-		_mc.fase = "partes" if not falta.is_empty() else "marca"
+	var pc2: Dictionary = _caca.peca_de(str(sel2[0]), int(sel2[1])) if not sel2.is_empty() else {}
+	var falta: Array = _caca.peca_partes_falta(str(sel2[0]), pc2) if not sel2.is_empty() else []
+	if str(_mc.fase) in ["marca", "partes", "escolhe", "grade"] and float(_mc.anim) < 0.0:
+		if not falta.is_empty():
+			_mc.fase = "partes"
+		elif not pc2.has("grade"):
+			_mc.fase = "escolhe"
+			if not bool(_mc.get("menu", false)) and _work_menu == null:
+				_mc.menu = true
+				_mc_menu.call_deferred()
+		else:
+			_mc.fase = "grade"
+	_mc.sem_vas = maxf(0.0, float(_mc.get("sem_vas", 0.0)) - delta)
 	var host := _peca_host_xf(mi)
 	var eye: Vector3 = host * Vector3(0.0, 2.15, 1.35)
 	var alvo: Vector3 = host * Vector3(0.0, 1.0, 0.0)
@@ -12156,8 +12170,9 @@ func _mc_move(delta: float) -> void:
 	if _mach_axe:
 		_mach_axe.visible = str(_mc.fase) in ["machado", "partes"]
 		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25) * Basis(Vector3.UP, PI), Vector3(0.3, -0.5, -0.6))
-	(_mc_btns[0] as Control).visible = str(_mc.fase) == "marca"
-	(_mc_btns[1] as Control).visible = str(_mc.fase) in ["marca", "partes"]
+	var fs := str(_mc.fase)
+	(_mc_btns[0] as Control).visible = fs == "escolhe" or (fs == "grade" and not _mc_cortaveis().is_empty())
+	(_mc_btns[1] as Control).visible = fs in ["partes", "escolhe"] or (fs == "grade" and not _mc_pegaveis().is_empty())
 	(_mc_btns[2] as Control).visible = true
 	_jump_btn.visible = false
 	_ctx_btn.visible = false
@@ -12223,16 +12238,109 @@ func _mc_plano() -> Array:
 	return [n.normalized(), (a + b) * 0.5]
 
 
+## O menu do corte (como o das forquilhas da madeira): pequeno ou grande.
+func _mc_menu() -> void:
+	if _mc.is_empty() or str(_mc.fase) != "escolhe":
+		return
+	var sel: Array = _mc.sel
+	var esc := func(tipo: String) -> void:
+		if _mc.is_empty() or (_mc.sel as Array).is_empty():
+			return
+		_caca.peca_grade(str(_mc.sel[0]), int(_mc.sel[1]), tipo)
+		_mc.fase = "grade"
+		_mc.marc = []
+	_choice_menu("TRABALHAR A CARNE", "Escolha o corte",
+		[["Pedaços pequenos", "Cubos de uns 8 cm, para cozinhar\nou fritar. Vão numa vasilha de\nbarro (cabem uns 2 kg em cada).", func(): esc.call("peq")],
+		["Pedaços grandes", "Pedaços de uns 22 cm, para assar\nna fogueira. Depois de cortado\ndá para picar em pequenos.", func(): esc.call("gde")]])
+
+
+## Os quadradinhos marcados que dá para cortar (inteiros) ou picar (grandes já cortados).
+func _mc_cortaveis() -> Array:
+	var out := []
+	var sel: Array = _mc.sel
+	if sel.is_empty():
+		return out
+	var pc: Dictionary = _caca.peca_de(str(sel[0]), int(sel[1]))
+	if not pc.has("grade"):
+		return out
+	var cel: Array = pc.grade.cel
+	for ci in _mc.get("marc", []):
+		if int(ci) >= cel.size():
+			continue
+		var cl: Dictionary = cel[int(ci)]
+		if int(cl.est) == 0 or (int(cl.est) == 1 and str(cl.tipo) == "gde"):
+			out.append(int(ci))
+	return out
+
+
+## Os marcados já cortados (dá para pegar).
+func _mc_pegaveis() -> Array:
+	var out := []
+	var sel: Array = _mc.sel
+	if sel.is_empty():
+		return out
+	var pc: Dictionary = _caca.peca_de(str(sel[0]), int(sel[1]))
+	if not pc.has("grade"):
+		return out
+	var cel: Array = pc.grade.cel
+	for ci in _mc.get("marc", []):
+		if int(ci) < cel.size() and int((cel[int(ci)] as Dictionary).est) == 1:
+			out.append(int(ci))
+	return out
+
+
 func _mc_cortar() -> void:
-	if str(_mc.get("fase", "")) != "marca" or (_mc.sel as Array).is_empty():
+	if (_mc.sel as Array).is_empty():
+		return
+	if str(_mc.fase) == "escolhe":
+		_mc.menu = true
+		_mc_menu()
+		return
+	if str(_mc.fase) != "grade":
 		return
 	if item_qtd("faca") <= 0 and not teste:
 		return
-	var sel: Array = _mc.sel
-	if _caca.peca_kg(str(sel[0]), _caca.peca_de(str(sel[0]), int(sel[1]))) < 0.15:
-		return                              # pequeno demais para cortar de novo
+	_mc.fila = _mc_cortaveis()
+	_mc_proximo()
+
+
+## O próximo quadradinho da fila: passa a faca nele (e o machado, se tem osso).
+func _mc_proximo() -> void:
+	var fila: Array = _mc.get("fila", [])
+	if fila.is_empty():
+		_mc.fase = "grade"
+		_mc.atual = -1
+		return
+	_mc.atual = int(fila.pop_front())
 	_mc.fase = "faca"
 	_mc.faca = 0.0
+	_mc.golpes = 0
+
+
+func _mc_cel(ci: int) -> Dictionary:
+	var sel: Array = _mc.sel
+	var pc: Dictionary = _caca.peca_de(str(sel[0]), int(sel[1]))
+	if not pc.has("grade") or ci < 0 or ci >= (pc.grade.cel as Array).size():
+		return {}
+	return pc.grade.cel[ci]
+
+
+## A faca passou (e o machado, se precisou): o quadradinho solta (ou o grande vira pequenos).
+func _mc_solta() -> void:
+	var sel: Array = _mc.sel
+	var ci := int(_mc.get("atual", -1))
+	var cl := _mc_cel(ci)
+	if cl.is_empty():
+		_mc_proximo()
+		return
+	var w: Vector3 = _caca.grade_centro(str(sel[0]), int(sel[1]), ci)
+	if int(cl.est) == 0:
+		_caca.grade_cortar(str(sel[0]), int(sel[1]), ci)
+	elif int(cl.est) == 1 and str(cl.tipo) == "gde":
+		_caca.grade_picar(str(sel[0]), int(sel[1]), ci)
+		(_mc.marc as Array).erase(ci)
+	Sons.play_at(self, "baque", w, -14.0, 1.4)
+	_mc_proximo()
 
 
 func _mc_machadada() -> void:
@@ -12250,47 +12358,26 @@ func _mc_machadada() -> void:
 			pg.erase(tp)
 			_mc.parte = ""
 		return
+	if str(_mc.fase) != "machado":
+		return
 	_mc.golpes = int(_mc.golpes) + 1
-	var pl := _mc_plano()
-	var w: Vector3 = pl[1] if not pl.is_empty() else _player.position
+	var w: Vector3 = _caca.grade_centro(str(sel[0]), int(sel[1]), int(_mc.atual))
+	if w == Vector3.INF:
+		w = _player.position
 	if wear("machado", 1):
 		_update_inventory()
 	if int(_mc.golpes) < 2:
 		Sons.play_at(self, "machado_osso", w, -2.0, randf_range(0.95, 1.1))
 		return
 	Sons.play_at(self, "osso_quebra", w, 0.0, 1.15)
-	var uid := str(sel[0])
-	var id := int(sel[1])
-	_mc.fase = "marca"
-	_mc.golpes = 0
-	if pl.is_empty():
-		return
-	var no: Node3D = _caca.peca_no(uid, id)
-	var mim: MeshInstance3D = Caca._malha(no) if no else null
-	if mim == null:
-		return
-	var nw: Vector3 = pl[0]
-	var gx := mim.global_transform
-	var n_l: Vector3 = (gx.basis.transposed() * nw).normalized()
-	var w_l: float = n_l.dot(gx.affine_inverse() * (pl[1] as Vector3))
-	var nova: Dictionary = _caca.peca_partir_plano(uid, id, n_l, w_l)
-	if nova.is_empty():
-		return                          # a faca passou fora da carne
-	# os dois pedaços se afastam um pouco na mesa
-	var host := _peca_host_xf(int(_mc.mi))
-	for par in [[id, 1.0], [int(nova.get("id", -1)), -1.0]]:
-		var pc: Dictionary = _caca.peca_de(uid, int(par[0]))
-		if pc.is_empty() or (pc.get("rel", []) as Array).size() < 12:
-			continue
-		var rel: Transform3D = Caca._xf_de(pc.rel)
-		var mundo := host * rel
-		mundo.origin += nw * 0.03 * float(par[1])
-		pc.rel = Caca._xf_json(host.affine_inverse() * mundo)
-	_mc.off = 0.0
+	_mc_solta()
+
+
+const VASILHA_KG := 2.0            # carne picada que cabe numa vasilha de barro
 
 
 func _mc_pegar() -> void:
-	if not (str(_mc.get("fase", "")) in ["marca", "partes"]) or (_mc.sel as Array).is_empty():
+	if (_mc.sel as Array).is_empty():
 		return
 	var sel: Array = _mc.sel
 	var uid := str(sel[0])
@@ -12298,10 +12385,63 @@ func _mc_pegar() -> void:
 	var pc: Dictionary = _caca.peca_de(uid, id)
 	if pc.is_empty():
 		return
-	var kg: float = _caca.peca_kg(uid, pc)
-	if kg <= MC_PEGAR_KG:
-		var item := "carne_suja" if bool(pc.get("sujo", false)) or _caca.peca_podre(uid, pc) >= 0.9 else "carne_crua"
-		var n := maxi(1, roundi(kg))
+	var sujo: bool = bool(pc.get("sujo", false)) or _caca.peca_podre(uid, pc) >= 0.9
+	if str(_mc.fase) == "grade":
+		var cel: Array = pc.grade.cel
+		var levou := []
+		var vas := item_qtd("vasilha_barro")
+		var usadas := 0
+		var cheia := 0.0
+		var peso := 0.0
+		var assar := 0
+		var sujos := 0.0
+		for ci in _mc_pegaveis():
+			var cl: Dictionary = cel[int(ci)]
+			var kg := float(cl.kg)
+			if sujo:
+				sujos += kg
+				levou.append(ci)
+				continue
+			if str(cl.tipo) == "gde":
+				if _bag_total() + peso + Itens.kg("carne_assar") > BAG_MAX:
+					continue
+				peso += Itens.kg("carne_assar")
+				assar += 1
+				levou.append(ci)
+				continue
+			# pequenos: na vasilha (enche uma, passa para a próxima)
+			if cheia <= 0.0 or cheia + kg > VASILHA_KG + 0.001:
+				if usadas >= vas:
+					_mc.sem_vas = 2.0
+					continue
+				if _bag_total() + peso + Itens.kg("vasilha_carne") - Itens.kg("vasilha_barro") > BAG_MAX:
+					continue
+				usadas += 1
+				peso += Itens.kg("vasilha_carne") - Itens.kg("vasilha_barro")
+				cheia = 0.0
+			cheia += kg
+			levou.append(ci)
+		if levou.is_empty():
+			return
+		if usadas > 0:
+			remove_item("vasilha_barro", usadas)
+			add_item("vasilha_carne", usadas)
+		if assar > 0:
+			add_item("carne_assar", assar)
+		if sujos > 0.0:
+			add_item("carne_suja", maxi(1, roundi(sujos)))
+		_update_inventory()
+		_caca.grade_tirar(uid, id, levou)
+		for ci2 in levou:
+			(_mc.marc as Array).erase(ci2)
+		Sons.play_at(self, "baque", _player.position + Vector3.UP, -12.0, 1.3)
+		return
+	if not (str(_mc.fase) in ["partes", "escolhe"]):
+		return
+	var kg2: float = _caca.peca_kg(uid, pc)
+	if kg2 <= MC_PEGAR_KG:
+		var item := "carne_suja" if sujo else "carne_crua"
+		var n := maxi(1, roundi(kg2))
 		if _bag_total() + Itens.kg(item) * n > BAG_MAX:
 			return
 		add_item(item, n)
@@ -12341,7 +12481,9 @@ func _mc_input(e: InputEvent) -> bool:
 			_mc.ini = pos
 			_mc["andou"] = 0.0
 			if str(_mc.fase) == "machado":
-				if float(_mc.anim) < 0.0 and pos.distance_to(_mc_marca()) < 140.0 and (item_qtd("machado") > 0 or teste):
+				var sl0: Array = _mc.sel
+				var wc: Vector3 = _caca.grade_centro(str(sl0[0]), int(sl0[1]), int(_mc.get("atual", -1)))
+				if float(_mc.anim) < 0.0 and wc != Vector3.INF and pos.distance_to(_cam.unproject_position(wc)) < 140.0 and (item_qtd("machado") > 0 or teste):
 					_mc.anim = 0.0
 			elif str(_mc.fase) == "partes" and float(_mc.anim) < 0.0 and (item_qtd("machado") > 0 or teste):
 				var sl: Array = _mc.sel
@@ -12360,8 +12502,18 @@ func _mc_input(e: InputEvent) -> bool:
 					_mc.anim = 0.0
 		elif int(_mc.drag) == idx:
 			_mc.drag = -9
+			# um toque num quadradinho: marca/desmarca
+			if str(_mc.fase) == "grade" and float(_mc.get("andou", 0.0)) < 14.0:
+				var ci := _mc_cel_em(pos)
+				if ci >= 0:
+					var mc: Array = _mc.marc
+					if ci in mc:
+						mc.erase(ci)
+					else:
+						mc.append(ci)
+					return true
 			# um toque (sem arrastar) num pedaço: escolhe ele
-			if str(_mc.fase) in ["marca", "partes"] and float(_mc.get("andou", 0.0)) < 12.0 and float(_mc.anim) < 0.0:
+			if str(_mc.fase) in ["partes", "escolhe", "grade"] and float(_mc.get("andou", 0.0)) < 12.0 and float(_mc.anim) < 0.0:
 				var best := []
 				var bd := 130.0
 				for pk in _caca.pecas_em("mesa", int(_mc.mi)):
@@ -12372,8 +12524,10 @@ func _mc_input(e: InputEvent) -> bool:
 						best = pk
 				if not best.is_empty() and best != (_mc.sel as Array):
 					_mc.sel = best
-					_mc.off = 0.0
-					_mc.ang = -9.0
+					_mc.marc = []
+					_mc.fila = []
+					_mc.menu = false
+					_mc.fase = "escolhe"
 		return true
 	var d := Vector2.ZERO
 	if e is InputEventScreenDrag and e.index == int(_mc.drag):
@@ -12383,23 +12537,46 @@ func _mc_input(e: InputEvent) -> bool:
 	else:
 		return e is InputEventScreenDrag or e is InputEventMouseMotion
 	_mc["andou"] = float(_mc.get("andou", 0.0)) + d.length()
-	var ln := _mc_linha()
-	if ln.is_empty():
-		return true
-	var dir: Vector2 = ln[1]
-	if str(_mc.fase) == "marca":
-		# para os lados da linha: ela anda; ao longo dela: gira (qualquer ângulo)
-		_mc.off = clampf(float(_mc.off) + d.dot(dir.orthogonal()), -260.0, 260.0)
-		_mc.ang = float(_mc.ang) + d.dot(dir) / 170.0
-	elif str(_mc.fase) == "faca":
-		# a faca passando pela linha (de uma ponta à outra)
-		_mc.faca = float(_mc.faca) + absf(d.dot(dir)) / 220.0
+	if str(_mc.fase) == "faca":
+		# a faca passando em volta do quadradinho (para lá e para cá)
+		var f0 := float(_mc.faca)
+		_mc.faca = f0 + d.length() / 320.0
+		if int(f0 * 4.0) != int(float(_mc.faca) * 4.0):
+			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -12.0, randf_range(1.5, 1.8))
 		if float(_mc.faca) >= 1.0:
-			_mc.fase = "machado"
-			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -8.0, 1.6)
 			if wear("faca", 1):
 				_update_inventory()
+			var cl := _mc_cel(int(_mc.get("atual", -1)))
+			if not cl.is_empty() and int(cl.est) == 0 and bool(cl.osso):
+				_mc.fase = "machado"           # tem osso: o machado parte
+				_mc.golpes = 0
+			else:
+				_mc_solta()
 	return true
+
+
+## O quadradinho debaixo do dedo (o mais de cima), ou -1.
+func _mc_cel_em(pos: Vector2) -> int:
+	var sel: Array = _mc.sel
+	var pc: Dictionary = _caca.peca_de(str(sel[0]), int(sel[1]))
+	if not pc.has("grade"):
+		return -1
+	var cel: Array = pc.grade.cel
+	for i in cel.size():
+		if not (int((cel[i] as Dictionary).est) in [0, 1]):
+			continue
+		var q: Array = _caca.grade_quad(str(sel[0]), int(sel[1]), i)
+		if q.is_empty():
+			continue
+		var poly := PackedVector2Array()
+		var atras := false
+		for w in q:
+			if _cam.is_position_behind(w):
+				atras = true
+			poly.append(_cam.unproject_position(w))
+		if not atras and Geometry2D.is_point_in_polygon(pos, poly):
+			return i
+	return -1
 
 
 func _mc_draw() -> void:
@@ -12410,6 +12587,11 @@ func _mc_draw() -> void:
 	for pk in _caca.pecas_em("mesa", int(_mc.mi)):
 		var cp: Vector2 = _cam.unproject_position(_caca.peca_centro(str(pk[0]), int(pk[1])))
 		ui.draw_circle(cp, 5.0, Color(1, 1, 1, 0.7))
+	if str(_mc.fase) in ["grade", "faca", "machado"]:
+		_mc_draw_grade(ui)
+		return
+	if str(_mc.fase) == "escolhe":
+		return
 	var ex := _mc_eixo()
 	if ex.is_empty():
 		return
@@ -12445,6 +12627,61 @@ func _mc_draw() -> void:
 	elif str(_mc.fase) == "machado":
 		var pul := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0)
 		ui.draw_arc(m, 30.0 + pul * 6.0, 0, TAU, 32, Color(1, 0.95, 0.7, 0.95), 3.0, true)
+
+
+## Os quadradinhos: brancos (inteiros), verdes (cortados), amarelos (marcados); o que
+## está sendo cortado: a faca dando a volta nele, ou o machado (se tem osso).
+func _mc_draw_grade(ui: Control) -> void:
+	var sel: Array = _mc.sel
+	var pc: Dictionary = _caca.peca_de(str(sel[0]), int(sel[1]))
+	if not pc.has("grade"):
+		return
+	var cel: Array = pc.grade.cel
+	var marc: Array = _mc.get("marc", [])
+	var atual := int(_mc.get("atual", -1))
+	for i in cel.size():
+		var cl: Dictionary = cel[i]
+		var est := int(cl.est)
+		if not (est in [0, 1]):
+			continue
+		var q: Array = _caca.grade_quad(str(sel[0]), int(sel[1]), i)
+		if q.is_empty():
+			continue
+		var poly := PackedVector2Array()
+		for w in q:
+			poly.append(_cam.unproject_position(w))
+		var fecha := poly + PackedVector2Array([poly[0]])
+		var m := i in marc
+		if m:
+			ui.draw_colored_polygon(poly, Color(1, 0.85, 0.2, 0.28))
+		var cor := Color(1, 1, 1, 0.55)
+		if est == 1:
+			cor = Color(0.55, 1, 0.6, 0.8)
+		if m:
+			cor = Color(1, 0.85, 0.2, 0.95)
+		ui.draw_polyline(fecha, cor, 3.0 if m else 1.5, true)
+		if i == atual and str(_mc.fase) == "faca":
+			# a faca: o contorno do quadradinho sendo passado
+			var f := clampf(float(_mc.faca), 0.0, 1.0) * 4.0
+			for k in 4:
+				var a: Vector2 = poly[k]
+				var b: Vector2 = poly[(k + 1) % 4]
+				var t := clampf(f - k, 0.0, 1.0)
+				if t > 0.0:
+					ui.draw_line(a, a.lerp(b, t), Color(0.95, 0.15, 0.1, 0.95), 4.0, true)
+		if i == atual and str(_mc.fase) == "machado":
+			var cc := (poly[0] + poly[2]) * 0.5
+			var pul := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0)
+			ui.draw_arc(cc, 26.0 + pul * 6.0, 0, TAU, 32, Color(1, 0.95, 0.7, 0.95), 3.0, true)
+			var gf := float(_mc.golpes) / 2.0
+			if gf > 0.0:
+				ui.draw_arc(cc, 36.0, -PI * 0.5, -PI * 0.5 + TAU * gf, 32, Color(0.85, 0.15, 0.1, 0.95), 5.0, true)
+	# sem vasilha para os pedaços pequenos: a vasilha riscada perto do Pegar
+	if float(_mc.get("sem_vas", 0.0)) > 0.0:
+		var bt: Control = _mc_btns[1]
+		var c := bt.get_global_rect().get_center() - ui.get_global_rect().position + Vector2(0, -110)
+		Desenhos.item(ui, "vasilha_barro", c, 70.0)
+		ui.draw_line(c + Vector2(-32, -32), c + Vector2(32, 32), Color(0.95, 0.15, 0.1, 0.95), 6.0, true)
 
 
 # ================== ARCO E FLECHA ==================
@@ -14808,6 +15045,11 @@ func _reb_tick(delta: float) -> void:
 
 func _fogueira_opts(i: int) -> Array:
 	var op := []
+	var fo: Dictionary = _fogos.items[i]
+	if fo.has("assa"):
+		op.append(["tirar_assado", "Tirar a carne do fogo"])
+	elif item_qtd("carne_assar") > 0 and (_fogos.acesa(i) or _fogos.brasa(i)):
+		op.append(["assar", "Assar a carne"])
 	if _fogos.acesa(i):
 		op.append(["por_lenha", "Pôr lenha"])
 		if item_qtd("folha_goiabeira") >= 3 and item_qtd("vasilha_barro") > 0 and (item_qtd("moringa_agua") > 0 or item_qtd("moringa_limpa") > 0):
@@ -14892,6 +15134,30 @@ func _fogueira_pick(i: int, acao: String) -> void:
 			_update_inventory()
 			_face_to(c)
 			Sons.play_at(self, "agua", c, -10.0, 0.7)
+		"assar":
+			if item_qtd("carne_assar") <= 0 or (_fogos.items[i] as Dictionary).has("assa"):
+				return
+			remove_item("carne_assar", 1)
+			_update_inventory()
+			(_fogos.items[i] as Dictionary)["assa"] = {"p": 0.0}
+			_face_to(c)
+			Sons.play_at(self, "baque", c + Vector3.UP * 0.5, -14.0, 1.3)
+		"tirar_assado":
+			var fo2: Dictionary = _fogos.items[i]
+			if not fo2.has("assa"):
+				return
+			var pa := float((fo2.assa as Dictionary).get("p", 0.0))
+			var item := "carne_assar"
+			if pa >= 2.0:
+				item = "carne_queimada"
+			elif pa >= 1.0:
+				item = "carne_assada"
+			if _bag_total() + Itens.kg(item) > BAG_MAX:
+				return
+			fo2.erase("assa")
+			add_item(item, 1)
+			_update_inventory()
+			_face_to(c)
 		"pegar_carvao":
 			var nc: int = _fogos.tirar_carvao(i)
 			if nc > 0:
@@ -17294,4 +17560,137 @@ static func _btn_bate(r: Rect2, postos: Array) -> bool:
 		if (q as Rect2).grow(-4.0).intersects(r.grow(-4.0)):
 			return true
 	return false
+
+
+# ================== ASSAR A CARNE NA FOGUEIRA ==================
+# Um pedaço de carne para assar (cortado na mesa) vai num espeto em cima da fogueira, nas
+# duas forquilhas. Com fogo assa em uns 45 min do jogo (na brasa, mais devagar; fria, para).
+# Crua (vermelha) vai dourando até ficar assada (marrom); esquecida no fogo, queima (preta).
+# fogueira.assa = {p: 0 crua .. 1 assada .. 2 queimada}
+
+const ASSA_H := 0.75
+var _assa_nos := {}               # índice da fogueira -> Node3D (o espeto)
+static var _assa_sh: Shader = null
+
+
+func _assar_tick(delta: float) -> void:
+	var dh := delta / maxf(float(sim.real_s_por_hora()), 1.0)
+	for i in _fogos.items.size():
+		var fo: Dictionary = _fogos.items[i]
+		if not fo.has("assa"):
+			if _assa_nos.has(i):
+				if is_instance_valid(_assa_nos[i]):
+					(_assa_nos[i] as Node).queue_free()
+				_assa_nos.erase(i)
+			continue
+		var a: Dictionary = fo.assa
+		if not _mp_client():
+			var k := 1.0 if _fogos.acesa(i) else (0.45 if _fogos.brasa(i) else 0.0)
+			var pv := float(a.get("pv", a.get("p", 0.0))) + k * dh / ASSA_H
+			a["pv"] = pv
+			if absf(pv - float(a.get("p", 0.0))) >= 0.02:
+				a.p = snappedf(pv, 0.02)            # (o que vai para os outros celulares, de pouco em pouco)
+		var no: Node3D = _assa_nos.get(i, null)
+		if no == null or not is_instance_valid(no):
+			no = _espeto_no()
+			add_child(no)
+			_assa_nos[i] = no
+			no.global_position = _fogos.center(i)
+		var carne: MeshInstance3D = no.get_node("giro/carne")
+		(carne.material_override as ShaderMaterial).set_shader_parameter("p", float(a.get("pv", a.get("p", 0.0))))
+		var esp: Node3D = no.get_node("giro")
+		esp.rotation.x = fmod(esp.rotation.x + delta * 0.25, TAU)
+
+
+## O espeto: duas forquilhas fincadas dos lados do fogo, a vara atravessada e a carne.
+func _espeto_no() -> Node3D:
+	var root := Node3D.new()
+	var madeira := StandardMaterial3D.new()
+	madeira.albedo_color = Color(0.36, 0.25, 0.15)
+	madeira.roughness = 0.9
+	for sg in [-1.0, 1.0]:
+		var st := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.018
+		cm.bottom_radius = 0.022
+		cm.height = 0.68
+		cm.radial_segments = 6
+		st.mesh = cm
+		st.material_override = madeira
+		st.position = Vector3(sg * 0.5, 0.3, 0)
+		root.add_child(st)
+		for sv in [-1.0, 1.0]:
+			var fk := MeshInstance3D.new()
+			var fm := CylinderMesh.new()
+			fm.top_radius = 0.012
+			fm.bottom_radius = 0.016
+			fm.height = 0.12
+			fm.radial_segments = 5
+			fk.mesh = fm
+			fk.material_override = madeira
+			fk.position = Vector3(sg * 0.5, 0.67, sv * 0.03)
+			fk.rotation.x = sv * 0.5
+			root.add_child(fk)
+	var giro := Node3D.new()
+	giro.name = "giro"
+	giro.position = Vector3(0, 0.64, 0)
+	root.add_child(giro)
+	var vara := MeshInstance3D.new()
+	var vm := CylinderMesh.new()
+	vm.top_radius = 0.012
+	vm.bottom_radius = 0.012
+	vm.height = 1.25
+	vm.radial_segments = 6
+	vara.mesh = vm
+	vara.material_override = madeira
+	vara.rotation.z = PI * 0.5
+	giro.add_child(vara)
+	var carne := MeshInstance3D.new()
+	carne.name = "carne"
+	var sm := SphereMesh.new()
+	sm.radius = 0.5
+	sm.height = 1.0
+	sm.radial_segments = 12
+	sm.rings = 8
+	carne.mesh = sm
+	carne.scale = Vector3(0.26, 0.15, 0.17)
+	if _assa_sh == null:
+		_assa_sh = Shader.new()
+		_assa_sh.code = """
+shader_type spatial;
+render_mode diffuse_burley, specular_schlick_ggx;
+uniform float p = 0.0;
+varying vec3 lp;
+float hh(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float ruido(vec3 q) {
+	vec3 i = floor(q); vec3 f = fract(q); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(hh(i), hh(i + vec3(1,0,0)), f.x), mix(hh(i + vec3(0,1,0)), hh(i + vec3(1,1,0)), f.x), f.y),
+		mix(mix(hh(i + vec3(0,0,1)), hh(i + vec3(1,0,1)), f.x), mix(hh(i + vec3(0,1,1)), hh(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+void vertex() {
+	lp = VERTEX;
+	// o pedaço não é uma bola: calombos da carne
+	VERTEX *= 1.0 + (ruido(VERTEX * 6.0) - 0.5) * 0.25;
+}
+void fragment() {
+	float n = ruido(lp * 14.0);
+	float g = smoothstep(0.65, 0.8, ruido(lp * 30.0 + 4.0));
+	vec3 crua = mix(vec3(0.45, 0.06, 0.05), vec3(0.6, 0.1, 0.08), n);
+	crua = mix(crua, vec3(0.88, 0.8, 0.66), g * 0.5);
+	vec3 assada = mix(vec3(0.42, 0.22, 0.09), vec3(0.58, 0.34, 0.14), n);
+	assada = mix(assada, vec3(0.75, 0.55, 0.25), g * 0.6);
+	vec3 queim = mix(vec3(0.05, 0.035, 0.025), vec3(0.16, 0.08, 0.04), n);
+	vec3 c = mix(crua, assada, smoothstep(0.1, 1.0, p));
+	c = mix(c, queim, smoothstep(1.3, 2.0, p));
+	ALBEDO = c;
+	// crua molhada brilha; assada a gordura chiando brilha também; queimada fosca
+	ROUGHNESS = mix(0.3, 0.45, smoothstep(0.5, 1.0, p)) + smoothstep(1.4, 2.0, p) * 0.5;
+	SPECULAR = 0.4;
+}
+"""
+	var mt := ShaderMaterial.new()
+	mt.shader = _assa_sh
+	carne.material_override = mt
+	giro.add_child(carne)
+	return root
 

@@ -557,6 +557,33 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				ci.draw_line(c + Vector2(14 + k * 6, -10) * u, c + Vector2(18 + k * 6, 38) * u, Color(0.45, 0.65, 0.88), 3.5 * u, true)
 		"vasilha_barro", "garrafa_barro", "moringa_barro", "bacia_barro", "filtro_barro":
 			load("res://scripts/world/olaria.gd").icone(ci, id, c, s)
+		"vasilha_carne":
+			# a vasilha com os cubos de carne aparecendo por cima da boca
+			load("res://scripts/world/olaria.gd").icone(ci, "vasilha_barro", c + Vector2(0, 8) * u, s * 0.95)
+			for q in [[-18, -14], [-4, -18], [10, -15], [-11, -24], [4, -27], [18, -22]]:
+				var o := c + Vector2(q[0], q[1]) * u
+				var cub := PackedVector2Array([o + Vector2(-7, -5) * u, o + Vector2(7, -6) * u, o + Vector2(8, 6) * u, o + Vector2(-6, 7) * u])
+				ci.draw_colored_polygon(cub, Color(0.62, 0.1, 0.08))
+				ci.draw_line(o + Vector2(-7, -5) * u, o + Vector2(7, -6) * u, Color(0.9, 0.82, 0.68), 2.0 * u, true)
+				ci.draw_polyline(cub + PackedVector2Array([cub[0]]), ink, 1.5 * u, true)
+		"carne_crua", "carne_assar", "carne_assada", "carne_queimada", "carne_suja":
+			# um pedaço de carne: vermelha crua (com a capa de gordura), dourada assada,
+			# preta queimada, com terra se suja
+			var cor := Color(0.66, 0.1, 0.08)
+			if id == "carne_assada":
+				cor = Color(0.55, 0.3, 0.12)
+			elif id == "carne_queimada":
+				cor = Color(0.12, 0.07, 0.05)
+			var pts := [[-40, -6], [-30, -24], [-4, -30], [26, -26], [42, -10], [40, 12], [20, 26], [-12, 28], [-36, 16]]
+			var lump: PackedVector2Array = P.call(pts)
+			ci.draw_colored_polygon(lump, cor)
+			ci.draw_colored_polygon(P.call([[-30, -24], [-4, -30], [26, -26], [42, -10], [30, -16], [-2, -20], [-26, -16]]), Color(0.92, 0.84, 0.68) if id in ["carne_crua", "carne_assar", "carne_suja"] else cor.lightened(0.25))
+			for k in 3:
+				ci.draw_line(c + Vector2(-24 + k * 18, -4) * u, c + Vector2(-16 + k * 18, 18) * u, cor.darkened(0.3), 2.0 * u, true)
+			if id == "carne_suja":
+				for q in [[-20, 6], [8, 14], [22, -2], [-6, -8]]:
+					ci.draw_circle(c + Vector2(q[0], q[1]) * u, 6.0 * u, Color(0.4, 0.3, 0.18, 0.9))
+			ci.draw_polyline(lump + PackedVector2Array([lump[0]]), ink, 2.0 * u, true)
 		"moringa_agua", "moringa_limpa", "acao_encher_cabaca":
 			load("res://scripts/world/olaria.gd").icone(ci, "moringa_barro", c + Vector2(-6, 2) * u, s * 0.92)
 			# a gota de água (do rio: meio barrenta; filtrada: azul clarinha com o brilho)
