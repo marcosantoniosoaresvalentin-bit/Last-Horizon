@@ -57,6 +57,17 @@ static func set_teste(on: bool) -> void:
 	_write(d)
 
 
+## Câmera em terceira pessoa (atrás do personagem) neste celular.
+static func terceira() -> bool:
+	return bool(_read().get("terceira", false))
+
+
+static func set_terceira(on: bool) -> void:
+	var d := _read()
+	d["terceira"] = on
+	_write(d)
+
+
 ## O Livro do Sobrevivente já abriu sozinho uma vez neste celular.
 static func livro_visto() -> bool:
 	return bool(_read().get("livro_visto", false))

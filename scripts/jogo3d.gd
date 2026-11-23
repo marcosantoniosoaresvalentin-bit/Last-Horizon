@@ -324,6 +324,10 @@ var _model: Node3D
 var _skel: Skeleton3D = null
 var _head_bone := -1
 var _eye_smooth := Vector3.ZERO
+var _terceira := false            # câmera em terceira pessoa (atrás do personagem)
+var _olhos: Node3D = null          # os olhos do personagem (a vista de primeira pessoa, mesmo com a câmera atrás)
+var _tp_dist := 3.0
+var _cam_btn: Button
 var _head_axes := []
 var _body_mats: Array = []        # materiais do corpo (some perto da câmera)
 var _busy_f := 0.0                # 0 andando livre, 1 abaixado fazendo algo
@@ -1011,6 +1015,23 @@ void fragment() {
 	proj_btn.pressed.connect(_open_projetos)
 	_hud.add_child(proj_btn)
 	_hud.add_child(craft_btn)
+	# primeira / terceira pessoa
+	_terceira = Perfil.terceira()
+	_cam_btn = Icones.IconButton.new()
+	_cam_btn.show_caption = false
+	_cam_btn.text = "Câmera"
+	_cam_btn.kind = "camera3" if _terceira else "camera1"
+	_cam_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_cam_btn.offset_left = -550
+	_cam_btn.offset_top = 6
+	_cam_btn.offset_right = -470
+	_cam_btn.offset_bottom = 72
+	_cam_btn.pressed.connect(func():
+		_terceira = not _terceira
+		Perfil.set_terceira(_terceira)
+		_cam_btn.kind = "camera3" if _terceira else "camera1"
+		_cam_btn.queue_redraw())
+	_hud.add_child(_cam_btn)
 	_inv_label.visible = false   # o que tem na mochila aparece na tela da mochila
 
 	_joy_ui = Control.new()
@@ -6695,6 +6716,35 @@ static func _best_axis(b: Basis, want: Vector3) -> Vector3:
 	return best
 
 
+## Os olhos do personagem: onde ficam as coisas da mão na frente da vista (o arco, a
+## vara). Em primeira pessoa é a própria câmera; em terceira, continua nos olhos.
+func _olhos_no() -> Node3D:
+	if _olhos == null:
+		_olhos = Node3D.new()
+		_olhos.name = "Olhos"
+		add_child(_olhos)
+	return _olhos
+
+
+## Terceira pessoa: a câmera atrás do ombro direito, olhando para onde o jogador olha;
+## chega mais perto quando o morro (o chão) fica no caminho.
+func _tp_pos(cb: Basis, delta: float) -> Vector3:
+	var piv := _player.global_position + Vector3.UP * (1.55 if not _swim else 0.6)
+	var atras: Vector3 = cb.z
+	var lado: Vector3 = cb.x
+	var quer := 3.2
+	var ok := quer
+	for k in range(1, 11):
+		var d := quer * k / 10.0
+		var q := piv + atras * d + lado * 0.45 * (d / quer) + Vector3.UP * 0.2 * (d / quer)
+		if q.y < height_at(q.x, q.z) + 0.35:
+			ok = maxf(0.6, d - quer / 10.0)
+			break
+	_tp_dist = ok if ok < _tp_dist else lerpf(_tp_dist, ok, minf(1.0, delta * 3.0))
+	var f := _tp_dist / quer
+	return piv + atras * _tp_dist + lado * 0.45 * f + Vector3.UP * 0.2 * f
+
+
 ## Primeira pessoa: a câmera fica nos olhos do personagem (segue a cabeça dele, que
 ## abaixa, anda e balança junto) e as mãos dele aparecem na frente.
 func _fp_camera(delta: float, moved: float) -> void:
@@ -6728,13 +6778,15 @@ func _fp_camera(delta: float, moved: float) -> void:
 	# o que está acontecendo: abaixado pegando/pondo, cavando, modelando...
 	var busy: bool = _crouch_job != "" or _digging or (_chop_pose != null and _chop_pose.crouch > 0.05)
 	_busy_f = move_toward(_busy_f, 1.0 if busy else 0.0, delta * 4.0)
+	var tp := _terceira
 	if _chop_pose:
-		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
+		_chop_pose.fp = not tp                  # terceira pessoa: os braços na pose do corpo (não na frente da câmera)
+		_chop_pose.hide_head = not tp          # primeira pessoa: a própria cabeça nunca aparece
 		# com ferramenta na mão os braços não aparecem (só a ferramenta, segura por baixo da tela)
-		_chop_pose.hide_arms = not _desf.is_empty() or not _mesa.is_empty() or not _torno.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada", "arco", "vara_pesca"]) and _vine.is_empty()
+		_chop_pose.hide_arms = not tp and (not _desf.is_empty() or not _mesa.is_empty() or not _torno.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada", "arco", "vara_pesca"]) and _vine.is_empty())
 	for m in _body_mats:
-		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, maxf(_busy_f, down))
-		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, maxf(_busy_f, down))
+		(m as BaseMaterial3D).distance_fade_min_distance = 0.0 if tp else lerpf(0.27, 0.5, maxf(_busy_f, down))
+		(m as BaseMaterial3D).distance_fade_max_distance = 0.0 if tp else lerpf(0.34, 0.6, maxf(_busy_f, down))
 	if _crouch_job != "":
 		_pitch = lerpf(_pitch, 0.95, minf(1.0, delta * 4.0))     # olha para onde as mãos vão
 	# trabalhando, o olhar desce para onde as mãos estão (o golpe, a serra, a pá)
@@ -6749,7 +6801,11 @@ func _fp_camera(delta: float, moved: float) -> void:
 		_pitch = lerpf(_pitch, work, minf(1.0, delta * 3.0))
 	var mal := _mal_camera()
 	var cam_basis := Basis.from_euler(Vector3(-_pitch - mal.x, _yaw + mal.y, mal.z))
-	_cam.global_transform = Transform3D(cam_basis, _eye_smooth)
+	_olhos_no().global_transform = Transform3D(cam_basis, _eye_smooth)
+	if tp:
+		_cam.global_transform = Transform3D(cam_basis, _tp_pos(cam_basis, delta))
+	else:
+		_cam.global_transform = Transform3D(cam_basis, _eye_smooth)
 	if _chop_pose:
 		var speed := moved / maxf(delta, 0.001)
 		_bob_t += delta * (6.0 + speed * 1.6) if speed > 0.3 else 0.0
@@ -13058,7 +13114,7 @@ func _flecha_tick(delta: float) -> void:
 	# o arco na frente da câmera
 	if com and _arco_fp == null:
 		_arco_fp = _arco_fp_node()
-		_cam.add_child(_arco_fp)
+		_olhos_no().add_child(_arco_fp)
 	if _arco_fp:
 		_arco_fp.visible = com
 		if com:
@@ -13646,7 +13702,7 @@ func _pesca_tick(delta: float) -> void:
 		mat.roughness = 0.9
 		vm.material_override = mat
 		_vara_fp.add_child(vm)
-		_cam.add_child(_vara_fp)
+		_olhos_no().add_child(_vara_fp)
 	if _vara_fp:
 		_vara_fp.visible = com
 	_pesca_ondas_tick(delta)

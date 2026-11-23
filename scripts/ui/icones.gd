@@ -502,6 +502,28 @@ static func draw_icon(ci: CanvasItem, k: String, c: Vector2, s: float, shadow: b
 				var body: PackedVector2Array = P.call([[20, 0], [6, -12], [-8, 0], [6, 12]])
 				_pp(ci, body, Color(0.42, 0.26, 0.14))
 				ci.draw_polyline(body + PackedVector2Array([body[0]]), INK, 2 * u, true)
+		"camera1", "camera3":
+			# a câmera: em 1ª pessoa, o olho; em 3ª, o bonequinho com a câmera atrás
+			if k == "camera1":
+				var olho := PackedVector2Array()
+				for i in 25:
+					var a := PI + PI * i / 12.0
+					olho.append(c + Vector2(cos(a) * 34.0, sin(a) * 18.0 * (1.0 if i <= 12 else -1.0)) * u)
+				_pp(ci, olho, col.call(Color(0.95, 0.93, 0.88)))
+				ci.draw_circle(c, 13.0 * u, col.call(Color(0.35, 0.25, 0.15)))
+				ci.draw_circle(c, 6.0 * u, ink)
+				ci.draw_polyline(olho + PackedVector2Array([olho[0]]), ink, 3.0 * u, true)
+			else:
+				ci.draw_circle(c + Vector2(10, -24) * u, 9.0 * u, col.call(Color(0.93, 0.76, 0.6)))
+				_pp(ci, P.call([[0, -14], [20, -14], [22, 16], [-2, 16]]), col.call(Color(0.3, 0.55, 0.6)))
+				_pp(ci, P.call([[2, 16], [10, 16], [10, 40], [2, 40]]), col.call(Color(0.25, 0.3, 0.45)))
+				_pp(ci, P.call([[12, 16], [20, 16], [20, 40], [12, 40]]), col.call(Color(0.25, 0.3, 0.45)))
+				_pp(ci, P.call([[-44, -10], [-22, -10], [-22, 6], [-44, 6]]), col.call(Color(0.2, 0.2, 0.22)))
+				_pp(ci, P.call([[-22, -6], [-14, -12], [-14, 10], [-22, 4]]), col.call(Color(0.3, 0.3, 0.33)))
+				ci.draw_line(c + Vector2(-12, -2) * u, c + Vector2(0, -6) * u, ink, 2.0 * u, true)
+			if not shadow:
+				var font := ThemeDB.fallback_font
+				ci.draw_string(font, c + Vector2(-16, 46) * u, "1ª" if k == "camera1" else "3ª", HORIZONTAL_ALIGNMENT_LEFT, -1, int(22 * u), Color(1, 0.95, 0.85))
 		_ when k.begins_with("it_"):
 			if not shadow:
 				Desenhos.item(ci, k.substr(3), c, s * 0.85)
