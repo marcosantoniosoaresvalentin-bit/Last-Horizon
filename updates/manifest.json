@@ -1,9 +1,9 @@
 {
-  "version": 221,
-  "file": "update_221.zip",
-  "size": 5872472,
-  "sha256": "4bbc46b9f7dc95023fd428c25f55c140d4ce1d8a27dbdbcc7778198e0e9ce4c6",
+  "version": 222,
+  "file": "update_222.zip",
+  "size": 5873536,
+  "sha256": "745a5df04f80d5a6acf12bb308f15d2005e53e3b77af8a0248e8a1a84d2e70b2",
   "min_build": 1,
-  "notes": "Fogão: o olho aparece sempre perto do fogão pronto, com Pôr lenha, Acender e Pôr a vasilha; a boca aceita lenha maior (a acha comum cabe; só o toquinho inteiro não). Mensagens de erro de volta em todo o jogo: quando algo não dá certo aparece o porquê (falta lenha, lenha grossa demais, sem vasilha, sem água, sem pedra, sem barro, mochila cheia...). As dicas continuam desligadas.",
+  "notes": "Desempenho: menos trabalho a cada quadro (botões, peças de carne no carrinho e na mesa, urubus de longe mais simples e animando menos, decomposição e moscas só perto do jogador). No multiplayer o fogão, o espeto e os urubus comendo não fazem mais o mundo ser reenviado sem parar.",
   "date": "2026-11-23"
 }
