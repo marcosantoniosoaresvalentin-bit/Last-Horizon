@@ -3940,6 +3940,15 @@ func podre_de(c: Dictionary, comido: float, k: float) -> Array:
 	return [Podre.estagio(h, cons, k), cons]
 
 
+## O estágio de podre de uma peça (0 fresca .. 4).
+func peca_podre(uid: String, pc: Dictionary) -> float:
+	var c := couro_de(uid)
+	if c.is_empty():
+		return 0.0
+	var k := float(PODRE_K.get(str(c.esp), 1.0)) * 1.2
+	return float(podre_de(c, float(pc.get("comido", 0.0)), k)[0])
+
+
 ## Peso (kg) da carcaça inteira.
 func carcaca_kg(c: Dictionary) -> float:
 	var p: Dictionary = c.get("p", {})

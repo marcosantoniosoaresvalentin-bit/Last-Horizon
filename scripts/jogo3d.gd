@@ -28,6 +28,7 @@ const Lascar := preload("res://scripts/world/lascar.gd")
 const Macacos := preload("res://scripts/world/macacos.gd")
 const Bacabas := preload("res://scripts/world/bacabas.gd")
 const Araras := preload("res://scripts/world/araras.gd")
+const Urubus := preload("res://scripts/world/urubus.gd")
 const Minerios := preload("res://scripts/world/minerios.gd")
 const Cupins := preload("res://scripts/world/cupins.gd")
 const Tamanduas := preload("res://scripts/world/tamanduas.gd")
@@ -424,6 +425,7 @@ var _macacos: Node3D = null
 var _bacabas: Node3D = null
 var _buritis: Node3D = null
 var _araras: Node3D = null
+var _urubus: Node3D = null
 var _minerios: Node = null
 var _cupins: Node3D = null
 var _tamanduas: Node3D = null
@@ -1168,6 +1170,9 @@ func _on_world_ready() -> void:
 	add_child(_macacos)
 	_macacos.build(self, _arvores, _cipos, _bacabas, int(sim.world_seed), Mundos.dir(_world_id) + "/macacos.json" if _world_id != "" else "")
 	print("macacos: %d em %d bandos" % [_macacos.count(), _macacos.troops.size()])
+	_urubus = Urubus.new()
+	add_child(_urubus)
+	_urubus.build(self)
 	_araras = Araras.new()
 	_araras._bur = _buritis
 	add_child(_araras)
@@ -1643,6 +1648,8 @@ func _process(delta: float) -> void:
 			_macacos.update(delta)
 		if _galhos:
 			_galhos.tick()
+	if _urubus and _caca:
+		_urubus.update(delta)
 	_save_timer -= delta
 	if _save_timer <= 0.0:
 		_save_world()
@@ -12293,7 +12300,7 @@ func _mc_pegar() -> void:
 		return
 	var kg: float = _caca.peca_kg(uid, pc)
 	if kg <= MC_PEGAR_KG:
-		var item := "carne_suja" if bool(pc.get("sujo", false)) else "carne_crua"
+		var item := "carne_suja" if bool(pc.get("sujo", false)) or _caca.peca_podre(uid, pc) >= 0.9 else "carne_crua"
 		var n := maxi(1, roundi(kg))
 		if _bag_total() + Itens.kg(item) * n > BAG_MAX:
 			return
