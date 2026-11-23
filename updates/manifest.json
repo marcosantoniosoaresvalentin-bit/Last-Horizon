@@ -1,9 +1,9 @@
 {
-  "version": 219,
-  "file": "update_219.zip",
-  "size": 5871401,
-  "sha256": "d8d09b53391ad0c64acd303e77efbf319023a3dd573accb7316cc5c648e92eae",
+  "version": 220,
+  "file": "update_220.zip",
+  "size": 5871430,
+  "sha256": "5c64a916adbdcfd8154a79698b6791add6c1297c7a4d7a15b25bd72822c92cb5",
   "min_build": 1,
-  "notes": "Fogão de barro (Projetos): base de madeira (4 pés, 2 travessas, tampo de tábuas), depois assentar 10 pedras e pôr 6 baldes de barro (paredes, chapa com 2 bocas de panela e a chaminé). Na boca de fogo só cabe lenha fina: rache as achas no cepo em pedaços pequenos. Acende com o arco de fogo (sai fumaça pela chaminé). Nas bocas vão as vasilhas com carne picada: cozinhar (2 goles de água da cabaça) ou fritar (tem que mexer, senão gruda e queima); a boca em cima do fogo esquenta mais. Relógio em cada vasilha; pronta, a carne cozida ou frita já se come e devolve a vasilha vazia.",
+  "notes": "Fogão de barro mais baixo: a base de madeira ficou baixinha e a chapa com as panelas fica na altura da cintura (uns 85 cm do chão).",
   "date": "2026-11-23"
 }
