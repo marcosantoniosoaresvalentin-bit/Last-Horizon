@@ -2439,8 +2439,29 @@ func _update_inventory() -> void:
 
 
 ## Sem mensagens de ajuda na tela: é sobrevivência, o jogador aprende sozinho.
-func _show_toast(_text: String) -> void:
-	pass
+## As mensagens: só as de ERRO aparecem (o que falta, por que não deu); as dicas não.
+const ERRO_INICIO := ["Precisa", "Falta", "Não ", "Você não", "Você já", "Para ", "A mochila está cheia", "Pesada demais",
+	"Essa ", "Esse ", "Sua lenha", "Está chovendo", "Agora não", "Ponha a enxada", "Ponha lenha no fogão", "Pegue o balde vazio",
+	"Longe", "Tora grossa demais", "Comprido demais", "Fina demais", "Rodela só", "Tem galho", "Tem outra peça", "Termine",
+	"Tire antes", "O balde está com", "O balde já está cheio", "O outro balde", "Já tem", "Acabaram", "Acabou o barro",
+	"A boca do fogão", "O fogão já", "Pouca argila", "Traga ", "Na serra vai", "Isso não", "Ainda tem brasa", "Sem "]
+
+
+static func _eh_erro(t: String) -> bool:
+	for p in ERRO_INICIO:
+		if t.begins_with(p):
+			return true
+	return t.contains(" precisa de ") or t.contains(" não cabe")
+
+
+func _show_toast(text: String) -> void:
+	if _toast == null or not _eh_erro(text):
+		return
+	_toast.text = text
+	_toast.add_theme_color_override("font_color", Color(1.0, 0.62, 0.5))
+	_toast_t = 4.5
+	_toast.modulate.a = 1.0
+	_toast.visible = true
 
 
 func _player_depth() -> float:
@@ -3390,7 +3411,7 @@ func _ctx_press() -> void:
 					_show_toast("+1 folha seca de buriti")
 				_act_check = 0.0
 			return
-		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar", "forno_pedra", "forno_barro", "fogao_pedra", "fogao_barro", "car_eixo", "car_roda", "car_cipo", "amarrar_cipo":
+		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar", "forno_pedra", "forno_barro", "fogao_pedra", "fogao_barro", "fogao_sem_barro", "car_eixo", "car_roda", "car_cipo", "amarrar_cipo":
 			_maq_ctx_press(_ctx_action)
 			return
 		"car_soltar", "car_lenha", "car_balde", "car_encher", "car_empurrar":
@@ -13207,9 +13228,13 @@ func _maq_ctx() -> bool:
 			_ctx_btn.text = "Encaixar pedra (%d/%d)" % [int(p.get("ped", 0)) + 1, int(fz.pedras)]
 			return true
 	var fgz: Dictionary = Maquinas.TIPOS[p.tipo].get("fogao", {})
-	if not fgz.is_empty() and _carry.is_empty() and _maq.fogao_etapa(mi) == "pedra" and (item_qtd("pedra") > 0 or teste):
+	if not fgz.is_empty() and _carry.is_empty() and _maq.fogao_etapa(mi) == "pedra":
 		_ctx_action = "fogao_pedra"
 		_ctx_btn.text = "Assentar pedra (%d/%d)" % [int(p.get("ped", 0)) + 1, int(fgz.pedras)]
+		return true
+	if not fgz.is_empty() and _carry.is_empty() and _maq.fogao_etapa(mi) == "barro" and not (_mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro"):
+		_ctx_action = "fogao_sem_barro"
+		_ctx_btn.text = "Pôr barro no fogão (%d/%d)" % [int(p.get("bar", 0)) + 1, int(fgz.barro)]
 		return true
 	if _maq.amarras_falta(mi) > 0 and _carry.is_empty() and (item_qtd("cipo") > 0 or teste):
 		_ctx_action = "amarrar_cipo"
@@ -13302,7 +13327,13 @@ func _maq_ctx_press(act: String) -> void:
 			var pp: Dictionary = _maq.plantas[mi]
 			_show_toast(("Pedra encaixada no barro (%d de %d)." % [int(pp.ped), int(fz2.pedras)]) + (" Agora faça a porta de barro (mais um balde de barro)." if int(pp.ped) >= int(fz2.pedras) else ""))
 			return
+		"fogao_sem_barro":
+			_show_toast("Precisa do balde cheio de barro na mão: prepare o barro no barreiro (terra, água e capim seco, misturados com a enxada) e encha o balde vazio.")
+			return
 		"fogao_pedra":
+			if item_qtd("pedra") <= 0 and not teste:
+				_show_toast("Falta pedra: pegue pedras do chão (o fogão leva %d)." % int(Maquinas.TIPOS.fogao.fogao.pedras))
+				return
 			if not teste:
 				remove_item("pedra", 1)
 				_update_inventory()
@@ -17995,17 +18026,15 @@ func _fogao_opts(mi: int) -> Array:
 	var g: Dictionary = _maq.fogao_st(mi)
 	var op := []
 	var n := (g.lenha as Array).size()
-	var na_mao := not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1 and Maquinas.acha_cabe(_carry)
-	if n < Maquinas.FOGAO_CAP and (na_mao or not _lenhas_finas().is_empty()):
-		op.append(["fogao_lenha", "Pôr lenha"])
-	if not bool(g.aceso) and n > 0:
+	# (as opções aparecem sempre; se faltar alguma coisa, ao tocar a mensagem diz o quê)
+	op.append(["fogao_lenha", "Pôr lenha (%d/%d)" % [n, Maquinas.FOGAO_CAP]])
+	if not bool(g.aceso):
 		op.append(["fogao_acender", "Acender"])
 	var nomes := ["boca do fogo", "boca do lado"]
 	for k in 2:
 		var b: Dictionary = (g.bocas as Array)[k]
 		if b.is_empty():
-			if item_qtd("vasilha_carne") > 0:
-				op.append(["fogao_panela_%d" % k, "Pôr a vasilha (%s)" % nomes[k]])
+			op.append(["fogao_panela_%d" % k, "Pôr a vasilha (%s)" % nomes[k]])
 		else:
 			if str(b.modo) == "fritar" and float(b.p) < 1.0:
 				op.append(["fogao_mexer_%d" % k, "Mexer a carne (%s)" % nomes[k]])
@@ -18049,7 +18078,25 @@ func _fogao_pick(mi: int, acao: String) -> void:
 	var boca: Vector3 = _maq.fogao_boca_mundo(mi)
 	if acao == "fogao_lenha":
 		var cabe: int = Maquinas.FOGAO_CAP - (g.lenha as Array).size()
-		if not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1 and Maquinas.acha_cabe(_carry) and cabe > 0:
+		if cabe <= 0:
+			_show_toast("A boca do fogão já está cheia (%d lenhas)." % Maquinas.FOGAO_CAP)
+			return
+		var mao_lenha := not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1
+		if mao_lenha and not Maquinas.acha_cabe(_carry):
+			_show_toast("Essa lenha é grossa demais para a boca do fogão (%d cm). Rache no cepo até ficar com menos de %d cm." % [roundi(Maquinas.acha_larg(_carry) * 100.0), roundi(Maquinas.FOGAO_LARG * 100.0)])
+			return
+		if not mao_lenha:
+			_lenha_fix()
+			if item_qtd("lenha") <= 0:
+				_show_toast("Você não tem lenha. Rache um toquinho no cepo com o machado e guarde os pedaços como lenha.")
+				return
+			if _lenhas_finas().is_empty():
+				var menor := 99.0
+				for a in _lenhas:
+					menor = minf(menor, Maquinas.acha_larg(a))
+				_show_toast("Sua lenha é grossa demais para a boca do fogão (a mais fina tem %d cm). Rache no cepo até ficar com menos de %d cm." % [roundi(menor * 100.0), roundi(Maquinas.FOGAO_LARG * 100.0)])
+				return
+		if mao_lenha:
 			var am: Dictionary = _carry.duplicate(true)
 			for k in ["pos", "yaw", "golpes", "em_pe"]:
 				am.erase(k)
@@ -18073,6 +18120,12 @@ func _fogao_pick(mi: int, acao: String) -> void:
 		Sons.play_at(self, "baque", boca, -12.0, 1.3)
 		return
 	if acao == "fogao_acender":
+		if bool(g.aceso):
+			_show_toast("O fogão já está aceso.")
+			return
+		if (g.lenha as Array).is_empty():
+			_show_toast("Ponha lenha no fogão antes de acender.")
+			return
 		_face_to(boca)
 		_yaw = _face
 		var msg := fogo_start(-1, mi)
@@ -18082,20 +18135,24 @@ func _fogao_pick(mi: int, acao: String) -> void:
 	var k := int(acao.substr(acao.length() - 1))
 	var bocas: Array = g.bocas
 	if acao.begins_with("fogao_panela_"):
-		if item_qtd("vasilha_carne") <= 0 or not (bocas[k] as Dictionary).is_empty():
+		if not (bocas[k] as Dictionary).is_empty():
+			_show_toast("Essa boca já tem uma vasilha.")
+			return
+		if item_qtd("vasilha_carne") <= 0:
+			_show_toast("Precisa de uma vasilha com carne picada: corte a carne em pedaços pequenos na mesa de carne e pegue com a vasilha de barro na mochila.")
 			return
 		var por := func(modo: String) -> void:
 			if item_qtd("vasilha_carne") <= 0 or not (bocas[k] as Dictionary).is_empty():
 				return
 			if modo == "cozinhar" and not _gasta_agua(2):
+				_show_toast("Para cozinhar precisa de 2 goles de água na cabaça.")
 				return
 			remove_item("vasilha_carne", 1)
 			_update_inventory()
 			bocas[k] = {"modo": modo, "p": 0.0, "q": 0.0, "mexe": _agora_h()}
 			Sons.play_at(self, "agua" if modo == "cozinhar" else "baque", _maq.fogao_panela_mundo(mi, k), -12.0, 1.2)
 		var opts := []
-		if _cabaca_goles() >= 2:
-			opts.append(["Cozinhar", "Com água da cabaça (2 goles):\na carne cozida no caldo.", func(): por.call("cozinhar")])
+		opts.append(["Cozinhar", "Com água da cabaça (2 goles):\na carne cozida no caldo.", func(): por.call("cozinhar")])
 		opts.append(["Fritar", "Na gordura da própria carne,\nmais depressa. Tem que mexer\nsenão gruda e queima.", func(): por.call("fritar")])
 		_choice_menu("NO FOGÃO", "Como fazer a carne", opts)
 		return
@@ -18113,6 +18170,7 @@ func _fogao_pick(mi: int, acao: String) -> void:
 		elif float(b.p) >= 1.0:
 			item = "vasilha_carne_cozida" if str(b.modo) == "cozinhar" else "vasilha_carne_frita"
 		if _bag_total() + Itens.kg(item) > BAG_MAX:
+			_show_toast("A mochila está cheia: não cabe a vasilha.")
 			return
 		bocas[k] = {}
 		add_item(item, 1)
