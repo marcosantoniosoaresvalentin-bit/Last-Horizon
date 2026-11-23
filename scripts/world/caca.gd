@@ -103,6 +103,7 @@ func update(delta: float) -> void:
 	_sangue_tick(delta)
 	_caindo_tick(delta)
 	_pecas_tick()
+	_couro_chao_tick(delta)
 	# poças de sangue crescendo
 	for p in _poças.duplicate():
 		p.r = move_toward(float(p.r), float(p.alvo), delta * 0.03)
@@ -1280,6 +1281,7 @@ func _pecas_tick() -> void:
 
 ## Monta as peças salvas (ao montar a carcaça).
 func _pecas_monta(uid: String) -> void:
+	_couro_chao_monta(uid)
 	for k in _peca_nodes.keys():
 		if str(k).begins_with(uid + ":"):
 			if is_instance_valid(_peca_nodes[k]):
@@ -3079,8 +3081,12 @@ func couro_visual(uid: String) -> void:
 	sm.set_shader_parameter("y_rabo", rf.y_rabo)
 	sm.set_shader_parameter("y_pescoco", rf.y_pescoco)
 	sm.set_shader_parameter("corte_ini", u_ini)
-	sm.set_shader_parameter("corte", lerpf(1.0, u_ini, float(cr.get("corte", 0.0))) if float(cr.get("corte", 0.0)) > 0.0 else 9.0)
 	var pl := float(cr.get("pele", 0.0))
+	if bool(cr.get("junto", false)):
+		# o couro novo: a faca vai abrindo a barriga junto com o couro saindo (um pouco à frente)
+		var uc := lerpf(1.0, -0.55, pl) - 0.1
+		cr["corte"] = clampf((1.0 - uc) / maxf(1.0 - u_ini, 0.01), 0.0, 1.0) if pl > 0.0 else 0.04
+	sm.set_shader_parameter("corte", lerpf(1.0, u_ini, float(cr.get("corte", 0.0))) if float(cr.get("corte", 0.0)) > 0.0 else 9.0)
 	sm.set_shader_parameter("pele", 9.0 if pl <= 0.0 else lerpf(1.0, -0.55, pl))
 	sm.set_shader_parameter("largura", 0.016 / m_por_u)
 	sm.set_shader_parameter("infla", 0.0015 / m_por_u)
@@ -3118,6 +3124,28 @@ func couro_linha(uid: String, n_pts := 16) -> Array:
 	for i in n_pts:
 		var y := lerpf(y0, y1, float(i) / (n_pts - 1))
 		out.append(mi.global_transform * Vector3(0, y, _barriga_z(mi, y) - 0.0005))
+	return out
+
+
+## Onde o couro está soltando agora (a borda entre o couro e a carne), no mundo: de um
+## lado do corpo ao outro, passando pela barriga (virada para quem está tirando).
+func couro_borda_linha(uid: String, n_pts := 11) -> Array:
+	var nd: Dictionary = _nodes.get(uid, {})
+	if nd.is_empty() or not is_instance_valid(nd.node):
+		return []
+	var cr: Dictionary = (nd.c as Dictionary).get("couro", {})
+	var rf := _couro_ref(nd.node)
+	var mi: MeshInstance3D = rf.mi
+	var u := clampf(lerpf(1.0, -0.55, float(cr.get("pele", 0.0))), -0.15, 0.97)
+	var y := lerpf(float(rf.y_rabo), float(rf.y_pescoco), u)
+	var zb := _barriga_z(mi, y)
+	var zt := _costas_z(mi, y)
+	var wx := _meia_largura(mi, y)
+	var out := []
+	for i in n_pts:
+		var t := lerpf(-1.0, 1.0, float(i) / (n_pts - 1))
+		var z := zb + (zt - zb) * 0.5 * (1.0 - sqrt(maxf(0.0, 1.0 - t * t)))
+		out.append(mi.global_transform * Vector3(t * wx * 1.02, y, z - 0.0008))
 	return out
 
 
@@ -3333,3 +3361,243 @@ func _load(path: String) -> bool:
 			novas.append(c)
 	carcacas = novas
 	return true
+
+
+# ---------- o couro tirado, estendido no chão ----------
+# Saiu todo: o couro fica estendido no chão do lado do tripé, do tamanho da vaca (o pelo
+# para cima, com as abas das pernas, o pescoço e o rabo). "Enrolar o couro" enrola ele
+# (vira um rolo) e "Pegar o couro" leva o rolo. c.couro_chao = {x, z, yaw, rolo 0..1, enrolando}
+
+var _cchao := {}                  # uid -> MeshInstance3D
+static var _cchao_mat: ShaderMaterial
+
+
+## Dentro do formato do couro aberto? (x de lado, z ao comprido: + o pescoço, - o rabo; em m numa vaca de tamanho 1)
+static func _couro_forma(x: float, z: float) -> bool:
+	var ax := absf(x)
+	if pow(ax / 0.72, 4.0) + pow(absf(z) / 0.85, 4.0) < 1.0:
+		return true
+	if z > 0.75 and z < 1.25 and ax < 0.34 - (z - 0.75) * 0.25:
+		return true
+	if z < -0.8 and z > -1.45 and ax < 0.045:
+		return true
+	for e in [[Vector2(0.6, 0.6), Vector2(1.22, 0.88), 0.13], [Vector2(0.6, -0.55), Vector2(1.28, -0.98), 0.16]]:
+		var a: Vector2 = e[0]
+		var b: Vector2 = e[1]
+		var q := Vector2(ax, z)
+		var t := clampf((q - a).dot(b - a) / (b - a).length_squared(), 0.0, 1.0)
+		if q.distance_to(a + (b - a) * t) < float(e[2]) * (1.0 - t * 0.45):
+			return true
+	return false
+
+
+func couro_chao_por(uid: String, pos: Vector3, yaw: float) -> void:
+	var c := couro_de(uid)
+	if c.is_empty():
+		return
+	c["couro_chao"] = {"x": pos.x, "z": pos.z, "yaw": yaw, "rolo": 0.0}
+	_couro_chao_monta(uid)
+
+
+func _couro_chao_monta(uid: String) -> void:
+	if _cchao.has(uid) and is_instance_valid(_cchao[uid]):
+		(_cchao[uid] as Node).queue_free()
+	_cchao.erase(uid)
+	var c := couro_de(uid)
+	var cc: Dictionary = c.get("couro_chao", {})
+	if cc.is_empty():
+		return
+	if _cchao_mat == null:
+		var sh := Shader.new()
+		sh.code = """
+shader_type spatial;
+render_mode cull_disabled, diffuse_burley;
+varying vec3 cor;
+varying vec3 lp;
+void vertex() { cor = COLOR.rgb; lp = VERTEX; }
+float hh(vec2 q) { return fract(sin(dot(q, vec2(12.9898, 78.233))) * 43758.5453); }
+void fragment() {
+	// o pelo: fiozinhos de tom diferente, deitados para o mesmo lado
+	float f = hh(floor(vec2(lp.x * 160.0, lp.z * 45.0)));
+	vec3 c = pow(cor, vec3(2.2)) * (0.82 + 0.3 * f);
+	ALBEDO = FRONT_FACING ? c : vec3(0.62, 0.5, 0.45);
+	ROUGHNESS = 0.92;
+	SPECULAR = 0.15;
+}
+"""
+		_cchao_mat = ShaderMaterial.new()
+		_cchao_mat.shader = sh
+	var mi := MeshInstance3D.new()
+	mi.name = "couro_chao"
+	mi.material_override = _cchao_mat
+	add_child(mi)
+	mi.global_transform = Transform3D(Basis(Vector3.UP, float(cc.yaw)), Vector3(float(cc.x), 0.0, float(cc.z)))
+	_cchao[uid] = mi
+	_couro_chao_malha(uid)
+
+
+## O desenho: a grade no formato do couro, deitada no chão; enrolando, o rolo vai
+## comendo do pescoço para o rabo.
+func _couro_chao_malha(uid: String) -> void:
+	var mi: MeshInstance3D = _cchao.get(uid, null)
+	if mi == null or not is_instance_valid(mi):
+		return
+	var c := couro_de(uid)
+	var cc: Dictionary = c.get("couro_chao", {})
+	var p: Dictionary = c.get("p", {})
+	var s := float(p.get("s", 1.0)) * 1.15
+	var cores: Array = VacaModelo.CORES.get(str(p.get("cor", "branca")), VacaModelo.CORES.branca)
+	var malhada := str(p.get("cor", "")) == "malhada"
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(uid)
+	var sx := rng.randf_range(0.0, 50.0)
+	var r := clampf(float(cc.get("rolo", 0.0)), 0.0, 1.0)
+	var z0 := -1.45
+	var z1 := 1.25
+	var zf := lerpf(z1, z0, r)              # até onde já enrolou
+	var R := (0.03 + 0.15 * sqrt(r)) * s
+	var xf := mi.global_transform
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var h := 0.05
+	var nx := 80
+	var nz := 80
+	var dx := 2.7 / nx
+	var dz := (z1 - z0) / nz
+	var alt := func(lx: float, lz: float, lift: float) -> Vector3:
+		var w := xf * Vector3(lx * s, 0.0, lz * s)
+		return Vector3(lx * s, _jogo.ground_at(w.x, w.z) + 0.025 + lift, lz * s)
+	var cor := func(lx: float, lz: float) -> Color:
+		var k: Color = (cores[0] as Color).darkened(0.18)
+		var n := sin(lx * 4.1 + sx) * sin(lz * 3.3 + sx * 0.7) + sin(lx * 9.0 - lz * 7.0 + sx) * 0.35
+		if malhada and n > 0.25:
+			k = cores[1]
+		# o pelo amassado e o meio (o lombo) um pouco mais escuro
+		var pelo := sin(lx * 37.0 + lz * 11.0) * sin(lz * 29.0 - lx * 5.0) * 0.05
+		k = k.darkened(clampf(n * 0.06 + pelo + (0.08 - absf(lx) * 0.08), -0.08, 0.25))
+		return k
+	if not mi.has_meta("tris"):
+		# cada quadradinho: inteiro se os 4 cantos estão no couro, meio (um triângulo) se 3
+		# (a beirada sai lisa, sem degraus). Feito uma vez: [pos, cor, z] por vértice.
+		var tv := []
+		for iz in nz:
+			for ix in nx:
+				var xa := -1.35 + ix * dx
+				var xb := xa + dx
+				var za := z0 + iz * dz
+				var zb := za + dz
+				var cs := [Vector2(xa, za), Vector2(xb, za), Vector2(xb, zb), Vector2(xa, zb)]
+				var dentro := []
+				var nd := 0
+				for cq in cs:
+					var dq := _couro_forma(cq.x, cq.y)
+					dentro.append(dq)
+					if dq:
+						nd += 1
+				if nd < 3:
+					continue
+				var tris := [[0, 1, 2], [0, 2, 3]]
+				if nd == 3:
+					var fora := dentro.find(false)
+					tris = [[(fora + 1) % 4, (fora + 2) % 4, (fora + 3) % 4]]
+				for tr in tris:
+					var zmax := maxf(maxf((cs[tr[0]] as Vector2).y, (cs[tr[1]] as Vector2).y), (cs[tr[2]] as Vector2).y)
+					for t in tr:
+						var cq2: Vector2 = cs[t]
+						var k: Color = cor.call(cq2.x, cq2.y)
+						if nd == 3:
+							k = k.darkened(0.12)       # a beirada um pouco mais escura (seca)
+						tv.append([alt.call(cq2.x, cq2.y, 0.0), k, zmax])
+		mi.set_meta("tris", tv)
+	if r < 0.999:
+		for v in (mi.get_meta("tris") as Array):
+			if float(v[2]) > zf + 0.0001:
+				continue
+			st.set_color(v[1])
+			st.set_normal(Vector3.UP)
+			st.add_vertex(v[0])
+	if r > 0.0:
+		# o rolo: o lado de dentro (a carne, branca e rosada) para fora
+		var meia := 0.0
+		for i in 40:
+			var lzz := lerpf(zf, z1, float(i) / 39.0)
+			for j in 28:
+				var lxx := float(j) / 27.0 * 1.35
+				if _couro_forma(lxx, lzz):
+					meia = maxf(meia, lxx)
+		meia = clampf(meia, 0.3, 0.72) * s        # (as abas das pernas dobram para dentro)
+		var cz := zf * s
+		var base: Vector3 = alt.call(0.0, zf, 0.0)
+		var n := 14
+		for i in n:
+			var a0 := TAU * i / n
+			var a1 := TAU * (i + 1) / n
+			var p0 := Vector3(0, base.y + R + sin(a0) * R, cz + cos(a0) * R)
+			var p1 := Vector3(0, base.y + R + sin(a1) * R, cz + cos(a1) * R)
+			var kk := Color(0.86, 0.76, 0.7) if i % 2 == 0 else Color(0.8, 0.66, 0.6)
+			var q2 := [p0 + Vector3(-meia, 0, 0), p0 + Vector3(meia, 0, 0), p1 + Vector3(meia, 0, 0), p1 + Vector3(-meia, 0, 0)]
+			var nr := Vector3(0, sin((a0 + a1) * 0.5), cos((a0 + a1) * 0.5))
+			for t in [0, 1, 2, 0, 2, 3]:
+				st.set_color(kk)
+				st.set_normal(nr)
+				st.add_vertex(q2[t])
+			# as pontas do rolo (a espiral do couro: o pelo por dentro)
+			for sg in [-1.0, 1.0]:
+				var cen := Vector3(sg * meia, base.y + R, cz)
+				for t2 in [[cen, p0 + Vector3(sg * meia, 0, 0), p1 + Vector3(sg * meia, 0, 0)]]:
+					for v in t2:
+						st.set_color((cores[0] as Color).darkened(0.25))
+						st.set_normal(Vector3(sg, 0, 0))
+						st.add_vertex(v)
+	mi.mesh = st.commit()
+
+
+## O couro no chão mais perto (uid ou "").
+func couro_chao_perto(pos: Vector3, reach: float) -> String:
+	var best := ""
+	var bd := reach
+	for uid in _cchao:
+		var mi: MeshInstance3D = _cchao[uid]
+		if not is_instance_valid(mi):
+			continue
+		var cc: Dictionary = couro_de(str(uid)).get("couro_chao", {})
+		if cc.is_empty():
+			continue
+		# perto de qualquer ponto do couro (ele é grande)
+		var l := mi.global_transform.affine_inverse() * pos
+		var d := Vector2(clampf(l.x, -0.9, 0.9) - l.x, clampf(l.z, -1.2, 1.1) - l.z).length()
+		if d < bd:
+			bd = d
+			best = str(uid)
+	return best
+
+
+func couro_chao_rolo(uid: String) -> float:
+	return float((couro_de(uid).get("couro_chao", {}) as Dictionary).get("rolo", 0.0))
+
+
+func couro_chao_enrolar(uid: String) -> void:
+	var cc: Dictionary = couro_de(uid).get("couro_chao", {})
+	if not cc.is_empty():
+		cc["enrolando"] = true
+		Sons.play_at(_jogo, "fibra_puxa", Vector3(float(cc.x), _jogo.ground_at(float(cc.x), float(cc.z)), float(cc.z)), -8.0, 0.6)
+
+
+func _couro_chao_tick(delta: float) -> void:
+	for uid in _cchao:
+		var cc: Dictionary = couro_de(str(uid)).get("couro_chao", {})
+		if cc.is_empty() or not bool(cc.get("enrolando", false)):
+			continue
+		cc.rolo = minf(1.0, float(cc.rolo) + delta / 2.2)
+		if float(cc.rolo) >= 1.0:
+			cc.erase("enrolando")
+		_couro_chao_malha(str(uid))
+
+
+## O rolo foi pego (sai do chão).
+func couro_chao_tirar(uid: String) -> void:
+	var c := couro_de(uid)
+	c.erase("couro_chao")
+	if _cchao.has(uid) and is_instance_valid(_cchao[uid]):
+		(_cchao[uid] as Node).queue_free()
+	_cchao.erase(uid)

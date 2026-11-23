@@ -10645,15 +10645,9 @@ func _couro_start(mi: int, uid: String) -> void:
 	if _mao != "":
 		equip("")
 	var cr: Dictionary = c.couro
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash(uid)
-	var presos := []
-	for k in 3:
-		var v := rng.randf_range(0.12 + k * 0.27, 0.3 + k * 0.27)
-		if v > float(cr.pele):
-			presos.append(v)
-	_couro = {"mi": mi, "uid": uid, "drag": -9, "ini": Vector2.ZERO, "fase": "corte" if float(cr.corte) < 1.0 else "puxa",
-		"forca": 0.0, "presos": presos, "faca": 0.0, "cortando": false, "soltando": false, "anda": 0.0}
+	cr["junto"] = true                     # a faca e a força juntos, do começo ao fim
+	_couro = {"mi": mi, "uid": uid, "drag": -9, "ini": Vector2.ZERO, "fase": "puxa",
+		"forca": 0.0, "presos": [], "faca": 0.0, "cortando": false, "soltando": false, "anda": 0.0}
 	_olho = {}
 	_bur = {}
 	_jump_btn.visible = false
@@ -10682,7 +10676,7 @@ func _couro_move(delta: float) -> void:
 	if _caca == null or _caca.couro_de(uid).is_empty() or mi >= _maq.plantas.size() or (_maq.plantas[mi].get("ice", {}) as Dictionary).is_empty():
 		_couro_end()
 		return
-	var lin: Array = _caca.couro_linha(uid, 8)
+	var lin: Array = _caca.couro_borda_linha(uid, 5)
 	if lin.is_empty():
 		_couro_end()
 		return
@@ -10690,6 +10684,10 @@ func _couro_move(delta: float) -> void:
 	for q in lin:
 		meio += q
 	meio /= lin.size()
+	# a câmera acompanha a borda devagar (onde a faca está trabalhando)
+	if _couro.has("olho_m"):
+		meio = (_couro.olho_m as Vector3).lerp(meio, 1.0 - exp(-delta * 3.0))
+	_couro["olho_m"] = meio
 	var fr: Vector3 = _caca.couro_frente(uid)
 	fr.y = 0.0
 	if fr.length() < 0.1:
@@ -10766,8 +10764,6 @@ func _couro_input(e: InputEvent) -> bool:
 		if pressed:
 			_couro.drag = idx
 			_couro.ini = pos
-			_couro.cortando = str(_couro.fase) == "corte" and pos.distance_to(_couro_tela(float(cr.corte))) < 110.0
-			_couro.soltando = str(_couro.fase) == "puxa" and _couro_preso(cr) and pos.distance_to(_couro_tela(_couro_borda(cr))) < 120.0
 		elif int(_couro.drag) == idx:
 			_couro.drag = -9
 			_couro.cortando = false
@@ -10793,75 +10789,52 @@ func _couro_preso(cr: Dictionary) -> bool:
 	return not pr.is_empty() and float(pr[0]) <= float(cr.pele) + 0.001
 
 
-## O dedo passando: corta (na linha), solta (em cima da marca) ou puxa (com força).
+## A borda do couro na tela (de um lado do corpo ao outro).
+func _couro_borda_tela() -> Array:
+	var out := []
+	for w in _caca.couro_borda_linha(str(_couro.uid), 11):
+		if _cam.is_position_behind(w):
+			continue
+		out.append(_cam.unproject_position(w))
+	return out
+
+
+## O dedo passando a faca na borda (onde o couro está soltando), com a força puxando o
+## couro ao mesmo tempo: só assim ele vai saindo. Sem força a faca não adianta; sem a faca
+## a força sozinha não arranca.
 func _couro_passa(cr: Dictionary, d: Vector2, at: Vector2) -> void:
 	var uid := str(_couro.uid)
-	var total := _couro_tela_len()
-	if str(_couro.fase) == "corte":
-		if not bool(_couro.cortando):
-			return
-		var t0 := float(cr.corte)
-		# o ponto da linha mais perto do dedo (na tela): o corte vai até ali
-		var lin: Array = _caca.couro_linha(str(_couro.uid), 33)
-		var best := 1e9
-		var tp := t0
-		for k in lin.size() - 1:
-			var a2: Vector2 = _cam.unproject_position(lin[k])
-			var b2: Vector2 = _cam.unproject_position(lin[k + 1])
-			var ab := b2 - a2
-			var f := clampf((at - a2).dot(ab) / maxf(ab.length_squared(), 1.0), 0.0, 1.0)
-			var dd := at.distance_to(a2 + ab * f)
-			var tk := (float(k) + f) / (lin.size() - 1)
-			if dd < best and tk > t0 - 0.1 and tk < t0 + 0.2:
-				best = dd
-				tp = tk
-		if best > 110.0:
-			_couro.cortando = false               # o dedo saiu da linha
-			return
-		if tp <= t0 and t0 < 0.95:
-			return
-		if maxf(tp, t0) >= 0.95:
-			tp = 1.0
-		if item_qtd("faca") <= 0 and not teste:
-			_couro.cortando = false
-			return
-		var t1 := minf(1.0, tp)
-		cr.corte = t1
-		_couro.faca = 1.0
-		if int(t1 * 8.0) != int(t0 * 8.0):
-			Sons.play_at(self, "fibra_puxa", _cam.global_position + _cam.global_transform.basis.z * -1.2, -14.0, 1.7)
-			if wear("faca", 1):
-				_update_inventory()
-		if t1 >= 1.0:
-			_couro.fase = "puxa"
-			_couro.cortando = false
-		_caca.couro_visual(uid)
+	var bt := _couro_borda_tela()
+	if bt.size() < 2:
 		return
-	# puxando
-	if bool(_couro.soltando):
-		if item_qtd("faca") <= 0 and not teste:
-			return
-		if at.distance_to(_couro.ini) > 55.0:
-			(_couro.presos as Array).pop_front()
-			_couro.soltando = false
-			_couro.faca = 1.0
-			Sons.play_at(self, "fibra_puxa", _cam.global_position + _cam.global_transform.basis.z * -1.2, -10.0, 1.4)
-			if wear("faca", 1):
-				_update_inventory()
+	var best := 1e9
+	var dirb := Vector2.RIGHT
+	var tot := 0.0
+	for k in bt.size() - 1:
+		var a2: Vector2 = bt[k]
+		var b2: Vector2 = bt[k + 1]
+		var ab := b2 - a2
+		tot += ab.length()
+		var f := clampf((at - a2).dot(ab) / maxf(ab.length_squared(), 1.0), 0.0, 1.0)
+		var dd := at.distance_to(a2 + ab * f)
+		if dd < best:
+			best = dd
+			dirb = ab.normalized()
+	if best > 120.0:
+		return                                  # a faca longe da borda
+	if item_qtd("faca") <= 0 and not teste:
 		return
-	if d.y <= 0.0 or _couro_preso(cr):
-		return
+	_couro.faca = 1.0
 	if float(_couro.forca) < COURO_PRECISA:
-		return
+		return                                  # o couro frouxo: a faca só raspa
 	var p0 := float(cr.pele)
-	var p1 := minf(1.0, p0 + d.y / total * 0.55)
-	var pr: Array = _couro.presos
-	if not pr.is_empty():
-		p1 = minf(p1, float(pr[0]))
+	var p1 := minf(1.0, p0 + absf(d.dot(dirb)) / maxf(tot, 80.0) * 0.06)
 	cr.pele = p1
 	_couro.anda = 1.0
-	if int(p1 * 12.0) != int(p0 * 12.0):
-		Sons.play_at(self, "fibra_puxa", _cam.global_position + _cam.global_transform.basis.z * -1.2, -8.0, 0.7)
+	if int(p1 * 14.0) != int(p0 * 14.0):
+		Sons.play_at(self, "fibra_puxa", _cam.global_position + _cam.global_transform.basis.z * -1.2, -8.0, randf_range(0.65, 0.85))
+		if int(p1 * 7.0) != int(p0 * 7.0) and wear("faca", 1):
+			_update_inventory()
 	_caca.couro_visual(uid)
 	if p1 >= 1.0:
 		_couro_pronto()
@@ -10878,18 +10851,14 @@ func _couro_pronto() -> void:
 	var uid := str(_couro.uid)
 	var c: Dictionary = _caca.couro_de(uid)
 	c["esfolada"] = true
-	var p: Dictionary = c.get("p", {})
-	var id := "couro_boi" if bool(p.get("touro", false)) else "couro_vaca"
-	var sobra := 0
-	if _bag_total() + Itens.kg(id) > BAG_MAX:
-		sobra = 1
-	else:
-		sobra = add_item(id, 1)
-	if sobra > 0:
-		var w := _player.position + Vector3(randf_range(-0.4, 0.4), 0, randf_range(-0.4, 0.4))
-		_add_ground(id, sobra, w.x, w.z)
-	_update_inventory()
-	Sons.play_at(self, "baque", _player.position + Vector3.UP * 0.3, -6.0, 0.8)
+	# o couro cai estendido no chão, atrás de quem tirou (longe da vaca)
+	var pe: Vector3 = _caca.pes_tras(uid)
+	var fora := _player.position - pe
+	fora.y = 0.0
+	fora = fora.normalized() if fora.length() > 0.05 else Vector3.BACK
+	var w := _player.position + fora * 1.9
+	_caca.couro_chao_por(uid, Vector3(w.x, 0.0, w.z), atan2(fora.x, fora.z))
+	Sons.play_at(self, "baque", w + Vector3.UP * 0.3, -4.0, 0.7)
 	_couro_end()
 
 
@@ -10901,36 +10870,15 @@ func _couro_draw() -> void:
 		return
 	var ui := _sub_ui
 	var s := ui.size
-	if str(_couro.fase) == "corte":
-		# a linha pontilhada do que falta cortar e a faca na ponta
-		var t0 := float(cr.corte)
-		var n := 24
-		for k in n:
-			var a := t0 + (1.0 - t0) * float(k) / n
-			var b := t0 + (1.0 - t0) * (float(k) + 0.5) / n
-			ui.draw_line(_couro_tela(a), _couro_tela(b), Color(1, 1, 1, 0.75), 3.0, true)
-		var tip := _couro_tela(t0)
-		var pulso := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 160.0)
-		ui.draw_arc(tip, 22.0 + pulso * 6.0, 0, TAU, 28, Color(1, 0.95, 0.6, 0.85), 3.0, true)
-		# a faca (lâmina de pedra e o cabo) apontando para baixo
-		var dn := (_couro_tela(t0 + 0.05) - tip).normalized()
-		var lt := Vector2(-dn.y, dn.x)
-		var pc := tip + lt * 6.0
-		ui.draw_colored_polygon(PackedVector2Array([pc + dn * 4.0, pc - dn * 34.0 + lt * 8.0, pc - dn * 34.0 - lt * 4.0]), Color(0.55, 0.55, 0.52))
-		ui.draw_line(pc - dn * 34.0, pc - dn * 70.0, Color(0.38, 0.26, 0.14), 9.0, true)
-	else:
-		# a borda do couro e, se grudou, a marca para soltar com a faca
-		var bt := _couro_tela(_couro_borda(cr))
-		if _couro_preso(cr):
-			var pul := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 110.0)
-			ui.draw_arc(bt, 26.0 + pul * 8.0, 0, TAU, 28, Color(1, 0.2, 0.15, 0.95), 4.0, true)
-			ui.draw_line(bt + Vector2(-14, -14), bt + Vector2(14, 14), Color(1, 0.2, 0.15, 0.95), 4.0, true)
-			ui.draw_line(bt + Vector2(-14, 14), bt + Vector2(14, -14), Color(1, 0.2, 0.15, 0.95), 4.0, true)
-		else:
-			var dn2 := (_couro_tela(_couro_borda(cr) + 0.06) - bt).normalized()
-			var cor := Color(1, 0.95, 0.6, 0.85) if float(_couro.forca) >= COURO_PRECISA else Color(1, 1, 1, 0.35)
-			ui.draw_line(bt, bt + dn2 * 70.0, cor, 6.0, true)
-			ui.draw_colored_polygon(PackedVector2Array([bt + dn2 * 88.0, bt + dn2 * 66.0 + Vector2(-dn2.y, dn2.x) * 14.0, bt + dn2 * 66.0 - Vector2(-dn2.y, dn2.x) * 14.0]), cor)
+	if true:
+		# a borda do couro (onde passar a faca): amarela com força, apagada sem
+		var bt := _couro_borda_tela()
+		var ok := float(_couro.forca) >= COURO_PRECISA
+		var cb := Color(1, 0.9, 0.45, 0.95) if ok else Color(1, 1, 1, 0.4)
+		for k in bt.size() - 1:
+			if k % 2 == 0:
+				ui.draw_line(bt[k], bt[k + 1], Color(0, 0, 0, 0.45), 7.0, true)
+				ui.draw_line(bt[k], bt[k + 1], cb, 4.0, true)
 		# a barra de força ao lado do botão
 		var btn: Control = _couro_btns[0]
 		var r := Rect2(btn.get_global_rect().position - ui.get_global_rect().position + Vector2(-44, 0), Vector2(28, btn.size.y))
@@ -12022,6 +11970,17 @@ func _carne_ctx() -> bool:
 		return true
 	if not _carry.is_empty() or _crouch_job != "" or _air or _empurra >= 0:
 		return false
+	var cu: String = _caca.couro_chao_perto(_player.position, 0.9)
+	if cu != "":
+		var rl: float = _caca.couro_chao_rolo(cu)
+		if rl <= 0.0:
+			_ctx_action = "carne_couro_enrolar"
+			_ctx_btn.text = "Enrolar o couro"
+			return true
+		if rl >= 1.0:
+			_ctx_action = "carne_couro_pegar"
+			_ctx_btn.text = "Pegar o couro"
+			return true
 	if not _caca.peca_perto(_player.position, 1.6, "chao").is_empty():
 		_ctx_action = "carne_pegar"
 		_ctx_btn.text = "Pegar a carne"
@@ -12039,6 +11998,22 @@ func _carne_ctx() -> bool:
 
 func _carne_press(act: String) -> void:
 	match act:
+		"carne_couro_enrolar":
+			var cu: String = _caca.couro_chao_perto(_player.position, 0.9)
+			if cu != "":
+				_caca.couro_chao_enrolar(cu)
+		"carne_couro_pegar":
+			var cu2: String = _caca.couro_chao_perto(_player.position, 0.9)
+			if cu2 == "":
+				return
+			var p: Dictionary = _caca.couro_de(cu2).get("p", {})
+			var id := "couro_boi" if bool(p.get("touro", false)) else "couro_vaca"
+			if _bag_total() + Itens.kg(id) > BAG_MAX:
+				return                     # não cabe: o rolo fica no chão
+			add_item(id, 1)
+			_update_inventory()
+			_caca.couro_chao_tirar(cu2)
+			Sons.play_at(self, "baque", _player.position + Vector3.UP, -8.0, 0.8)
 		"carne_pegar":
 			var pk: Array = _caca.peca_perto(_player.position, 1.6, "chao")
 			if not pk.is_empty():
