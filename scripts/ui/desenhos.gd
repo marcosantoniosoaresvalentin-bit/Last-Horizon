@@ -15,21 +15,21 @@ static func backpack(ci: CanvasItem, c: Vector2, s: float, col: Color, shade: Co
 	ci.draw_arc(c + Vector2(0, -38) * u, 11 * u, PI, TAU, 16, col.darkened(0.25), 5 * u, true)
 	# corpo
 	var body: PackedVector2Array = P.call([[-30, -34], [30, -34], [38, -24], [40, 36], [34, 46], [-34, 46], [-40, 36], [-38, -24]])
-	ci.draw_colored_polygon(body, col)
+	_poly(ci, body, col)
 	# tampa
 	var flap: PackedVector2Array = P.call([[-31, -34], [31, -34], [37, -22], [34, -4], [-34, -4], [-37, -22]])
-	ci.draw_colored_polygon(flap, col.darkened(0.22))
+	_poly(ci, flap, col.darkened(0.22))
 	# bolso da frente
 	var pocket: PackedVector2Array = P.call([[-22, 10], [22, 10], [24, 40], [-24, 40]])
-	ci.draw_colored_polygon(pocket, col.darkened(0.12))
-	ci.draw_colored_polygon(P.call([[-24, 10], [24, 10], [22, 20], [-22, 20]]), col.darkened(0.3))
+	_poly(ci, pocket, col.darkened(0.12))
+	_poly(ci, P.call([[-24, 10], [24, 10], [22, 20], [-22, 20]]), col.darkened(0.3))
 	# fivelas
 	for x in [-14, 14]:
 		ci.draw_rect(Rect2(c + Vector2(x - 3, -8) * u, Vector2(6, 16) * u), Color(0.35, 0.25, 0.14, col.a))
 		ci.draw_rect(Rect2(c + Vector2(x - 4, 4) * u, Vector2(8, 5) * u), Color(0.75, 0.7, 0.55, col.a))
 	# sombra lateral e contornos
 	if shade.a > 0.0:
-		ci.draw_colored_polygon(P.call([[26, -24], [38, -24], [40, 36], [34, 46], [24, 46]]), shade)
+		_poly(ci, P.call([[26, -24], [38, -24], [40, 36], [34, 46], [24, 46]]), shade)
 	ci.draw_polyline(body + PackedVector2Array([body[0]]), outline, 2.5 * u, true)
 	ci.draw_polyline(flap + PackedVector2Array([flap[0]]), outline, 2.0 * u, true)
 	ci.draw_polyline(pocket + PackedVector2Array([pocket[0]]), outline, 2.0 * u, true)
@@ -37,8 +37,277 @@ static func backpack(ci: CanvasItem, c: Vector2, s: float, col: Color, shade: Co
 
 
 
+## Uma forma pintada com luz: mais clara do lado de cima à esquerda (de onde vem a luz)
+## e mais escura embaixo à direita, como uma coisa de verdade (e não chapada).
+static func _poly(ci: CanvasItem, pts: PackedVector2Array, cor: Color) -> void:
+	if pts.size() < 3:
+		return
+	var mn := pts[0]
+	var mx := pts[0]
+	for q in pts:
+		mn = mn.min(q)
+		mx = mx.max(q)
+	var cen := (mn + mx) * 0.5
+	var r := maxf((mx - mn).length() * 0.5, 0.001)
+	var luz := Vector2(-0.55, -0.83)
+	var cols := PackedColorArray()
+	for q in pts:
+		var t := clampf((q - cen).dot(luz) / r, -1.0, 1.0)
+		var c2 := cor.lightened(0.17 * t) if t > 0.0 else cor.darkened(-0.24 * t)
+		c2.a = cor.a
+		cols.append(c2)
+	ci.draw_polygon(pts, cols)
+
+
+## A sombrinha no chão embaixo do item.
+static func _sombra(ci: CanvasItem, c: Vector2, s: float) -> void:
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	for k in 24:
+		var a := TAU * k / 24.0
+		pts.append(c + Vector2(cos(a) * s * 0.36, s * 0.4 + sin(a) * s * 0.07))
+		cols.append(Color(0, 0, 0, 0.16))
+	ci.draw_polygon(pts, cols)
+
+
 ## Desenho de um item (ícone da mochila e do craft). Devolve false se não sabe desenhar.
 static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
+	if not id.begins_with("acao_"):
+		_sombra(ci, c, s)
+	return _item(ci, id, c, s)
+
+
+static func _item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
+	if _novo(ci, id, c, s):
+		return true
+	return _item_velho(ci, id, c, s)
+
+
+## Um pau (galho, vareta, cabo) com casca: contorno escuro, a cor, o brilho de cima e os
+## nós; w: grossura.
+static func _pau(ci: CanvasItem, pts: PackedVector2Array, w: float, cor: Color, u: float, nos := 0) -> void:
+	var ink := Color(0.14, 0.09, 0.05)
+	ci.draw_polyline(pts, ink, (w + 3.0) * u, true)
+	ci.draw_polyline(pts, cor, w * u, true)
+	var hi := PackedVector2Array()
+	for q in pts:
+		hi.append(q + Vector2(-0.18, -0.26) * w * u)
+	ci.draw_polyline(hi, cor.lightened(0.28), maxf(1.0, w * 0.28) * u, true)
+	var sh := PackedVector2Array()
+	for q in pts:
+		sh.append(q + Vector2(0.2, 0.28) * w * u)
+	ci.draw_polyline(sh, cor.darkened(0.3), maxf(1.0, w * 0.22) * u, true)
+	for k in nos:
+		var t := (k + 1.0) / (nos + 1.0)
+		var i := clampi(int(t * (pts.size() - 1)), 0, pts.size() - 2)
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[i + 1]
+		var d := (b - a).normalized()
+		var nn := Vector2(-d.y, d.x)
+		var m := a.lerp(b, 0.5)
+		ci.draw_line(m - nn * w * 0.5 * u, m + nn * w * 0.5 * u, cor.darkened(0.4), 1.6 * u, true)
+
+
+## A madeira cortada (tábua, ripa, lenha): a face com os veios e a ponta com os anéis.
+static func _madeira(ci: CanvasItem, a: Vector2, b: Vector2, larg: float, esp: float, cor: Color, u: float, casca := false) -> void:
+	var ink := Color(0.14, 0.09, 0.05)
+	var d := (b - a).normalized()
+	var n := Vector2(-d.y, d.x)
+	var face := PackedVector2Array([a - n * larg * 0.5 * u, b - n * larg * 0.5 * u, b + n * larg * 0.5 * u, a + n * larg * 0.5 * u])
+	var lado := PackedVector2Array([a + n * larg * 0.5 * u, b + n * larg * 0.5 * u, b + (n * larg * 0.5 + Vector2(0, esp)) * u, a + (n * larg * 0.5 + Vector2(0, esp)) * u])
+	_poly(ci, lado, cor.darkened(0.3) if not casca else Color(0.33, 0.22, 0.13))
+	_poly(ci, face, cor)
+	# os veios
+	for k in 4:
+		var o := -0.35 + k * 0.23
+		var pl := PackedVector2Array()
+		for i in 9:
+			var t := float(i) / 8.0
+			pl.append(a.lerp(b, t) + n * (o * larg + sin(t * 7.0 + k * 2.0) * 1.2) * u)
+		ci.draw_polyline(pl, cor.darkened(0.25), 1.1 * u, true)
+	# a ponta (corte) com os anéis
+	var ponta := PackedVector2Array([b - n * larg * 0.5 * u, b + n * larg * 0.5 * u, b + (n * larg * 0.5 + Vector2(0, esp)) * u, b + (-n * larg * 0.5 + Vector2(0, esp)) * u])
+	_poly(ci, ponta, cor.lightened(0.15))
+	ci.draw_polyline(face + PackedVector2Array([face[0]]), ink, 1.8 * u, true)
+	ci.draw_polyline(lado + PackedVector2Array([lado[0]]), ink, 1.5 * u, true)
+
+
+## Os desenhos novos (mais caprichados). false se não é um deles.
+static func _novo(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
+	var u := s / 100.0
+	var ink := Color(0.12, 0.08, 0.05)
+	var P := func(arr: Array) -> PackedVector2Array:
+		var out := PackedVector2Array()
+		for q in arr:
+			out.append(c + Vector2(q[0], q[1]) * u)
+		return out
+	match id:
+		"galho":
+			# o galho seco com a forquilha, a casca e duas folhinhas na ponta fina
+			_pau(ci, P.call([[-44, 34], [-20, 16], [4, 0], [24, -14], [44, -30]]), 8.0, Color(0.42, 0.29, 0.17), u, 3)
+			_pau(ci, P.call([[-8, 8], [0, -12], [6, -30]]), 5.0, Color(0.42, 0.29, 0.17), u)
+			for q in [[8, -34, -0.6], [46, -34, 0.4]]:
+				var lc := c + Vector2(q[0], q[1]) * u
+				var fl := PackedVector2Array()
+				for k in 12:
+					var a := TAU * k / 12.0
+					fl.append(lc + Vector2(cos(a) * 9.0, sin(a) * 4.0).rotated(float(q[2])) * u)
+				_poly(ci, fl, Color(0.5, 0.55, 0.22))
+				ci.draw_polyline(fl + PackedVector2Array([fl[0]]), ink, 1.2 * u, true)
+			return true
+		"vareta", "espeto":
+			# a vareta reta, fina, sem casca (raspada); o espeto com a ponta apontada clara
+			var a0 := c + Vector2(-42, 38) * u
+			var b0 := c + Vector2(40, -36) * u
+			_pau(ci, PackedVector2Array([a0, a0.lerp(b0, 0.5), b0]), 5.0, Color(0.66, 0.5, 0.3), u, 2)
+			if id == "espeto":
+				var d := (b0 - a0).normalized()
+				var nn := Vector2(-d.y, d.x)
+				var pt := PackedVector2Array([b0 - nn * 3.2 * u, b0 + d * 12.0 * u, b0 + nn * 3.2 * u])
+				_poly(ci, pt, Color(0.86, 0.74, 0.52))
+				ci.draw_polyline(pt, ink, 1.4 * u, true)
+			return true
+		"cipo":
+			# o cipó-titica enrolado em voltas, castanho-esverdeado com os nós
+			for k in 3:
+				var pts := PackedVector2Array()
+				for i in 41:
+					var a := TAU * i / 40.0
+					pts.append(c + Vector2(cos(a) * (36.0 - k * 5.0), sin(a) * (22.0 - k * 3.0) + k * 5.0 - 4.0) * u)
+				_pau(ci, pts, 4.5, Color(0.4, 0.34, 0.16).lerp(Color(0.32, 0.36, 0.16), k * 0.4), u, 6)
+			_pau(ci, P.call([[30, 6], [40, 22], [46, 40]]), 4.0, Color(0.4, 0.34, 0.16), u)
+			_pau(ci, P.call([[-34, -6], [-44, -24], [-40, -40]]), 4.0, Color(0.36, 0.34, 0.16), u)
+			return true
+		"ponta_pedra":
+			flint(ci, P.call([[-34, 10], [-10, -14], [30, -32], [40, -26], [12, 10], [-20, 24]]), Color(0.5, 0.5, 0.5), 41, u, [1, 2, 3])
+			return true
+		"lamina_faca":
+			flint(ci, P.call([[-44, 12], [-22, -4], [10, -14], [42, -20], [44, -14], [14, 6], [-18, 18], [-42, 20]]), Color(0.46, 0.47, 0.5), 77, u, [1, 2, 3, 4])
+			return true
+		"argila_limpa":
+			# as bolas de argila limpa, lisinhas e úmidas (brilham)
+			for q in [[-16, 8, 26.0], [18, 12, 22.0], [2, -16, 20.0]]:
+				var bc := c + Vector2(q[0], q[1]) * u
+				var bl := PackedVector2Array()
+				for k in 24:
+					var a := TAU * k / 24.0
+					bl.append(bc + Vector2(cos(a), sin(a) * 0.9) * float(q[2]) * u)
+				_poly(ci, bl, Color(0.62, 0.36, 0.24))
+				ci.draw_arc(bc + Vector2(-0.25, -0.3) * float(q[2]) * u, float(q[2]) * 0.45 * u, PI * 1.0, PI * 1.6, 8, Color(1, 0.88, 0.75, 0.6), 2.5 * u, true)
+				ci.draw_polyline(bl + PackedVector2Array([bl[0]]), ink, 1.8 * u, true)
+			return true
+		"semente":
+			semente_cedro(ci, c, s)
+			return true
+		"semente_andiroba":
+			# as sementes de andiroba: grandes, castanhas, com as faces chatas (quinas)
+			for q in [[-20, 10, 0.2], [18, 12, -0.4], [0, -14, 0.9]]:
+				var sc := c + Vector2(q[0], q[1]) * u
+				var r := float(q[2])
+				var sm := PackedVector2Array()
+				for v in [[-18, -4], [-8, -18], [12, -16], [20, -2], [14, 14], [-6, 18], [-18, 10]]:
+					sm.append(sc + Vector2(v[0], v[1]).rotated(r) * u)
+				_poly(ci, sm, Color(0.5, 0.32, 0.17))
+				# a quina clara (a face de cima) e a casquinha
+				_poly(ci, PackedVector2Array([sc + Vector2(-8, -18).rotated(r) * u, sc + Vector2(12, -16).rotated(r) * u, sc + Vector2(4, -2).rotated(r) * u, sc + Vector2(-12, -4).rotated(r) * u]), Color(0.62, 0.42, 0.24))
+				ci.draw_polyline(sm + PackedVector2Array([sm[0]]), ink, 1.8 * u, true)
+			return true
+		"raiz_timbo":
+			# as raízes de timbó: tortas, cheias de nó, castanho-escuras, amarradas
+			for k in 4:
+				var y := -14.0 + k * 9.0
+				var pts2 := PackedVector2Array()
+				for i in 9:
+					var t := float(i) / 8.0
+					pts2.append(c + Vector2(lerpf(-44, 42, t), y + sin(t * 8.0 + k * 1.7) * 3.5 + t * k * 2.0) * u)
+				_pau(ci, pts2, 5.5 - k * 0.6, Color(0.42, 0.27, 0.15).darkened(k * 0.06), u, 3)
+			_pau(ci, P.call([[-6, -22], [-4, 0], [-2, 24]]), 6.0, Color(0.4, 0.34, 0.16), u)
+			return true
+		"veneno_timbo":
+			# a cuia com o caldo leitoso do timbó amassado e um pedaço de raiz
+			load("res://scripts/world/olaria.gd").icone(ci, "vasilha_barro", c + Vector2(0, 10) * u, s * 0.95)
+			var lq := PackedVector2Array()
+			for k in 20:
+				var a := TAU * k / 20.0
+				lq.append(c + Vector2(cos(a) * 30.0, sin(a) * 6.0 - 12.0) * u)
+			_poly(ci, lq, Color(0.88, 0.88, 0.8))
+			ci.draw_arc(c + Vector2(-8, -13) * u, 8.0 * u, PI, PI * 1.7, 8, Color(1, 1, 1, 0.8), 2.0 * u, true)
+			_pau(ci, P.call([[8, -14], [22, -30], [34, -38]]), 5.0, Color(0.42, 0.27, 0.15), u, 2)
+			return true
+		"lenha":
+			# duas achas rachadas: a casca escura de um lado, a madeira clara rachada do outro
+			_madeira(ci, c + Vector2(-40, 26) * u, c + Vector2(30, -8) * u, 18.0, 10.0, Color(0.78, 0.62, 0.42), u, true)
+			_madeira(ci, c + Vector2(-30, 4) * u, c + Vector2(40, -30) * u, 16.0, 9.0, Color(0.74, 0.58, 0.38), u, true)
+			return true
+		"tabua":
+			_madeira(ci, c + Vector2(-44, 22) * u, c + Vector2(40, -14) * u, 34.0, 8.0, Color(0.72, 0.55, 0.34), u)
+			return true
+		"ripa":
+			_madeira(ci, c + Vector2(-44, 30) * u, c + Vector2(42, -30) * u, 10.0, 5.0, Color(0.74, 0.57, 0.36), u)
+			return true
+		"pino":
+			# os pinos de madeira: rachados da ripa, com a ponta afinada
+			for k in 2:
+				var x := -12.0 + k * 24.0
+				var pn: PackedVector2Array = P.call([[x - 7, -38], [x + 7, -38], [x + 6, 22], [x, 40], [x - 6, 22]])
+				_poly(ci, pn, Color(0.76, 0.6, 0.38))
+				ci.draw_line(c + Vector2(x - 2, -34) * u, c + Vector2(x - 1, 20) * u, Color(0.6, 0.45, 0.27), 1.2 * u, true)
+				_poly(ci, P.call([[x - 7, -38], [x + 7, -38], [x + 6, -33], [x - 6, -33]]), Color(0.86, 0.72, 0.5))
+				ci.draw_polyline(pn + PackedVector2Array([pn[0]]), ink, 1.6 * u, true)
+			return true
+		"banda":
+			# a banda da vaca (meia carcaça): a carne vermelha, as costelas brancas, a capa
+			# de gordura e o osso da perna na ponta
+			var bd: PackedVector2Array = P.call([[-46, -6], [-36, -28], [0, -34], [36, -26], [46, -6], [40, 16], [10, 30], [-26, 28], [-44, 14]])
+			_poly(ci, bd, Color(0.64, 0.13, 0.1))
+			_poly(ci, P.call([[-36, -28], [0, -34], [36, -26], [30, -20], [0, -26], [-30, -21]]), Color(0.94, 0.88, 0.72))
+			for k in 6:
+				var x := -26.0 + k * 10.0
+				ci.draw_line(c + Vector2(x, -18) * u, c + Vector2(x + 4, 18) * u, Color(0.95, 0.9, 0.8), 3.2 * u, true)
+				ci.draw_line(c + Vector2(x + 2, -18) * u, c + Vector2(x + 6, 18) * u, Color(0.45, 0.06, 0.05, 0.6), 1.2 * u, true)
+			ci.draw_line(c + Vector2(40, 8) * u, c + Vector2(52, 24) * u, Color(0.93, 0.89, 0.8), 8.0 * u, true)
+			ci.draw_polyline(bd + PackedVector2Array([bd[0]]), ink, 2.0 * u, true)
+			return true
+		"arco_fogo":
+			# o arco de fogo: o arco de galho com a corda de cipó dando a volta na vareta,
+			# a vareta em pé e a tábua (a base) embaixo com o furinho preto
+			_madeira(ci, c + Vector2(-40, 34) * u, c + Vector2(40, 34) * u, 12.0, 5.0, Color(0.74, 0.57, 0.36), u)
+			ci.draw_circle(c + Vector2(2, 34) * u, 4.0 * u, Color(0.1, 0.06, 0.04))
+			_pau(ci, P.call([[2, 32], [2, -30]]), 4.0, Color(0.7, 0.55, 0.34), u)
+			var arc := PackedVector2Array()
+			for i in 13:
+				var t := float(i) / 12.0
+				arc.append(c + Vector2(lerpf(-44, 40, t), -6.0 - sin(t * PI) * 20.0) * u)
+			_pau(ci, arc, 4.5, Color(0.42, 0.29, 0.17), u, 2)
+			ci.draw_polyline(P.call([[-44, -6], [-2, -4], [6, 2], [40, -6]]), Color(0.5, 0.44, 0.22), 2.0 * u, true)
+			return true
+		"couro_vaca", "couro_boi":
+			# o couro esticado: a forma do bicho aberto, o pelo por cima (malhado na vaca,
+			# castanho no boi), o lado de dentro aparecendo na borda
+			var cv: PackedVector2Array = P.call([[-30, -36], [-10, -30], [10, -30], [30, -36], [36, -20], [46, -12], [38, 0], [38, 22], [46, 32], [28, 36], [10, 30], [-10, 30], [-28, 36], [-46, 32], [-38, 22], [-38, 0], [-46, -12], [-36, -20]])
+			var pelo := Color(0.85, 0.82, 0.76) if id == "couro_vaca" else Color(0.45, 0.3, 0.18)
+			_poly(ci, cv, Color(0.9, 0.84, 0.74))
+			var dentro := PackedVector2Array()
+			for q in cv:
+				dentro.append(c + (q - c) * 0.88)
+			_poly(ci, dentro, pelo)
+			if id == "couro_vaca":
+				for q in [[-14, -10, 12], [16, 6, 10], [-4, 18, 7]]:
+					var mc := PackedVector2Array()
+					for k in 10:
+						var a := TAU * k / 10.0
+						mc.append(c + (Vector2(q[0], q[1]) + Vector2(cos(a), sin(a) * 0.8) * float(q[2]) * (0.85 + 0.2 * sin(a * 3.0))) * u)
+					_poly(ci, mc, Color(0.3, 0.22, 0.15))
+			for k in 14:
+				var hx := -26.0 + (k % 7) * 9.0
+				var hy := -18.0 + (k / 7) * 30.0
+				ci.draw_line(c + Vector2(hx, hy) * u, c + Vector2(hx + 3, hy + 5) * u, pelo.darkened(0.25), 1.0 * u, true)
+			ci.draw_polyline(cv + PackedVector2Array([cv[0]]), ink, 1.8 * u, true)
+			return true
+	return false
+
+
+static func _item_velho(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 	var u := s / 100.0
 	var P := func(arr: Array) -> PackedVector2Array:
 		var out := PackedVector2Array()
@@ -50,12 +319,12 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 		"machado":
 			# cabo de madeira na diagonal e cabeça de pedra lascada amarrada com cipó
 			var handle: PackedVector2Array = P.call([[-34, 42], [-28, 46], [22, -30], [16, -34]])
-			ci.draw_colored_polygon(handle, Color(0.55, 0.36, 0.2))
+			_poly(ci, handle, Color(0.55, 0.36, 0.2))
 			ci.draw_polyline(handle + PackedVector2Array([handle[0]]), ink, 2.0 * u, true)
 			ci.draw_line(c + Vector2(-26, 36) * u, c + Vector2(16, -26) * u, Color(0.7, 0.5, 0.3), 2.0 * u, true)
 			var head: PackedVector2Array = P.call([[4, -40], [20, -46], [40, -38], [46, -18], [36, -8], [24, -16], [10, -22]])
-			ci.draw_colored_polygon(head, Color(0.5, 0.5, 0.48))
-			ci.draw_colored_polygon(P.call([[36, -8], [46, -18], [40, -38], [44, -36], [50, -18], [40, -5]]), Color(0.72, 0.72, 0.68))
+			_poly(ci, head, Color(0.5, 0.5, 0.48))
+			_poly(ci, P.call([[36, -8], [46, -18], [40, -38], [44, -36], [50, -18], [40, -5]]), Color(0.72, 0.72, 0.68))
 			ci.draw_polyline(head + PackedVector2Array([head[0]]), ink, 2.0 * u, true)
 			for k in 3:
 				var y := -30 + k * 6
@@ -65,8 +334,8 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_line(c + Vector2(42, -44) * u, c + Vector2(-14, 18) * u, Color(0.4, 0.26, 0.14), 7.0 * u, true)
 			ci.draw_line(c + Vector2(42, -44) * u, c + Vector2(-14, 18) * u, ink, 1.2 * u, true)
 			var blade: PackedVector2Array = P.call([[-10, 10], [-22, 22], [-46, 30], [-40, 44], [-30, 46], [-12, 36], [2, 18]])
-			ci.draw_colored_polygon(blade, Color(0.58, 0.52, 0.42))
-			ci.draw_colored_polygon(P.call([[-46, 30], [-40, 44], [-34, 45], [-42, 30]]), Color(0.74, 0.7, 0.6))
+			_poly(ci, blade, Color(0.58, 0.52, 0.42))
+			_poly(ci, P.call([[-46, 30], [-40, 44], [-34, 45], [-42, 30]]), Color(0.74, 0.7, 0.6))
 			ci.draw_polyline(blade + PackedVector2Array([blade[0]]), ink, 2.0 * u, true)
 			for k in 3:
 				var t := 0.1 + k * 0.08
@@ -87,13 +356,13 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				var a2 := TAU * k / 24.0
 				var rr := 1.0 + 0.06 * sin(a2 * 3.0 + 1.0)
 				pts.append(c + Vector2(cos(a2) * 38.0 * rr, sin(a2) * 28.0 * rr + 4.0) * u)
-			ci.draw_colored_polygon(pts, Color(0.36, 0.35, 0.33))
+			_poly(ci, pts, Color(0.36, 0.35, 0.33))
 			for k2 in 4:
 				var f2 := 1.0 - k2 * 0.2
 				var inner := PackedVector2Array()
 				for q in pts:
 					inner.append(c + Vector2(-6, -6 - k2 * 2) * u + (q - c - Vector2(0, 4) * u) * f2)
-				ci.draw_colored_polygon(inner, Color(0.42, 0.41, 0.38).lightened(k2 * 0.07))
+				_poly(ci, inner, Color(0.42, 0.41, 0.38).lightened(k2 * 0.07))
 			ci.draw_circle(c + Vector2(-14, -10) * u, 5 * u, Color(0.68, 0.67, 0.63))
 			for sp in [Vector2(12, 8), Vector2(-4, 14), Vector2(20, -6)]:
 				ci.draw_circle(c + sp * u, 1.6 * u, Color(0.3, 0.29, 0.27))
@@ -134,8 +403,8 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 		"ripa":
 			# tábua fina e comprida, com veios
 			var rp: PackedVector2Array = P.call([[-44, 22], [-36, 34], [44, -22], [36, -34]])
-			ci.draw_colored_polygon(rp, Color(0.7, 0.54, 0.34))
-			ci.draw_colored_polygon(P.call([[-44, 22], [-36, 34], [-32, 32], [-40, 20]]), Color(0.86, 0.72, 0.5))
+			_poly(ci, rp, Color(0.7, 0.54, 0.34))
+			_poly(ci, P.call([[-44, 22], [-36, 34], [-32, 32], [-40, 20]]), Color(0.86, 0.72, 0.5))
 			for k in 3:
 				var o := -5.0 + k * 5.0
 				ci.draw_line(c + Vector2(-36 + o, 26 + o * 0.2) * u, c + Vector2(36 + o, -26 + o * 0.2) * u, Color(0.55, 0.4, 0.24), 1.2 * u, true)
@@ -218,28 +487,28 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_circle(c + Vector2(-30, -2) * u, 12 * u, Color(0.36, 0.26, 0.15))
 		"veneno_timbo":
 			var cup: PackedVector2Array = P.call([[-32, -10], [32, -10], [24, 34], [-24, 34]])
-			ci.draw_colored_polygon(cup, Color(0.5, 0.36, 0.22))
-			ci.draw_colored_polygon(P.call([[-30, -10], [30, -10], [28, 0], [-28, 0]]), Color(0.75, 0.82, 0.55))
+			_poly(ci, cup, Color(0.5, 0.36, 0.22))
+			_poly(ci, P.call([[-30, -10], [30, -10], [28, 0], [-28, 0]]), Color(0.75, 0.82, 0.55))
 			ci.draw_polyline(cup + PackedVector2Array([cup[0]]), ink, 2.0 * u, true)
-			ci.draw_colored_polygon(P.call([[-4, -40], [10, -30], [2, -16], [-10, -26]]), Color(0.2, 0.4, 0.15))
+			_poly(ci, P.call([[-4, -40], [10, -30], [2, -16], [-10, -26]]), Color(0.2, 0.4, 0.15))
 		"semente_andiroba":
 			for k in 3:
 				var o := Vector2(-22 + k * 22, 8 - (k % 2) * 16)
-				ci.draw_colored_polygon(P.call([[o.x - 16, o.y - 12], [o.x + 14, o.y - 14], [o.x + 16, o.y + 12], [o.x - 14, o.y + 14]]), Color(0.45, 0.29, 0.16))
+				_poly(ci, P.call([[o.x - 16, o.y - 12], [o.x + 14, o.y - 14], [o.x + 16, o.y + 12], [o.x - 14, o.y + 14]]), Color(0.45, 0.29, 0.16))
 				ci.draw_line(c + Vector2(o.x - 12, o.y) * u, c + Vector2(o.x + 12, o.y - 2) * u, Color(0.3, 0.19, 0.1), 2.0 * u, true)
 		"oleo_andiroba":
 			var gar: PackedVector2Array = P.call([[-14, -40], [14, -40], [14, -26], [30, -8], [30, 38], [-30, 38], [-30, -8], [-14, -26]])
-			ci.draw_colored_polygon(gar, Color(0.55, 0.42, 0.26))
-			ci.draw_colored_polygon(P.call([[-28, 2], [28, 2], [28, 36], [-28, 36]]), Color(0.86, 0.68, 0.22))
+			_poly(ci, gar, Color(0.55, 0.42, 0.26))
+			_poly(ci, P.call([[-28, 2], [28, 2], [28, 36], [-28, 36]]), Color(0.86, 0.68, 0.22))
 			ci.draw_polyline(gar + PackedVector2Array([gar[0]]), ink, 2.0 * u, true)
-			ci.draw_colored_polygon(P.call([[-10, -48], [10, -48], [10, -40], [-10, -40]]), Color(0.4, 0.28, 0.16))
+			_poly(ci, P.call([[-10, -48], [10, -48], [10, -40], [-10, -40]]), Color(0.4, 0.28, 0.16))
 		"lamina_faca", "faca":
 			if id == "faca":
 				ci.draw_line(c + Vector2(-46, 26) * u, c + Vector2(-8, 4) * u, Color(0.55, 0.36, 0.2), 12 * u, true)
 				for k in 3:
 					ci.draw_line(c + Vector2(-16 + k * 4, -2 + k * 2) * u, c + Vector2(-8 + k * 4, 12 + k * 2) * u, Color(0.7, 0.58, 0.32), 3 * u, true)
 			var bl: PackedVector2Array = P.call([[-10, 6], [-4, -6], [44, -34], [12, 10]]) if id == "faca" else P.call([[-40, 18], [-36, 6], [42, -26], [8, 22]])
-			ci.draw_colored_polygon(bl, Color(0.46, 0.46, 0.44))
+			_poly(ci, bl, Color(0.46, 0.46, 0.44))
 			ci.draw_polyline(bl + PackedVector2Array([bl[0]]), ink, 2.0 * u, true)
 		"folha_buriti", "acao_cortar":
 			buriti_leaf(ci, c + Vector2(4, 4) * u, s * 0.95)
@@ -267,12 +536,12 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			ci.draw_rect(Rect2(c + Vector2(-5, -9) * u, Vector2(10, 18) * u), Color(0.15, 0.1, 0.05), false, 1.5 * u)
 		"acao_trabalhar":
 			# a bancada com as lâminas em pé e o talo sendo puxado em cima delas
-			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-46, 10) * u, c + Vector2(46, 4) * u, c + Vector2(46, 14) * u, c + Vector2(-46, 20) * u]), Color(0.58, 0.42, 0.26))
+			_poly(ci, PackedVector2Array([c + Vector2(-46, 10) * u, c + Vector2(46, 4) * u, c + Vector2(46, 14) * u, c + Vector2(-46, 20) * u]), Color(0.58, 0.42, 0.26))
 			ci.draw_rect(Rect2(c + Vector2(-38, 18) * u, Vector2(9, 28) * u), Color(0.38, 0.28, 0.17))
 			ci.draw_rect(Rect2(c + Vector2(28, 13) * u, Vector2(9, 32) * u), Color(0.38, 0.28, 0.17))
 			for k in 3:
 				var bx := -18 + k * 16
-				ci.draw_colored_polygon(PackedVector2Array([c + Vector2(bx - 7, 10 - k * 0.6) * u, c + Vector2(bx + 7, 9 - k * 0.6) * u, c + Vector2(bx + 1, -2 - k * 0.6) * u]), Color(0.45, 0.45, 0.43))
+				_poly(ci, PackedVector2Array([c + Vector2(bx - 7, 10 - k * 0.6) * u, c + Vector2(bx + 7, 9 - k * 0.6) * u, c + Vector2(bx + 1, -2 - k * 0.6) * u]), Color(0.45, 0.45, 0.43))
 			ci.draw_line(c + Vector2(-46, -14) * u, c + Vector2(40, -6) * u, Color(0.2, 0.32, 0.12), 8 * u, true)
 			ci.draw_line(c + Vector2(-46, -14) * u, c + Vector2(40, -6) * u, Color(0.45, 0.6, 0.28), 5 * u, true)
 			for k in 5:
@@ -290,7 +559,7 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				for i in 24:
 					var a := TAU * i / 24.0
 					pts.append(cc + Vector2(cos(a) * rr * 0.85, sin(a) * rr))
-				ci.draw_colored_polygon(pts, Color(0.55, 0.16, 0.08))
+				_poly(ci, pts, Color(0.55, 0.16, 0.08))
 				for k in 6:
 					var o := Vector2(cos(k * 1.1) * rr * 0.45, sin(k * 1.7) * rr * 0.55)
 					ci.draw_arc(cc + o, rr * 0.22, PI * 0.1, PI * 0.9, 6, Color(0.82, 0.32, 0.14), 1.6 * u, true)
@@ -307,7 +576,7 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for i in 24:
 				var a := TAU * i / 24.0
 				bp.append(c + Vector2(cos(a) * 34, sin(a) * 26 + 10) * u)
-			ci.draw_colored_polygon(bp, Color(0.45, 0.32, 0.2))
+			_poly(ci, bp, Color(0.45, 0.32, 0.2))
 			ci.draw_polyline(bp + PackedVector2Array([bp[0]]), ink, 2.0 * u, true)
 			for k in 5:
 				ci.draw_line(c + Vector2(-20 + k * 10, 34) * u, c + Vector2(-24 + k * 12, 46) * u, Color(0.4, 0.3, 0.2), 1.5 * u, true)
@@ -325,7 +594,7 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 					var a := TAU * i / 24.0
 					var r := float(q[2]) * (1.0 + 0.12 * sin(a))
 					gp.append(gc + Vector2(cos(a) * r * 0.92, sin(a) * r) * u)
-				ci.draw_colored_polygon(gp, Color(0.85, 0.8, 0.3))
+				_poly(ci, gp, Color(0.85, 0.8, 0.3))
 				ci.draw_polyline(gp + PackedVector2Array([gp[0]]), ink, 2.0 * u, true)
 				ci.draw_circle(gc + Vector2(-7, -9) * u, 5.0 * u, Color(0.95, 0.92, 0.6))
 				ci.draw_circle(gc + Vector2(0, float(q[2]) * 0.95) * u, 3.0 * u, Color(0.3, 0.25, 0.12))
@@ -349,7 +618,7 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				for i in range(19, 0, -1):
 					var t := float(i) / 20.0
 					fp.append(b + (d * t * 76.0 - sd * sin(t * PI) * 17.0) * u)
-				ci.draw_colored_polygon(fp, Color(0.36, 0.55, 0.2))
+				_poly(ci, fp, Color(0.36, 0.55, 0.2))
 				ci.draw_polyline(fp + PackedVector2Array([fp[0]]), ink, 1.8 * u, true)
 				ci.draw_line(b, b + d * 76.0 * u, Color(0.7, 0.8, 0.45), 1.6 * u, true)
 				for k in range(1, 6):
@@ -359,7 +628,7 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 		"cha_goiabeira", "acao_cha":
 			# a vasilha de barro com o chá (cor de mate) e o vapor
 			var vp := PackedVector2Array(P.call([[-40, -6], [40, -6], [32, 22], [18, 34], [-18, 34], [-32, 22]]))
-			ci.draw_colored_polygon(vp, Color(0.66, 0.38, 0.22))
+			_poly(ci, vp, Color(0.66, 0.38, 0.22))
 			ci.draw_polyline(vp + PackedVector2Array([vp[0]]), ink, 2.0 * u, true)
 			ci.draw_rect(Rect2(c + Vector2(-38, -10) * u, Vector2(76, 7) * u), Color(0.55, 0.42, 0.18))
 			ci.draw_line(c + Vector2(-14, -2) * u, c + Vector2(-2, -6) * u, Color(0.36, 0.55, 0.2), 4.0 * u, true)
@@ -376,8 +645,8 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for i in 13:
 				var a2 := PI * i / 12.0
 				cu.append(c + Vector2(cos(a2) * 40, sin(a2) * 30 + 2) * u)
-			ci.draw_colored_polygon(cu, Color(0.5, 0.3, 0.16))
-			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-38, 2) * u, c + Vector2(38, 2) * u, c + Vector2(30, -8) * u, c + Vector2(-30, -8) * u]), Color(0.72, 0.68, 0.38))
+			_poly(ci, cu, Color(0.5, 0.3, 0.16))
+			_poly(ci, PackedVector2Array([c + Vector2(-38, 2) * u, c + Vector2(38, 2) * u, c + Vector2(30, -8) * u, c + Vector2(-30, -8) * u]), Color(0.72, 0.68, 0.38))
 			ci.draw_polyline(cu, ink, 2.0 * u, true)
 			ci.draw_line(c + Vector2(-38, 2) * u, c + Vector2(38, 2) * u, ink, 2.0 * u, true)
 			# a cruzinha de remédio
@@ -423,8 +692,8 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			# o couro aberto (com as pernas) dobrado ao meio: pelo de fora, o lado de dentro claro
 			var fora := Color(0.74, 0.7, 0.64) if id == "couro_vaca" else Color(0.42, 0.3, 0.2)
 			var pel: PackedVector2Array = P.call([[-40, -26], [-30, -36], [-18, -28], [18, -28], [30, -36], [40, -26], [34, -8], [42, 14], [34, 34], [16, 26], [-16, 26], [-34, 34], [-42, 14], [-34, -8]])
-			ci.draw_colored_polygon(pel, fora)
-			ci.draw_colored_polygon(P.call([[-30, -18], [30, -18], [26, 18], [-26, 18]]), Color(0.9, 0.82, 0.74))
+			_poly(ci, pel, fora)
+			_poly(ci, P.call([[-30, -18], [30, -18], [26, 18], [-26, 18]]), Color(0.9, 0.82, 0.74))
 			for k in 4:
 				var yy := -12.0 + k * 9.0
 				ci.draw_line(c + Vector2(-24, yy) * u, c + Vector2(24, yy + 2) * u, Color(0.8, 0.62, 0.55), 1.4 * u, true)
@@ -450,7 +719,7 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				for i in 20:
 					var a := TAU * i / 20.0
 					pts.append(cc + Vector2(cos(a) * 14, sin(a) * 22).rotated(0.3) * u)
-				ci.draw_colored_polygon(pts, Color(0.45, 0.3, 0.16).darkened(0.08 * k))
+				_poly(ci, pts, Color(0.45, 0.3, 0.16).darkened(0.08 * k))
 				pts.append(pts[0])
 				ci.draw_polyline(pts, ink, 1.6 * u, true)
 				ci.draw_line(cc + Vector2(-4, -12) * u, cc + Vector2(-6, -18) * u, ink, 2.0 * u, true)
@@ -501,15 +770,15 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				ci.draw_line(c + Vector2(-27, yy) * u, c + Vector2(-25, yy + 8) * u, Color(0.4, 0.33, 0.15), 1.5 * u, true)
 			if id == "acao_atirar":
 				ci.draw_line(c + Vector2(-34, 0) * u, c + Vector2(44, 0) * u, Color(0.6, 0.45, 0.28), 4 * u, true)
-				ci.draw_colored_polygon(P.call([[44, -7], [58, 0], [44, 7]]), Color(0.45, 0.45, 0.43))
+				_poly(ci, P.call([[44, -7], [58, 0], [44, 7]]), Color(0.45, 0.45, 0.43))
 		"flecha":
 			# a vareta com a ponta de pedra amarrada e as penas atrás
 			ci.draw_line(c + Vector2(-44, 36) * u, c + Vector2(30, -30) * u, Color(0.6, 0.45, 0.28), 5 * u, true)
-			ci.draw_colored_polygon(P.call([[24, -20], [46, -44], [34, -16]]), Color(0.45, 0.45, 0.43))
+			_poly(ci, P.call([[24, -20], [46, -44], [34, -16]]), Color(0.45, 0.45, 0.43))
 			ci.draw_polyline(P.call([[24, -20], [46, -44], [34, -16], [24, -20]]), ink, 1.5 * u, true)
 			ci.draw_line(c + Vector2(22, -26) * u, c + Vector2(28, -18) * u, Color(0.3, 0.22, 0.1), 5 * u, true)
-			ci.draw_colored_polygon(P.call([[-44, 36], [-50, 20], [-36, 26]]), Color(0.85, 0.82, 0.75))
-			ci.draw_colored_polygon(P.call([[-44, 36], [-28, 42], [-36, 26]]), Color(0.75, 0.72, 0.65))
+			_poly(ci, P.call([[-44, 36], [-50, 20], [-36, 26]]), Color(0.85, 0.82, 0.75))
+			_poly(ci, P.call([[-44, 36], [-28, 42], [-36, 26]]), Color(0.75, 0.72, 0.65))
 		"arco_fogo":
 			# o galho curvo e o cipó esticado, com a vareta atravessada
 			var pts := PackedVector2Array()
@@ -524,7 +793,7 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for k in 2:
 				var o := Vector2(-10 + k * 18, -8 + k * 14)
 				var poly: PackedVector2Array = P.call([[o.x - 34, o.y + 10], [o.x + 30, o.y - 16], [o.x + 38, o.y - 4], [o.x - 26, o.y + 22]])
-				ci.draw_colored_polygon(poly, Color(0.78, 0.6, 0.38))
+				_poly(ci, poly, Color(0.78, 0.6, 0.38))
 				ci.draw_line(c + Vector2(o.x - 30, o.y + 18) * u, c + Vector2(o.x + 34, o.y - 8) * u, Color(0.36, 0.25, 0.15), 6 * u, true)
 				ci.draw_polyline(poly + PackedVector2Array([poly[0]]), ink, 2.0 * u, true)
 		"tela_fibra", "acao_tela":
@@ -540,7 +809,7 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for q in [[-18, 10, 20.0], [14, 14, 17.0], [0, -12, 19.0], [24, -16, 12.0], [-28, -10, 12.0]]:
 				var cc := c + Vector2(q[0], q[1]) * u
 				var rr := float(q[2]) * u
-				ci.draw_colored_polygon(PackedVector2Array([cc + Vector2(-rr, 0), cc + Vector2(-rr * 0.4, -rr * 0.9), cc + Vector2(rr * 0.6, -rr * 0.7), cc + Vector2(rr, 0.1 * rr), cc + Vector2(rr * 0.3, rr * 0.8), cc + Vector2(-rr * 0.7, rr * 0.6)]), Color(0.08, 0.08, 0.09))
+				_poly(ci, PackedVector2Array([cc + Vector2(-rr, 0), cc + Vector2(-rr * 0.4, -rr * 0.9), cc + Vector2(rr * 0.6, -rr * 0.7), cc + Vector2(rr, 0.1 * rr), cc + Vector2(rr * 0.3, rr * 0.8), cc + Vector2(-rr * 0.7, rr * 0.6)]), Color(0.08, 0.08, 0.09))
 				ci.draw_line(cc + Vector2(-rr * 0.4, -rr * 0.5), cc + Vector2(rr * 0.3, -rr * 0.4), Color(0.35, 0.35, 0.38), 1.5 * u, true)
 		"acao_pedrinhas":
 			for q in [[-20, 14, 13.0], [8, 18, 11.0], [24, 4, 12.0], [-4, -6, 12.0], [-26, -12, 9.0], [14, -18, 10.0]]:
@@ -548,7 +817,7 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				ci.draw_arc(c + Vector2(q[0], q[1]) * u, float(q[2]) * u, 0, TAU, 14, ink, 1.5 * u, true)
 		"acao_areia":
 			balde(ci, c + Vector2(-10, -6) * u, s * 0.75)
-			ci.draw_colored_polygon(P.call([[-30, -30], [10, -30], [6, -22], [-26, -22]]), Color(0.82, 0.72, 0.52))
+			_poly(ci, P.call([[-30, -30], [10, -30], [6, -22], [-26, -22]]), Color(0.82, 0.72, 0.52))
 		"acao_vasilha":
 			load("res://scripts/world/olaria.gd").icone(ci, "bacia_barro", c, s)
 		"acao_agua_filtro":
@@ -560,11 +829,11 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 		"espeto", "espeto_carne":
 			# a vareta comprida, apontada, na diagonal (com o pedaço de carne espetado)
 			ci.draw_line(c + Vector2(-42, 40) * u, c + Vector2(40, -38) * u, Color(0.5, 0.34, 0.18), 5.0 * u, true)
-			ci.draw_colored_polygon(P.call([[40, -38], [48, -46], [36, -40]]), Color(0.7, 0.55, 0.35))
+			_poly(ci, P.call([[40, -38], [48, -46], [36, -40]]), Color(0.7, 0.55, 0.35))
 			if id == "espeto_carne":
 				var lump: PackedVector2Array = P.call([[-18, 6], [-10, -10], [8, -16], [20, -6], [16, 12], [0, 18], [-14, 16]])
-				ci.draw_colored_polygon(lump, Color(0.66, 0.1, 0.08))
-				ci.draw_colored_polygon(P.call([[-10, -10], [8, -16], [20, -6], [6, -8]]), Color(0.92, 0.84, 0.68))
+				_poly(ci, lump, Color(0.66, 0.1, 0.08))
+				_poly(ci, P.call([[-10, -10], [8, -16], [20, -6], [6, -8]]), Color(0.92, 0.84, 0.68))
 				ci.draw_polyline(lump + PackedVector2Array([lump[0]]), ink, 2.0 * u, true)
 		"vasilha_carne", "vasilha_carne_cozida", "vasilha_carne_frita", "vasilha_carne_queimada":
 			# a vasilha com os cubos de carne aparecendo por cima da boca (crus, cozidos,
@@ -582,37 +851,45 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for q in [[-18, -14], [-4, -18], [10, -15], [-11, -24], [4, -27], [18, -22]]:
 				var o := c + Vector2(q[0], q[1]) * u
 				var cub := PackedVector2Array([o + Vector2(-7, -5) * u, o + Vector2(7, -6) * u, o + Vector2(8, 6) * u, o + Vector2(-6, 7) * u])
-				ci.draw_colored_polygon(cub, cc)
+				_poly(ci, cub, cc)
 				ci.draw_line(o + Vector2(-7, -5) * u, o + Vector2(7, -6) * u, Color(0.9, 0.82, 0.68), 2.0 * u, true)
 				ci.draw_polyline(cub + PackedVector2Array([cub[0]]), ink, 1.5 * u, true)
-		"coco":
-			# o coco-da-baía com a casca: oval, verde amarelando, com as fibras marcadas
-			var cc := PackedVector2Array()
-			for k in 32:
-				var a := TAU * k / 32.0
-				cc.append(c + Vector2(cos(a) * 34.0 + 4.0 * cos(a) * sin(a), sin(a) * 42.0) * u)
-			ci.draw_colored_polygon(cc, Color(0.55, 0.52, 0.22))
-			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-34, 0) * u, c + Vector2(-26, -26) * u, c + Vector2(0, -42) * u, c + Vector2(-4, -30) * u, c + Vector2(-20, -12) * u]), Color(0.7, 0.66, 0.32))
-			for k in 4:
-				var x := -18.0 + k * 12.0
-				ci.draw_line(c + Vector2(x, -38) * u, c + Vector2(x * 1.1, 38) * u, Color(0.4, 0.36, 0.14), 1.3 * u, true)
-			ci.draw_circle(c + Vector2(0, -40) * u, 6.0 * u, Color(0.42, 0.3, 0.14))
-			ci.draw_polyline(cc + PackedVector2Array([cc[0]]), ink, 2.0 * u, true)
+		"coco", "acao_coco":
+			coco(ci, c, s, false)
 		"massa_coco":
-			# metade do coco aberto: a casca marrom por fora e a massa branca por dentro
-			var arco := PackedVector2Array()
-			for k in 17:
-				var a := PI * k / 16.0
-				arco.append(c + Vector2(cos(a) * 40.0, sin(a) * 30.0 - 4.0) * u)
-			ci.draw_colored_polygon(arco, Color(0.38, 0.25, 0.13))
-			var dentro := PackedVector2Array()
-			for k in 17:
-				var a := PI * k / 16.0
-				dentro.append(c + Vector2(cos(a) * 33.0, sin(a) * 23.0 - 4.0) * u)
-			ci.draw_colored_polygon(dentro, Color(0.97, 0.95, 0.9))
-			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-40, -4) * u, c + Vector2(40, -4) * u, c + Vector2(36, -14) * u, c + Vector2(-36, -14) * u]), Color(0.96, 0.94, 0.88))
-			ci.draw_line(c + Vector2(-40, -4) * u, c + Vector2(40, -4) * u, ink, 2.0 * u, true)
-			ci.draw_polyline(arco, ink, 2.0 * u, true)
+			coco(ci, c, s, true)
+		"argila":
+			# o torrão de argila molhada: marrom-avermelhado, liso e brilhante, com marcas de dedo
+			var pa := PackedVector2Array()
+			var rg := RandomNumberGenerator.new()
+			rg.seed = 11
+			for k in 20:
+				var a := TAU * k / 20.0
+				var rr := 36.0 * rg.randf_range(0.84, 1.06)
+				pa.append(c + Vector2(cos(a) * rr * 1.2, sin(a) * rr * 0.82 + 4) * u)
+			_poly(ci, pa, Color(0.56, 0.31, 0.2))
+			for k in 3:
+				ci.draw_arc(c + Vector2(-14 + k * 14, 4 + (k % 2) * 6) * u, 8.0 * u, PI * 1.1, PI * 1.9, 8, Color(0.4, 0.2, 0.12, 0.8), 2.0 * u, true)
+			ci.draw_arc(c + Vector2(-12, -10) * u, 14.0 * u, PI * 1.05, PI * 1.6, 10, Color(1, 0.85, 0.7, 0.55), 3.0 * u, true)
+			ci.draw_polyline(pa + PackedVector2Array([pa[0]]), ink, 2.0 * u, true)
+		"semente":
+			semente_cedro(ci, c, s)
+		"quarto_vaca", "quarto_vaca_sujo":
+			# o quarto de vaca: a peça grande de carne vermelha com a capa de gordura, o osso
+			# saindo na ponta; o sujo com terra
+			var qv := PackedVector2Array(P.call([[-44, -8], [-30, -32], [6, -36], [34, -22], [44, 4], [30, 30], [-6, 36], [-36, 22]]))
+			_poly(ci, qv, Color(0.66, 0.12, 0.1))
+			_poly(ci, P.call([[-30, -32], [6, -36], [34, -22], [26, -18], [2, -26], [-24, -22]]), Color(0.93, 0.86, 0.7))
+			for k in 4:
+				ci.draw_line(c + Vector2(-26 + k * 15, -10) * u, c + Vector2(-18 + k * 15, 24) * u, Color(0.45, 0.06, 0.05), 2.2 * u, true)
+			# o osso
+			ci.draw_line(c + Vector2(30, 18) * u, c + Vector2(48, 34) * u, Color(0.92, 0.88, 0.78), 10.0 * u, true)
+			ci.draw_circle(c + Vector2(49, 35) * u, 7.0 * u, Color(0.95, 0.92, 0.82))
+			ci.draw_arc(c + Vector2(49, 35) * u, 7.0 * u, 0, TAU, 12, ink, 1.5 * u, true)
+			if id == "quarto_vaca_sujo":
+				for q in [[-24, 6], [-4, 18], [16, -4], [-14, -12], [24, 14], [4, 2]]:
+					ci.draw_circle(c + Vector2(q[0], q[1]) * u, 6.5 * u, Color(0.42, 0.31, 0.18, 0.92))
+			ci.draw_polyline(qv + PackedVector2Array([qv[0]]), ink, 2.0 * u, true)
 		"linha_pesca", "acao_linha_fazer":
 			# o rolinho de linha fina (muitas voltas finas)
 			for k in 7:
@@ -648,8 +925,8 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				cor = Color(0.12, 0.07, 0.05)
 			var pts := [[-40, -6], [-30, -24], [-4, -30], [26, -26], [42, -10], [40, 12], [20, 26], [-12, 28], [-36, 16]]
 			var lump: PackedVector2Array = P.call(pts)
-			ci.draw_colored_polygon(lump, cor)
-			ci.draw_colored_polygon(P.call([[-30, -24], [-4, -30], [26, -26], [42, -10], [30, -16], [-2, -20], [-26, -16]]), Color(0.92, 0.84, 0.68) if id in ["carne_crua", "carne_assar", "carne_suja"] else cor.lightened(0.25))
+			_poly(ci, lump, cor)
+			_poly(ci, P.call([[-30, -24], [-4, -30], [26, -26], [42, -10], [30, -16], [-2, -20], [-26, -16]]), Color(0.92, 0.84, 0.68) if id in ["carne_crua", "carne_assar", "carne_suja"] else cor.lightened(0.25))
 			for k in 3:
 				ci.draw_line(c + Vector2(-24 + k * 18, -4) * u, c + Vector2(-16 + k * 18, 18) * u, cor.darkened(0.3), 2.0 * u, true)
 			if id == "carne_suja":
@@ -660,18 +937,18 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			load("res://scripts/world/olaria.gd").icone(ci, "moringa_barro", c + Vector2(-6, 2) * u, s * 0.92)
 			# a gota de água (do rio: meio barrenta; filtrada: azul clarinha com o brilho)
 			var gc := c + Vector2(30, -18) * u
-			ci.draw_colored_polygon(PackedVector2Array([gc + Vector2(0, -16) * u, gc + Vector2(9, 2) * u, gc + Vector2(6, 9) * u, gc + Vector2(0, 11) * u, gc + Vector2(-6, 9) * u, gc + Vector2(-9, 2) * u]), Color(0.5, 0.55, 0.42) if id == "moringa_agua" else Color(0.35, 0.62, 0.92))
+			_poly(ci, PackedVector2Array([gc + Vector2(0, -16) * u, gc + Vector2(9, 2) * u, gc + Vector2(6, 9) * u, gc + Vector2(0, 11) * u, gc + Vector2(-6, 9) * u, gc + Vector2(-9, 2) * u]), Color(0.5, 0.55, 0.42) if id == "moringa_agua" else Color(0.35, 0.62, 0.92))
 			ci.draw_circle(gc + Vector2(-2.5, 3) * u, 2.5 * u, Color(0.8, 0.92, 1.0))
 		"acao_modelar":
 			# a mesa redonda do torno e o pote em cima
-			ci.draw_colored_polygon(P.call([[-44, 22], [44, 22], [40, 32], [-40, 32]]), Color(0.6, 0.42, 0.25))
+			_poly(ci, P.call([[-44, 22], [44, 22], [40, 32], [-40, 32]]), Color(0.6, 0.42, 0.25))
 			ci.draw_line(c + Vector2(0, 32) * u, c + Vector2(0, 48) * u, Color(0.4, 0.28, 0.16), 6 * u, true)
 			load("res://scripts/world/olaria.gd").icone(ci, "moringa_barro", c + Vector2(0, -8) * u, s * 0.62)
 		"argila_limpa", "acao_limpar", "acao_despejar_argila":
 			# bola de argila (lisa, alaranjada); limpar: com pedrinhas saindo; despejar: o balde
 			if id == "acao_despejar_argila":
 				balde(ci, c + Vector2(-14, -10) * u, s * 0.7)
-				ci.draw_colored_polygon(P.call([[-2, 6], [10, 4], [16, 20], [2, 24]]), Color(0.58, 0.29, 0.16))
+				_poly(ci, P.call([[-2, 6], [10, 4], [16, 20], [2, 24]]), Color(0.58, 0.29, 0.16))
 			var bc := c + (Vector2(14, 18) if id == "acao_despejar_argila" else Vector2(0, 6)) * u
 			var br := (22.0 if id == "acao_despejar_argila" else 32.0) * u
 			ci.draw_circle(bc, br, Color(0.62, 0.31, 0.17))
@@ -689,12 +966,12 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for i in 17:
 				var t := float(i) / 16.0
 				mound.append(c + Vector2(lerpf(-46, 46, t), 40 - sin(t * PI) * 30) * u)
-			ci.draw_colored_polygon(mound, mc)
+			_poly(ci, mound, mc)
 			ci.draw_polyline(mound, ink, 2.0 * u, true)
 			if id != "acao_pegar_barro":
-				ci.draw_colored_polygon(P.call([[-18, 14], [0, 18], [18, 14], [10, 10], [-10, 10]]), Color(0.16, 0.11, 0.07))
+				_poly(ci, P.call([[-18, 14], [0, 18], [18, 14], [10, 10], [-10, 10]]), Color(0.16, 0.11, 0.07))
 			if id == "acao_agua":
-				ci.draw_colored_polygon(P.call([[-14, 13], [14, 13], [8, 16], [-8, 16]]), Color(0.35, 0.5, 0.62))
+				_poly(ci, P.call([[-14, 13], [14, 13], [8, 16], [-8, 16]]), Color(0.35, 0.5, 0.62))
 				for k in 3:
 					var dx := -6.0 + k * 6.0
 					ci.draw_line(c + Vector2(dx + 8, -44) * u, c + Vector2(dx, 4) * u, Color(0.45, 0.65, 0.85), 3.5 * u, true)
@@ -714,20 +991,20 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				for k in 4:
 					ci.draw_line(c + Vector2(-6 + k * 4, -8 + k * 3) * u, c + Vector2(4 + k * 4, 6 + k * 3) * u, Color(0.7, 0.58, 0.32), 3 * u, true)
 			var tip: PackedVector2Array = P.call([[-2, -2], [10, -18], [46, -40], [22, 6], [8, 10]]) if id == "furador" else P.call([[-34, 20], [-30, -6], [40, -34], [10, 22]])
-			ci.draw_colored_polygon(tip, Color(0.42, 0.42, 0.4))
+			_poly(ci, tip, Color(0.42, 0.42, 0.4))
 			ci.draw_polyline(tip + PackedVector2Array([tip[0]]), ink, 2.0 * u, true)
 		"pino":
 			for k in 2:
 				var o := Vector2(-14 + k * 26, 0)
 				var body: PackedVector2Array = P.call([[o.x - 7, -40], [o.x + 7, -40], [o.x + 7, 26], [o.x, 44], [o.x - 7, 26]])
-				ci.draw_colored_polygon(body, Color(0.66, 0.5, 0.32))
+				_poly(ci, body, Color(0.66, 0.5, 0.32))
 				ci.draw_line(c + Vector2(o.x - 2, -36) * u, c + Vector2(o.x - 2, 24) * u, Color(0.5, 0.36, 0.2), 2.0 * u, true)
 				ci.draw_polyline(body + PackedVector2Array([body[0]]), ink, 2.0 * u, true)
-				ci.draw_colored_polygon(P.call([[o.x - 7, -40], [o.x + 7, -40], [o.x + 7, -34], [o.x - 7, -34]]), Color(0.78, 0.62, 0.42))
+				_poly(ci, P.call([[o.x - 7, -40], [o.x + 7, -40], [o.x + 7, -34], [o.x - 7, -34]]), Color(0.78, 0.62, 0.42))
 		"tabua", "ripa":
 			var w := 26.0 if id == "tabua" else 9.0
 			var pts := PackedVector2Array([c + Vector2(-44, -w) * u, c + Vector2(44, -w - 8) * u, c + Vector2(44, w - 8) * u, c + Vector2(-44, w) * u])
-			ci.draw_colored_polygon(pts, Color(0.6, 0.44, 0.28))
+			_poly(ci, pts, Color(0.6, 0.44, 0.28))
 			for k in 3:
 				var y := -w + (k + 1) * w * 0.5
 				ci.draw_line(c + Vector2(-40, y) * u, c + Vector2(40, y - 8) * u, Color(0.45, 0.31, 0.18), 1.5 * u, true)
@@ -737,18 +1014,18 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 			for k in 13:
 				var a := PI * k / 12.0
 				pts.append(c + Vector2(cos(a) * 44.0, -sin(a) * 34.0 + 14.0) * u)
-			ci.draw_colored_polygon(pts, Color(0.36, 0.26, 0.17))
+			_poly(ci, pts, Color(0.36, 0.26, 0.17))
 			var inner := PackedVector2Array()
 			for q in pts:
 				inner.append(c + (q - c - Vector2(0, 14) * u) * 0.82 + Vector2(0, 14) * u)
-			ci.draw_colored_polygon(inner, Color(0.78, 0.62, 0.42))
+			_poly(ci, inner, Color(0.78, 0.62, 0.42))
 			ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 2.0 * u, true)
 		"hematita", "magnetita", "goetita", "silex", "malaquita", "calcopirita":
 			_mineral(ci, id, c, u)
 		"lasca_silex":
 			var sh: PackedVector2Array = P.call([[-36, 18], [-10, -30], [8, -38], [34, -6], [10, 30], [-20, 34]])
-			ci.draw_colored_polygon(sh, Color(0.36, 0.37, 0.4))
-			ci.draw_colored_polygon(P.call([[-10, -30], [8, -38], [34, -6], [14, -2]]), Color(0.55, 0.56, 0.6))
+			_poly(ci, sh, Color(0.36, 0.37, 0.4))
+			_poly(ci, P.call([[-10, -30], [8, -38], [34, -6], [14, -2]]), Color(0.55, 0.56, 0.6))
 			ci.draw_polyline(sh + PackedVector2Array([sh[0]]), ink, 2.0 * u, true)
 		_:
 			return false
@@ -765,12 +1042,12 @@ static func _mineral(ci: CanvasItem, id: String, c: Vector2, u: float) -> void:
 		var a := TAU * k / 9.0
 		var rr := 34.0 + float((sd >> (k * 3)) & 7) * 1.8
 		pts.append(c + Vector2(cos(a) * rr * 1.15, sin(a) * rr * 0.85 + 4.0) * u)
-	ci.draw_colored_polygon(pts, base)
+	_poly(ci, pts, base)
 	# luz em cima
 	var hi := PackedVector2Array()
 	for q in pts:
 		hi.append(c + (q - c) * 0.55 + Vector2(-6, -10) * u)
-	ci.draw_colored_polygon(hi, base.lightened(0.18))
+	_poly(ci, hi, base.lightened(0.18))
 	match id:
 		"silex":
 			ci.draw_arc(c + Vector2(4, 6) * u, 30.0 * u, 0.0, TAU, 24, Color(0.82, 0.8, 0.72), 5.0 * u, true)   # córtex branco
@@ -806,15 +1083,15 @@ static func balde(ci: CanvasItem, c: Vector2, s: float) -> void:
 		ci.draw_line(arc[i], arc[i + 1], Color(0.62, 0.5, 0.3), 2.5 * u, true)
 	# corpo de ripas (um pouco mais largo em cima)
 	var body: PackedVector2Array = P.call([[-34, -18], [34, -18], [29, 42], [-29, 42]])
-	ci.draw_colored_polygon(body, Color(0.46, 0.36, 0.25))
+	_poly(ci, body, Color(0.46, 0.36, 0.25))
 	for k in 7:
 		var t := (k + 1) / 8.0
 		ci.draw_line(c + Vector2(lerpf(-34, 34, t), -18) * u, c + Vector2(lerpf(-29, 29, t), 42) * u, Color(0.3, 0.23, 0.15), 1.5 * u, true)
 	# boca (elipse escura) e as duas ripas altas com o furo da alça
-	ci.draw_colored_polygon(P.call([[-34, -18], [-20, -24], [20, -24], [34, -18], [20, -13], [-20, -13]]), Color(0.2, 0.15, 0.1))
+	_poly(ci, P.call([[-34, -18], [-20, -24], [20, -24], [34, -18], [20, -13], [-20, -13]]), Color(0.2, 0.15, 0.1))
 	for sx in [-1.0, 1.0]:
 		var ear: PackedVector2Array = P.call([[30 * sx, -32], [38 * sx, -32], [38 * sx, -10], [30 * sx, -10]])
-		ci.draw_colored_polygon(ear, Color(0.44, 0.34, 0.23))
+		_poly(ci, ear, Color(0.44, 0.34, 0.23))
 		ci.draw_polyline(ear + PackedVector2Array([ear[0]]), ink, 1.5 * u, true)
 		ci.draw_circle(c + Vector2(34 * sx, -25) * u, 2.2 * u, Color(0.1, 0.07, 0.05))
 	# aros de cipó: dois em cima, dois no meio, dois embaixo
@@ -828,7 +1105,7 @@ static func balde(ci: CanvasItem, c: Vector2, s: float) -> void:
 ## a beirada clara (o fio) e contorno escuro.
 static func flint(ci: CanvasItem, pts: PackedVector2Array, base: Color, seed_: int, u: float, edge: Array) -> void:
 	var ink := Color(0.08, 0.07, 0.06)
-	ci.draw_colored_polygon(pts, base.darkened(0.25))
+	_poly(ci, pts, base.darkened(0.25))
 	var cen := Vector2.ZERO
 	for q in pts:
 		cen += q
@@ -844,9 +1121,9 @@ static func flint(ci: CanvasItem, pts: PackedVector2Array, base: Color, seed_: i
 		var ib := cen + (b - cen) * rng.randf_range(0.45, 0.62)
 		var lit := clampf(0.5 - ((a + b) * 0.5 - cen).normalized().dot(Vector2(0.6, 0.8)) * 0.5, 0.0, 1.0)
 		var col := base.lerp(base.lightened(0.45), lit * rng.randf_range(0.6, 1.0)).darkened(rng.randf_range(0.0, 0.15))
-		ci.draw_colored_polygon(PackedVector2Array([a, b, ib, ia]), col)
+		_poly(ci, PackedVector2Array([a, b, ib, ia]), col)
 		ci.draw_polyline(PackedVector2Array([ia, ib]), base.darkened(0.45), 1.0 * u, true)
-		ci.draw_colored_polygon(PackedVector2Array([ia, ib, cen]), base.lerp(base.lightened(0.3), rng.randf() * 0.6))
+		_poly(ci, PackedVector2Array([ia, ib, cen]), base.lerp(base.lightened(0.3), rng.randf() * 0.6))
 	# fio: beirada clara (afiada)
 	for ei in edge:
 		var e0: Vector2 = pts[int(ei) % n]
@@ -885,7 +1162,7 @@ static func buriti_leaf(ci: CanvasItem, c: Vector2, s: float, seca := false) -> 
 		if seca:
 			col = Color(0.62, 0.45, 0.24) if light else Color(0.45, 0.31, 0.15)
 		var poly := PackedVector2Array([base - side * 1.0 * u, mid - side * w, tip, mid + side * w, base + side * 1.0 * u])
-		ci.draw_colored_polygon(poly, col)
+		_poly(ci, poly, col)
 		# a ponta rasgada em duas (como a folha de verdade)
 		ci.draw_line(tip, tip + dir * 5.0 * u + side * 2.5 * u + droop * 0.3, col.darkened(0.15), 1.6 * u, true)
 		ci.draw_line(tip, tip + dir * 5.0 * u - side * 2.5 * u + droop * 0.3, col.darkened(0.15), 1.6 * u, true)
@@ -905,14 +1182,14 @@ static func fell_icon(ci: CanvasItem, c: Vector2, s: float) -> void:
 			out.append(c + Vector2(p[0], p[1]) * u)
 		return out
 	# chão (capim)
-	ci.draw_colored_polygon(P.call([[-50, 34], [50, 30], [50, 44], [-50, 44]]), Color(0.24, 0.36, 0.14))
+	_poly(ci, P.call([[-50, 34], [50, 30], [50, 44], [-50, 44]]), Color(0.24, 0.36, 0.14))
 	for k in 9:
 		var x := -46 + k * 11
 		ci.draw_line(c + Vector2(x, 36) * u, c + Vector2(x + 3, 28) * u, Color(0.36, 0.52, 0.2), 2.0 * u, true)
 	# tronco caído (deitado, da esquerda para a direita, atrás)
 	var lg: PackedVector2Array = P.call([[-18, 16], [46, 6], [48, 26], [-16, 36]])
-	ci.draw_colored_polygon(lg, Color(0.47, 0.44, 0.4))
-	ci.draw_colored_polygon(P.call([[-18, 16], [46, 6], [46, 12], [-18, 22]]), Color(0.6, 0.57, 0.52))
+	_poly(ci, lg, Color(0.47, 0.44, 0.4))
+	_poly(ci, P.call([[-18, 16], [46, 6], [46, 12], [-18, 22]]), Color(0.6, 0.57, 0.52))
 	for k in 5:
 		var x := -6 + k * 11
 		ci.draw_line(c + Vector2(x, 15 - k * 1.8) * u, c + Vector2(x + 1, 33 - k * 1.8) * u, Color(0.36, 0.33, 0.3), 1.6 * u, true)
@@ -921,8 +1198,8 @@ static func fell_icon(ci: CanvasItem, c: Vector2, s: float) -> void:
 	_ellipse(ci, c + Vector2(-17, 26) * u, Vector2(6, 10) * u, Color(0.86, 0.74, 0.52), ink, u)
 	# o toco
 	var st: PackedVector2Array = P.call([[-44, 0], [-20, 0], [-18, 38], [-46, 38]])
-	ci.draw_colored_polygon(st, Color(0.42, 0.39, 0.35))
-	ci.draw_colored_polygon(P.call([[-24, 0], [-20, 0], [-18, 38], [-22, 38]]), Color(0.32, 0.29, 0.26))
+	_poly(ci, st, Color(0.42, 0.39, 0.35))
+	_poly(ci, P.call([[-24, 0], [-20, 0], [-18, 38], [-22, 38]]), Color(0.32, 0.29, 0.26))
 	ci.draw_polyline(st + PackedVector2Array([st[0]]), ink, 1.8 * u, true)
 	_ellipse(ci, c + Vector2(-32, 0) * u, Vector2(12, 5) * u, Color(0.88, 0.76, 0.54), ink, u)
 	ci.draw_arc(c + Vector2(-32, 0) * u, 6.0 * u, 0, TAU, 16, Color(0.7, 0.56, 0.36), 1.2 * u, true)
@@ -930,7 +1207,7 @@ static func fell_icon(ci: CanvasItem, c: Vector2, s: float) -> void:
 	ci.draw_line(c + Vector2(-30, -2) * u, c + Vector2(-8, -38) * u, Color(0.25, 0.15, 0.07), 7.0 * u, true)
 	ci.draw_line(c + Vector2(-30, -2) * u, c + Vector2(-8, -38) * u, Color(0.6, 0.4, 0.22), 4.0 * u, true)
 	var head: PackedVector2Array = P.call([[-40, -6], [-30, -14], [-22, -6], [-30, 2]])
-	ci.draw_colored_polygon(head, Color(0.5, 0.5, 0.47))
+	_poly(ci, head, Color(0.5, 0.5, 0.47))
 	ci.draw_polyline(head + PackedVector2Array([head[0]]), ink, 1.6 * u, true)
 	for k in 3:
 		ci.draw_line(c + Vector2(-32 + k * 2, -10 + k * 2) * u, c + Vector2(-25 + k * 2, -12 + k * 2) * u, Color(0.68, 0.56, 0.3), 1.6 * u, true)
@@ -950,7 +1227,7 @@ static func eye(ci: CanvasItem, c: Vector2, s: float, lit := false) -> void:
 	ci.draw_circle(c, 52.0 * u, Color(0.04, 0.04, 0.03, 0.55))
 	if lit:
 		ci.draw_circle(c, 52.0 * u, Color(1.0, 0.8, 0.3, 0.35))
-	ci.draw_colored_polygon(pts, Color(0.97, 0.95, 0.9))
+	_poly(ci, pts, Color(0.97, 0.95, 0.9))
 	ci.draw_circle(c + Vector2(0, -1) * u, 18.0 * u, Color(0.33, 0.22, 0.1))
 	ci.draw_circle(c + Vector2(0, -1) * u, 14.0 * u, Color(0.47, 0.33, 0.14))
 	ci.draw_circle(c + Vector2(0, -1) * u, 7.5 * u, Color(0.03, 0.02, 0.02))
@@ -969,7 +1246,7 @@ static func _ellipse(ci: CanvasItem, c: Vector2, r: Vector2, fill: Color, ink: C
 	for i in 24:
 		var a := TAU * i / 24.0
 		pts.append(c + Vector2(cos(a) * r.x, sin(a) * r.y))
-	ci.draw_colored_polygon(pts, fill)
+	_poly(ci, pts, fill)
 	ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 1.4 * u, true)
 
 
@@ -1011,13 +1288,13 @@ static func peixe(ci: CanvasItem, id: String, c: Vector2, s: float) -> void:
 	var fin := costa.darkened(0.15)
 	if id == "peixe_piranha":
 		fin = Color(0.6, 0.22, 0.12)
-	ci.draw_colored_polygon(rabo, fin)
+	_poly(ci, rabo, fin)
 	ci.draw_polyline(rabo + PackedVector2Array([rabo[0]]), ink, 1.8 * u, true)
 	var dors := PackedVector2Array([c + Vector2(-8, -hh * 0.46) * u, c + Vector2(14, -hh * 0.5) * u, c + Vector2(-2, -hh * 0.5 - 14) * u])
-	ci.draw_colored_polygon(dors, fin)
+	_poly(ci, dors, fin)
 	ci.draw_polyline(dors + PackedVector2Array([dors[0]]), ink, 1.5 * u, true)
-	ci.draw_colored_polygon(corpo, barriga)
-	ci.draw_colored_polygon(cima, costa)
+	_poly(ci, corpo, barriga)
+	_poly(ci, cima, costa)
 	match id:
 		"peixe_tucunare":
 			for bx in [-4.0, 10.0, 24.0]:
@@ -1040,4 +1317,110 @@ static func peixe(ci: CanvasItem, id: String, c: Vector2, s: float) -> void:
 	ci.draw_circle(c + Vector2(34.6, -hh * 0.12) * u, 2.0 * u, ink)
 	if id == "peixe_piranha":
 		for k in 3:
-			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(38 + k * 1.6, hh * 0.08) * u, c + Vector2(39.6 + k * 1.6, hh * 0.08) * u, c + Vector2(38.8 + k * 1.6, hh * 0.08 - 3) * u]), Color(1, 1, 1))
+			_poly(ci, PackedVector2Array([c + Vector2(38 + k * 1.6, hh * 0.08) * u, c + Vector2(39.6 + k * 1.6, hh * 0.08) * u, c + Vector2(38.8 + k * 1.6, hh * 0.08 - 3) * u]), Color(1, 1, 1))
+
+
+## O coco-da-baía. Inteiro: a casca de fibra (verde-oliva amarelando para marrom, com
+## as três quinas e o "umbigo" do cabinho). Aberto (a massa): as duas metades com a casca
+## grossa marrom de fibra, a parede dura escura e a massa branca por dentro, com a água.
+static func coco(ci: CanvasItem, c: Vector2, s: float, aberto: bool) -> void:
+	var u := s / 100.0
+	var ink := Color(0.12, 0.08, 0.05)
+	if not aberto:
+		var pts := PackedVector2Array()
+		for k in 36:
+			var a := TAU * k / 36.0
+			# oval com a ponta para cima e uma quina de cada lado
+			var r := Vector2(34.0, 44.0) * (1.0 + 0.06 * cos(3.0 * a))
+			pts.append(c + Vector2(cos(a) * r.x, sin(a) * r.y * (1.0 + 0.12 * sin(a))) * u)
+		_poly(ci, pts, Color(0.5, 0.5, 0.2))
+		# a parte de cima marrom (secando) e as fibras
+		var top := PackedVector2Array()
+		for k in 19:
+			var a2 := PI + PI * k / 18.0
+			top.append(c + Vector2(cos(a2) * 33.0, sin(a2) * 46.0) * u)
+		top.append(c + Vector2(20, -18) * u)
+		top.append(c + Vector2(-22, -16) * u)
+		_poly(ci, top, Color(0.55, 0.4, 0.2, 0.75))
+		for k in 7:
+			var x := -24.0 + k * 8.0
+			var pl := PackedVector2Array()
+			for i in 9:
+				var t := float(i) / 8.0
+				var y := lerpf(-40.0, 40.0, t)
+				pl.append(c + Vector2(x * sqrt(maxf(0.0, 1.0 - pow(y / 46.0, 2.0))) + sin(t * 9.0 + k) * 1.2, y) * u)
+			ci.draw_polyline(pl, Color(0.3, 0.26, 0.1, 0.45), 1.2 * u, true)
+		# o brilho e o cabinho
+		ci.draw_arc(c + Vector2(-10, -6) * u, 20.0 * u, PI * 1.05, PI * 1.45, 10, Color(1, 1, 0.85, 0.45), 4.0 * u, true)
+		_poly(ci, PackedVector2Array([c + Vector2(-6, -44) * u, c + Vector2(6, -44) * u, c + Vector2(4, -52) * u, c + Vector2(-4, -52) * u]), Color(0.36, 0.25, 0.12))
+		ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 2.0 * u, true)
+		return
+	# as duas metades, uma de pé (de frente, vendo a massa) e a outra deitada atrás
+	for lado in [1, 0]:
+		var o := c + (Vector2(16, 8) if lado == 1 else Vector2(-14, -6)) * u
+		var R := 34.0 if lado == 1 else 28.0
+		var sq := 0.62 if lado == 1 else 0.5
+		# a casca de fibra marrom por fora (a borda grossa)
+		var casca := PackedVector2Array()
+		for k in 32:
+			var a := TAU * k / 32.0
+			casca.append(o + Vector2(cos(a) * R, sin(a) * R * sq) * u)
+		_poly(ci, casca, Color(0.5, 0.36, 0.18))
+		for k in 10:
+			var a3 := TAU * k / 10.0
+			ci.draw_line(o + Vector2(cos(a3) * R * 0.86, sin(a3) * R * sq * 0.86) * u, o + Vector2(cos(a3) * R, sin(a3) * R * sq) * u, Color(0.35, 0.24, 0.1, 0.7), 1.4 * u, true)
+		# a parede dura (quengo) escura
+		var quengo := PackedVector2Array()
+		for k in 32:
+			var a := TAU * k / 32.0
+			quengo.append(o + Vector2(cos(a) * R * 0.8, sin(a) * R * sq * 0.8) * u)
+		_poly(ci, quengo, Color(0.26, 0.17, 0.09))
+		# a massa branca
+		var massa := PackedVector2Array()
+		for k in 32:
+			var a := TAU * k / 32.0
+			massa.append(o + Vector2(cos(a) * R * 0.72, sin(a) * R * sq * 0.72) * u)
+		_poly(ci, massa, Color(0.97, 0.95, 0.9))
+		# o fundo (a cavidade): um pouco de sombra e a água brilhando
+		var fundo := PackedVector2Array()
+		for k in 32:
+			var a := TAU * k / 32.0
+			fundo.append(o + Vector2(cos(a) * R * 0.5, sin(a) * R * sq * 0.5 + R * sq * 0.06) * u)
+		_poly(ci, fundo, Color(0.84, 0.86, 0.85))
+		if lado == 1:
+			ci.draw_arc(o + Vector2(-4, 2) * u, R * 0.3 * u, PI * 1.1, PI * 1.6, 8, Color(1, 1, 1, 0.9), 2.5 * u, true)
+		ci.draw_polyline(casca + PackedVector2Array([casca[0]]), ink, 2.0 * u, true)
+
+
+## A semente do cedrinho (Cedrela): o caroço achatado na ponta de uma asa fina e larga,
+## castanho-clara com as nervuras (voa girando como hélice). Duas, cruzadas.
+static func semente_cedro(ci: CanvasItem, c: Vector2, s: float) -> void:
+	var u := s / 100.0
+	var ink := Color(0.22, 0.13, 0.06)
+	for k in 2:
+		var o := c + Vector2(-6 + k * 12, -4 + k * 10) * u
+		var rot := -0.6 + k * 1.0
+		var asa := PackedVector2Array()
+		# a asa: começa no caroço, alarga e termina arredondada
+		for i in 13:
+			var t := float(i) / 12.0
+			var x := lerpf(14.0, -40.0, t)
+			var w := 4.0 + 10.0 * sin(t * PI * 0.92)
+			asa.append(o + Vector2(x, -w).rotated(rot) * u)
+		for i in range(12, -1, -1):
+			var t := float(i) / 12.0
+			var x := lerpf(14.0, -40.0, t)
+			var w := 3.0 + 6.0 * sin(t * PI * 0.92)
+			asa.append(o + Vector2(x, w).rotated(rot) * u)
+		_poly(ci, asa, Color(0.8, 0.66, 0.44))
+		for i in 6:
+			var t := 0.2 + i * 0.13
+			var x2 := lerpf(14.0, -40.0, t)
+			ci.draw_line(o + Vector2(x2 + 4.0, -1.0).rotated(rot) * u, o + Vector2(x2 - 3.0, -8.0 * sin(t * PI)).rotated(rot) * u, Color(0.58, 0.43, 0.25, 0.6), 1.0 * u, true)
+		ci.draw_polyline(asa + PackedVector2Array([asa[0]]), ink, 1.4 * u, true)
+		var car := PackedVector2Array()
+		for i in 14:
+			var a := TAU * i / 14.0
+			car.append(o + Vector2(14.0 + cos(a) * 9.0, sin(a) * 6.0).rotated(rot) * u)
+		_poly(ci, car, Color(0.48, 0.3, 0.15))
+		ci.draw_polyline(car + PackedVector2Array([car[0]]), ink, 1.5 * u, true)

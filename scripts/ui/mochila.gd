@@ -604,10 +604,6 @@ class SlotIcon extends Control:
 		var c := size * 0.5
 		var faint := Color(1, 1, 1, 0.18)
 		match kind:
-			"item_argila":
-				_clay(c, s)
-			"item_semente":
-				_seed(c, s)
 			"mochila":
 				Desenhos.backpack(self, c + Vector2(0, s * 0.04), s * 0.9, faint, Color(1, 1, 1, 0.0))
 			_:

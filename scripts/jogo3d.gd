@@ -3267,7 +3267,31 @@ func _update_chop(delta: float) -> void:
 
 ## Botão de ação do lugar: pegar galho, apoiar a tora nas forquilhas, pegar a tora
 ## de cima delas ou recolher uma forquilha.
+## As ações das máquinas (construir, serra, carrinho, tripé, mesa, forno, fogão) não
+## viram botão: vão para o olho. Só as de ferramenta e as de sair ficam como botão.
+const CTX_MAQ := ["carne_mesa", "carne_carrinho", "carne_do_carrinho", "car_lenha", "car_balde", "car_encher", "car_empurrar",
+	"forno_barro", "fogao_barro", "planta_peca", "planta_lamina", "pedalar", "empurrar", "tora_serra", "saida_pegar",
+	"forno_pedra", "fogao_pedra", "fogao_sem_barro", "car_eixo", "car_roda", "car_cipo", "amarrar_cipo",
+	"tri_forro", "tri_roldana", "tri_corda", "tri_pe", "tri_pegar", "tri_soltar_banda", "tri_desestaca", "tri_desamarrar", "tri_puxar"]
+var _maq_olho_acao: Array = []      # [ação, nome] da máquina perto, para o olho
+
+
 func _update_ctx_btn() -> void:
+	_update_ctx_btn_2()
+	if _pesca_fase() != "":
+		_ctx_action = ""                 # pescando: só os botões da pesca
+		_ctx_btn.visible = false
+		_maq_olho_acao = []
+		return
+	if _ctx_action in CTX_MAQ:
+		_maq_olho_acao = [_ctx_action, _ctx_btn.text]
+		_ctx_action = ""
+		_ctx_btn.visible = false
+	else:
+		_maq_olho_acao = []
+
+
+func _update_ctx_btn_2() -> void:
 	_ctx_action = ""
 	if not _couro.is_empty() or not _mach.is_empty() or not _evis.is_empty() or not _banda.is_empty() or not _quarto.is_empty() or not _mc.is_empty():
 		_ctx_btn.visible = false
@@ -17710,7 +17734,7 @@ func _lenha_na_mao() -> bool:
 
 
 func _olho_free() -> bool:
-	return _desf.is_empty() and _mesa.is_empty() and _torno.is_empty() and _arco.is_empty() and _pin.is_empty() and (_carry.is_empty() or _lenha_na_mao()) and not _chopping and _crouch_job == "" \
+	return _desf.is_empty() and _mesa.is_empty() and _torno.is_empty() and _arco.is_empty() and _pin.is_empty() and (_carry.is_empty() or _lenha_na_mao() or not _maq_olho_acao.is_empty()) and not _chopping and _crouch_job == "" \
 		and not _air and _bld.is_empty() and _proj.is_empty() and _buck_sel.is_empty() and _maq_op.is_empty() \
 		and _trim.is_empty() and _post_mark.is_empty() and _knap.is_empty() and _vine.is_empty() and not _walking \
 		and _coop.is_empty() and _bag_ui == null and _craft_ui == null and _mix.is_empty() and _reb.is_empty() and _pour_t < 0.0
@@ -17746,6 +17770,10 @@ func _olho_tick() -> void:
 		if mi >= 0 and str(_maq.plantas[mi].tipo) in tipos_ok and _maq.pronta(mi) and _tranca.is_empty() and _carne.is_empty() and _mc.is_empty():
 			var mo: Vector3 = _maq.xform(mi).origin
 			cands.append([{"maq": mi}, maxf(0.0, pp.distance_to(Vector2(mo.x, mo.z)) - 0.8)])
+	if not _maq_olho_acao.is_empty():
+		# a ação da máquina perto vem primeiro (com as do olho dessa máquina, se tiver)
+		var mi2: int = _maq.planta_near(_player.position, 2.2) if _maq else -1
+		cands.append([{"ctxmaq": str(_maq_olho_acao[0]), "mi": mi2}, -1.0])
 	if _fogos:
 		var fgi: int = _fogos.near(_player.position, 1.8)
 		if fgi >= 0:
@@ -17766,12 +17794,22 @@ func _olho_tick() -> void:
 	if p.is_empty() or _olho_opts(p).is_empty():
 		_olho = {}
 		return
-	if _olho.is_empty() or not (_olho.p as Dictionary) == p or (not p.has("maq") and not p.has("barreiro") and not p.has("fogueira") and not _buritis.has_palm(_olho.p)):
+	if _olho.is_empty() or not (_olho.p as Dictionary) == p or (not p.has("maq") and not p.has("ctxmaq") and not p.has("barreiro") and not p.has("fogueira") and not _buritis.has_palm(_olho.p)):
 		_olho = {"p": p, "open": false}
 
 
 ## O que dá para fazer nesse buriti: [[ação, nome]]
 func _olho_opts(p: Dictionary) -> Array:
+	if p.has("ctxmaq"):
+		var o2 := []
+		if not _maq_olho_acao.is_empty():
+			o2.append(["ctx:" + str(_maq_olho_acao[0]), str(_maq_olho_acao[1])])
+		var mi3 := int(p.get("mi", -1))
+		if mi3 >= 0 and mi3 < _maq.plantas.size() and _maq.pronta(mi3) and (_carry.is_empty() or _lenha_na_mao()):
+			for o in _olho_opts({"maq": mi3}):
+				if not (o in o2):
+					o2.append(o)
+		return o2
 	if _lenha_na_mao():
 		return _olho_opts_lenha(p)
 	var out := []
@@ -17815,6 +17853,16 @@ func _olho_opts(p: Dictionary) -> Array:
 
 ## Onde o olho fica: no tronco (na altura do peito), do lado de quem está olhando.
 func _olho_world(p: Dictionary) -> Vector3:
+	if p.has("ctxmaq"):
+		# o olho da máquina perto (ou na frente do jogador, perto da peça)
+		var mi4 := int(p.get("mi", -1))
+		if mi4 < 0 and _maq:
+			mi4 = _maq.planta_near(_player.position, 5.0)
+		if mi4 >= 0 and mi4 < _maq.plantas.size():
+			var o4: Vector3 = _olho_world({"maq": mi4})
+			if o4.distance_to(_player.position) < 3.5:
+				return o4
+		return _player.position + Vector3.UP * 1.1 + Vector3(sin(_face), 0, cos(_face)) * 1.0
 	if p.has("maq"):
 		if str(_maq.plantas[int(p.maq)].tipo) == "forno":
 			return _maq.xform(int(p.maq)) * Vector3(0.75, 0.75, 0.0)
@@ -17844,17 +17892,31 @@ func _olho_layout() -> Dictionary:
 	if _olho.is_empty():
 		return {}
 	var w := _olho_world(_olho.p)
-	if _cam.is_position_behind(w):
-		return {}
 	var vs := get_viewport().get_visible_rect().size
-	var e := _cam.unproject_position(w)
+	var e: Vector2
+	if _cam.is_position_behind(w):
+		if not (_olho.p as Dictionary).has("ctxmaq"):
+			return {}
+		e = Vector2(vs.x * 0.5, vs.y * 0.3)      # a máquina está atrás: o olho fica no meio
+	else:
+		e = _cam.unproject_position(w)
 	e.x = clampf(e.x, 70.0, vs.x - 260.0)
 	e.y = clampf(e.y, 70.0, vs.y - 260.0)
 	var rows := []
 	if bool(_olho.open):
 		var opts := _olho_opts(_olho.p)
+		# a largura cabe o nome mais comprido (sem passar da tela)
+		var font := ThemeDB.fallback_font
+		var larg := 250.0
+		for o in opts:
+			larg = maxf(larg, font.get_string_size(str(o[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x + 140.0)
+		larg = minf(larg, vs.x - 40.0)
+		var x0 := clampf(e.x - larg * 0.5, 20.0, vs.x - larg - 20.0)
+		var y0 := e.y + 62.0
+		if y0 + opts.size() * 74.0 > vs.y - 10.0:
+			y0 = maxf(10.0, vs.y - 10.0 - opts.size() * 74.0)
 		for i in opts.size():
-			rows.append(Rect2(e + Vector2(-125, 62 + i * 74), Vector2(250, 64)))
+			rows.append(Rect2(Vector2(x0, y0 + i * 74), Vector2(larg, 64)))
 	return {"eye": e, "close": e + Vector2(72, 0), "rows": rows}
 
 
@@ -18028,6 +18090,14 @@ func _bur_input(e: InputEvent) -> bool:
 func _olho_pick(acao: String) -> void:
 	var p: Dictionary = _olho.p
 	_olho.open = false
+	if acao.begins_with("ctx:"):
+		_ctx_action = acao.substr(4)
+		_ctx_press()
+		_act_check = 0.0
+		return
+	if p.has("ctxmaq") and int(p.get("mi", -1)) >= 0:
+		p = {"maq": int(p.mi)}
+		_olho.p = p
 	if p.has("barreiro"):
 		_barr_pick(int(p.barreiro), acao)
 		return
