@@ -24,6 +24,14 @@ const Sons := preload("res://scripts/sons.gd")
 ## - Pastam andando devagar, de cabeça baixa (arrancando a grama de verdade); no calor do
 ##   meio do dia e de noite deitam e ruminam. São bravas (selvagens): gente chegando
 ##   perto, o rebanho todo foge trotando.
+##
+## DOMAR
+## - Laçada, a vaca pode ser amarrada numa estaca fincada ou numa árvore (v.presa): fica
+##   presa na corda, rodando em volta; brava, ela puxa para longe do jogador.
+## - Presa, o jogador trata dela com capim verde (uma vez por dia): a cada trato fica mais
+##   mansa (v.manso, 0 a 1). Mansa, não foge mais de gente.
+## - Mansa e solta, vai para o curral (um rebanho manso, v.casa): fica pastando ali em
+##   volta (o rebanho manso não muda de pasto). Os bezerros dela já nascem mansos.
 
 const Modelo := preload("res://scripts/world/vaca_modelo.gd")
 const MundoSim := preload("res://scripts/mundo_sim.gd")
@@ -48,6 +56,7 @@ const SHOW := 110.0
 const WALK := 0.7                # m/s
 const TROTE := 3.2
 const MEDO := 7.0                # gente mais perto que isso: o rebanho foge
+const TRATO := 0.25              # quanto amansa cada dia de trato (4 dias: mansa)
 
 var vacas: Array = []            # {id, sexo, nasc, reb, x, z, mae, prenhe, fome, vida, cor}
 var rebanhos: Array = []         # {id, x, z}
@@ -313,7 +322,7 @@ func _day(day: int) -> void:
 				v.fome = int(v.fome) + 1
 		fome_reb[int(rb.id)] = comeu_tot < precisa * 0.75
 		# pouca comida aqui (ou vontade de andar): o rebanho muda de pasto
-		if bool(fome_reb[int(rb.id)]) or _rng.randf() < 0.08:
+		if not bool(rb.get("manso", false)) and (bool(fome_reb[int(rb.id)]) or _rng.randf() < 0.08):
 			var nv := _lugar_bom(c, 350.0)
 			if nv != Vector2.INF:
 				var dv := nv - c
@@ -321,7 +330,7 @@ func _day(day: int) -> void:
 				rb.x = np.x
 				rb.z = np.y
 				for v in membros:
-					if not _agents.has(int(v.id)):
+					if not _agents.has(int(v.id)) and not v.has("presa"):
 						var a2 := _rng.randf() * TAU
 						var d2 := _rng.randf_range(2.0, 16.0)
 						v.x = np.x + cos(a2) * d2
@@ -352,6 +361,8 @@ func _day(day: int) -> void:
 	for nb in nascidos:
 		var mae2: Dictionary = nb[0]
 		var b := _nova("f" if _rng.randf() < 0.5 else "m", day, nb[1], int(mae2.id), str(mae2.cor) if _rng.randf() < 0.7 else ["branca", "cinza", "vermelha", "parda"][_rng.randi() % 4])
+		if mansa(mae2):
+			b["manso"] = 1.0                    # filho de mansa já nasce manso
 		b.x = float(mae2.x) - 0.8
 		b.z = float(mae2.z) + 0.5
 	# o bezerro que cresceu fica no rebanho (sem seguir a mãe); rebanho sem ninguém some
@@ -430,6 +441,7 @@ func update(delta: float) -> void:
 			_agents.erase(id)
 			continue
 		_step(v, _agents[id], pp, h, delta)
+	_desenha_cordas()
 	if _tex_sujo and Engine.get_process_frames() % 20 == 0:
 		tex.update(_img)
 		_tex_sujo = false
@@ -535,7 +547,18 @@ func _step(v: Dictionary, a: Dictionary, pp: Vector3, h: float, delta: float) ->
 	var rb := _rebanho(int(v.reb))
 	var mae := _find(int(v.mae)) if int(v.mae) >= 0 else {}
 	# brava: gente perto, foge (e o rebanho junto)
-	if modo != "fugir" and dist_p < (MEDO if modo != "deitar" else MEDO * 0.7):
+	if v.has("presa") and not mansa(v):
+		# presa e brava: gente perto, ela puxa a corda para o lado de lá
+		if dist_p < MEDO * 1.3 * (1.0 - float(v.get("manso", 0.0)) * 0.6):
+			var po := Vector3(float(v.presa.x), 0, float(v.presa.z))
+			var fora := Vector3(pos.x - pp.x, 0, pos.z - pp.z).normalized()
+			a.alvo = po + fora * float(v.presa.L)
+			a.modo = "puxa"
+			modo = "puxa"
+		elif modo == "puxa":
+			a.modo = "parado"
+			modo = "parado"
+	elif modo != "fugir" and not mansa(v) and dist_p < (MEDO if modo != "deitar" else MEDO * 0.7):
 		_assusta(int(v.reb), pp)
 		modo = str(a.modo)
 	# o boi: tem vaca no cio no rebanho, vai atrás dela (trotando) até cobrir
@@ -585,6 +608,8 @@ func _step(v: Dictionary, a: Dictionary, pp: Vector3, h: float, delta: float) ->
 			if _walk(v, a, TROTE, delta):
 				a.modo = "parado"
 				a.timer = _rng.randf_range(2.0, 5.0)
+		"puxa":
+			_walk(v, a, TROTE * 0.6, delta)
 		"deitar":
 			if _acordada(h) and float(a.timer) <= 0.0:
 				a.modo = "parado"
@@ -597,7 +622,7 @@ func _step(v: Dictionary, a: Dictionary, pp: Vector3, h: float, delta: float) ->
 			var fwd := Vector3(cos(float(a.yaw)), 0, -sin(float(a.yaw)))
 			var stp := 0.12 * float(a.s) * delta
 			var np := pos + fwd * stp
-			if _pode_andar(np):
+			if _pode_andar(np) and _na_corda(v, np):
 				v.x = np.x
 				v.z = np.z
 				a.fase = float(a.fase) + stp / 0.5 * PI
@@ -641,6 +666,8 @@ func _step(v: Dictionary, a: Dictionary, pp: Vector3, h: float, delta: float) ->
 	node.position = Vector3(float(v.x), y, float(v.z))
 	node.rotation.y = lerp_angle(node.rotation.y, float(a.yaw), minf(1.0, delta * 3.0))
 	var anim := str(a.modo)
+	if anim == "puxa":
+		anim = "andar"
 	if anim == "fugir" or (anim == "cobrir" and float(a.get("cob_t", 0.0)) <= 0.0):
 		anim = "correr"
 	elif anim == "cobrir":
@@ -714,7 +741,7 @@ func _assusta(reb: int, pp: Vector3) -> void:
 	for v in vacas:
 		if int(v.reb) != reb or not _agents.has(int(v.id)):
 			continue
-		if int(v.id) == laco_id:
+		if int(v.id) == laco_id or mansa(v) or v.has("presa"):
 			continue
 		var a: Dictionary = _agents[int(v.id)]
 		var pos := Vector3(float(v.x), 0, float(v.z))
@@ -760,6 +787,142 @@ func _pode_andar(p: Vector3) -> bool:
 	return float(sim.wat[i]) < 0.05 and float(sim.ter[i]) > MundoSim.SEA + 0.3
 
 
+## Mansa (já não foge de gente)?
+func mansa(v: Dictionary) -> bool:
+	return float(v.get("manso", 0.0)) >= 0.999
+
+
+## Presa na corda: não passa do comprimento dela.
+func _na_corda(v: Dictionary, np: Vector3) -> bool:
+	if not v.has("presa"):
+		return true
+	return Vector2(np.x - float(v.presa.x), np.z - float(v.presa.z)).length() <= float(v.presa.L)
+
+
+## Amarra a vaca no ponto (estaca ou árvore) com a corda do laço.
+func prender(id: int, ponto: Vector3, L: float, item: String) -> void:
+	var v := _find(id)
+	if v.is_empty():
+		return
+	v["presa"] = {"x": snappedf(ponto.x, 0.01), "z": snappedf(ponto.z, 0.01), "L": snappedf(L, 0.01), "item": item}
+	# fica no comprimento da corda
+	var d := Vector2(float(v.x) - ponto.x, float(v.z) - ponto.z)
+	if d.length() > L:
+		d = d.normalized() * (L - 0.1)
+		v.x = ponto.x + d.x
+		v.z = ponto.z + d.y
+	if _agents.has(id):
+		_agents[id].modo = "parado"
+
+
+## Trata com capim verde: "" deu certo, ou a mensagem do porquê não.
+func tratar(id: int, day: int) -> String:
+	var v := _find(id)
+	if v.is_empty():
+		return "Essa vaca não está aqui."
+	if int(v.get("trato", -1)) == day:
+		return "Ela já comeu o capim hoje: trate de novo amanhã."
+	v["trato"] = day
+	v.fome = 0
+	v["manso"] = minf(1.0, float(v.get("manso", 0.0)) + TRATO)
+	if _agents.has(id):
+		var a: Dictionary = _agents[id]
+		a.modo = "parado"
+		a.timer = 4.0
+		a["voz"] = 0.5
+	return ""
+
+
+## Solta da corda (devolve o laço). Mansa: vai para o curral ali (o rebanho manso).
+func soltar(id: int) -> String:
+	var v := _find(id)
+	if v.is_empty() or not v.has("presa"):
+		return ""
+	var item := str(v.presa.get("item", "laco_5"))
+	var ponto := Vector2(float(v.presa.x), float(v.presa.z))
+	v.erase("presa")
+	if mansa(v):
+		var curral := {}
+		for rb in rebanhos:
+			if bool(rb.get("manso", false)) and Vector2(float(rb.x), float(rb.z)).distance_to(ponto) < 60.0:
+				curral = rb
+				break
+		if curral.is_empty():
+			curral = {"id": _next_id, "x": ponto.x, "z": ponto.y, "manso": true}
+			_next_id += 1
+			rebanhos.append(curral)
+		var velho := int(v.reb)
+		v.reb = int(curral.id)
+		# o bezerro novinho dela vai junto
+		for f in vacas:
+			if int(f.mae) == int(v.id) and int(f.reb) == velho:
+				f.reb = int(curral.id)
+				f["manso"] = 1.0
+	return item
+
+
+## A vaca viva perto do ponto (a cabeça) que está presa ou é mansa: id ou -1.
+func domada_perto(pos: Vector3, r: float) -> int:
+	var best := -1
+	var bd := r
+	for id in _agents:
+		var v := _find(int(id))
+		if v.is_empty() or not (v.has("presa") or mansa(v)):
+			continue
+		var c := cabeca(int(id))
+		if c == Vector3.INF:
+			continue
+		var d := minf(Vector2(c.x - pos.x, c.z - pos.z).length(), Vector2(float(v.x) - pos.x, float(v.z) - pos.z).length() - 0.6)
+		if d < bd:
+			bd = d
+			best = int(id)
+	return best
+
+
+## As cordas das presas (da estaca ao pescoço), redesenhadas a cada quadro.
+var _cordas: MeshInstance3D = null
+
+func _desenha_cordas() -> void:
+	if _cordas == null:
+		_cordas = MeshInstance3D.new()
+		_cordas.mesh = ImmediateMesh.new()
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = Color(0.5, 0.42, 0.24)
+		_cordas.material_override = m
+		_cordas.top_level = true
+		add_child(_cordas)
+	var im := _cordas.mesh as ImmediateMesh
+	im.clear_surfaces()
+	var tem := false
+	for id in _agents:
+		var v := _find(int(id))
+		if v.is_empty() or not v.has("presa"):
+			continue
+		var c := cabeca(int(id))
+		if c == Vector3.INF:
+			continue
+		if not tem:
+			im.surface_begin(Mesh.PRIMITIVE_LINES)
+			tem = true
+		var px := float(v.presa.x)
+		var pz := float(v.presa.z)
+		var a := Vector3(px, _jogo.ground_at(px, pz) + 0.7, pz)
+		var b := c + Vector3.DOWN * 0.25
+		var L := float(v.presa.L)
+		var folga := clampf(1.0 - a.distance_to(b) / maxf(L, 0.1), 0.0, 1.0)
+		var ant := a
+		for k in range(1, 13):
+			var u := float(k) / 12.0
+			var q := a.lerp(b, u) + Vector3.DOWN * folga * L * 0.35 * 4.0 * u * (1.0 - u)
+			q.y = maxf(q.y, _jogo.ground_at(q.x, q.z) + 0.03)
+			im.surface_add_vertex(ant)
+			im.surface_add_vertex(q)
+			ant = q
+	if tem:
+		im.surface_end()
+
+
 ## Anda até o alvo; true quando chegou (ou quando a água não deixa).
 func _walk(v: Dictionary, a: Dictionary, speed: float, delta: float) -> bool:
 	var pos := Vector3(float(v.x), 0, float(v.z))
@@ -771,7 +934,7 @@ func _walk(v: Dictionary, a: Dictionary, speed: float, delta: float) -> bool:
 	var dir := d / L
 	var stp := minf(L, speed * float(a.s) * delta)
 	var np := pos + dir * stp
-	if not _pode_andar(np):
+	if not _pode_andar(np) or not _na_corda(v, np):
 		return true
 	v.x = np.x
 	v.z = np.z

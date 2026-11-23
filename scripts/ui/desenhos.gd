@@ -734,6 +734,17 @@ static func _item_velho(ci: CanvasItem, id: String, c: Vector2, s: float) -> boo
 			# a cruzinha de remédio
 			ci.draw_rect(Rect2(c + Vector2(18, -46) * u, Vector2(8, 24) * u), Color(0.85, 0.15, 0.15))
 			ci.draw_rect(Rect2(c + Vector2(10, -38) * u, Vector2(24, 8) * u), Color(0.85, 0.15, 0.15))
+		"capim_verde":
+			# um feixe de capim verde cortado: as folhas compridas e moles, curvando nas pontas
+			for k in 18:
+				var o := (k - 8.5) * 2.4
+				var pts := PackedVector2Array()
+				for i in 7:
+					var t := float(i) / 6.0
+					pts.append(c + Vector2(o * 0.35 + (o * 1.5 + sin(k * 1.7) * 6.0) * t + t * t * (6.0 if k % 2 == 0 else -6.0), 6.0 - 50.0 * t + t * t * 10.0) * u)
+				ci.draw_polyline(pts, Color(0.3, 0.55, 0.18).darkened(0.12 * (k % 3)).lightened(0.08 * (k % 2)), 2.6 * u, true)
+				ci.draw_line(c + Vector2(o * 0.35, 6) * u, c + Vector2(o * 0.8, 36) * u, Color(0.36, 0.5, 0.2).darkened(0.1 * (k % 2)), 2.4 * u, true)
+			ci.draw_rect(Rect2(c + Vector2(-9, -2) * u, Vector2(18, 10) * u), Color(0.4, 0.32, 0.15))
 		"capim_seco":
 			# um maço de capim seco amarrado no meio
 			for k in 16:

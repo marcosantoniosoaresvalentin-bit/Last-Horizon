@@ -852,7 +852,7 @@ void fragment() {
 	_sub_btns = [mk.call("Sair", -430, -146, _bur_sair)]
 	_desf_btns = [mk.call("Puxar", -290, -146, _desf_puxar), mk.call("Levantar", -430, -146, _desf_end)]
 	_tranca_btns = [mk.call("Parar", -290, -146, _tranca_end)]
-	_laco_btns = [mk.call("Laçar", -290, -146, _laco_lancar), mk.call("Força", -290, -146, _laco_forca), mk.call("Soltar", -480, -146, _laco_soltar)]
+	_laco_btns = [mk.call("Laçar", -290, -146, _laco_lancar), mk.call("Força", -290, -146, _laco_forca), mk.call("Soltar", -480, -146, _laco_soltar), mk.call("Amarrar", -290, -286, _laco_amarrar)]
 	(_laco_btns[1] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_couro_btns = [mk.call("Força", -290, -146, _couro_forca), mk.call("Parar", -480, -146, _couro_end)]
 	_mach_btns = [mk.call("Parar", -480, -146, _mach_end)]
@@ -2463,7 +2463,7 @@ func _update_inventory() -> void:
 
 ## Sem mensagens de ajuda na tela: é sobrevivência, o jogador aprende sozinho.
 ## As mensagens: só as de ERRO aparecem (o que falta, por que não deu); as dicas não.
-const ERRO_INICIO := ["Só dá para dormir", "No multiplayer", "Acabou a fibra", "Acabou o cipó", "Você não tem", "Puxou cedo", "O peixe", "A linha", "Água rasa", "Precisa", "Falta", "Não ", "Você não", "Você já", "Para ", "A mochila está cheia", "Pesada demais",
+const ERRO_INICIO := ["Ela já comeu", "Essa vaca", "Só dá para dormir", "No multiplayer", "Acabou a fibra", "Acabou o cipó", "Você não tem", "Puxou cedo", "O peixe", "A linha", "Água rasa", "Precisa", "Falta", "Não ", "Você não", "Você já", "Para ", "A mochila está cheia", "Pesada demais",
 	"Essa ", "Esse ", "Sua lenha", "Está chovendo", "Agora não", "Ponha a enxada", "Ponha lenha no fogão", "Pegue o balde vazio",
 	"Longe", "Tora grossa demais", "Comprido demais", "Fina demais", "Rodela só", "Tem galho", "Tem outra peça", "Termine",
 	"Tire antes", "O balde está com", "O balde já está cheio", "O outro balde", "Já tem", "Acabaram", "Acabou o barro",
@@ -3346,6 +3346,9 @@ func _update_ctx_btn_2() -> void:
 	elif _capins and _crouch_job == "" and not _air and not _swim and _carry.is_empty() and _capins.colhivel(_capins.nearest(_player.position, 1.3)):
 		_ctx_action = "capim"
 		_ctx_btn.text = "Colher capim seco"
+	elif _capins and (item_qtd("faca") > 0 or teste) and _crouch_job == "" and not _air and not _swim and _carry.is_empty() and _capins.comivel(_capins.nearest(_player.position, 1.3)):
+		_ctx_action = "capim_verde"
+		_ctx_btn.text = "Cortar capim verde"
 	elif (item_qtd("moringa_barro") > 0 or _cab_falta()) and _crouch_job == "" and not _chopping and not _air and not _swim and _carry.is_empty() and _cab_spot() != Vector3.INF:
 		_ctx_action = "encher_cabaca"
 		_ctx_btn.text = "Encher a cabaça"
@@ -3652,6 +3655,22 @@ func _ctx_press() -> void:
 			_face_to(bs)
 			_crouch_target = {"agua": bs}
 			_crouch_job = "beber"
+		"capim_verde":
+			var cv: int = _capins.nearest(_player.position, 1.3)
+			if not _capins.comivel(cv):
+				return
+			if _bag_total() + Itens.kg("capim_verde") * 2 > BAG_MAX:
+				_show_toast("A mochila está cheia: não cabe o capim verde.")
+				return
+			_face_to(_capins.point_of(cv))
+			_capins.comer(cv, true)
+			add_item("capim_verde", 2)
+			wear("faca", 1)
+			_update_inventory()
+			Sons.play_at(self, "talo_corte", _capins.point_of(cv) + Vector3.UP * 0.3, -6.0, 1.3)
+			Sons.play_at(self, "folha_cai", _capins.point_of(cv), -8.0, 1.2)
+			_act_check = 0.0
+			return
 		"capim":
 			var ci: int = _capins.nearest(_player.position, 1.3)
 			if not _capins.colhivel(ci):
@@ -10003,10 +10022,86 @@ func _laco_soltar() -> void:
 			_vacas._assusta(int(v.reb), _player.position)
 
 
+## Onde dá para amarrar a vaca laçada: uma estaca fincada ou o tronco de uma árvore
+## perto do jogador (o ponto), ou Vector3.INF.
+func _amarra_ponto() -> Vector3:
+	if _buracos:
+		var pi := int(_buracos.post_near(_player.position, 1.8))
+		if pi >= 0:
+			var po: Dictionary = _buracos.posts[pi]
+			return Vector3(float(po.x), 0, float(po.z))
+	if _arvores:
+		var k := Vector2i(floori(_player.position.x / 8.0), floori(_player.position.z / 8.0))
+		for dz in range(-1, 2):
+			for dx in range(-1, 2):
+				for t in _arvores._grid.get(k + Vector2i(dx, dz), []):
+					var d := Vector2(_player.position.x - float(t[0]), _player.position.z - float(t[1])).length()
+					if d < float(t[2]) + 1.4 and float(t[2]) > 0.06:
+						return Vector3(float(t[0]), 0, float(t[1]))
+	return Vector3.INF
+
+
+## Amarra a vaca laçada na estaca (ou na árvore): o laço fica nela (presa na corda).
+func _laco_amarrar() -> void:
+	if not _laco.has("L") or _vacas == null:
+		return
+	var pt := _amarra_ponto()
+	if pt == Vector3.INF:
+		_show_toast("Para amarrar, chegue perto de uma estaca fincada no chão ou de uma árvore.")
+		return
+	var id := int(_laco.id)
+	var it := str(_laco.get("item", _mao))
+	var L := clampf(float(_laco.L), 2.0, float(LACO_CORDA.get(it, 5.0)))
+	_laco_fim()
+	_vacas.prender(id, pt, L, it)
+	if item_qtd(it) > 0:
+		remove_item(it, 1)
+		_update_inventory()
+	if _mao == it and item_qtd(it) <= 0:
+		equip("")
+	Sons.play_at(self, "fibra_puxa", pt + Vector3.UP * 0.8, -6.0, 0.9)
+
+
 func _laco_forca() -> void:
 	if not _laco.has("L"):
 		return
 	_laco.forca = minf(1.0, float(_laco.forca) + 0.1)
+
+
+## Domar: dar o capim verde (uma vez por dia) e soltar da corda.
+func _vaca_pick(id: int, acao: String) -> void:
+	if _vacas == null:
+		return
+	match acao:
+		"vaca_capim":
+			if item_qtd("capim_verde") <= 0 and not teste:
+				_show_toast("Precisa de capim verde na mochila: corte as touceiras de capim verde com a faca.")
+				return
+			if _mp_client():
+				_show_toast("No multiplayer, quem doma as vacas é quem abriu o mundo.")
+				return
+			var msg: String = _vacas.tratar(id, int(sim.elapsed_days()))
+			if msg != "":
+				_show_toast(msg)
+				return
+			if not teste:
+				remove_item("capim_verde", 1)
+				_update_inventory()
+			var cb: Vector3 = _vacas.cabeca(id)
+			_face_to(cb)
+			Sons.play_at(self, "folha_cai", cb, -8.0, 1.0)
+		"vaca_soltar":
+			if _mp_client():
+				_show_toast("No multiplayer, quem doma as vacas é quem abriu o mundo.")
+				return
+			var v: Dictionary = _vacas._find(id)
+			var brava: bool = not v.is_empty() and not _vacas.mansa(v)
+			var it: String = _vacas.soltar(id)
+			if it != "":
+				add_item(it, 1)
+				_update_inventory()
+			if brava:
+				_vacas._assusta(int(v.reb), _player.position)
 
 
 ## Quanto de força precisa para segurar: mais longe, mais força.
@@ -10048,7 +10143,9 @@ func _laco_tick(delta: float) -> void:
 	if not com and not _laco.is_empty() and not _laco.has("voa"):
 		_laco_soltar()
 	var laçada := _laco.has("L")
-	if _laco_btns.size() == 3:
+	if _laco_btns.size() == 4:
+		(_laco_btns[3] as Control).visible = laçada and _amarra_ponto() != Vector3.INF
+	if _laco_btns.size() >= 3:
 		(_laco_btns[0] as Control).visible = com and (_laco.is_empty() or _laco.has("gira"))
 		(_laco_btns[1] as Control).visible = laçada
 		(_laco_btns[2] as Control).visible = laçada
@@ -18125,6 +18222,11 @@ func _olho_tick() -> void:
 		if mi >= 0 and str(_maq.plantas[mi].tipo) in tipos_ok and _maq.pronta(mi) and _tranca.is_empty() and _carne.is_empty() and _mc.is_empty():
 			var mo: Vector3 = _maq.xform(mi).origin
 			cands.append([{"maq": mi}, maxf(0.0, pp.distance_to(Vector2(mo.x, mo.z)) - 0.8)])
+	if _vacas and _carry.is_empty():
+		var vid: int = _vacas.domada_perto(_player.position, 3.4)
+		if vid >= 0:
+			var cb: Vector3 = _vacas.cabeca(vid)
+			cands.append([{"vaca": vid}, pp.distance_to(Vector2(cb.x, cb.z))])
 	if not _maq_olho_acao.is_empty():
 		# a ação da máquina perto vem primeiro (com as do olho dessa máquina, se tiver)
 		var mi2: int = _maq.planta_near(_player.position, 2.2) if _maq else -1
@@ -18149,12 +18251,22 @@ func _olho_tick() -> void:
 	if p.is_empty() or _olho_opts(p).is_empty():
 		_olho = {}
 		return
-	if _olho.is_empty() or not (_olho.p as Dictionary) == p or (not p.has("maq") and not p.has("ctxmaq") and not p.has("barreiro") and not p.has("fogueira") and not _buritis.has_palm(_olho.p)):
+	if _olho.is_empty() or not (_olho.p as Dictionary) == p or (not p.has("maq") and not p.has("ctxmaq") and not p.has("vaca") and not p.has("barreiro") and not p.has("fogueira") and not _buritis.has_palm(_olho.p)):
 		_olho = {"p": p, "open": false}
 
 
 ## O que dá para fazer nesse buriti: [[ação, nome]]
 func _olho_opts(p: Dictionary) -> Array:
+	if p.has("vaca"):
+		var v: Dictionary = _vacas._find(int(p.vaca)) if _vacas else {}
+		if v.is_empty():
+			return []
+		var ov := []
+		var m := roundi(float(v.get("manso", 0.0)) * 100.0)
+		ov.append(["vaca_capim", "Dar capim verde (mansa %d%%)" % m if m < 100 else "Dar capim verde"])
+		if v.has("presa"):
+			ov.append(["vaca_soltar", "Soltar da corda"])
+		return ov
 	if p.has("ctxmaq"):
 		var o2 := []
 		if not _maq_olho_acao.is_empty():
@@ -18208,6 +18320,9 @@ func _olho_opts(p: Dictionary) -> Array:
 
 ## Onde o olho fica: no tronco (na altura do peito), do lado de quem está olhando.
 func _olho_world(p: Dictionary) -> Vector3:
+	if p.has("vaca"):
+		var cb: Vector3 = _vacas.cabeca(int(p.vaca)) if _vacas else Vector3.INF
+		return cb + Vector3.UP * 0.6 if cb != Vector3.INF else _player.position + Vector3.UP * 1.5
 	if p.has("ctxmaq"):
 		# o olho da máquina perto (ou na frente do jogador, perto da peça)
 		var mi4 := int(p.get("mi", -1))
@@ -18449,6 +18564,9 @@ func _olho_pick(acao: String) -> void:
 		_ctx_action = acao.substr(4)
 		_ctx_press()
 		_act_check = 0.0
+		return
+	if p.has("vaca"):
+		_vaca_pick(int(p.vaca), acao)
 		return
 	if p.has("ctxmaq") and int(p.get("mi", -1)) >= 0:
 		p = {"maq": int(p.mi)}
