@@ -1,9 +1,9 @@
 {
-  "version": 230,
-  "file": "update_230.zip",
-  "size": 6099947,
-  "sha256": "f7eb6dfea599e65f369b8bc8ec922c002f76a4cda6a16eed10bdf0232156ee90",
+  "version": 231,
+  "file": "update_231.zip",
+  "size": 6103263,
+  "sha256": "cb35d53b756c3ae600f153e4e597ef21c4f8ff9efd7b3c9d718b4c03620ce84d",
   "min_build": 1,
-  "notes": "Cama e dormir; a noite agora dura o mesmo que o dia",
+  "notes": "Domar vacas: amarrar, capim verde, tratar até ficar mansa e criar no curral",
   "date": "2026-11-23"
 }
