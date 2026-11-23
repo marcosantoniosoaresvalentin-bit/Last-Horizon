@@ -1,9 +1,9 @@
 {
-  "version": 218,
-  "file": "update_218.zip",
-  "size": 5863606,
-  "sha256": "d6cb25f721657cf31f5508dab6fd76f988fc373c6c48490ec12d7bf9437aa9d5",
+  "version": 219,
+  "file": "update_219.zip",
+  "size": 5871401,
+  "sha256": "d8d09b53391ad0c64acd303e77efbf319023a3dd573accb7316cc5c648e92eae",
   "min_build": 1,
-  "notes": "A carne no espeto agora é sempre o mesmo pedaço cortado na mesa: o tamanho, a gordura, o osso (se tinha) e o peso de verdade de cada pedaço vão da mesa para a mochila, para o espeto e para o fogo, assando de cada lado.",
+  "notes": "Fogão de barro (Projetos): base de madeira (4 pés, 2 travessas, tampo de tábuas), depois assentar 10 pedras e pôr 6 baldes de barro (paredes, chapa com 2 bocas de panela e a chaminé). Na boca de fogo só cabe lenha fina: rache as achas no cepo em pedaços pequenos. Acende com o arco de fogo (sai fumaça pela chaminé). Nas bocas vão as vasilhas com carne picada: cozinhar (2 goles de água da cabaça) ou fritar (tem que mexer, senão gruda e queima); a boca em cima do fogo esquenta mais. Relógio em cada vasilha; pronta, a carne cozida ou frita já se come e devolve a vasilha vazia.",
   "date": "2026-11-23"
 }
