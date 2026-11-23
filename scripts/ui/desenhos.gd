@@ -557,6 +557,15 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				ci.draw_line(c + Vector2(14 + k * 6, -10) * u, c + Vector2(18 + k * 6, 38) * u, Color(0.45, 0.65, 0.88), 3.5 * u, true)
 		"vasilha_barro", "garrafa_barro", "moringa_barro", "bacia_barro", "filtro_barro":
 			load("res://scripts/world/olaria.gd").icone(ci, id, c, s)
+		"espeto", "espeto_carne":
+			# a vareta comprida, apontada, na diagonal (com o pedaço de carne espetado)
+			ci.draw_line(c + Vector2(-42, 40) * u, c + Vector2(40, -38) * u, Color(0.5, 0.34, 0.18), 5.0 * u, true)
+			ci.draw_colored_polygon(P.call([[40, -38], [48, -46], [36, -40]]), Color(0.7, 0.55, 0.35))
+			if id == "espeto_carne":
+				var lump: PackedVector2Array = P.call([[-18, 6], [-10, -10], [8, -16], [20, -6], [16, 12], [0, 18], [-14, 16]])
+				ci.draw_colored_polygon(lump, Color(0.66, 0.1, 0.08))
+				ci.draw_colored_polygon(P.call([[-10, -10], [8, -16], [20, -6], [6, -8]]), Color(0.92, 0.84, 0.68))
+				ci.draw_polyline(lump + PackedVector2Array([lump[0]]), ink, 2.0 * u, true)
 		"vasilha_carne":
 			# a vasilha com os cubos de carne aparecendo por cima da boca
 			load("res://scripts/world/olaria.gd").icone(ci, "vasilha_barro", c + Vector2(0, 8) * u, s * 0.95)

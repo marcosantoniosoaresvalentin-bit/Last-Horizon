@@ -12394,6 +12394,7 @@ func _mc_pegar() -> void:
 		var cheia := 0.0
 		var peso := 0.0
 		var assar := 0
+		var espetos := 0
 		var sujos := 0.0
 		for ci in _mc_pegaveis():
 			var cl: Dictionary = cel[int(ci)]
@@ -12403,10 +12404,17 @@ func _mc_pegar() -> void:
 				levou.append(ci)
 				continue
 			if str(cl.tipo) == "gde":
-				if _bag_total() + peso + Itens.kg("carne_assar") > BAG_MAX:
+				# com espeto na mochila a carne já vai espetada
+				var esp := (item_qtd("espeto") - espetos) > 0
+				var it_g := "espeto_carne" if esp else "carne_assar"
+				var dk := Itens.kg(it_g) - (Itens.kg("espeto") if esp else 0.0)
+				if _bag_total() + peso + dk > BAG_MAX:
 					continue
-				peso += Itens.kg("carne_assar")
-				assar += 1
+				peso += dk
+				if esp:
+					espetos += 1
+				else:
+					assar += 1
 				levou.append(ci)
 				continue
 			# pequenos: na vasilha (enche uma, passa para a próxima)
@@ -12428,6 +12436,9 @@ func _mc_pegar() -> void:
 			add_item("vasilha_carne", usadas)
 		if assar > 0:
 			add_item("carne_assar", assar)
+		if espetos > 0:
+			remove_item("espeto", espetos)
+			add_item("espeto_carne", espetos)
 		if sujos > 0.0:
 			add_item("carne_suja", maxi(1, roundi(sujos)))
 		_update_inventory()
@@ -15047,9 +15058,10 @@ func _fogueira_opts(i: int) -> Array:
 	var op := []
 	var fo: Dictionary = _fogos.items[i]
 	if fo.has("assa"):
-		op.append(["tirar_assado", "Tirar a carne do fogo"])
-	elif item_qtd("carne_assar") > 0 and (_fogos.acesa(i) or _fogos.brasa(i)):
-		op.append(["assar", "Assar a carne"])
+		op.append(["virar_espeto", "Virar o espeto"])
+		op.append(["tirar_assado", "Tirar o espeto"])
+	elif item_qtd("espeto_carne") > 0 and (_fogos.acesa(i) or _fogos.brasa(i)):
+		op.append(["assar", "Pôr o espeto no fogo"])
 	if _fogos.acesa(i):
 		op.append(["por_lenha", "Pôr lenha"])
 		if item_qtd("folha_goiabeira") >= 3 and item_qtd("vasilha_barro") > 0 and (item_qtd("moringa_agua") > 0 or item_qtd("moringa_limpa") > 0):
@@ -15135,27 +15147,38 @@ func _fogueira_pick(i: int, acao: String) -> void:
 			_face_to(c)
 			Sons.play_at(self, "agua", c, -10.0, 0.7)
 		"assar":
-			if item_qtd("carne_assar") <= 0 or (_fogos.items[i] as Dictionary).has("assa"):
+			if item_qtd("espeto_carne") <= 0 or (_fogos.items[i] as Dictionary).has("assa"):
 				return
-			remove_item("carne_assar", 1)
+			remove_item("espeto_carne", 1)
 			_update_inventory()
-			(_fogos.items[i] as Dictionary)["assa"] = {"p": 0.0}
+			(_fogos.items[i] as Dictionary)["assa"] = {"l": [0.0, 0.0], "baixo": 0}
 			_face_to(c)
 			Sons.play_at(self, "baque", c + Vector3.UP * 0.5, -14.0, 1.3)
+		"virar_espeto":
+			var fo3: Dictionary = _fogos.items[i]
+			if fo3.has("assa"):
+				var a3: Dictionary = fo3.assa
+				a3.baixo = 1 - int(a3.get("baixo", 0))
+				_face_to(c)
+				Sons.play_at(self, "fibra_bate", c + Vector3.UP * 0.6, -16.0, 1.4)
 		"tirar_assado":
 			var fo2: Dictionary = _fogos.items[i]
 			if not fo2.has("assa"):
 				return
-			var pa := float((fo2.assa as Dictionary).get("p", 0.0))
-			var item := "carne_assar"
-			if pa >= 2.0:
+			var ls: Array = _assa_lados(fo2.assa)
+			var item := "espeto_carne"
+			if maxf(float(ls[0]), float(ls[1])) >= ASSA_QUEIMA:
 				item = "carne_queimada"
-			elif pa >= 1.0:
+			elif minf(float(ls[0]), float(ls[1])) >= 1.0:
 				item = "carne_assada"
-			if _bag_total() + Itens.kg(item) > BAG_MAX:
+			var kg_tot := Itens.kg(item) + (Itens.kg("espeto") if item != "espeto_carne" else 0.0)
+			if _bag_total() + kg_tot > BAG_MAX:
 				return
 			fo2.erase("assa")
+			# a carne assada e o espeto vão separados (o espeto serve de novo)
 			add_item(item, 1)
+			if item != "espeto_carne":
+				add_item("espeto", 1)
 			_update_inventory()
 			_face_to(c)
 		"pegar_carvao":
@@ -16901,6 +16924,7 @@ func _olho_layout() -> Dictionary:
 
 func _draw_bur_ui() -> void:
 	_draw_fornos()
+	_draw_espetos()
 	_tranca_draw()
 	_laco_draw()
 	_tri_draw()
@@ -17563,14 +17587,36 @@ static func _btn_bate(r: Rect2, postos: Array) -> bool:
 
 
 # ================== ASSAR A CARNE NA FOGUEIRA ==================
-# Um pedaço de carne para assar (cortado na mesa) vai num espeto em cima da fogueira, nas
-# duas forquilhas. Com fogo assa em uns 45 min do jogo (na brasa, mais devagar; fria, para).
-# Crua (vermelha) vai dourando até ficar assada (marrom); esquecida no fogo, queima (preta).
-# fogueira.assa = {p: 0 crua .. 1 assada .. 2 queimada}
+# A carne para assar vai num espeto (o espeto se faz com uma vareta e a faca; na mesa, com
+# o espeto na mochila, o pedaço grande já sai espetado; ou USAR a carne com o espeto). Na
+# fogueira acesa: "Pôr o espeto no fogo" (nas duas forquilhas). O lado de baixo assa (mais
+# depressa com fogo forte, devagar na brasa, nada com o fogo frio); tem que virar o espeto
+# de vez em quando: um lado esquecido em cima do fogo passa do ponto e queima. De perto,
+# o relógio mostra quanto falta (e cada lado: dourando, pronto, queimando). Tirando, a
+# carne assada e o espeto vão para a mochila, cada um no seu lugar.
+# fogueira.assa = {l: [lado 0, lado 1] (0 cru .. 1 assado .. ASSA_QUEIMA queimado), baixo}
 
-const ASSA_H := 0.75
+const ASSA_H := 0.4               # horas do jogo para assar um lado (fogo médio)
+const ASSA_QUEIMA := 1.75
 var _assa_nos := {}               # índice da fogueira -> Node3D (o espeto)
 static var _assa_sh: Shader = null
+
+
+## Os dois lados (o da versão de antes tinha um "p" só).
+func _assa_lados(a: Dictionary) -> Array:
+	if not a.has("l"):
+		var p := float(a.get("pv", a.get("p", 0.0)))
+		a["l"] = [p, p]
+		a["baixo"] = 0
+	var lv: Array = a.get("lv", a.l)
+	return lv
+
+
+## Quanto o fogo assa agora (fogo forte assa e queima mais depressa).
+func _assa_k(i: int) -> float:
+	if _fogos.acesa(i):
+		return clampf(0.55 + float(_fogos.fogo(i)) * 0.16, 0.6, 1.9)
+	return 0.35 if _fogos.brasa(i) else 0.0
 
 
 func _assar_tick(delta: float) -> void:
@@ -17584,22 +17630,110 @@ func _assar_tick(delta: float) -> void:
 				_assa_nos.erase(i)
 			continue
 		var a: Dictionary = fo.assa
+		var ls: Array = _assa_lados(a)
+		var b := int(a.get("baixo", 0))
 		if not _mp_client():
-			var k := 1.0 if _fogos.acesa(i) else (0.45 if _fogos.brasa(i) else 0.0)
-			var pv := float(a.get("pv", a.get("p", 0.0))) + k * dh / ASSA_H
-			a["pv"] = pv
-			if absf(pv - float(a.get("p", 0.0))) >= 0.02:
-				a.p = snappedf(pv, 0.02)            # (o que vai para os outros celulares, de pouco em pouco)
+			var lv: Array = [float(ls[0]), float(ls[1])]
+			var k := _assa_k(i)
+			lv[b] = float(lv[b]) + k * dh / ASSA_H
+			lv[1 - b] = float(lv[1 - b]) + k * dh / ASSA_H * 0.08     # o de cima pega um pouco do calor
+			a["lv"] = lv
+			for s2 in 2:
+				if absf(float(lv[s2]) - float((a.l as Array)[s2])) >= 0.02:
+					(a.l as Array)[s2] = snappedf(float(lv[s2]), 0.02)   # (para os outros celulares, de pouco em pouco)
 		var no: Node3D = _assa_nos.get(i, null)
 		if no == null or not is_instance_valid(no):
 			no = _espeto_no()
 			add_child(no)
 			_assa_nos[i] = no
 			no.global_position = _fogos.center(i)
-		var carne: MeshInstance3D = no.get_node("giro/carne")
-		(carne.material_override as ShaderMaterial).set_shader_parameter("p", float(a.get("pv", a.get("p", 0.0))))
-		var esp: Node3D = no.get_node("giro")
-		esp.rotation.x = fmod(esp.rotation.x + delta * 0.25, TAU)
+		var ls2: Array = _assa_lados(a)
+		var sm: ShaderMaterial = (no.get_node("giro/carne") as MeshInstance3D).material_override
+		sm.set_shader_parameter("p0", float(ls2[0]))
+		sm.set_shader_parameter("p1", float(ls2[1]))
+		# virando: o espeto gira meia volta (o lado 0 embaixo = carne de cabeça para baixo)
+		var giro: Node3D = no.get_node("giro")
+		var alvo := PI if int(a.get("baixo", 0)) == 0 else 0.0
+		giro.rotation.x = lerp_angle(giro.rotation.x, alvo, 1.0 - exp(-delta * 5.0))
+	if _sub_ui and not _assa_nos.is_empty():
+		_sub_ui.queue_redraw()
+
+
+## O relógio do espeto (de perto, como o do forno): quanto falta para assar; em volta, os
+## dois lados (amarelo dourando, verde pronto, vermelho queimando).
+func _draw_espetos() -> void:
+	if _fogos == null:
+		return
+	var font := ThemeDB.fallback_font
+	for i in _assa_nos:
+		if i >= _fogos.items.size() or not (_fogos.items[i] as Dictionary).has("assa"):
+			continue
+		var a: Dictionary = _fogos.items[i].assa
+		var ls: Array = _assa_lados(a)
+		var fc: Vector3 = _fogos.center(i)
+		if Vector2(fc.x - _player.position.x, fc.z - _player.position.z).length() > 3.0:
+			continue
+		var w := fc + Vector3.UP * 1.25
+		if _cam.is_position_behind(w):
+			continue
+		var c := _cam.unproject_position(w)
+		var R := 34.0
+		var b := int(a.get("baixo", 0))
+		var k := _assa_k(i)
+		# o que falta: os dois lados até 1 (o de baixo assando agora)
+		var falta_h := 0.0
+		for s2 in 2:
+			falta_h += maxf(0.0, 1.0 - float(ls[s2])) * ASSA_H
+		var fl := clampf(falta_h / (ASSA_H * 2.0), 0.0, 1.0)
+		_sub_ui.draw_circle(c, R + 6.0, Color(0.04, 0.035, 0.03, 0.8))
+		_sub_ui.draw_arc(c, R + 6.0, 0, TAU, 40, Color(0.86, 0.7, 0.38, 0.6), 2.0, true)
+		var queim := maxf(float(ls[0]), float(ls[1])) >= ASSA_QUEIMA
+		if queim:
+			_sub_ui.draw_circle(c, R, Color(0.15, 0.08, 0.05))
+		elif fl > 0.0:
+			var pts := PackedVector2Array([c])
+			var seg := maxi(3, int(48 * fl))
+			for q in seg + 1:
+				var an := -PI * 0.5 + TAU * fl * float(q) / seg
+				pts.append(c + Vector2(cos(an), sin(an)) * R)
+			_sub_ui.draw_colored_polygon(pts, Color(0.85, 0.12, 0.08).lerp(Color(1.0, 0.55, 0.15), 1.0 - fl))
+			if k > 0.0:
+				var seg_left := int(ceil(falta_h * float(sim.real_s_por_hora()) / k))
+				var tx := "%d:%02d" % [seg_left / 60, seg_left % 60]
+				var tw := font.get_string_size(tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+				_sub_ui.draw_string(font, c + Vector2(-tw * 0.5, R + 26), tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.95, 0.85))
+		else:
+			_sub_ui.draw_circle(c, R, Color(0.2, 0.7, 0.3))
+		# os dois lados da carne: meia-lua em cima e embaixo (o de baixo é o que está no fogo)
+		for s2 in 2:
+			var pv := float(ls[s2])
+			var cor := Color(0.95, 0.8, 0.3)
+			if pv >= ASSA_QUEIMA:
+				cor = Color(0.1, 0.06, 0.04)
+			elif pv >= 1.35:
+				cor = Color(0.95, 0.2, 0.1)              # passando do ponto: vire!
+			elif pv >= 1.0:
+				cor = Color(0.3, 0.85, 0.35)
+			var em_baixo := s2 == b
+			var a0 := 0.15 if em_baixo else PI + 0.15
+			_sub_ui.draw_arc(c, R + 13.0, a0, a0 + PI - 0.3, 24, cor, 6.0 if em_baixo else 4.0, true)
+		# os ponteirinhos
+		_sub_ui.draw_line(c, c + Vector2(0, -R * 0.75), Color(1, 1, 1, 0.9), 3.0, true)
+		_sub_ui.draw_line(c, c + Vector2(R * 0.5, 0), Color(1, 1, 1, 0.9), 3.0, true)
+		_sub_ui.draw_circle(c, 4.0, Color(1, 1, 1))
+
+
+## USAR a carne para assar (com um espeto na mochila): espeta ela.
+func espetar() -> String:
+	if item_qtd("carne_assar") <= 0:
+		return ""
+	if item_qtd("espeto") <= 0:
+		return "Precisa de um espeto (faça com uma vareta e a faca)."
+	remove_item("carne_assar", 1)
+	remove_item("espeto", 1)
+	add_item("espeto_carne", 1)
+	_update_inventory()
+	return "A carne está no espeto. Leve até uma fogueira acesa."
 
 
 ## O espeto: duas forquilhas fincadas dos lados do fogo, a vara atravessada e a carne.
@@ -17659,7 +17793,8 @@ func _espeto_no() -> Node3D:
 		_assa_sh.code = """
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
-uniform float p = 0.0;
+uniform float p0 = 0.0;
+uniform float p1 = 0.0;
 varying vec3 lp;
 float hh(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
 float ruido(vec3 q) {
@@ -17680,8 +17815,10 @@ void fragment() {
 	vec3 assada = mix(vec3(0.42, 0.22, 0.09), vec3(0.58, 0.34, 0.14), n);
 	assada = mix(assada, vec3(0.75, 0.55, 0.25), g * 0.6);
 	vec3 queim = mix(vec3(0.05, 0.035, 0.025), vec3(0.16, 0.08, 0.04), n);
+	// cada metade (de um lado do espeto) assa do seu jeito
+	float p = mix(p1, p0, smoothstep(-0.05, 0.05, lp.y));
 	vec3 c = mix(crua, assada, smoothstep(0.1, 1.0, p));
-	c = mix(c, queim, smoothstep(1.3, 2.0, p));
+	c = mix(c, queim, smoothstep(1.3, 1.75, p));
 	ALBEDO = c;
 	// crua molhada brilha; assada a gordura chiando brilha também; queimada fosca
 	ROUGHNESS = mix(0.3, 0.45, smoothstep(0.5, 1.0, p)) + smoothstep(1.4, 2.0, p) * 0.5;

@@ -540,6 +540,8 @@ func _max_craft(r: Dictionary) -> int:
 	var m := 99
 	for ing in r.ingredientes:
 		m = mini(m, _have(str(ing[0])) / int(ing[1]))
+	if r.has("ferramenta") and _have(str(r.ferramenta)) <= 0:
+		m = 0                                 # (precisa da ferramenta: ela não gasta)
 	return m
 
 
@@ -611,7 +613,7 @@ func _refresh() -> void:
 	if ok:
 		_msg.text = ""
 	else:
-		_msg.text = "Faltam ingredientes."
+		_msg.text = "Faltam ingredientes." if not r.has("ferramenta") or _have(str(r.ferramenta)) > 0 else "Precisa de %s na mochila." % Itens.nome(str(r.ferramenta)).to_lower()
 		_msg.add_theme_color_override("font_color", C_DIM)
 
 
