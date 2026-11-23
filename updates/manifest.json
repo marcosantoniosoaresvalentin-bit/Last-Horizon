@@ -1,9 +1,9 @@
 {
-  "version": 225,
-  "file": "update_225.zip",
-  "size": 5896733,
-  "sha256": "d76022dc7778572bda5fac692be0941a575a0ffb27be6cee06a99ad254c8ba5a",
+  "version": 226,
+  "file": "update_226.zip",
+  "size": 5903162,
+  "sha256": "6e03a6624d662cc6b15ecdda58caeaa1db66f0b37d5c3d26d767c35a74d2c5ae",
   "min_build": 1,
-  "notes": "Pesca: linha de fibra de coco no cavalete, vara de pesca, arremessar, puxar o peixe com Força, 5 peixes, fritar no fogão",
+  "notes": "Coqueiros na praia: pegar coco, abrir com a faca, beber a água e comer a massa. Linha de pesca agora com fibra de buriti",
   "date": "2026-11-23"
 }
