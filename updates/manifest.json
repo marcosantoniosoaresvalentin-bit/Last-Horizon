@@ -1,9 +1,9 @@
 {
-  "version": 216,
-  "file": "update_216.zip",
-  "size": 5860475,
-  "sha256": "855a9d4bf5e26ebdeaaf0289b016dacd2b2b79ff750f7487682d19628e466172",
+  "version": 217,
+  "file": "update_217.zip",
+  "size": 5862577,
+  "sha256": "91ca777eabee76e8157f975f94e5b4f13e5c1bcb84853b5ab9077a3d4afc4d21",
   "min_build": 1,
-  "notes": "Forro do tripé acompanha o morro (as folhas deitam no chão, não flutuam). Mesa de carne nova: ao trabalhar a carne escolhe o corte (pedaços pequenos para cozinhar/fritar ou grandes para assar); aparece a grade de quadradinhos em cima da peça; marca e corta cada um com a faca (e o machado onde tem osso: espinha, costelas, bacia, fêmur); os pedaços pequenos vão numa vasilha de barro (2 kg em cada); os grandes vão para a mochila e podem ser picados em pequenos. Assar: na fogueira acesa, 'Assar a carne' põe o pedaço no espeto; assa em uns 45 min do jogo (crua → assada → queimada se esquecer) e mata bem a fome.",
+  "notes": "Assar no espeto: faça o espeto (vareta + faca na mochila). Na mesa, com espeto na mochila, o pedaço grande já sai espetado (ou USAR a carne para assar com o espeto). Na fogueira acesa: 'Pôr o espeto no fogo'. O lado de baixo assa (fogo forte mais depressa); vire o espeto ('Virar o espeto') senão o lado esquecido queima. De perto aparece o relógio (como o do forno de carvão) com o tempo que falta e os dois lados da carne. 'Tirar o espeto': a carne assada e o espeto vão para a mochila separados; a carne assada já é comida e mata bastante a fome.",
   "date": "2026-11-23"
 }
