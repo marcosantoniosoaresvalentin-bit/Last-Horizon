@@ -1,9 +1,9 @@
 {
-  "version": 217,
-  "file": "update_217.zip",
-  "size": 5862577,
-  "sha256": "91ca777eabee76e8157f975f94e5b4f13e5c1bcb84853b5ab9077a3d4afc4d21",
+  "version": 218,
+  "file": "update_218.zip",
+  "size": 5863606,
+  "sha256": "d6cb25f721657cf31f5508dab6fd76f988fc373c6c48490ec12d7bf9437aa9d5",
   "min_build": 1,
-  "notes": "Assar no espeto: faça o espeto (vareta + faca na mochila). Na mesa, com espeto na mochila, o pedaço grande já sai espetado (ou USAR a carne para assar com o espeto). Na fogueira acesa: 'Pôr o espeto no fogo'. O lado de baixo assa (fogo forte mais depressa); vire o espeto ('Virar o espeto') senão o lado esquecido queima. De perto aparece o relógio (como o do forno de carvão) com o tempo que falta e os dois lados da carne. 'Tirar o espeto': a carne assada e o espeto vão para a mochila separados; a carne assada já é comida e mata bastante a fome.",
+  "notes": "A carne no espeto agora é sempre o mesmo pedaço cortado na mesa: o tamanho, a gordura, o osso (se tinha) e o peso de verdade de cada pedaço vão da mesa para a mochila, para o espeto e para o fogo, assando de cada lado.",
   "date": "2026-11-23"
 }
