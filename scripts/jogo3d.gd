@@ -313,6 +313,7 @@ var _grass_mat: ShaderMaterial
 var _water_mat: ShaderMaterial
 var _water_mi: MeshInstance3D
 var _sun: DirectionalLight3D
+var _grafico := 2                  # 0 muito baixo, 1 baixo, 2 médio, 3 alto (Configurações)
 var _moon: DirectionalLight3D
 var _env: Environment
 var _sky_mat: ProceduralSkyMaterial
@@ -611,7 +612,11 @@ func _exit_tree() -> void:
 func _ready() -> void:
 	Diag.marcar("gerando mundo")
 	_build_hud()
+	_grafico = Perfil.grafico()
+	GRASS_RADIUS = [1, 2, 3, 3][_grafico]
+	GRASS_PER_CHUNK = [90, 140, 200, 260][_grafico]
 	_build_environment()
+	_aplica_graficos()
 	sim = MundoSim.new()
 	teste = Perfil.teste()
 	_world_id = str(Engine.get_meta("mundo", ""))
@@ -1060,6 +1065,16 @@ func _set_loading(text: String) -> void:
 
 
 # ================== AMBIENTE ==================
+
+## As opções gráficas: resolução do 3D, sombras, até onde se enxerga, a neblina, a chuva.
+func _aplica_graficos() -> void:
+	var g := _grafico
+	get_viewport().scaling_3d_scale = [0.6, 0.75, 0.9, 1.0][g]
+	_sun.directional_shadow_max_distance = [0.0, 0.0, 14.0, 18.0][g]
+	_cam.far = [220.0, 350.0, 500.0, 700.0][g]
+	_env.fog_density = [0.0065, 0.0042, 0.0025, 0.0018][g]
+	_rain.amount = [300, 500, 700, 900][g]
+
 
 func _build_environment() -> void:
 	_env = Environment.new()
@@ -6361,7 +6376,7 @@ func _update_sky(delta: float) -> void:
 	var warm := clampf(1.0 - elev * 2.5, 0.0, 1.0)
 	_sun.light_color = Color(1, 0.97, 0.9).lerp(Color(1.0, 0.62, 0.35), warm)
 	_sun.light_energy = lerpf(0.0, 1.5, daylight) * lerpf(1.0, 0.35, _rain_amount)
-	_sun.shadow_enabled = daylight > 0.2
+	_sun.shadow_enabled = daylight > 0.2 and _grafico >= 2
 	var night := 1.0 - daylight
 	var top := Color(0.30, 0.50, 0.78).lerp(Color(0.42, 0.45, 0.5), _rain_amount).lerp(Color(0.02, 0.03, 0.08), night)
 	var hor := Color(0.72, 0.78, 0.82).lerp(Color(0.95, 0.62, 0.4), warm * daylight).lerp(Color(0.58, 0.6, 0.62), _rain_amount).lerp(Color(0.04, 0.05, 0.1), night)

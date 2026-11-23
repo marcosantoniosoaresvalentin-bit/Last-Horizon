@@ -57,6 +57,19 @@ static func set_teste(on: bool) -> void:
 	_write(d)
 
 
+## Qualidade dos gráficos neste celular: 0 muito baixo, 1 baixo, 2 médio, 3 alto.
+const GRAFICOS := ["Muito baixo", "Baixo", "Médio", "Alto"]
+
+static func grafico() -> int:
+	return clampi(int(_read().get("grafico", 2)), 0, 3)
+
+
+static func set_grafico(n: int) -> void:
+	var d := _read()
+	d["grafico"] = clampi(n, 0, 3)
+	_write(d)
+
+
 ## Câmera em terceira pessoa (atrás do personagem) neste celular.
 static func terceira() -> bool:
 	return bool(_read().get("terceira", false))

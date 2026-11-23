@@ -784,6 +784,38 @@ func _page_settings() -> Control:
 	tb.add_child(tchk)
 	tb.add_child(_note("Para testar o jogo: fabricar sem gastar nada, pedra fica pronta na hora de modelar, madeira corta numa batida (árvore, tora, galho, tábua, rachar com cunha, serrar) e as ferramentas não gastam. Vale só neste celular.", C_DIM))
 
+	# os gráficos: quatro níveis (o mais baixo para celular fraco)
+	var gc := PanelContainer.new()
+	gc.add_theme_stylebox_override("panel", _box(C_CARD, 10, C_LINE, 1))
+	v.add_child(gc)
+	var gm := MarginContainer.new()
+	for k in ["left", "right", "top", "bottom"]:
+		gm.add_theme_constant_override("margin_" + k, 22)
+	gc.add_child(gm)
+	var gb := VBoxContainer.new()
+	gb.add_theme_constant_override("separation", 10)
+	gm.add_child(gb)
+	var gt := Label.new()
+	gt.text = "Gráficos"
+	gt.add_theme_font_size_override("font_size", 22)
+	gb.add_child(gt)
+	gb.add_child(_note("Se o jogo estiver travando, baixe a qualidade: menos sombras, menos grama em volta e a vista mais curta. Vale só neste celular (entra na próxima vez que abrir um mundo).", C_DIM))
+	var gh := HBoxContainer.new()
+	gh.add_theme_constant_override("separation", 10)
+	gb.add_child(gh)
+	var gbtns := []
+	for i in Perfil.GRAFICOS.size():
+		var b := _button(Perfil.GRAFICOS[i], i == Perfil.grafico())
+		b.custom_minimum_size = Vector2(150, 54)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		gh.add_child(b)
+		gbtns.append(b)
+	for i in gbtns.size():
+		var nivel := i
+		(gbtns[i] as Button).pressed.connect(func():
+			Perfil.set_grafico(nivel)
+			_show("Configurações"))
+
 	var lc := PanelContainer.new()
 	lc.add_theme_stylebox_override("panel", _box(C_CARD, 10, C_LINE, 1))
 	v.add_child(lc)
