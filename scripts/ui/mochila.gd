@@ -449,6 +449,10 @@ func _use() -> void:
 	if it.id in ["machado", "cavadeira", "serra", "pa", "balde", "marreta", "arco", "laco_5", "laco_10", "vara_pesca"]:
 		_equip()
 		return
+	if it.id == "coco" and _game:
+		_say(_game.abrir_coco())
+		_refresh()
+		return
 	if it.id == "pedra" and _game:
 		if str(_game._mao) == "pedra":
 			_game.equip("")

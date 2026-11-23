@@ -1496,7 +1496,7 @@ func corda_of(mi: int) -> Dictionary:
 
 
 static var _cipo_mat: StandardMaterial3D
-## Desenhando a linha de pesca (fibra de coco): fios bem finos e cor de palha.
+## Desenhando a linha de pesca (fibra de buriti): fios bem finos e cor de palha.
 static var fino := false
 
 static func cipo_mat() -> StandardMaterial3D:
@@ -1529,7 +1529,7 @@ static func fio_cipo(st: SurfaceTool, pts: Array, r: float, tom := 0.0) -> void:
 		rows.append(row)
 	var base := Color(0.3, 0.23, 0.1).lerp(Color(0.26, 0.26, 0.11), tom)
 	if fino:
-		base = Color(0.62, 0.45, 0.26).lerp(Color(0.55, 0.4, 0.22), tom)
+		base = Color(0.78, 0.68, 0.46).lerp(Color(0.7, 0.6, 0.4), tom)
 	for i in rows.size() - 1:
 		var c0 := base.darkened(0.12 * sin(float(i) * 1.7) + 0.06 * sin(float(i) * 0.37 + tom * 9.0))
 		for k in lados:

@@ -377,19 +377,33 @@ func _rebuild() -> void:
 func _add_mm(mesh: Mesh, xs: Array, view: float, shadow: bool) -> void:
 	if xs.is_empty():
 		return
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = mesh
-	mm.instance_count = xs.size()
-	for i in xs.size():
-		mm.set_instance_transform(i, xs[i])
-	var mi := MultiMeshInstance3D.new()
-	mi.multimesh = mm
-	mi.material_override = _mat
-	mi.visibility_range_end = view
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mi)
-	_nodes.append(mi)
+	# em pedaços de 64 m: a distância de ver conta de cada pedaço (não do mapa inteiro)
+	var grupos := {}
+	for t in xs:
+		var o: Vector3 = (t as Transform3D).origin
+		var k := Vector2i(floori(o.x / 64.0), floori(o.z / 64.0))
+		if not grupos.has(k):
+			grupos[k] = []
+		grupos[k].append(t)
+	for k in grupos:
+		var lst: Array = grupos[k]
+		var c := Vector3((k.x + 0.5) * 64.0, 0.0, (k.y + 0.5) * 64.0)
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = mesh
+		mm.instance_count = lst.size()
+		for i in lst.size():
+			var t2: Transform3D = lst[i]
+			mm.set_instance_transform(i, Transform3D(t2.basis, t2.origin - c))
+		var mi := MultiMeshInstance3D.new()
+		mi.multimesh = mm
+		mi.material_override = _mat
+		mi.position = c
+		if view > 0.0:
+			mi.visibility_range_end = view
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+		_nodes.append(mi)
 
 
 # ================== MODELOS ==================

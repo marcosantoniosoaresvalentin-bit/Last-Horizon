@@ -585,16 +585,34 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				ci.draw_colored_polygon(cub, cc)
 				ci.draw_line(o + Vector2(-7, -5) * u, o + Vector2(7, -6) * u, Color(0.9, 0.82, 0.68), 2.0 * u, true)
 				ci.draw_polyline(cub + PackedVector2Array([cub[0]]), ink, 1.5 * u, true)
-		"fibra_coco":
-			# um feixe de fibras compridas cor de palha, amarradas no meio
-			for k in 9:
-				var o := -12.0 + k * 3.0
-				var pts := PackedVector2Array()
-				for i in 9:
-					var t := float(i) / 8.0
-					pts.append(c + Vector2(lerpf(-42, 42, t), o * (0.4 + 0.9 * absf(t - 0.5)) + sin(t * 7.0 + k) * 2.0) * u)
-				ci.draw_polyline(pts, Color(0.62, 0.45, 0.25).darkened(0.12 * (k % 3)), 2.2 * u, true)
-			ci.draw_rect(Rect2(c + Vector2(-5, -9) * u, Vector2(10, 18) * u), Color(0.4, 0.28, 0.14))
+		"coco":
+			# o coco-da-baía com a casca: oval, verde amarelando, com as fibras marcadas
+			var cc := PackedVector2Array()
+			for k in 32:
+				var a := TAU * k / 32.0
+				cc.append(c + Vector2(cos(a) * 34.0 + 4.0 * cos(a) * sin(a), sin(a) * 42.0) * u)
+			ci.draw_colored_polygon(cc, Color(0.55, 0.52, 0.22))
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-34, 0) * u, c + Vector2(-26, -26) * u, c + Vector2(0, -42) * u, c + Vector2(-4, -30) * u, c + Vector2(-20, -12) * u]), Color(0.7, 0.66, 0.32))
+			for k in 4:
+				var x := -18.0 + k * 12.0
+				ci.draw_line(c + Vector2(x, -38) * u, c + Vector2(x * 1.1, 38) * u, Color(0.4, 0.36, 0.14), 1.3 * u, true)
+			ci.draw_circle(c + Vector2(0, -40) * u, 6.0 * u, Color(0.42, 0.3, 0.14))
+			ci.draw_polyline(cc + PackedVector2Array([cc[0]]), ink, 2.0 * u, true)
+		"massa_coco":
+			# metade do coco aberto: a casca marrom por fora e a massa branca por dentro
+			var arco := PackedVector2Array()
+			for k in 17:
+				var a := PI * k / 16.0
+				arco.append(c + Vector2(cos(a) * 40.0, sin(a) * 30.0 - 4.0) * u)
+			ci.draw_colored_polygon(arco, Color(0.38, 0.25, 0.13))
+			var dentro := PackedVector2Array()
+			for k in 17:
+				var a := PI * k / 16.0
+				dentro.append(c + Vector2(cos(a) * 33.0, sin(a) * 23.0 - 4.0) * u)
+			ci.draw_colored_polygon(dentro, Color(0.97, 0.95, 0.9))
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-40, -4) * u, c + Vector2(40, -4) * u, c + Vector2(36, -14) * u, c + Vector2(-36, -14) * u]), Color(0.96, 0.94, 0.88))
+			ci.draw_line(c + Vector2(-40, -4) * u, c + Vector2(40, -4) * u, ink, 2.0 * u, true)
+			ci.draw_polyline(arco, ink, 2.0 * u, true)
 		"linha_pesca", "acao_linha_fazer":
 			# o rolinho de linha fina (muitas voltas finas)
 			for k in 7:

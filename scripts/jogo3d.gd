@@ -46,6 +46,7 @@ const Cobras := preload("res://scripts/world/cobras.gd")
 const Taias := preload("res://scripts/world/taias.gd")
 const Goiabeiras := preload("res://scripts/world/goiabeiras.gd")
 const Babacus := preload("res://scripts/world/babacus.gd")
+const Coqueiros := preload("res://scripts/world/coqueiros.gd")
 const Caca := preload("res://scripts/world/caca.gd")
 const Vacas := preload("res://scripts/world/vacas.gd")
 const Capins := preload("res://scripts/world/capins.gd")
@@ -433,6 +434,7 @@ var _cobras: Node3D = null         # jararacas (de tocaia nas moitas)
 var _taias: Node3D = null          # jararaca-taia (a planta do remédio)
 var _goiab: Node3D = null          # goiabeiras (goiaba e o chá das folhas)
 var _babacu: Node3D = null         # babaçu (pindovas, palmeiras, cocos e folhas secas)
+var _coq: Node3D = null            # coqueiros da praia (coco-da-baía)
 var _vacas: Node3D = null          # vacas selvagens (e o pasto que elas comem)
 var _caca: Node3D = null           # flechas voando, bichos feridos e carcaças
 var _tiro_btn: Button
@@ -1240,6 +1242,10 @@ func _on_world_ready() -> void:
 	add_child(_babacu)
 	_babacu.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/babacus.json" if _world_id != "" else "")
 	print("babaçus: %d" % _babacu.palms.size())
+	_coq = Coqueiros.new()
+	add_child(_coq)
+	_coq.build(self, _arvores, int(sim.world_seed), Mundos.dir(_world_id) + "/coqueiros.json" if _world_id != "" else "")
+	print("coqueiros: %d" % _coq.palms.size())
 	_vacas = Vacas.new()
 	add_child(_vacas)
 	_vacas.build(self, int(sim.world_seed), Mundos.dir(_world_id) + "/vacas.json" if _world_id != "" else "")
@@ -1632,6 +1638,8 @@ func _process(delta: float) -> void:
 			_buritis.tick()
 		if _babacu:
 			_babacu.tick()
+		if _coq:
+			_coq.tick()
 		if _minerios:
 			_minerios.tick()
 		if _cupins:
@@ -1764,6 +1772,8 @@ func _save_world() -> void:
 		_goiab.save(Mundos.dir(_world_id) + "/goiabeiras.json")
 	if _babacu:
 		_babacu.save(Mundos.dir(_world_id) + "/babacus.json")
+	if _coq:
+		_coq.save(Mundos.dir(_world_id) + "/coqueiros.json")
 	if _vacas:
 		_vacas.save(Mundos.dir(_world_id) + "/vacas.json")
 	if _caca:
@@ -1822,6 +1832,9 @@ func _load_player() -> void:
 		for k in d.itens:
 			if Itens.ITENS.has(k) and int(d.itens[k]) > 0:
 				_itens[k] = int(d.itens[k])
+			elif k == "fibra_coco" and int(d.itens[k]) > 0:
+				# (a linha de pesca agora é de fibra de buriti: a fibra de coco vira buriti)
+				_itens["fibra_buriti"] = int(_itens.get("fibra_buriti", 0)) + int(d.itens[k])
 		# a cavadeira chegou numa atualização: quem já jogava ganha uma para testar
 		if not bool(d.get("ganhou_cavadeira", false)) and not _itens.has("cavadeira"):
 			_itens["cavadeira"] = 1
@@ -2445,7 +2458,7 @@ func _update_inventory() -> void:
 
 ## Sem mensagens de ajuda na tela: é sobrevivência, o jogador aprende sozinho.
 ## As mensagens: só as de ERRO aparecem (o que falta, por que não deu); as dicas não.
-const ERRO_INICIO := ["Acabou a fibra", "Acabou o cipó", "Puxou cedo", "O peixe", "A linha", "Água rasa", "Precisa", "Falta", "Não ", "Você não", "Você já", "Para ", "A mochila está cheia", "Pesada demais",
+const ERRO_INICIO := ["Acabou a fibra", "Acabou o cipó", "Você não tem", "Puxou cedo", "O peixe", "A linha", "Água rasa", "Precisa", "Falta", "Não ", "Você não", "Você já", "Para ", "A mochila está cheia", "Pesada demais",
 	"Essa ", "Esse ", "Sua lenha", "Está chovendo", "Agora não", "Ponha a enxada", "Ponha lenha no fogão", "Pegue o balde vazio",
 	"Longe", "Tora grossa demais", "Comprido demais", "Fina demais", "Rodela só", "Tem galho", "Tem outra peça", "Termine",
 	"Tire antes", "O balde está com", "O balde já está cheio", "O outro balde", "Já tem", "Acabaram", "Acabou o barro",
@@ -2874,6 +2887,27 @@ func comer(id: String) -> String:
 		_update_inventory()
 	Sons.play_at(self, "folha_cai", _player.position + Vector3.UP * 1.5, -16.0, 0.8)
 	return "Você comeu %s. (fome %d de 100)" % [Itens.nome(id).to_lower(), roundi(_fome)]
+
+
+## Abre o coco com a faca: bebe a água (mata a sede) e fica a massa branca. Devolve a
+## mensagem.
+func abrir_coco() -> String:
+	if item_qtd("coco") <= 0:
+		return "Você não tem coco."
+	if item_qtd("faca") <= 0 and not teste:
+		return "Precisa de uma faca na mochila para abrir o coco."
+	remove_item("coco", 1)
+	if not teste:
+		wear("faca", 1)
+	_sede = minf(100.0, _sede + 22.0)
+	var caiu := add_item("massa_coco", 1)
+	if caiu > 0:
+		var q := _front(0.5)
+		_add_ground("massa_coco", 1, q.x, q.z)
+	_update_inventory()
+	Sons.play_at(self, "talo_corte", _player.position + Vector3.UP * 1.2, -8.0, 1.1)
+	Sons.play_at(self, "agua", _player.position + Vector3.UP * 1.5, -14.0, 1.7)
+	return "Você abriu o coco e bebeu a água (sede %d de 100). Ficou a massa de coco." % roundi(_sede)
 
 
 ## Frutos maduros caídos no pé de uma palmeira perto (bacaba: outubro a dezembro; buriti:
@@ -3319,6 +3353,9 @@ func _update_ctx_btn() -> void:
 	elif _babacu and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and (item_qtd("machado") > 0 or teste) and _pindova_cortavel():
 		_ctx_action = "babacu_cortar"
 		_ctx_btn.text = "Cortar folha de babaçu"
+	elif _coq and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _coq.coco_near(_player.position, 1.3) >= 0:
+		_ctx_action = "coco"
+		_ctx_btn.text = "Pegar coco"
 	elif _babacu and _carry.is_empty() and _crouch_job == "" and not _chopping and not _air and _babacu.coco_near(_player.position, 1.2) >= 0:
 		_ctx_action = "babacu_coco"
 		_ctx_btn.text = "Pegar coco de babaçu"
@@ -3389,6 +3426,18 @@ func _ctx_press() -> void:
 			if _babacu.golpe_folha(pb, _player.position):
 				Sons.play_at(self, "talo_corte", at, 0.0, 1.0)
 				Sons.play_at(self, "folha_cai", at, 0.0, 0.9)
+			_act_check = 0.0
+			return
+		"coco":
+			var ci: int = _coq.coco_near(_player.position, 1.3)
+			if ci >= 0:
+				if _bag_total() + Itens.kg("coco") > BAG_MAX:
+					_show_toast("A mochila está cheia: não cabe o coco (%s kg)." % Itens.kg_txt(Itens.kg("coco")))
+				else:
+					_coq.take_coco(ci)
+					add_item("coco", 1)
+					_update_inventory()
+					Sons.play_at(self, "baque", _player.position + Vector3.UP * 0.3, -10.0, 1.0)
 			_act_check = 0.0
 			return
 		"babacu_seca", "babacu_coco":
@@ -6434,6 +6483,8 @@ func _move_player(delta: float) -> void:
 		p = _buritis.push_out(p)
 	if _babacu:
 		p = _babacu.push_out(p)          # nem o tronco do babaçu
+	if _coq:
+		p = _coq.push_out(p)
 	if _goiab:
 		p = _goiab.push_out(p)            # nem o tronco da goiabeira
 	if _apoios:
@@ -8827,7 +8878,7 @@ func _bld_place() -> void:
 var _sync_hash := {}               # parte -> hash do que todos já têm
 var _sync_t := {}                  # parte -> tempo até conferir de novo
 const SYNC_EVERY := {"construcao": 0.4, "buracos": 0.4, "apoios": 0.4, "galhos": 0.6, "pedras": 0.6, "chao": 0.4,
-	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0, "goiabeiras": 1.0, "vacas": 2.0, "caca": 0.6, "babacus": 1.5}
+	"escavacao": 0.5, "maquinas": 0.3, "arvores": 0.8, "cupins": 1.5, "cipos": 1.5, "bacabas": 3.0, "buritis": 0.6, "minerios": 3.0, "barreiros": 0.4, "capins": 1.0, "fogueiras": 0.5, "cobras": 3.0, "taias": 1.0, "goiabeiras": 1.0, "vacas": 2.0, "caca": 0.6, "babacus": 1.5, "coqueiros": 1.5}
 const SYNC_ONLY_HOST := ["bacabas", "cobras", "vacas"]        # só o dono manda (os bichos comem os frutos); buritis: degraus e folhas cortadas vêm de todos
 
 
@@ -8945,6 +8996,7 @@ func _sync_mod(nome: String):
 		"taias": return _taias
 		"goiabeiras": return _goiab
 		"babacus": return _babacu
+		"coqueiros": return _coq
 		"vacas": return _vacas
 		"caca": return _caca
 	return null
@@ -9476,7 +9528,7 @@ const CORDAS := [5, 10, 20, 30, 50]       # metros
 const CORDA_M_CIPO := 2.0                 # metros de corda por cipó
 const CORDA_PASSO := 0.25                 # metros por cruzamento (cada passada de dedo)
 const LINHA_M := 10                       # a linha de pesca: tamanho único (metros)
-const LINHA_M_FIBRA := 1.0                # metros de linha por fibra de coco
+const LINHA_M_FIBRA := 1.0                # metros de linha por fibra de buriti
 var _tranca := {}                         # {mi, lado (0 esquerda→direita, 1 direita→esquerda), anim, drag, dx}
 var _tranca_btns: Array = []
 var _corda_ui: Control = null
@@ -9496,8 +9548,8 @@ func _corda_pick(mi: int, acao: String) -> void:
 		"corda_continuar":
 			_tranca_start(mi)
 		"linha_fazer":
-			if item_qtd("fibra_coco") <= 0 and not teste:
-				_show_toast("Precisa de fibra de coco para trançar a linha: no craft, corte os cocos de babaçu com a faca (cada coco dá 2 fibras). A linha inteira gasta %d fibras." % int(ceil(LINHA_M / LINHA_M_FIBRA)))
+			if item_qtd("fibra_buriti") <= 0 and not teste:
+				_show_toast("Precisa de fibra de buriti para trançar a linha: corte o talo do buriti com a faca e tire a fibra na desfibradeira. A linha inteira gasta %d fibras." % int(ceil(LINHA_M / LINHA_M_FIBRA)))
 				return
 			_maq.plantas[mi]["corda"] = {"alvo": LINHA_M, "feito": 0.0, "cipo": 0, "tipo": "linha"}
 			_maq._rebuild()
@@ -9677,15 +9729,15 @@ func _tranca_passada(sentido: int) -> void:
 		Sons.play_at(self, "fibra_bate", at, -14.0, 0.7)
 		return
 	var cd: Dictionary = _maq.corda_of(mi)
-	# o cipó: cada 2 m de corda precisa de mais um cipó (a linha: 1 fibra de coco por metro)
+	# o cipó: cada 2 m de corda precisa de mais um cipó (a linha: 1 fibra de buriti por metro)
 	var linha := str(cd.get("tipo", "")) == "linha"
-	var mat := "fibra_coco" if linha else "cipo"
+	var mat := "fibra_buriti" if linha else "cipo"
 	var precisa := int(floor((float(cd.feito) + CORDA_PASSO - 0.001) / (LINHA_M_FIBRA if linha else CORDA_M_CIPO))) + 1
 	if int(cd.cipo) < precisa:
 		if item_qtd(mat) <= 0 and not teste:
 			_tranca_end()                    # acabou: o trabalho fica parado aqui
 			if linha:
-				_show_toast("Acabou a fibra de coco: a linha ficou parada no cavalete (%.1f de %d m). Traga mais fibra e toque em \"Continuar linha\"." % [float(cd.feito), int(cd.alvo)])
+				_show_toast("Acabou a fibra de buriti: a linha ficou parada no cavalete (%.1f de %d m). Traga mais fibra e toque em \"Continuar linha\"." % [float(cd.feito), int(cd.alvo)])
 			else:
 				_show_toast("Acabou o cipó: a corda ficou parada no cavalete (%.1f de %d m). Traga mais cipó e toque em \"Continuar corda\"." % [float(cd.feito), int(cd.alvo)])
 			return
