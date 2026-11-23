@@ -1,9 +1,9 @@
 {
-  "version": 227,
-  "file": "update_227.zip",
-  "size": 5909761,
-  "sha256": "e2ce140458de5a4fe083a07d09931abff95a30910d4d9c8dddfcee774eadf9cb",
+  "version": 228,
+  "file": "update_228.zip",
+  "size": 5910108,
+  "sha256": "7f41636f5b9ccec64c64d33b4b825603fcc54726240786850e39d9cd0caf1aa0",
   "min_build": 1,
-  "notes": "Ícones novos e mais realistas, botões de ação melhores, máquinas e carrinho pelo olho",
+  "notes": "Ícone novo do coco aberto (massa de coco)",
   "date": "2026-11-23"
 }
