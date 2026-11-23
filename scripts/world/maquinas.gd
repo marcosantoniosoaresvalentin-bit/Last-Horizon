@@ -159,22 +159,22 @@ const TIPOS := {
 		"nome": "Fogão de Barro",
 		"desc": "Fogão caipira de barro e pedras em cima de uma base de madeira. Primeiro a base (pés, travessas e o tampo de tábuas), depois as pedras do chão do fogão e o barro das paredes, da chapa com as duas bocas de panela e da chaminé. Na boca de fogo vai lenha fina (rachada no cepo em pedaços pequenos); acende com o arco de fogo. Nas bocas vão as vasilhas com carne: cozinhar (com água) ou fritar (mexendo).",
 		"pecas": [
-			["tora", 0.55, Vector3(0.6, 0.275, 0.33), "y", 0.07],      # 0 pé
-			["tora", 0.55, Vector3(0.6, 0.275, -0.33), "y", 0.07],     # 1 pé
-			["tora", 0.55, Vector3(-0.6, 0.275, 0.33), "y", 0.07],     # 2 pé
-			["tora", 0.55, Vector3(-0.6, 0.275, -0.33), "y", 0.07],    # 3 pé
-			["tora", 0.9, Vector3(0.6, 0.6, 0.0), "z", 0.06],          # 4 travessa
-			["tora", 0.9, Vector3(-0.6, 0.6, 0.0), "z", 0.06],         # 5 travessa
-			["tabua", 1.45, Vector3(0.0, 0.695, -0.3), "x", 0.15],     # 6 tampo
-			["tabua", 1.45, Vector3(0.0, 0.695, -0.1), "x", 0.15],     # 7 tampo
-			["tabua", 1.45, Vector3(0.0, 0.695, 0.1), "x", 0.15],      # 8 tampo
-			["tabua", 1.45, Vector3(0.0, 0.695, 0.3), "x", 0.15],      # 9 tampo
+			["tora", 0.25, Vector3(0.6, 0.125, 0.33), "y", 0.07],      # 0 pé (baixinho)
+			["tora", 0.25, Vector3(0.6, 0.125, -0.33), "y", 0.07],     # 1 pé
+			["tora", 0.25, Vector3(-0.6, 0.125, 0.33), "y", 0.07],     # 2 pé
+			["tora", 0.25, Vector3(-0.6, 0.125, -0.33), "y", 0.07],    # 3 pé
+			["tora", 0.9, Vector3(0.6, 0.3, 0.0), "z", 0.06],          # 4 travessa
+			["tora", 0.9, Vector3(-0.6, 0.3, 0.0), "z", 0.06],         # 5 travessa
+			["tabua", 1.45, Vector3(0.0, 0.395, -0.3), "x", 0.15],     # 6 tampo
+			["tabua", 1.45, Vector3(0.0, 0.395, -0.1), "x", 0.15],     # 7 tampo
+			["tabua", 1.45, Vector3(0.0, 0.395, 0.1), "x", 0.15],      # 8 tampo
+			["tabua", 1.45, Vector3(0.0, 0.395, 0.3), "x", 0.15],      # 9 tampo
 		],
 		"pinos": [
-			[[4, 0], Vector3(0.6, 0.6, 0.33)], [[4, 1], Vector3(0.6, 0.6, -0.33)],
-			[[5, 2], Vector3(-0.6, 0.6, 0.33)], [[5, 3], Vector3(-0.6, 0.6, -0.33)],
-			[[6, 4], Vector3(0.6, 0.68, -0.3)], [[9, 4], Vector3(0.6, 0.68, 0.3)],
-			[[6, 5], Vector3(-0.6, 0.68, -0.3)], [[9, 5], Vector3(-0.6, 0.68, 0.3)],
+			[[4, 0], Vector3(0.6, 0.3, 0.33)], [[4, 1], Vector3(0.6, 0.3, -0.33)],
+			[[5, 2], Vector3(-0.6, 0.3, 0.33)], [[5, 3], Vector3(-0.6, 0.3, -0.33)],
+			[[6, 4], Vector3(0.6, 0.38, -0.3)], [[9, 4], Vector3(0.6, 0.38, 0.3)],
+			[[6, 5], Vector3(-0.6, 0.38, -0.3)], [[9, 5], Vector3(-0.6, 0.38, 0.3)],
 		],
 		"area": Rect2(-0.8, -0.5, 1.6, 1.0),
 		"fogao": {"pedras": 10, "barro": 6},
@@ -3420,8 +3420,8 @@ func _load(path: String) -> bool:
 # Estado de uso (p.fg): {lenha: [achas], aceso: bool, f: lenha queimando (em lenhas),
 # bocas: [{tipo, modo ("cozinhar"/"fritar"), p, q (queimando), mexe (hora)} ou {}, ...]}
 
-const FOGAO_Y := 0.725            # o chão do fogão (em cima do tampo e das pedras)
-const FOGAO_H := 0.42             # a altura da chapa em cima do chão do fogão
+const FOGAO_Y := 0.425            # o chão do fogão (em cima do tampo e das pedras)
+const FOGAO_H := 0.38             # a altura da chapa em cima do chão do fogão (a chapa fica a uns 85 cm do chão)
 const FOGAO_W := 0.6              # meia largura (x)
 const FOGAO_D := 0.33             # meia fundura (z); a frente é +z
 const FOGAO_CAP := 5              # lenhas que cabem na boca
