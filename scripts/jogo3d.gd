@@ -16917,8 +16917,29 @@ func _desf_end() -> void:
 #    tombar. O tronco fica no chão (dá para cortar em toras) e as folhas espalhadas.
 # As folhas secas (a "saia" da copa) caem sozinhas de vez em quando: dá para pegar.
 
+## Com a lenha na mão, o olho só mostra onde pôr ela (fogão, forno, fogueira).
+func _olho_opts_lenha(p: Dictionary) -> Array:
+	if p.has("fogueira"):
+		return [["por_lenha", "Pôr lenha"]]
+	if p.has("maq"):
+		var mi := int(p.maq)
+		match str(_maq.plantas[mi].tipo):
+			"fogao":
+				return [["fogao_lenha", "Pôr lenha (%d/%d)" % [(_maq.fogao_st(mi).lenha as Array).size(), Maquinas.FOGAO_CAP]]]
+			"forno":
+				var f: Dictionary = _maq.forno_st(mi)
+				if not bool(f.aceso) and str(f.porta) == "aberta" and int(f.carvao) <= 0:
+					return [["forno_lenha", "Pôr lenha (%d/%d)" % [(f.lenha as Array).size(), Maquinas.FORNO_CAP]]]
+	return []
+
+
+## Com uma acha de lenha na mão (no ombro, não arrastando)?
+func _lenha_na_mao() -> bool:
+	return not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1 and not _drag
+
+
 func _olho_free() -> bool:
-	return _desf.is_empty() and _mesa.is_empty() and _torno.is_empty() and _arco.is_empty() and _pin.is_empty() and _carry.is_empty() and not _chopping and _crouch_job == "" \
+	return _desf.is_empty() and _mesa.is_empty() and _torno.is_empty() and _arco.is_empty() and _pin.is_empty() and (_carry.is_empty() or _lenha_na_mao()) and not _chopping and _crouch_job == "" \
 		and not _air and _bld.is_empty() and _proj.is_empty() and _buck_sel.is_empty() and _maq_op.is_empty() \
 		and _trim.is_empty() and _post_mark.is_empty() and _knap.is_empty() and _vine.is_empty() and not _walking \
 		and _coop.is_empty() and _bag_ui == null and _craft_ui == null and _mix.is_empty() and _reb.is_empty() and _pour_t < 0.0
@@ -16948,7 +16969,10 @@ func _olho_tick() -> void:
 		cands.append([cp, pp.distance_to(Vector2(co.x, co.z))])
 	if _maq:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
-		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho", "trancador", "mesa_carne", "fogao"] and _maq.pronta(mi) and _tranca.is_empty() and _carne.is_empty() and _mc.is_empty():
+		var tipos_ok := ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho", "trancador", "mesa_carne", "fogao"]
+		if _lenha_na_mao():
+			tipos_ok = ["forno", "fogao"]              # (com lenha na mão: só onde ela vai)
+		if mi >= 0 and str(_maq.plantas[mi].tipo) in tipos_ok and _maq.pronta(mi) and _tranca.is_empty() and _carne.is_empty() and _mc.is_empty():
 			var mo: Vector3 = _maq.xform(mi).origin
 			cands.append([{"maq": mi}, maxf(0.0, pp.distance_to(Vector2(mo.x, mo.z)) - 0.8)])
 	if _fogos:
@@ -16977,6 +17001,8 @@ func _olho_tick() -> void:
 
 ## O que dá para fazer nesse buriti: [[ação, nome]]
 func _olho_opts(p: Dictionary) -> Array:
+	if _lenha_na_mao():
+		return _olho_opts_lenha(p)
 	var out := []
 	if p.has("maq"):
 		if str(_maq.plantas[int(p.maq)].tipo) == "forno":
@@ -18093,7 +18119,7 @@ func _fogao_pick(mi: int, acao: String) -> void:
 		if not mao_lenha:
 			_lenha_fix()
 			if item_qtd("lenha") <= 0:
-				_show_toast("Você não tem lenha. Rache um toquinho no cepo com o machado e guarde os pedaços como lenha.")
+				_show_toast("Você não está com lenha na mão. Pegue uma acha (rachada no cepo, do chão ou do carrinho) e chegue no fogão com ela.")
 				return
 			if _lenhas_finas().is_empty():
 				var menor := 99.0
