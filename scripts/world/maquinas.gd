@@ -1496,6 +1496,8 @@ func corda_of(mi: int) -> Dictionary:
 
 
 static var _cipo_mat: StandardMaterial3D
+## Desenhando a linha de pesca (fibra de coco): fios bem finos e cor de palha.
+static var fino := false
 
 static func cipo_mat() -> StandardMaterial3D:
 	if _cipo_mat == null:
@@ -1526,6 +1528,8 @@ static func fio_cipo(st: SurfaceTool, pts: Array, r: float, tom := 0.0) -> void:
 			row.append(p + (a * cos(t) + b * sin(t)) * r)
 		rows.append(row)
 	var base := Color(0.3, 0.23, 0.1).lerp(Color(0.26, 0.26, 0.11), tom)
+	if fino:
+		base = Color(0.62, 0.45, 0.26).lerp(Color(0.55, 0.4, 0.22), tom)
 	for i in rows.size() - 1:
 		var c0 := base.darkened(0.12 * sin(float(i) * 1.7) + 0.06 * sin(float(i) * 0.37 + tom * 9.0))
 		for k in lados:
@@ -1649,6 +1653,7 @@ func _draw_amarras(mi: int, root: Node3D, nd: Dictionary) -> void:
 	mt.name = "corda"
 	mt.material_override = cipo_mat()
 	tr.add_child(mt)
+	fino = str(cd.get("tipo", "")) == "linha"
 	mt.mesh = tranca_mesh(float(cd.get("feito", 0.0)) * 4.0, -1, 0.0, not cd.is_empty())
 	# o rolo de corda que já ficou pronta (no chão, embaixo)
 	if not cd.is_empty() and float(cd.get("feito", 0.0)) > 0.05:
@@ -1658,6 +1663,7 @@ func _draw_amarras(mi: int, root: Node3D, nd: Dictionary) -> void:
 		rolo.material_override = cipo_mat()
 		rolo.position = Vector3(0.25, 0.0, 0.32)
 		root.add_child(rolo)
+	fino = false
 
 
 ## A trança pendurada (de cima para baixo): três fios de cipó em trança (cada fio cruza
@@ -1672,8 +1678,8 @@ static func tranca_mesh(fase: float, lado: int, movendo: float, com_fios: bool) 
 	var a := 0.018
 	var b := 0.012
 	if com_fios:
-		var r := 0.0125
-		var ps := 0.1
+		var r := 0.0125 * (0.3 if fino else 1.0)
+		var ps := 0.1 * (0.4 if fino else 1.0)
 		var corpo := []
 		for j in 2:
 			corpo.append(Vector3(0, lerpf(topo, fim, float(j)), 0))
@@ -1694,7 +1700,7 @@ static func tranca_mesh(fase: float, lado: int, movendo: float, com_fios: bool) 
 				var tw := (1.0 - u2) * 0.6
 				var pp := pf.lerp(ponta, u2) + Vector3(sin(th + tw) * 0.004, 0, sin(u2 * PI) * 0.03)
 				pts.append(pp)
-			fio_cipo(st, pts, r, float(i) * 0.35)
+			fio_cipo(st, pts, r * (1.3 if fino else 1.0), float(i) * 0.35)
 	# o nó no alto da vara
 	var no := []
 	for j in 13:
@@ -1710,8 +1716,8 @@ static func rolo_mesh(metros: float) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var voltas := clampi(int(round(metros * 0.6)) + 2, 3, 34)
-	var R := clampf(0.1 + metros * 0.002, 0.1, 0.2)
-	var r := 0.0075
+	var R := clampf(0.1 + metros * 0.002, 0.1, 0.2) * (0.6 if fino else 1.0)
+	var r := 0.0075 * (0.35 if fino else 1.0)
 	var esp := r * 2.3 * 1.12                # grossura da corda
 	var pts := []
 	var n := voltas * 20

@@ -585,6 +585,41 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				ci.draw_colored_polygon(cub, cc)
 				ci.draw_line(o + Vector2(-7, -5) * u, o + Vector2(7, -6) * u, Color(0.9, 0.82, 0.68), 2.0 * u, true)
 				ci.draw_polyline(cub + PackedVector2Array([cub[0]]), ink, 1.5 * u, true)
+		"fibra_coco":
+			# um feixe de fibras compridas cor de palha, amarradas no meio
+			for k in 9:
+				var o := -12.0 + k * 3.0
+				var pts := PackedVector2Array()
+				for i in 9:
+					var t := float(i) / 8.0
+					pts.append(c + Vector2(lerpf(-42, 42, t), o * (0.4 + 0.9 * absf(t - 0.5)) + sin(t * 7.0 + k) * 2.0) * u)
+				ci.draw_polyline(pts, Color(0.62, 0.45, 0.25).darkened(0.12 * (k % 3)), 2.2 * u, true)
+			ci.draw_rect(Rect2(c + Vector2(-5, -9) * u, Vector2(10, 18) * u), Color(0.4, 0.28, 0.14))
+		"linha_pesca", "acao_linha_fazer":
+			# o rolinho de linha fina (muitas voltas finas)
+			for k in 7:
+				var pts2 := PackedVector2Array()
+				for i in 33:
+					var a := TAU * i / 32.0
+					pts2.append(c + Vector2(cos(a) * (30.0 - k * 1.5), sin(a) * (20.0 - k) + 4 - k * 1.4) * u)
+				ci.draw_polyline(pts2, Color(0.66, 0.5, 0.3).darkened(0.1 * (k % 2)), 2.4 * u, true)
+			ci.draw_polyline(PackedVector2Array([c + Vector2(26, 8) * u, c + Vector2(38, 26) * u, c + Vector2(44, 40) * u]), Color(0.6, 0.45, 0.26), 2.0 * u, true)
+			if id == "acao_linha_fazer":
+				ci.draw_arc(c + Vector2(44, 40) * u, 5.0 * u, -PI * 0.2, PI * 1.1, 10, ink, 2.2 * u, true)
+		"vara_pesca":
+			# o galho comprido na diagonal, a linha descendo da ponta, a boia e o anzol
+			ci.draw_line(c + Vector2(-44, 44) * u, c + Vector2(38, -42) * u, ink, 7.5 * u, true)
+			ci.draw_line(c + Vector2(-44, 44) * u, c + Vector2(38, -42) * u, Color(0.55, 0.4, 0.22), 5.0 * u, true)
+			ci.draw_line(c + Vector2(-40, 40) * u, c + Vector2(-28, 28) * u, Color(0.3, 0.2, 0.1), 7.0 * u, true)
+			ci.draw_polyline(PackedVector2Array([c + Vector2(38, -42) * u, c + Vector2(40, -10) * u, c + Vector2(38, 24) * u]), Color(0.75, 0.66, 0.48), 1.6 * u, true)
+			ci.draw_circle(c + Vector2(40, -2) * u, 5.0 * u, Color(0.88, 0.82, 0.64))
+			ci.draw_arc(c + Vector2(40, -2) * u, 5.0 * u, 0, TAU, 12, ink, 1.4 * u, true)
+			ci.draw_arc(c + Vector2(34, 26) * u, 5.0 * u, -PI * 0.1, PI * 1.2, 10, Color(0.85, 0.82, 0.75), 2.0 * u, true)
+		"peixe_tucunare", "peixe_pacu", "peixe_traira", "peixe_piranha", "peixe_curimata":
+			peixe(ci, id, c, s)
+		"vasilha_peixe_frito", "vasilha_peixe_queimado":
+			load("res://scripts/world/olaria.gd").icone(ci, "vasilha_barro", c + Vector2(0, 8) * u, s * 0.95)
+			peixe(ci, "peixe_queimado" if id == "vasilha_peixe_queimado" else "peixe_frito", c + Vector2(0, -22) * u, s * 0.7)
 		"carne_crua", "carne_assar", "carne_assada", "carne_queimada", "carne_suja":
 			# um pedaço de carne: vermelha crua (com a capa de gordura), dourada assada,
 			# preta queimada, com terra se suja
@@ -918,3 +953,73 @@ static func _ellipse(ci: CanvasItem, c: Vector2, r: Vector2, fill: Color, ink: C
 		pts.append(c + Vector2(cos(a) * r.x, sin(a) * r.y))
 	ci.draw_colored_polygon(pts, fill)
 	ci.draw_polyline(pts + PackedVector2Array([pts[0]]), ink, 1.4 * u, true)
+
+
+## Um peixe de lado (a cabeça para a direita), com a cor e o desenho de cada espécie.
+## "peixe_frito" / "peixe_queimado": dourado ou preto (na vasilha).
+static func peixe(ci: CanvasItem, id: String, c: Vector2, s: float) -> void:
+	var u := s / 100.0
+	var ink := Color(0.12, 0.08, 0.05)
+	var cores := {
+		"peixe_tucunare": [Color(0.33, 0.42, 0.16), Color(0.92, 0.8, 0.36), 0.36],
+		"peixe_pacu": [Color(0.34, 0.38, 0.38), Color(0.85, 0.74, 0.58), 0.62],
+		"peixe_traira": [Color(0.3, 0.24, 0.14), Color(0.66, 0.57, 0.42), 0.26],
+		"peixe_piranha": [Color(0.45, 0.48, 0.47), Color(0.86, 0.26, 0.14), 0.55],
+		"peixe_curimata": [Color(0.44, 0.48, 0.5), Color(0.9, 0.9, 0.87), 0.34],
+		"peixe_frito": [Color(0.55, 0.32, 0.1), Color(0.82, 0.58, 0.26), 0.38],
+		"peixe_queimado": [Color(0.08, 0.05, 0.03), Color(0.2, 0.13, 0.08), 0.38],
+	}
+	var e: Array = cores.get(id, cores["peixe_curimata"])
+	var costa: Color = e[0]
+	var barriga: Color = e[1]
+	var hh: float = 70.0 * float(e[2])
+	# o corpo: elipse pontuda, as costas em cima e a barriga clara embaixo
+	var corpo := PackedVector2Array()
+	var cima := PackedVector2Array()
+	for i in 25:
+		var t := float(i) / 24.0
+		var x := lerpf(-30, 42, t)
+		var f := pow(sin(PI * clampf(t * 0.94 + 0.03, 0.0, 1.0)), 0.75)
+		corpo.append(c + Vector2(x, -hh * 0.5 * f) * u)
+		cima.append(c + Vector2(x, -hh * 0.5 * f) * u)
+	for i in range(24, -1, -1):
+		var t := float(i) / 24.0
+		var x := lerpf(-30, 42, t)
+		var f := pow(sin(PI * clampf(t * 0.94 + 0.03, 0.0, 1.0)), 0.75)
+		corpo.append(c + Vector2(x, hh * 0.5 * f) * u)
+		cima.append(c + Vector2(x, hh * 0.05 * f) * u)
+	# o rabo e as nadadeiras
+	var rabo := PackedVector2Array([c + Vector2(-27, 0) * u, c + Vector2(-46, -hh * 0.42) * u, c + Vector2(-40, 0) * u, c + Vector2(-46, hh * 0.42) * u])
+	var fin := costa.darkened(0.15)
+	if id == "peixe_piranha":
+		fin = Color(0.6, 0.22, 0.12)
+	ci.draw_colored_polygon(rabo, fin)
+	ci.draw_polyline(rabo + PackedVector2Array([rabo[0]]), ink, 1.8 * u, true)
+	var dors := PackedVector2Array([c + Vector2(-8, -hh * 0.46) * u, c + Vector2(14, -hh * 0.5) * u, c + Vector2(-2, -hh * 0.5 - 14) * u])
+	ci.draw_colored_polygon(dors, fin)
+	ci.draw_polyline(dors + PackedVector2Array([dors[0]]), ink, 1.5 * u, true)
+	ci.draw_colored_polygon(corpo, barriga)
+	ci.draw_colored_polygon(cima, costa)
+	match id:
+		"peixe_tucunare":
+			for bx in [-4.0, 10.0, 24.0]:
+				ci.draw_line(c + Vector2(bx, -hh * 0.45) * u, c + Vector2(bx - 2, hh * 0.15) * u, Color(0.12, 0.12, 0.06, 0.85), 4.5 * u, true)
+			ci.draw_circle(c + Vector2(-25, -2) * u, 4.5 * u, Color(0.1, 0.08, 0.04))
+			ci.draw_arc(c + Vector2(-25, -2) * u, 5.5 * u, 0, TAU, 12, Color(0.95, 0.65, 0.2), 1.6 * u, true)
+		"peixe_traira":
+			for q in [[-14, -6], [0, -9], [14, -5], [-4, 2], [22, -1], [8, 4]]:
+				ci.draw_circle(c + Vector2(q[0], q[1]) * u, 3.2 * u, Color(0.16, 0.12, 0.06, 0.8))
+		"peixe_curimata", "peixe_pacu", "peixe_piranha":
+			for k in 4:
+				ci.draw_arc(c + Vector2(-12 + k * 12, 0) * u, 6.0 * u, -PI * 0.4, PI * 0.4, 6, Color(1, 1, 1, 0.25), 1.2 * u, true)
+		"peixe_frito":
+			for k in 3:
+				ci.draw_line(c + Vector2(-10 + k * 14, -hh * 0.35) * u, c + Vector2(-16 + k * 14, hh * 0.3) * u, Color(0.35, 0.18, 0.05), 2.4 * u, true)
+	ci.draw_polyline(corpo + PackedVector2Array([corpo[0]]), ink, 2.0 * u, true)
+	# a guelra e o olho
+	ci.draw_arc(c + Vector2(30, 0) * u, hh * 0.32 * u, PI * 0.6, PI * 1.4, 8, ink.lightened(0.15), 1.6 * u, true)
+	ci.draw_circle(c + Vector2(34, -hh * 0.12) * u, 3.6 * u, Color(0.95, 0.92, 0.8) if id != "peixe_queimado" else Color(0.2, 0.15, 0.1))
+	ci.draw_circle(c + Vector2(34.6, -hh * 0.12) * u, 2.0 * u, ink)
+	if id == "peixe_piranha":
+		for k in 3:
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(38 + k * 1.6, hh * 0.08) * u, c + Vector2(39.6 + k * 1.6, hh * 0.08) * u, c + Vector2(38.8 + k * 1.6, hh * 0.08 - 3) * u]), Color(1, 1, 1))

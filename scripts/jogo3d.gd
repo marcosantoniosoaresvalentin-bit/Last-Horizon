@@ -862,6 +862,7 @@ void fragment() {
 	(_couro_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	_tri_btns = [mk.call("Força", -290, -146, _tri_forca), mk.call("Soltar", -480, -146, _tri_soltar), mk.call("Amarrar", -290, -286, _tri_amarrar_estaca)]
 	(_tri_btns[0] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+	_pesca_btns_cria(mk)
 	_sub_ui = Control.new()
 	_sub_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_sub_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1678,6 +1679,7 @@ func _process(delta: float) -> void:
 	_vitais_tick(delta)
 	_car_tick(delta)
 	_flecha_tick(delta)
+	_pesca_tick(delta)
 	_laco_tick(delta)
 	_tri_tick(delta)
 	if _caca:
@@ -2443,7 +2445,7 @@ func _update_inventory() -> void:
 
 ## Sem mensagens de ajuda na tela: é sobrevivência, o jogador aprende sozinho.
 ## As mensagens: só as de ERRO aparecem (o que falta, por que não deu); as dicas não.
-const ERRO_INICIO := ["Precisa", "Falta", "Não ", "Você não", "Você já", "Para ", "A mochila está cheia", "Pesada demais",
+const ERRO_INICIO := ["Acabou a fibra", "Acabou o cipó", "Puxou cedo", "O peixe", "A linha", "Água rasa", "Precisa", "Falta", "Não ", "Você não", "Você já", "Para ", "A mochila está cheia", "Pesada demais",
 	"Essa ", "Esse ", "Sua lenha", "Está chovendo", "Agora não", "Ponha a enxada", "Ponha lenha no fogão", "Pegue o balde vazio",
 	"Longe", "Tora grossa demais", "Comprido demais", "Fina demais", "Rodela só", "Tem galho", "Tem outra peça", "Termine",
 	"Tire antes", "O balde está com", "O balde já está cheio", "O outro balde", "Já tem", "Acabaram", "Acabou o barro",
@@ -2867,7 +2869,7 @@ func comer(id: String) -> String:
 	_update_inventory()
 	_fome = minf(100.0, _fome + float(it.fome))
 	_sede = minf(100.0, _sede + float(it.get("sede", 0.0)))
-	if id.begins_with("vasilha_carne_"):
+	if id.begins_with("vasilha_carne_") or id.begins_with("vasilha_peixe_"):
 		add_item("vasilha_barro", 1)              # comeu: fica a vasilha vazia
 		_update_inventory()
 	Sons.play_at(self, "folha_cai", _player.position + Vector3.UP * 1.5, -16.0, 0.8)
@@ -6598,7 +6600,7 @@ func _fp_camera(delta: float, moved: float) -> void:
 	if _chop_pose:
 		_chop_pose.hide_head = true          # primeira pessoa: a própria cabeça nunca aparece
 		# com ferramenta na mão os braços não aparecem (só a ferramenta, segura por baixo da tela)
-		_chop_pose.hide_arms = not _desf.is_empty() or not _mesa.is_empty() or not _torno.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada", "arco"]) and _vine.is_empty()
+		_chop_pose.hide_arms = not _desf.is_empty() or not _mesa.is_empty() or not _torno.is_empty() or (not _swim and _mao in ["machado", "cavadeira", "serra", "pedra", "pa", "balde", "marreta", "faca", "enxada", "arco", "vara_pesca"]) and _vine.is_empty()
 	for m in _body_mats:
 		(m as BaseMaterial3D).distance_fade_min_distance = lerpf(0.27, 0.5, maxf(_busy_f, down))
 		(m as BaseMaterial3D).distance_fade_max_distance = lerpf(0.34, 0.6, maxf(_busy_f, down))
@@ -6716,7 +6718,7 @@ func _input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
 			# toque em botão de ação não gira a câmera (dá para tocar "Cortar" várias vezes)
-			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _tri_btns + _couro_btns + _mach_btns + _evis_btns + _banda_btns + _quarto_btns + _mc_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
+			for btn in [_dig_btn, _chop_btn, _seed_btn, _pick_btn, _jump_btn, _log_btn, _vine_btn, _plant_btn, _ctx_btn, _work_btn, _place_btn, _rot_btn, _store_btn, _saw_ctrl, _bld_pad, _bld_btn, _maq_stop, _tiro_btn] + _laco_btns + _pesca_btns + _tri_btns + _couro_btns + _mach_btns + _evis_btns + _banda_btns + _quarto_btns + _mc_btns + _bld_btns + _mark_btns + ([_trim.ctrl] if _trim.has("ctrl") else []) + ([_maq_op.ctrl] if _maq_op.has("ctrl") else []) + _sub_btns:
 				if btn and btn.visible and btn.get_global_rect().has_point(e.position):
 					return
 		if e.pressed:
@@ -9473,6 +9475,8 @@ func _proj_place() -> void:
 const CORDAS := [5, 10, 20, 30, 50]       # metros
 const CORDA_M_CIPO := 2.0                 # metros de corda por cipó
 const CORDA_PASSO := 0.25                 # metros por cruzamento (cada passada de dedo)
+const LINHA_M := 10                       # a linha de pesca: tamanho único (metros)
+const LINHA_M_FIBRA := 1.0                # metros de linha por fibra de coco
 var _tranca := {}                         # {mi, lado (0 esquerda→direita, 1 direita→esquerda), anim, drag, dx}
 var _tranca_btns: Array = []
 var _corda_ui: Control = null
@@ -9481,8 +9485,8 @@ var _corda_ui: Control = null
 func _corda_opts(mi: int) -> Array:
 	var cd: Dictionary = _maq.corda_of(mi)
 	if not cd.is_empty() and float(cd.feito) < float(cd.alvo):
-		return [["corda_continuar", "Continuar corda"]]
-	return [["corda_fazer", "Fazer corda"]]
+		return [["corda_continuar", "Continuar linha" if str(cd.get("tipo", "")) == "linha" else "Continuar corda"]]
+	return [["corda_fazer", "Fazer corda"], ["linha_fazer", "Fazer linha de pesca"]]
 
 
 func _corda_pick(mi: int, acao: String) -> void:
@@ -9490,6 +9494,13 @@ func _corda_pick(mi: int, acao: String) -> void:
 		"corda_fazer":
 			_corda_escolher(mi)
 		"corda_continuar":
+			_tranca_start(mi)
+		"linha_fazer":
+			if item_qtd("fibra_coco") <= 0 and not teste:
+				_show_toast("Precisa de fibra de coco para trançar a linha: no craft, corte os cocos de babaçu com a faca (cada coco dá 2 fibras). A linha inteira gasta %d fibras." % int(ceil(LINHA_M / LINHA_M_FIBRA)))
+				return
+			_maq.plantas[mi]["corda"] = {"alvo": LINHA_M, "feito": 0.0, "cipo": 0, "tipo": "linha"}
+			_maq._rebuild()
 			_tranca_start(mi)
 
 
@@ -9587,7 +9598,9 @@ func _tranca_desenha() -> void:
 	if float(_tranca.anim) >= 0.0:
 		mov = clampf(float(_tranca.anim) / 0.3, 0.0, 1.0)
 		fase += mov
+	Maquinas.fino = str(cd.get("tipo", "")) == "linha"
 	mt.mesh = Maquinas.tranca_mesh(fase, int(_tranca.lado), mov, true)
+	Maquinas.fino = false
 
 
 func _tranca_move(delta: float) -> void:
@@ -9664,14 +9677,20 @@ func _tranca_passada(sentido: int) -> void:
 		Sons.play_at(self, "fibra_bate", at, -14.0, 0.7)
 		return
 	var cd: Dictionary = _maq.corda_of(mi)
-	# o cipó: cada 2 m de corda precisa de mais um cipó
-	var precisa := int(floor((float(cd.feito) + CORDA_PASSO - 0.001) / CORDA_M_CIPO)) + 1
+	# o cipó: cada 2 m de corda precisa de mais um cipó (a linha: 1 fibra de coco por metro)
+	var linha := str(cd.get("tipo", "")) == "linha"
+	var mat := "fibra_coco" if linha else "cipo"
+	var precisa := int(floor((float(cd.feito) + CORDA_PASSO - 0.001) / (LINHA_M_FIBRA if linha else CORDA_M_CIPO))) + 1
 	if int(cd.cipo) < precisa:
-		if item_qtd("cipo") <= 0 and not teste:
-			_tranca_end()                    # acabou o cipó: o trabalho fica parado aqui
+		if item_qtd(mat) <= 0 and not teste:
+			_tranca_end()                    # acabou: o trabalho fica parado aqui
+			if linha:
+				_show_toast("Acabou a fibra de coco: a linha ficou parada no cavalete (%.1f de %d m). Traga mais fibra e toque em \"Continuar linha\"." % [float(cd.feito), int(cd.alvo)])
+			else:
+				_show_toast("Acabou o cipó: a corda ficou parada no cavalete (%.1f de %d m). Traga mais cipó e toque em \"Continuar corda\"." % [float(cd.feito), int(cd.alvo)])
 			return
 		if not teste:
-			remove_item("cipo", 1)
+			remove_item(mat, 1)
 			_update_inventory()
 		cd.cipo = int(cd.cipo) + 1
 	_tranca.anim = 0.0
@@ -9704,7 +9723,7 @@ func _tranca_tick(delta: float) -> void:
 
 func _corda_pronta(mi: int) -> void:
 	var cd: Dictionary = _maq.corda_of(mi)
-	var id := "corda_%d" % int(cd.alvo)
+	var id := "linha_pesca" if str(cd.get("tipo", "")) == "linha" else "corda_%d" % int(cd.alvo)
 	_maq.plantas[mi].erase("corda")
 	_maq._rebuild()
 	var caiu := add_item(id, 1)
@@ -12925,6 +12944,706 @@ func _arco_fp_pose(puxa: float, com_flecha: bool) -> void:
 	var tre := sin(Time.get_ticks_msec() / 40.0) * 0.002 * smoothstep(0.85, 1.0, puxa)
 	r.position = Vector3(-0.14 + puxa * 0.06 + tre, -0.06 + puxa * 0.02, -0.62)
 	r.rotation = Vector3(0, 0.08 - puxa * 0.05, 0.3 - puxa * 0.1)
+
+
+# ================== PESCA ==================
+# Com a vara de pesca na mão (Mochila → EQUIPAR), na beira do rio ou da lagoa: segurando
+# "Arremessar" a vara vai para trás (quanto mais segura, mais longe); soltando, a linha
+# voa e o anzol (com a boia) bate na água. Esperando, o peixe belisca (a boia treme) e
+# depois fisga (a boia afunda): é a hora de tocar "Força". Na briga, tocando "Força" sem
+# parar o jogador segura a vara e o peixe vem vindo; com pouca força ele puxa a linha e
+# escapa. Chegou na beira, a vara sobe e o peixe sai da água para a mão (e a mochila).
+
+const PESCA_PUXA_S := 0.9          # segundos para levar a vara todo para trás
+const PESCA_FUNDO := 0.25          # água mais rasa que isso não tem peixe
+const PEIXES := {
+	"peixe_piranha": {"peso": 0.3, "forca": 0.34, "L": 0.24, "H": 0.5, "W": 0.12, "costa": Color(0.42, 0.45, 0.44), "barriga": Color(0.82, 0.24, 0.12)},
+	"peixe_curimata": {"peso": 0.22, "forca": 0.42, "L": 0.33, "H": 0.3, "W": 0.1, "costa": Color(0.4, 0.44, 0.45), "barriga": Color(0.88, 0.88, 0.85)},
+	"peixe_pacu": {"peso": 0.2, "forca": 0.52, "L": 0.34, "H": 0.58, "W": 0.11, "costa": Color(0.32, 0.36, 0.36), "barriga": Color(0.82, 0.74, 0.6)},
+	"peixe_traira": {"peso": 0.16, "forca": 0.5, "L": 0.4, "H": 0.21, "W": 0.14, "costa": Color(0.26, 0.21, 0.13), "barriga": Color(0.62, 0.54, 0.4)},
+	"peixe_tucunare": {"peso": 0.12, "forca": 0.66, "L": 0.46, "H": 0.28, "W": 0.12, "costa": Color(0.33, 0.4, 0.16), "barriga": Color(0.9, 0.78, 0.36)},
+}
+var _pesca := {}                   # {fase, ...}: "" parado, puxando, voa, agua, belisca, fisgou, briga, tira, volta
+var _pesca_btns: Array = []        # [Arremessar, Força, Recolher]
+var _vara_fp: Node3D = null        # a vara na frente da câmera
+var _pesca_linha: MeshInstance3D = null
+var _pesca_boia: MeshInstance3D = null
+var _pesca_peixe: Node3D = null
+var _pesca_ondas: Array = []       # [nó, t, raio]
+var _pesca_mostra := {}            # o peixe que acabou de sair: {id, t}
+static var _peixe_sh: Shader
+
+
+func _pesca_btns_cria(mk: Callable) -> void:
+	_pesca_btns = [mk.call("Arremessar", -290, -146, func(): pass), mk.call("Força", -290, -146, _pesca_forca), mk.call("Recolher", -480, -146, _pesca_recolher)]
+	(_pesca_btns[0] as Button).button_down.connect(_pesca_carrega)
+	(_pesca_btns[0] as Button).button_up.connect(_pesca_arremessa)
+	(_pesca_btns[1] as Button).action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+
+
+func _pesca_fase() -> String:
+	return str(_pesca.get("fase", ""))
+
+
+func _pesca_carrega() -> void:
+	if _mao != "vara_pesca" or _pesca_fase() != "":
+		return
+	_pesca = {"fase": "puxando", "t": 0.0}
+
+
+## Soltou o botão: a linha sai voando para a frente (mais longe quanto mais puxou).
+func _pesca_arremessa() -> void:
+	if _pesca_fase() != "puxando":
+		return
+	var carga := clampf(float(_pesca.t) / PESCA_PUXA_S, 0.0, 1.0)
+	if carga < 0.15:
+		_pesca = {}
+		return
+	var f := -_cam.global_transform.basis.z
+	var dir := Vector3(f.x, 0, f.z).normalized()
+	var dist := 2.5 + carga * 5.5 + randf_range(-0.3, 0.3)
+	var alvo := _player.position + dir * dist
+	alvo.y = maxf(height_at(alvo.x, alvo.z), _water_surface(alvo.x, alvo.z))
+	var de := _vara_ponta()
+	_pesca = {"fase": "voa", "t": 0.0, "T": 0.45 + dist * 0.045, "de": de, "para": alvo, "dist": dist, "lanca": 0.0}
+	Sons.play_at(self, "fibra_bate", _player.position + Vector3.UP * 1.5, -8.0, 1.9)
+
+
+func _pesca_forca() -> void:
+	match _pesca_fase():
+		"belisca":
+			_show_toast("Puxou cedo demais: o peixe só beliscou a isca e fugiu. Espere a boia afundar de vez.")
+			_pesca_agua_de_novo()
+		"fisgou":
+			var id := str(_pesca.peixe)
+			var dir: Vector3 = _pesca.boia - _player.position
+			dir.y = 0.0
+			_pesca.merge({"fase": "briga", "forca": 0.55, "escapa": 0.0, "dist": dir.length(), "ang": atan2(dir.x, dir.z), "corre": 0.0, "corre_t": randf_range(0.8, 2.0), "t": 0.0}, true)
+			_pesca.precisa = float(PEIXES[id].forca)
+			_pesca_peixe = _peixe_no(id)
+			add_child(_pesca_peixe)
+			_pesca_respingo(_pesca.boia, 0.8)
+			Sons.play_at(self, "agua", _pesca.boia, -4.0, 1.3)
+		"briga":
+			_pesca.forca = minf(1.0, float(_pesca.forca) + 0.12)
+		"agua":
+			_pesca.tranco = 0.25                 # só dá um tranquinho na linha
+
+
+func _pesca_recolher() -> void:
+	if _pesca_fase() == "belisca":
+		_show_toast("Puxou cedo demais: o peixe só beliscou a isca e fugiu. Espere a boia afundar de vez.")
+	if _pesca_fase() in ["agua", "belisca", "fisgou"]:
+		_pesca_volta()
+
+
+func _pesca_volta() -> void:
+	var de: Vector3 = _pesca.get("boia", _vara_ponta())
+	_pesca = {"fase": "volta", "t": 0.0, "de": de}
+	_pesca_sem_peixe()
+
+
+func _pesca_sem_peixe() -> void:
+	if _pesca_peixe and is_instance_valid(_pesca_peixe):
+		_pesca_peixe.queue_free()
+	_pesca_peixe = null
+
+
+## Quanto esperar o peixe: de 6 a 25 s (de manhãzinha e no fim da tarde, mais depressa).
+func _pesca_espera() -> float:
+	var h := fmod(_agora_h(), 24.0)
+	var k := 0.65 if (h >= 5.0 and h < 8.5) or (h >= 16.0 and h < 19.0) else 1.0
+	return randf_range(6.0, 25.0) * k
+
+
+func _pesca_agua_de_novo() -> void:
+	_pesca.fase = "agua"
+	_pesca.espera = _pesca_espera()
+	_pesca.t = 0.0
+
+
+func _pesca_sorteia() -> String:
+	var tot := 0.0
+	for id in PEIXES:
+		tot += float(PEIXES[id].peso)
+	var r := randf() * tot
+	for id in PEIXES:
+		r -= float(PEIXES[id].peso)
+		if r <= 0.0:
+			return str(id)
+	return "peixe_piranha"
+
+
+func _pesca_tick(delta: float) -> void:
+	var com := _mao == "vara_pesca" and _morto < 0.0 and not _swim and _carry.is_empty()
+	var fase := _pesca_fase()
+	if not com and fase != "":
+		_pesca = {}
+		_pesca_sem_peixe()
+		fase = ""
+	if _pesca_btns.size() == 3:
+		(_pesca_btns[0] as Control).visible = com and fase in ["", "puxando"] and _bld.is_empty() and _proj.is_empty()
+		(_pesca_btns[1] as Control).visible = com and fase in ["agua", "belisca", "fisgou", "briga"]
+		(_pesca_btns[2] as Control).visible = com and fase in ["agua", "belisca", "fisgou"]
+		if com and _chop_btn:
+			_chop_btn.visible = false
+	if com and _vara_fp == null:
+		_vara_fp = Node3D.new()
+		var vm := MeshInstance3D.new()
+		vm.name = "vara"
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.3, 0.21, 0.11)
+		mat.roughness = 0.9
+		vm.material_override = mat
+		_vara_fp.add_child(vm)
+		_cam.add_child(_vara_fp)
+	if _vara_fp:
+		_vara_fp.visible = com
+	_pesca_ondas_tick(delta)
+	if _pesca_mostra.has("t"):
+		_pesca_mostra.t = float(_pesca_mostra.t) - delta
+		if float(_pesca_mostra.t) <= 0.0:
+			_pesca_mostra = {}
+	if not com:
+		if _pesca_linha:
+			_pesca_linha.visible = false
+		if _pesca_boia:
+			_pesca_boia.visible = false
+		return
+	# a vara: o ângulo (para cima) e quanto ela enverga
+	var ang := 0.55
+	var curva := 0.0
+	var boia := Vector3.INF
+	var esticada := 0.0
+	match fase:
+		"puxando":
+			_pesca.t = float(_pesca.t) + delta
+			var c := clampf(float(_pesca.t) / PESCA_PUXA_S, 0.0, 1.0)
+			ang = lerpf(0.55, 1.45, c)
+			curva = -0.25 * c
+		"voa":
+			_pesca.t = float(_pesca.t) + delta
+			var u := clampf(float(_pesca.t) / float(_pesca.T), 0.0, 1.0)
+			ang = lerpf(1.45, 0.25, clampf(float(_pesca.t) / 0.18, 0.0, 1.0))
+			curva = 0.2 * (1.0 - u)
+			var de: Vector3 = _pesca.de
+			var para: Vector3 = _pesca.para
+			boia = de.lerp(para, u) + Vector3.UP * sin(u * PI) * (1.0 + float(_pesca.dist) * 0.12)
+			esticada = 1.0
+			if u >= 1.0:
+				_pesca_caiu()
+				boia = _pesca.get("boia", boia)
+		"agua", "belisca", "fisgou":
+			_pesca.t = float(_pesca.t) + delta
+			var b0: Vector3 = _pesca.boia
+			var lv := _water_surface(b0.x, b0.z)
+			var y := lv + sin(float(_pesca.t) * 2.1) * 0.008
+			ang = 0.45
+			_pesca.tranco = maxf(0.0, float(_pesca.get("tranco", 0.0)) - delta)
+			if float(_pesca.tranco) > 0.0:
+				ang += 0.2
+				esticada = 0.8
+			if fase == "agua":
+				_pesca.espera = float(_pesca.espera) - delta
+				if float(_pesca.espera) <= 0.0:
+					_pesca.fase = "belisca"
+					_pesca.peixe = _pesca_sorteia()
+					_pesca.n = randi_range(1, 3)
+					_pesca.t = 0.0
+			elif fase == "belisca":
+				# a boia treme: um tranquinho a cada meio segundo
+				var ph := fmod(float(_pesca.t), 0.6)
+				if ph < 0.15:
+					y -= 0.025 * sin(ph / 0.15 * PI)
+				if ph < delta * 1.5:
+					_pesca_onda(Vector3(b0.x, lv, b0.z), 0.35)
+				if float(_pesca.t) >= 0.6 * int(_pesca.n):
+					_pesca.fase = "fisgou"
+					_pesca.t = 0.0
+					_pesca_onda(Vector3(b0.x, lv, b0.z), 0.8)
+					Sons.play_at(self, "agua", Vector3(b0.x, lv, b0.z), -6.0, 1.6)
+			else:
+				y -= minf(float(_pesca.t) * 0.6, 0.12)        # afundou
+				curva = 0.25
+				esticada = 1.0
+				if float(_pesca.t) > 1.6:
+					_show_toast("O peixe soltou a isca: quando a boia afundar, toque em Força na hora.")
+					_pesca_agua_de_novo()
+			boia = Vector3(b0.x, y, b0.z)
+		"briga":
+			_pesca_briga(delta)
+			if _pesca_fase() == "briga":
+				var lv2 := _water_surface((_pesca.boia as Vector3).x, (_pesca.boia as Vector3).z)
+				boia = Vector3((_pesca.boia as Vector3).x, lv2 - 0.03, (_pesca.boia as Vector3).z)
+				ang = lerpf(0.75, 1.05, float(_pesca.forca))
+				curva = lerpf(0.25, 0.75, clampf(float(_pesca.precisa) + float(_pesca.corre) * 0.3, 0.0, 1.0))
+				esticada = 1.0
+		"tira":
+			_pesca.t = float(_pesca.t) + delta
+			var u2 := clampf(float(_pesca.t) / 0.75, 0.0, 1.0)
+			ang = lerpf(1.0, 1.4, u2)
+			curva = 0.35 * (1.0 - u2) + 0.2
+			var mao := _cam.global_transform * Vector3(0.05, -0.05, -0.7)
+			var de2: Vector3 = _pesca.de
+			boia = de2.lerp(mao, u2 * u2) + Vector3.UP * sin(u2 * PI) * 1.4
+			esticada = 1.0
+			if _pesca_peixe and is_instance_valid(_pesca_peixe):
+				# pendurado pela boca (a cabeça para cima), o lado virado para quem pescou,
+				# se debatendo
+				var Lp := float(PEIXES[str(_pesca.peixe)].L)
+				_pesca_peixe.global_position = boia + Vector3.DOWN * Lp * 0.5
+				var para_cam := _cam.global_position - _pesca_peixe.global_position
+				para_cam.y = 0.0
+				var zb := para_cam.normalized() if para_cam.length() > 0.01 else Vector3.BACK
+				var xb := Vector3.UP
+				var bas := Basis(xb, zb.cross(xb), zb).orthonormalized()
+				bas = Basis(Vector3.UP, sin(float(_pesca.t) * 26.0) * 0.45) * bas
+				_pesca_peixe.global_transform = Transform3D(bas, _pesca_peixe.global_position)
+			if u2 >= 1.0:
+				_pesca_pegou()
+				boia = Vector3.INF
+		"volta":
+			_pesca.t = float(_pesca.t) + delta
+			var u3 := clampf(float(_pesca.t) / 0.5, 0.0, 1.0)
+			ang = lerpf(0.9, 0.55, u3)
+			var de3: Vector3 = _pesca.de
+			boia = de3.lerp(_vara_ponta(), u3) + Vector3.UP * sin(u3 * PI) * 0.8
+			esticada = 0.6
+			if u3 >= 1.0:
+				_pesca = {}
+				boia = Vector3.INF
+	_vara_pose(ang, curva)
+	_pesca_linha_desenha(boia, esticada)
+	if _sub_ui:
+		_sub_ui.queue_redraw()
+
+
+## O anzol chegou: na água funda (rio ou lagoa) fica boiando; senão volta.
+func _pesca_caiu() -> void:
+	var p: Vector3 = _pesca.para
+	var lv := _water_surface(p.x, p.z)
+	var h := height_at(p.x, p.z)
+	if lv > -1e8 and lv - h > 0.02:
+		_pesca_respingo(Vector3(p.x, lv, p.z), 1.0)
+		Sons.play_at(self, "agua", Vector3(p.x, lv, p.z), -8.0, 1.8)
+	if lv < -1e8 or lv - h <= 0.02:
+		_show_toast("A linha caiu no chão: arremesse na água (no rio ou na lagoa).")
+		_pesca.boia = Vector3(p.x, h + 0.02, p.z)
+		_pesca_volta()
+		return
+	if _is_sea(p.x, p.z):
+		_show_toast("Essa água é do mar: os peixes daqui são de água doce. Pesque no rio ou na lagoa.")
+		_pesca.boia = Vector3(p.x, lv, p.z)
+		_pesca_volta()
+		return
+	if lv - h < PESCA_FUNDO:
+		_show_toast("Água rasa demais aqui (%d cm): arremesse mais longe, onde o rio ou a lagoa é mais fundo." % roundi((lv - h) * 100.0))
+		_pesca.boia = Vector3(p.x, lv, p.z)
+		_pesca_volta()
+		return
+	_pesca.boia = Vector3(p.x, lv, p.z)
+	_pesca_agua_de_novo()
+
+
+## A briga: a força cai sozinha e cada toque em Força sobe; o peixe puxa (e às vezes
+## dá uma corrida). Com força sobrando ele vem vindo; faltando, ele leva linha e escapa.
+func _pesca_briga(delta: float) -> void:
+	var id := str(_pesca.peixe)
+	_pesca.t = float(_pesca.t) + delta
+	_pesca.forca = maxf(0.0, float(_pesca.forca) - delta * 0.45)
+	_pesca.corre_t = float(_pesca.corre_t) - delta
+	if float(_pesca.corre_t) <= 0.0:
+		if float(_pesca.corre) <= 0.0:
+			_pesca.corre = 1.0                       # uma corrida: puxa forte uns instantes
+			_pesca.corre_t = randf_range(0.6, 1.1)
+			_pesca_respingo(_pesca.boia, 0.6)
+			Sons.play_at(self, "agua", _pesca.boia, -8.0, 1.4)
+		else:
+			_pesca.corre = 0.0
+			_pesca.corre_t = randf_range(1.2, 2.8)
+	var precisa := clampf(float(PEIXES[id].forca) + float(_pesca.corre) * 0.22, 0.1, 0.95)
+	_pesca.precisa = precisa
+	var f := float(_pesca.forca)
+	if f >= precisa:
+		_pesca.dist = float(_pesca.dist) - (f - precisa + 0.2) * 3.2 * delta
+		_pesca.escapa = maxf(0.0, float(_pesca.escapa) - delta * 0.35)
+	else:
+		_pesca.dist = float(_pesca.dist) + (precisa - f) * 2.2 * delta
+		_pesca.escapa = float(_pesca.escapa) + (precisa - f) * delta * 1.3
+	# o peixe nada de um lado para o outro (sem sair da água funda)
+	var ang := float(_pesca.ang)
+	var funda := func(a: float) -> bool:
+		var q := _player.position + Vector3(sin(a), 0, cos(a)) * float(_pesca.dist)
+		var l := _water_surface(q.x, q.z)
+		return l > -1e8 and l - height_at(q.x, q.z) >= 0.15
+	var balanco := sin(float(_pesca.t) * 1.3) * 0.3 * clampf(float(_pesca.dist) / 6.0, 0.2, 1.0)
+	if funda.call(ang + balanco):
+		ang += balanco
+	elif funda.call(ang + balanco * 0.4):
+		ang += balanco * 0.4
+	var pos := _player.position + Vector3(sin(ang), 0, cos(ang)) * float(_pesca.dist)
+	var lv := _water_surface(pos.x, pos.z)
+	pos.y = lv - 0.22
+	_pesca.boia = pos
+	if _pesca_peixe and is_instance_valid(_pesca_peixe):
+		_pesca_peixe.global_position = pos
+		_pesca_peixe.rotation = Vector3(0, ang - PI * 0.5 + sin(float(_pesca.t) * 9.0) * 0.25, 0)
+	if float(_pesca.escapa) >= 1.0 or float(_pesca.dist) > float(LINHA_M) + 0.5:
+		_show_toast("O peixe escapou: faltou força. Na briga, toque em Força sem parar enquanto ele puxa.")
+		_pesca_volta()
+		return
+	# chegou na beira (acabou a água funda ou está pertinho): a vara sobe e ele sai
+	if float(_pesca.dist) < 1.6 or not funda.call(ang):
+		_pesca_respingo(Vector3(pos.x, lv if lv > -1e8 else pos.y, pos.z), 1.1)
+		Sons.play_at(self, "agua", pos, -4.0, 1.1)
+		_pesca.fase = "tira"
+		_pesca.t = 0.0
+		_pesca.de = pos
+
+
+func _pesca_pegou() -> void:
+	var id := str(_pesca.peixe)
+	_pesca = {}
+	_pesca_sem_peixe()
+	var caiu := add_item(id, 1)
+	if caiu > 0:
+		var q := _front(0.6)
+		_add_ground(id, 1, q.x, q.z)
+		_show_toast("A mochila está cheia: o peixe ficou no chão.")
+	_update_inventory()
+	_pesca_mostra = {"id": id, "t": 3.0}
+	Sons.play_at(self, "baque", _player.position + Vector3.UP, -14.0, 1.6)
+	wear("vara_pesca", 1)
+
+
+## A ponta da vara no mundo.
+func _vara_ponta() -> Vector3:
+	if _vara_fp and _vara_fp.has_meta("ponta"):
+		return _vara_fp.to_global(_vara_fp.get_meta("ponta"))
+	return _cam.global_transform * Vector3(0.1, 0.4, -1.6)
+
+
+## A vara (do pé, embaixo à direita da tela, para a frente e para cima), envergando
+## na ponta quando a linha está esticada (curva < 0: para trás, no arremesso).
+func _vara_pose(ang: float, curva: float) -> void:
+	if _vara_fp == null:
+		return
+	var key := "%.3f:%.3f" % [ang, curva]
+	if _vara_fp.get_meta("key", "") == key:
+		return
+	_vara_fp.set_meta("key", key)
+	var base := Vector3(0.2, -0.36, -0.42)
+	var d := Vector3(-0.1, sin(ang), -cos(ang)).normalized()
+	var baixo := Vector3(0, -cos(ang), -sin(ang)).normalized()      # para onde a ponta enverga
+	var L := 1.9
+	var n := 12
+	var pts := []
+	for i in n + 1:
+		var u := float(i) / n
+		pts.append(base + d * L * u + baixo * curva * 0.55 * u * u * L)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var lados := 6
+	var rows := []
+	for i in pts.size():
+		var p: Vector3 = pts[i]
+		var q: Vector3 = pts[mini(i + 1, n)]
+		var o: Vector3 = pts[maxi(i - 1, 0)]
+		var t := (q - o).normalized()
+		var a := t.cross(Vector3.RIGHT).normalized()
+		var b := t.cross(a).normalized()
+		var r := lerpf(0.013, 0.0035, float(i) / n)
+		var row := []
+		for k in lados:
+			var th := TAU * k / lados
+			row.append(p + (a * cos(th) + b * sin(th)) * r)
+		rows.append(row)
+	for i in n:
+		for k in lados:
+			var qd := [rows[i][k], rows[i + 1][k], rows[i + 1][(k + 1) % lados], rows[i][(k + 1) % lados]]
+			for j in [0, 2, 1, 0, 3, 2]:
+				st.add_vertex(qd[j])
+	st.generate_normals()
+	(_vara_fp.get_node("vara") as MeshInstance3D).mesh = st.commit()
+	_vara_fp.set_meta("ponta", pts[n])
+
+
+## A linha (da ponta da vara até a boia), caída em barriga quando frouxa; e a boia.
+func _pesca_linha_desenha(boia: Vector3, esticada: float) -> void:
+	if _pesca_linha == null:
+		_pesca_linha = MeshInstance3D.new()
+		_pesca_linha.mesh = ImmediateMesh.new()
+		var lm := StandardMaterial3D.new()
+		lm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		lm.albedo_color = Color(0.78, 0.68, 0.5)
+		_pesca_linha.material_override = lm
+		_pesca_linha.top_level = true
+		add_child(_pesca_linha)
+		_pesca_boia = MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.025
+		sm.height = 0.07
+		sm.radial_segments = 10
+		sm.rings = 6
+		_pesca_boia.mesh = sm
+		var bm := StandardMaterial3D.new()
+		bm.albedo_color = Color(0.86, 0.8, 0.62)
+		bm.roughness = 0.9
+		_pesca_boia.material_override = bm
+		add_child(_pesca_boia)
+	var im := _pesca_linha.mesh as ImmediateMesh
+	im.clear_surfaces()
+	var tem := boia != Vector3.INF
+	_pesca_boia.visible = tem and _pesca_fase() != "tira" and _pesca_fase() != "briga"
+	if not tem:
+		# parada: a linha pende da ponta com o anzol balançando
+		var pt := _vara_ponta()
+		boia = pt + Vector3.DOWN * 0.55 + _cam.global_transform.basis.x * sin(Time.get_ticks_msec() / 600.0) * 0.03
+		esticada = 1.0
+	else:
+		_pesca_boia.global_position = boia + Vector3.UP * 0.015
+	_pesca_linha.visible = true
+	var a := _vara_ponta()
+	var L := a.distance_to(boia)
+	var sag := (1.0 - esticada) * L * 0.18
+	im.surface_begin(Mesh.PRIMITIVE_LINE_STRIP)
+	for i in 17:
+		var u := float(i) / 16.0
+		im.surface_add_vertex(a.lerp(boia, u) + Vector3.DOWN * sag * 4.0 * u * (1.0 - u))
+	im.surface_end()
+
+
+## O anzol batendo na água: gotas subindo e caindo e a onda abrindo em roda.
+func _pesca_respingo(p: Vector3, forte: float) -> void:
+	var pt := CPUParticles3D.new()
+	pt.one_shot = true
+	pt.explosiveness = 0.9
+	pt.amount = int(10 + 14 * forte)
+	pt.lifetime = 0.7
+	var sm := SphereMesh.new()
+	sm.radius = 0.012
+	sm.height = 0.024
+	sm.radial_segments = 4
+	sm.rings = 2
+	pt.mesh = sm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.82, 0.9, 0.95, 0.8)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pt.material_override = m
+	pt.direction = Vector3.UP
+	pt.spread = 35.0
+	pt.initial_velocity_min = 1.2 * forte
+	pt.initial_velocity_max = 2.6 * forte
+	pt.gravity = Vector3(0, -9.8, 0)
+	pt.scale_amount_min = 0.6
+	pt.scale_amount_max = 1.4
+	add_child(pt)
+	pt.global_position = p
+	pt.emitting = true
+	get_tree().create_timer(1.5).timeout.connect(pt.queue_free)
+	_pesca_onda(p, 0.6 + 0.5 * forte)
+	_pesca_onda(p, 0.35 + 0.3 * forte)
+
+
+func _pesca_onda(p: Vector3, raio: float) -> void:
+	var o := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.9
+	tm.outer_radius = 1.0
+	tm.rings = 24
+	tm.ring_segments = 4
+	o.mesh = tm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.9, 0.95, 1.0, 0.6)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	o.material_override = m
+	add_child(o)
+	o.global_position = p + Vector3.UP * 0.01
+	o.scale = Vector3(0.05, 0.02, 0.05)
+	_pesca_ondas.append([o, 0.0, raio])
+
+
+func _pesca_ondas_tick(delta: float) -> void:
+	for i in range(_pesca_ondas.size() - 1, -1, -1):
+		var w: Array = _pesca_ondas[i]
+		var o: MeshInstance3D = w[0]
+		w[1] = float(w[1]) + delta
+		var u := float(w[1]) / 1.2
+		if u >= 1.0 or not is_instance_valid(o):
+			if is_instance_valid(o):
+				o.queue_free()
+			_pesca_ondas.remove_at(i)
+			continue
+		var r := float(w[2]) * (0.1 + u)
+		o.scale = Vector3(r, 0.02, r)
+		(o.material_override as StandardMaterial3D).albedo_color.a = 0.6 * (1.0 - u)
+
+
+## O peixe em 3D (a cabeça para +x): o corpo em elipses, a cor das costas para a
+## barriga e o desenho de cada espécie, o rabo, as nadadeiras e o olho.
+static func peixe_mesh(id: String) -> ArrayMesh:
+	var e: Dictionary = PEIXES.get(id, PEIXES["peixe_piranha"])
+	var L := float(e.L)
+	var H := L * float(e.H)
+	var W := L * float(e.W)
+	var costa: Color = e.costa
+	var barriga: Color = e.barriga
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := 16
+	var lados := 12
+	var rows := []
+	var cols := []
+	for i in n + 1:
+		var u := float(i) / n                       # 0 = começo do rabo, 1 = focinho
+		var f := 0.14 + 0.86 * pow(sin(PI * clampf(u * 0.92 + 0.04, 0.0, 1.0)), 0.75)
+		if u > 0.9:
+			f *= 1.0 - (u - 0.9) * 6.0
+		var x := lerpf(-L * 0.5, L * 0.5, u)
+		var hh := H * 0.5 * maxf(f, 0.02)
+		var ww := W * 0.5 * maxf(f, 0.02)
+		var row := []
+		var crow := []
+		for k in lados:
+			var a := TAU * k / lados
+			var y := cos(a) * hh
+			var z := sin(a) * ww
+			row.append(Vector3(x, y + hh * 0.08, z))
+			var t := (cos(a) + 1.0) * 0.5                 # 1 = costas, 0 = barriga
+			var c := barriga.lerp(costa, smoothstep(0.2, 0.65, t))
+			match id:
+				"peixe_tucunare":
+					for bx in [0.35, 0.55, 0.75]:
+						if absf(u - bx) < 0.045 and t > 0.3:
+							c = c.darkened(0.55)
+				"peixe_traira":
+					if t > 0.25 and sin(u * 41.0) * sin(a * 5.0 + u * 13.0) > 0.35:
+						c = c.darkened(0.35)
+				"peixe_pacu":
+					if t < 0.3:
+						c = c.lerp(Color(0.85, 0.45, 0.2), 0.35)
+				"peixe_curimata":
+					if t > 0.45 and absf(u - 0.95) < 0.05:
+						c = c.darkened(0.3)
+			crow.append(c)
+		rows.append(row)
+		cols.append(crow)
+	for i in n:
+		for k in lados:
+			var k2 := (k + 1) % lados
+			var qd := [[i, k], [i + 1, k], [i + 1, k2], [i, k2]]
+			for j in [0, 1, 2, 0, 2, 3]:
+				var ij: Array = qd[j]
+				st.set_color(cols[ij[0]][ij[1]])
+				st.add_vertex(rows[ij[0]][ij[1]])
+	var tri := func(a: Vector3, b: Vector3, c: Vector3, col: Color) -> void:
+		for v in [a, b, c, a, c, b]:
+			st.set_color(col)
+			st.add_vertex(v)
+	var x0 := -L * 0.5
+	var fin := costa.darkened(0.2)
+	if id == "peixe_piranha":
+		fin = Color(0.55, 0.2, 0.12)
+	# o rabo em V
+	tri.call(Vector3(x0 + L * 0.02, 0.0, 0), Vector3(x0 - L * 0.22, H * 0.42, 0), Vector3(x0 - L * 0.16, 0.02 * H, 0), fin)
+	tri.call(Vector3(x0 + L * 0.02, 0.0, 0), Vector3(x0 - L * 0.16, 0.02 * H, 0), Vector3(x0 - L * 0.22, -H * 0.38, 0), fin)
+	if id == "peixe_tucunare":
+		# a mancha redonda (o olho falso) no rabo
+		var oc := Vector3(x0 - L * 0.04, H * 0.06, 0)
+		for k in 8:
+			var a1 := TAU * k / 8.0
+			var a2 := TAU * (k + 1) / 8.0
+			tri.call(oc, oc + Vector3(cos(a1), sin(a1), 0) * H * 0.11, oc + Vector3(cos(a2), sin(a2), 0) * H * 0.11, Color(0.1, 0.08, 0.05))
+	# a nadadeira de cima e as de baixo
+	tri.call(Vector3(-L * 0.12, H * 0.5, 0), Vector3(L * 0.12, H * 0.52, 0), Vector3(-L * 0.06, H * 0.78, 0), fin)
+	tri.call(Vector3(-L * 0.22, -H * 0.38, 0), Vector3(-L * 0.05, -H * 0.44, 0), Vector3(-L * 0.2, -H * 0.62, 0), fin)
+	# os olhos
+	for sz in [-1.0, 1.0]:
+		var oc2 := Vector3(L * 0.36, H * 0.12, sz * W * 0.36)
+		for k in 8:
+			var a1 := TAU * k / 8.0
+			var a2 := TAU * (k + 1) / 8.0
+			tri.call(oc2, oc2 + Vector3(cos(a1), sin(a1), 0) * H * 0.07, oc2 + Vector3(cos(a2), sin(a2), 0) * H * 0.07, Color(0.05, 0.04, 0.03))
+	st.generate_normals()
+	return st.commit()
+
+
+static func peixe_material() -> ShaderMaterial:
+	if _peixe_sh == null:
+		_peixe_sh = Shader.new()
+		_peixe_sh.code = """
+shader_type spatial;
+render_mode cull_disabled;
+uniform float p0 = 0.0;
+uniform float p1 = 0.0;
+void fragment() {
+	vec3 c = COLOR.rgb;
+	float p = clamp(p0, 0.0, 1.0);
+	vec3 frito = mix(vec3(0.55, 0.33, 0.12), vec3(0.78, 0.55, 0.25), dot(c, vec3(0.33)));
+	c = mix(c, frito, p);
+	c = mix(c, vec3(0.07, 0.05, 0.03), clamp((p0 - 1.0) * 1.4, 0.0, 1.0));
+	ALBEDO = c;
+	ROUGHNESS = mix(0.45, 0.75, p);
+	SPECULAR = mix(0.4, 0.3, p);
+}
+"""
+	var m := ShaderMaterial.new()
+	m.shader = _peixe_sh
+	return m
+
+
+func _peixe_no(id: String) -> Node3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = peixe_mesh(id)
+	mi.material_override = peixe_material()
+	return mi
+
+
+## O peixe que acabou de sair da água: o desenho dele grande, com o nome.
+func _pesca_draw() -> void:
+	if not _pesca_mostra.has("id") or _sub_ui == null:
+		return
+	var ui := _sub_ui
+	var id := str(_pesca_mostra.id)
+	var a := clampf(float(_pesca_mostra.t) / 0.4, 0.0, 1.0)
+	var c := Vector2(ui.size.x * 0.5, ui.size.y * 0.3)
+	ui.draw_circle(c, 92.0, Color(0.05, 0.04, 0.03, 0.6 * a))
+	Desenhos.item(ui, id, c, 150.0)
+	var font := ThemeDB.fallback_font
+	var tx := "%s · %s kg" % [Itens.nome(id), Itens.kg_txt(Itens.kg(id))]
+	var tw := font.get_string_size(tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
+	ui.draw_string(font, c + Vector2(-tw * 0.5 + 2, 122), tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(0, 0, 0, 0.7 * a))
+	ui.draw_string(font, c + Vector2(-tw * 0.5, 120), tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1, 0.95, 0.82, a))
+
+
+## Na briga: a barra da força (com o risco da força que precisa) do lado do botão e a
+## barra vermelha de quanto falta para o peixe escapar.
+func _pesca_draw_briga() -> void:
+	if _pesca_fase() != "briga" or _pesca_btns.size() < 2:
+		return
+	var ui := _sub_ui
+	var btn: Control = _pesca_btns[1]
+	var r := Rect2(btn.get_global_rect().position - ui.get_global_rect().position + Vector2(-44, 0), Vector2(28, btn.size.y))
+	ui.draw_rect(r.grow(3), Color(0.04, 0.04, 0.03, 0.85))
+	var v := float(_pesca.forca)
+	var col := Color(0.25, 0.85, 0.3) if v >= float(_pesca.precisa) else Color(0.95, 0.55, 0.15)
+	var h := r.size.y * v
+	ui.draw_rect(Rect2(Vector2(r.position.x, r.end.y - h), Vector2(r.size.x, h)), col)
+	var ny := r.end.y - r.size.y * float(_pesca.precisa)
+	ui.draw_line(Vector2(r.position.x - 8, ny), Vector2(r.end.x + 8, ny), Color(1, 1, 1, 0.95), 3.0)
+	ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
+	var t := float(_pesca.escapa)
+	if t > 0.02:
+		var pisca := 0.5 + 0.5 * sin(Time.get_ticks_msec() / (60.0 + 200.0 * (1.0 - t)))
+		var rb := Rect2(Vector2(ui.size.x * 0.5 - 160, 40), Vector2(320, 12))
+		ui.draw_rect(rb.grow(3), Color(0.04, 0.04, 0.03, 0.8))
+		ui.draw_rect(Rect2(rb.position, Vector2(rb.size.x * clampf(t, 0.0, 1.0), rb.size.y)), Color(0.95, 0.2, 0.12, 0.6 + 0.4 * pisca))
+	# a distância até a beira
+	var font := ThemeDB.fallback_font
+	var tx := "%.1f m" % float(_pesca.dist)
+	ui.draw_string(font, Vector2(r.position.x - 4, r.position.y - 10), tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 0.95, 0.85))
 
 
 # ================== CARRINHO DE MÃO ==================
@@ -17093,6 +17812,8 @@ func _draw_bur_ui() -> void:
 	_draw_fogoes()
 	_tranca_draw()
 	_laco_draw()
+	_pesca_draw_briga()
+	_pesca_draw()
 	_tri_draw()
 	_couro_draw()
 	_mach_draw()
@@ -17284,7 +18005,7 @@ func _olho_pick(acao: String) -> void:
 		"car_despejar", "car_pegar_lenha", "car_tirar_itens":
 			_car_pick(int(p.maq), acao)
 			return
-		"corda_fazer", "corda_continuar":
+		"corda_fazer", "corda_continuar", "linha_fazer":
 			_corda_pick(int(p.maq), acao)
 			return
 		"pedrinhas", "carvao", "areia", "tela", "vasilha", "agua_filtro", "encher_limpa":
@@ -18068,7 +18789,7 @@ func _fogao_opts(mi: int) -> Array:
 			op.append(["fogao_panela_%d" % k, "Pôr a vasilha (%s)" % nomes[k]])
 		else:
 			if str(b.modo) == "fritar" and float(b.p) < 1.0:
-				op.append(["fogao_mexer_%d" % k, "Mexer a carne (%s)" % nomes[k]])
+				op.append(["fogao_mexer_%d" % k, ("Virar o peixe (%s)" if str(b.get("o", "")) == "peixe" else "Mexer a carne (%s)") % nomes[k]])
 			op.append(["fogao_tirar_%d" % k, "Tirar a vasilha (%s)" % nomes[k]])
 	return op
 
@@ -18169,9 +18890,25 @@ func _fogao_pick(mi: int, acao: String) -> void:
 		if not (bocas[k] as Dictionary).is_empty():
 			_show_toast("Essa boca já tem uma vasilha.")
 			return
-		if item_qtd("vasilha_carne") <= 0:
-			_show_toast("Precisa de uma vasilha com carne picada: corte a carne em pedaços pequenos na mesa de carne e pegue com a vasilha de barro na mochila.")
+		var peixes := []
+		for pid in PEIXES:
+			if item_qtd(str(pid)) > 0:
+				peixes.append(str(pid))
+		var com_vas := item_qtd("vasilha_barro") > 0
+		if item_qtd("vasilha_carne") <= 0 and (peixes.is_empty() or not com_vas):
+			if not peixes.is_empty():
+				_show_toast("Precisa de uma vasilha de barro vazia na mochila para fritar o peixe.")
+			else:
+				_show_toast("Precisa de uma vasilha com carne picada (corte na mesa de carne e pegue com a vasilha de barro) ou de um peixe e uma vasilha de barro vazia.")
 			return
+		var por_peixe := func(pid: String) -> void:
+			if item_qtd(pid) <= 0 or item_qtd("vasilha_barro") <= 0 or not (bocas[k] as Dictionary).is_empty():
+				return
+			remove_item(pid, 1)
+			remove_item("vasilha_barro", 1)
+			_update_inventory()
+			bocas[k] = {"modo": "fritar", "o": "peixe", "peixe": pid, "p": 0.0, "q": 0.0, "mexe": _agora_h()}
+			Sons.play_at(self, "baque", _maq.fogao_panela_mundo(mi, k), -12.0, 1.2)
 		var por := func(modo: String) -> void:
 			if item_qtd("vasilha_carne") <= 0 or not (bocas[k] as Dictionary).is_empty():
 				return
@@ -18183,9 +18920,14 @@ func _fogao_pick(mi: int, acao: String) -> void:
 			bocas[k] = {"modo": modo, "p": 0.0, "q": 0.0, "mexe": _agora_h()}
 			Sons.play_at(self, "agua" if modo == "cozinhar" else "baque", _maq.fogao_panela_mundo(mi, k), -12.0, 1.2)
 		var opts := []
-		opts.append(["Cozinhar", "Com água da cabaça (2 goles):\na carne cozida no caldo.", func(): por.call("cozinhar")])
-		opts.append(["Fritar", "Na gordura da própria carne,\nmais depressa. Tem que mexer\nsenão gruda e queima.", func(): por.call("fritar")])
-		_choice_menu("NO FOGÃO", "Como fazer a carne", opts)
+		if item_qtd("vasilha_carne") > 0:
+			opts.append(["Cozinhar a carne", "Com água da cabaça (2 goles):\na carne cozida no caldo.", func(): por.call("cozinhar")])
+			opts.append(["Fritar a carne", "Na gordura da própria carne,\nmais depressa. Tem que mexer\nsenão gruda e queima.", func(): por.call("fritar")])
+		if com_vas:
+			for pid in peixes.slice(0, 3):
+				var pp: String = pid
+				opts.append(["Fritar %s" % Itens.nome(pp).to_lower(), "O peixe inteiro na vasilha\nde barro. Vire de vez em\nquando senão gruda e queima.", func(): por_peixe.call(pp)])
+		_choice_menu("NO FOGÃO", "O que vai fazer", opts)
 		return
 	var b: Dictionary = bocas[k]
 	if b.is_empty():
@@ -18193,6 +18935,26 @@ func _fogao_pick(mi: int, acao: String) -> void:
 	if acao.begins_with("fogao_mexer_"):
 		b.mexe = _agora_h()
 		Sons.play_at(self, "fibra_bate", _maq.fogao_panela_mundo(mi, k), -14.0, 1.6)
+		return
+	if acao.begins_with("fogao_tirar_") and str(b.get("o", "")) == "peixe":
+		var pid := str(b.get("peixe", "peixe_piranha"))
+		var it_p := ""
+		if float(b.get("q", 0.0)) >= 1.0:
+			it_p = "vasilha_peixe_queimado"
+		elif float(b.p) >= 1.0:
+			it_p = "vasilha_peixe_frito"
+		var kg_p := Itens.kg(it_p) if it_p != "" else Itens.kg(pid) + Itens.kg("vasilha_barro")
+		if _bag_total() + kg_p > BAG_MAX:
+			_show_toast("A mochila está cheia: não cabe a vasilha.")
+			return
+		bocas[k] = {}
+		if it_p != "":
+			add_item(it_p, 1)
+		else:
+			add_item(pid, 1)                     # ainda cru: o peixe e a vasilha voltam
+			add_item("vasilha_barro", 1)
+		_update_inventory()
+		Sons.play_at(self, "baque", _maq.fogao_panela_mundo(mi, k), -14.0, 1.1)
 		return
 	if acao.begins_with("fogao_tirar_"):
 		var item := "vasilha_carne"
@@ -18254,7 +19016,7 @@ func _fogao_tick(delta: float) -> void:
 					b.q = snappedf(float(fino[1]), 0.001)
 			var no: Node3D = _fogao_nos.get(key, null)
 			if no == null or not is_instance_valid(no):
-				no = _panela_no(str(b.modo))
+				no = _panela_no(str(b.modo), str(b.get("peixe", "")) if str(b.get("o", "")) == "peixe" else "")
 				add_child(no)
 				_fogao_nos[key] = no
 			no.global_position = _maq.fogao_panela_mundo(mi, k) + Vector3.UP * 0.01
@@ -18267,7 +19029,7 @@ func _fogao_tick(delta: float) -> void:
 
 
 ## A vasilha na boca do fogão com os cubos de carne dentro (e o caldo, cozinhando).
-func _panela_no(modo: String) -> Node3D:
+func _panela_no(modo: String, peixe := "") -> Node3D:
 	var root := Node3D.new()
 	var pot := MeshInstance3D.new()
 	pot.mesh = Olaria.malha("vasilha_barro", [1.0, 1.0, 1.0, 1.0])
@@ -18290,6 +19052,19 @@ func _panela_no(modo: String) -> Node3D:
 		ca.material_override = cmat
 		ca.position.y = topo * 0.75
 		root.add_child(ca)
+	if peixe != "":
+		# o peixe inteiro deitado no fundo da vasilha (o tamanho que cabe)
+		var pn := MeshInstance3D.new()
+		pn.name = "carne"
+		pn.mesh = peixe_mesh(peixe)
+		pn.material_override = peixe_material()
+		var Lp := float(PEIXES[peixe].L)
+		var esc := minf(1.0, rb * 1.7 / (Lp * 1.2))
+		pn.scale = Vector3.ONE * esc
+		pn.rotation = Vector3(PI * 0.5, 0.4, 0)
+		pn.position = Vector3(0, topo * 0.35 + float(PEIXES[peixe].W) * Lp * 0.5 * esc, 0)
+		root.add_child(pn)
+		return _panela_vapor(root, modo)
 	# os cubos (um montinho) com a cor do ponto
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -18311,7 +19086,13 @@ func _panela_no(modo: String) -> Node3D:
 	mt.shader = _assa_sh
 	carne.material_override = mt
 	root.add_child(carne)
-	# o vapor (cozinhando) ou a fumacinha da fritura
+	return _panela_vapor(root, modo)
+
+
+## O vapor (cozinhando) ou a fumacinha da fritura saindo da vasilha.
+func _panela_vapor(root: Node3D, modo: String) -> Node3D:
+	var pf: Array = Olaria.perfil_final("vasilha_barro")
+	var topo: float = (pf[pf.size() - 1] as Vector2).y
 	var vp := CPUParticles3D.new()
 	vp.name = "vapor"
 	var qm := QuadMesh.new()
