@@ -240,6 +240,7 @@ uniform vec3 deep = vec3(0.012, 0.03, 0.025);
 uniform vec3 shallow = vec3(0.09, 0.08, 0.04);
 uniform vec3 mud = vec3(0.36, 0.26, 0.15);
 uniform float sea_level = -1000.0;
+uniform float realce = 0.0;          // água de buraco/valeta: mais à vista (o céu refletido)
 uniform vec3 sea_deep = vec3(0.015, 0.075, 0.10);
 uniform vec3 sea_shallow = vec3(0.10, 0.28, 0.27);
 varying float depth;
@@ -288,6 +289,11 @@ void fragment(){
 	vec3 muddy = mud * mix(1.0, 0.55, sqrt(d));
 	ALBEDO = mix(clean, muddy, clamp(m, 0.0, 1.0) * 0.9) + vec3(0.05, 0.07, 0.08) * fres;
 	ALPHA = clamp(mix(0.45, 0.93, sqrt(d)) + m * 0.3 + fres * 0.15, 0.0, 1.0) * smoothstep(0.0, 0.06, depth);
+	if (realce > 0.5) {
+		// buraco e valeta: rasa e escura no barro some; o céu refletido mostra que é água
+		ALBEDO = mix(ALBEDO, vec3(0.16, 0.21, 0.24), 0.35 * (1.0 - clamp(m, 0.0, 1.0) * 0.6)) + vec3(0.08, 0.1, 0.12) * fres;
+		ALPHA = max(ALPHA, 0.82 * smoothstep(0.0, 0.025, depth));
+	}
 	// água barrenta brilha menos (o barro tira o espelho)
 	ROUGHNESS = mix(0.12, 0.4, clamp(m, 0.0, 1.0));
 	SPECULAR = mix(0.45, 0.2, clamp(m, 0.0, 1.0));
@@ -1234,7 +1240,9 @@ func _on_world_ready() -> void:
 	_caca = Caca.new()
 	add_child(_caca)
 	_caca.build(self, Mundos.dir(_world_id) + "/caca.json" if _world_id != "" else "")
-	_escav.water_mat = _water_mat
+	var wm2: ShaderMaterial = _water_mat.duplicate()
+	wm2.set_shader_parameter("realce", 1.0)
+	_escav.water_mat = wm2
 	_escav.sea_m = MundoSim.SEA * HS
 	_escav.rio_fn = _rio_nivel
 	_escav.agua_fn = _rio_puxar
@@ -6127,6 +6135,8 @@ func _update_sky(delta: float) -> void:
 	_grass_mat.set_shader_parameter("wet", _rain_amount)
 	_grass_mat.set_shader_parameter("wind", lerpf(0.1, 0.28, _rain_amount))
 	_water_mat.set_shader_parameter("rain", _rain_amount)
+	if _escav and _escav.water_mat is ShaderMaterial and _escav.water_mat != _water_mat:
+		(_escav.water_mat as ShaderMaterial).set_shader_parameter("rain", _rain_amount)
 	_rain.emitting = _rain_amount > 0.3
 	_rain.visible = _rain.emitting          # sem gota parada no ar quando a chuva para (celular)
 	if _player:
@@ -10466,7 +10476,7 @@ func _tri_tick(delta: float) -> void:
 				var hv := Vector2(mao.x - rt.x, mao.z - rt.z)
 				var dy := mao.y - rt.y
 				var hmax := sqrt(maxf(dmax * dmax - dy * dy, 0.0))
-				if alt > alt0 + 0.01 and hv.length() > hmax + 0.01:
+				if hv.length() > hmax + 0.01:
 					var volta := hv.normalized() * (hv.length() - hmax)
 					_player.position.x -= volta.x
 					_player.position.z -= volta.y
@@ -11345,7 +11355,7 @@ func _banda_move(delta: float) -> void:
 				_banda.fim = 0.0
 		_banda.anim = a if a < 0.56 else -1.0
 	if _mach_axe:
-		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25), Vector3(0.3, -0.5, -0.6))
+		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25) * Basis(Vector3.UP, PI), Vector3(0.3, -0.5, -0.6))
 	if float(_banda.fim) >= 0.0:
 		_banda.fim = float(_banda.fim) + delta
 		if float(_banda.fim) > 1.8:
@@ -11584,7 +11594,7 @@ func _quarto_move(delta: float) -> void:
 		_quarto.anim = a if a < 0.56 else -1.0
 	if _mach_axe:
 		_mach_axe.visible = str(_quarto.fase) == "machado"
-		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25), Vector3(0.3, -0.5, -0.6))
+		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25) * Basis(Vector3.UP, PI), Vector3(0.3, -0.5, -0.6))
 	if float(_quarto.fim) >= 0.0:
 		_quarto.fim = float(_quarto.fim) + delta
 		if float(_quarto.fim) > 2.2:
@@ -11844,7 +11854,7 @@ func _mach_move(delta: float) -> void:
 		var d: Vector3 = _cam.global_transform.basis.inverse() * (_caca.parte_ponto(uid, str(_mach.alvo)) - _cam.global_position)
 		giro = clampf(atan2(-d.x, -d.z), -0.6, 0.6)
 	if _mach_axe:
-		_mach_axe.transform = Transform3D(Basis(Vector3.UP, giro * 0.8) * Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25), Vector3(0.3, -0.5, -0.6))
+		_mach_axe.transform = Transform3D(Basis(Vector3.UP, giro * 0.8) * Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25) * Basis(Vector3.UP, PI), Vector3(0.3, -0.5, -0.6))
 	if float(_mach.fim) >= 0.0:
 		_mach.fim = float(_mach.fim) + delta
 		if float(_mach.fim) > 1.6:
@@ -12017,6 +12027,9 @@ func _carne_ctx() -> bool:
 		_ctx_btn.text = "Pegar a carne"
 		return true
 	var ci := _peca_maq_perto("carrinho", 1.8)
+	# (atrás do carrinho, nas alças, é para empurrar: a carne se pega do lado da caixa)
+	if ci >= 0 and (_peca_host_xf(ci).affine_inverse() * _player.position).x < -0.5:
+		ci = -1
 	if ci >= 0 and not _caca.pecas_em("carrinho", ci).is_empty():
 		_ctx_action = "carne_do_carrinho"
 		_ctx_btn.text = "Pegar a carne"
@@ -12081,7 +12094,7 @@ func _mc_start(mi: int) -> void:
 	if _mao != "":
 		equip("")
 	var lst: Array = _caca.pecas_em("mesa", mi)
-	_mc = {"mi": mi, "sel": lst[0] if not lst.is_empty() else [], "t": 0.5, "fase": "marca", "faca": 0.0, "golpes": 0,
+	_mc = {"mi": mi, "sel": lst[0] if not lst.is_empty() else [], "off": 0.0, "ang": -9.0, "fase": "marca", "faca": 0.0, "golpes": 0,
 		"anim": -1.0, "treme": 0.0, "drag": -9, "ini": Vector2.ZERO, "parte": "", "pg": {}}
 	_olho = {}
 	_bur = {}
@@ -12121,6 +12134,8 @@ func _mc_move(delta: float) -> void:
 		var lst: Array = _caca.pecas_em("mesa", mi)
 		_mc.sel = lst[0]
 		_mc.fase = "marca"
+		_mc.off = 0.0
+		_mc.ang = -9.0
 	# a pata ou a cabeça ainda na peça: tem que tirar antes de cortar a carne
 	var sel2: Array = _mc.sel
 	var falta: Array = _caca.peca_partes_falta(str(sel2[0]), _caca.peca_de(str(sel2[0]), int(sel2[1]))) if not sel2.is_empty() else []
@@ -12157,7 +12172,7 @@ func _mc_move(delta: float) -> void:
 		_mc.anim = a if a < 0.56 else -1.0
 	if _mach_axe:
 		_mach_axe.visible = str(_mc.fase) in ["machado", "partes"]
-		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25), Vector3(0.3, -0.5, -0.6))
+		_mach_axe.transform = Transform3D(Basis(Vector3.RIGHT, th) * Basis(Vector3.FORWARD, 0.25) * Basis(Vector3.UP, PI), Vector3(0.3, -0.5, -0.6))
 	(_mc_btns[0] as Control).visible = str(_mc.fase) == "marca"
 	(_mc_btns[1] as Control).visible = str(_mc.fase) in ["marca", "partes"]
 	(_mc_btns[2] as Control).visible = true
@@ -12179,11 +12194,50 @@ func _mc_eixo() -> Array:
 	return [_cam.unproject_position(a), _cam.unproject_position(b), a, b]
 
 
+## A linha vermelha na tela: [meio, direção]. Começa atravessada no pedaço; arrastando o
+## dedo para os lados dela ela anda, ao longo dela ela gira (como o risco da lenha).
+func _mc_linha() -> Array:
+	var sel: Array = _mc.sel
+	if sel.is_empty():
+		return []
+	var cw: Vector3 = _caca.peca_centro(str(sel[0]), int(sel[1]))
+	if cw == Vector3.INF or _cam.is_position_behind(cw):
+		return []
+	if float(_mc.ang) < -8.0:
+		var e := _mc_eixo()
+		var ax: Vector2 = ((e[1] as Vector2) - (e[0] as Vector2)) if not e.is_empty() else Vector2.RIGHT
+		_mc.ang = ax.angle() + PI * 0.5
+	var dir := Vector2.from_angle(float(_mc.ang))
+	var nrm := dir.orthogonal()
+	return [_cam.unproject_position(cw) + nrm * float(_mc.off), dir]
+
+
 func _mc_marca() -> Vector2:
-	var e := _mc_eixo()
-	if e.is_empty():
-		return Vector2.ZERO
-	return (e[0] as Vector2).lerp(e[1], float(_mc.t))
+	var l := _mc_linha()
+	return l[0] if not l.is_empty() else Vector2.ZERO
+
+
+## O plano da faca (no mundo): em pé, passando pela linha vermelha deitada na mesa.
+func _mc_plano() -> Array:
+	var l := _mc_linha()
+	var sel: Array = _mc.sel
+	if l.is_empty():
+		return []
+	var cy: float = _caca.peca_centro(str(sel[0]), int(sel[1])).y
+	var pts := []
+	for sg in [-1.0, 1.0]:
+		var sp: Vector2 = (l[0] as Vector2) + (l[1] as Vector2) * 120.0 * sg
+		var o := _cam.project_ray_origin(sp)
+		var dv := _cam.project_ray_normal(sp)
+		if absf(dv.y) < 1e-4:
+			return []
+		pts.append(o + dv * ((cy - o.y) / dv.y))
+	var a: Vector3 = pts[0]
+	var b: Vector3 = pts[1]
+	var n := (b - a).cross(Vector3.UP)
+	if n.length() < 1e-5:
+		return []
+	return [n.normalized(), (a + b) * 0.5]
 
 
 func _mc_cortar() -> void:
@@ -12192,7 +12246,7 @@ func _mc_cortar() -> void:
 	if item_qtd("faca") <= 0 and not teste:
 		return
 	var sel: Array = _mc.sel
-	if _caca.peca_kg(str(sel[0]), _caca.peca_de(str(sel[0]), int(sel[1]))) < 1.2:
+	if _caca.peca_kg(str(sel[0]), _caca.peca_de(str(sel[0]), int(sel[1]))) < 0.15:
 		return                              # pequeno demais para cortar de novo
 	_mc.fase = "faca"
 	_mc.faca = 0.0
@@ -12214,8 +12268,8 @@ func _mc_machadada() -> void:
 			_mc.parte = ""
 		return
 	_mc.golpes = int(_mc.golpes) + 1
-	var e := _mc_eixo()
-	var w: Vector3 = (e[2] as Vector3).lerp(e[3], float(_mc.t)) if not e.is_empty() else _player.position
+	var pl := _mc_plano()
+	var w: Vector3 = pl[1] if not pl.is_empty() else _player.position
 	if wear("machado", 1):
 		_update_inventory()
 	if int(_mc.golpes) < 2:
@@ -12224,22 +12278,32 @@ func _mc_machadada() -> void:
 	Sons.play_at(self, "osso_quebra", w, 0.0, 1.15)
 	var uid := str(sel[0])
 	var id := int(sel[1])
-	var t := float(_mc.t)
-	var nova: Dictionary = _caca.peca_partir(uid, id, t)
+	_mc.fase = "marca"
+	_mc.golpes = 0
+	if pl.is_empty():
+		return
+	var no: Node3D = _caca.peca_no(uid, id)
+	var mim: MeshInstance3D = Caca._malha(no) if no else null
+	if mim == null:
+		return
+	var nw: Vector3 = pl[0]
+	var gx := mim.global_transform
+	var n_l: Vector3 = (gx.basis.transposed() * nw).normalized()
+	var w_l: float = n_l.dot(gx.affine_inverse() * (pl[1] as Vector3))
+	var nova: Dictionary = _caca.peca_partir_plano(uid, id, n_l, w_l)
+	if nova.is_empty():
+		return                          # a faca passou fora da carne
 	# os dois pedaços se afastam um pouco na mesa
 	var host := _peca_host_xf(int(_mc.mi))
-	for par in [[id, -1.0], [int(nova.get("id", -1)), 1.0]]:
+	for par in [[id, 1.0], [int(nova.get("id", -1)), -1.0]]:
 		var pc: Dictionary = _caca.peca_de(uid, int(par[0]))
 		if pc.is_empty() or (pc.get("rel", []) as Array).size() < 12:
 			continue
-		var ax: Vector3 = ((e[3] as Vector3) - (e[2] as Vector3)).normalized() if not e.is_empty() else Vector3.RIGHT
 		var rel: Transform3D = Caca._xf_de(pc.rel)
 		var mundo := host * rel
-		mundo.origin += ax * 0.04 * float(par[1])
+		mundo.origin += nw * 0.03 * float(par[1])
 		pc.rel = Caca._xf_json(host.affine_inverse() * mundo)
-	_mc.fase = "marca"
-	_mc.golpes = 0
-	_mc.t = 0.5
+	_mc.off = 0.0
 
 
 func _mc_pegar() -> void:
@@ -12294,7 +12358,7 @@ func _mc_input(e: InputEvent) -> bool:
 			_mc.ini = pos
 			_mc["andou"] = 0.0
 			if str(_mc.fase) == "machado":
-				if float(_mc.anim) < 0.0 and pos.distance_to(_mc_marca()) < 110.0 and (item_qtd("machado") > 0 or teste):
+				if float(_mc.anim) < 0.0 and pos.distance_to(_mc_marca()) < 140.0 and (item_qtd("machado") > 0 or teste):
 					_mc.anim = 0.0
 			elif str(_mc.fase) == "partes" and float(_mc.anim) < 0.0 and (item_qtd("machado") > 0 or teste):
 				var sl: Array = _mc.sel
@@ -12325,7 +12389,8 @@ func _mc_input(e: InputEvent) -> bool:
 						best = pk
 				if not best.is_empty() and best != (_mc.sel as Array):
 					_mc.sel = best
-					_mc.t = 0.5
+					_mc.off = 0.0
+					_mc.ang = -9.0
 		return true
 	var d := Vector2.ZERO
 	if e is InputEventScreenDrag and e.index == int(_mc.drag):
@@ -12335,17 +12400,17 @@ func _mc_input(e: InputEvent) -> bool:
 	else:
 		return e is InputEventScreenDrag or e is InputEventMouseMotion
 	_mc["andou"] = float(_mc.get("andou", 0.0)) + d.length()
-	var ex := _mc_eixo()
-	if ex.is_empty():
+	var ln := _mc_linha()
+	if ln.is_empty():
 		return true
-	var ax: Vector2 = (ex[1] as Vector2) - (ex[0] as Vector2)
+	var dir: Vector2 = ln[1]
 	if str(_mc.fase) == "marca":
-		# arrasta a marca ao longo do pedaço
-		_mc.t = clampf(float(_mc.t) + d.dot(ax.normalized()) / maxf(ax.length(), 40.0), 0.08, 0.92)
+		# para os lados da linha: ela anda; ao longo dela: gira (qualquer ângulo)
+		_mc.off = clampf(float(_mc.off) + d.dot(dir.orthogonal()), -260.0, 260.0)
+		_mc.ang = float(_mc.ang) + d.dot(dir) / 170.0
 	elif str(_mc.fase) == "faca":
-		# a faca atravessando a marca (de um lado ao outro)
-		var per := Vector2(-ax.y, ax.x).normalized()
-		_mc.faca = float(_mc.faca) + absf(d.dot(per)) / 160.0
+		# a faca passando pela linha (de uma ponta à outra)
+		_mc.faca = float(_mc.faca) + absf(d.dot(dir)) / 220.0
 		if float(_mc.faca) >= 1.0:
 			_mc.fase = "machado"
 			Sons.play_at(self, "fibra_puxa", _player.position + Vector3.UP, -8.0, 1.6)
@@ -12368,7 +12433,6 @@ func _mc_draw() -> void:
 	var a: Vector2 = ex[0]
 	var b: Vector2 = ex[1]
 	var cen := (a + b) * 0.5
-	ui.draw_arc(cen, maxf(40.0, a.distance_to(b) * 0.55), 0, TAU, 40, Color(1, 0.95, 0.6, 0.6), 2.0, true)
 	if str(_mc.fase) == "partes":
 		# as patas e a cabeça que faltam tirar: uma marca em cada (o arco: as machadadas)
 		var sl: Array = _mc.sel
@@ -12384,14 +12448,17 @@ func _mc_draw() -> void:
 			if f > 0.0:
 				ui.draw_arc(p, r + 7.0, -PI * 0.5, -PI * 0.5 + TAU * f, 32, Color(0.85, 0.15, 0.1, 0.95), 5.0, true)
 		return
-	var m := _mc_marca()
-	var per := Vector2(-(b - a).y, (b - a).x).normalized()
+	var ln := _mc_linha()
+	if ln.is_empty():
+		return
+	var m: Vector2 = ln[0]
+	var per: Vector2 = ln[1]
 	var cor := Color(0.95, 0.15, 0.1, 0.95)
-	ui.draw_line(m - per * 70.0, m + per * 70.0, Color(0, 0, 0, 0.5), 8.0, true)
-	ui.draw_line(m - per * 70.0, m + per * 70.0, cor, 4.0, true)
+	ui.draw_line(m - per * 150.0, m + per * 150.0, Color(0, 0, 0, 0.5), 8.0, true)
+	ui.draw_line(m - per * 150.0, m + per * 150.0, cor, 4.0, true)
 	if str(_mc.fase) == "faca":
 		var f := clampf(float(_mc.faca), 0.0, 1.0)
-		ui.draw_line(m - per * 70.0, m - per * 70.0 + per * 140.0 * f, Color(1, 0.95, 0.6, 0.95), 6.0, true)
+		ui.draw_line(m - per * 150.0, m - per * 150.0 + per * 300.0 * f, Color(1, 0.95, 0.6, 0.95), 6.0, true)
 	elif str(_mc.fase) == "machado":
 		var pul := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0)
 		ui.draw_arc(m, 30.0 + pul * 6.0, 0, TAU, 32, Color(1, 0.95, 0.7, 0.95), 3.0, true)

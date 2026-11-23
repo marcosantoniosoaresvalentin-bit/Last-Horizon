@@ -1092,7 +1092,7 @@ func peca_kg(uid: String, pc: Dictionary) -> float:
 	var s := float((c.get("p", {}) as Dictionary).get("s", 1.0))
 	var a := maxf(float(pc.u0), -0.35)
 	var b := minf(float(pc.u1), 1.2)
-	return maxf(0.3, (b - a) / 1.55 * 110.0 * s * s * s)
+	return maxf(0.05, (b - a) / 1.55 * 110.0 * s * s * s * float(pc.get("frac", 1.0)))
 
 
 ## O desenho da peça: a vaca na pose de pendurada mostrando só o trecho dela.
@@ -1133,6 +1133,14 @@ func _peca_monta(uid: String, pc: Dictionary) -> Node3D:
 	sm.set_shader_parameter("u_lo", float(pc.u0))
 	sm.set_shader_parameter("u_hi", float(pc.u1))
 	sm.set_shader_parameter("sujo", 1.0 if bool(pc.get("sujo", false)) else 0.0)
+	var pls: Array = pc.get("pl", [])
+	var plv := PackedVector4Array()
+	for e in pls:
+		plv.append(Vector4(float(e[0]), float(e[1]), float(e[2]), float(e[3])))
+	while plv.size() < PL_MAX:
+		plv.append(Vector4(0, 0, 0, -1))
+	sm.set_shader_parameter("pl", plv)
+	sm.set_shader_parameter("n_pl", mini(pls.size(), PL_MAX))
 	mi.material_override = sm
 	# os pontos da peça (no nó): o meio, as pontas do eixo e os de baixo (para encostar)
 	var rf := _couro_ref(no)
@@ -1162,6 +1170,36 @@ func _peca_monta(uid: String, pc: Dictionary) -> Node3D:
 	for q in eixo:
 		centro += q
 	centro /= eixo.size()
+	if not pls.is_empty():
+		# cortada na mesa: o meio, o eixo e os pontos de baixo pelo pedaço que sobrou
+		var dentro := _dentro_pc(uid, pc, no)
+		if dentro.size() >= 2:
+			centro = Vector3.ZERO
+			for q in dentro:
+				centro += to_no * (q as Vector3)
+			centro /= dentro.size()
+			var a0: Vector3 = to_no * (dentro[0] as Vector3)
+			var b0 := a0
+			var dm := -1.0
+			for q in dentro:
+				var w: Vector3 = to_no * (q as Vector3)
+				if w.distance_squared_to(centro) > dm:
+					dm = w.distance_squared_to(centro)
+					a0 = w
+			dm = -1.0
+			for q in dentro:
+				var w: Vector3 = to_no * (q as Vector3)
+				if w.distance_squared_to(a0) > dm:
+					dm = w.distance_squared_to(a0)
+					b0 = w
+			eixo = [a0, b0]
+			var am2 := []
+			for q in amostras:
+				if _no_pl(inv_mi(no, mi) * (q as Vector3), pls):
+					am2.append(q)
+			for i in mini(dentro.size(), 40):
+				am2.append(to_no * (dentro[(i * 7919) % dentro.size()] as Vector3))
+			amostras = am2
 	no.set_meta("low", amostras)
 	no.set_meta("eixo", [eixo[0], eixo[eixo.size() - 1]])
 	no.set_meta("centro", centro)
@@ -1325,6 +1363,99 @@ func peca_partir(uid: String, id: int, t: float) -> Dictionary:
 	nova.erase("id")
 	nova.u0 = uc
 	pc.u1 = uc
+	var d := peca_nova(uid, nova)
+	_peca_monta(uid, pc)
+	return d
+
+
+## Cortes da mesa: cada peça guarda os planos (na malha) do lado que ficou com ela.
+const PL_MAX := 12
+static var _dentro_cache := {}
+
+
+static func inv_mi(no: Node3D, mi: MeshInstance3D) -> Transform3D:
+	return mi.global_transform.affine_inverse() * no.global_transform
+
+
+static func _no_pl(q: Vector3, pls: Array) -> bool:
+	for e in pls:
+		if Vector3(float(e[0]), float(e[1]), float(e[2])).dot(q) < float(e[3]):
+			return false
+	return true
+
+
+## Pontos de dentro da meia vaca (na malha), para pesar e achar o meio dos pedaços.
+func _dentro_meia(uid: String, lado: String, no: Node3D) -> Array:
+	var key := uid + ":" + lado
+	if _dentro_cache.has(key):
+		return _dentro_cache[key]
+	var rf := _couro_ref(no)
+	var mi: MeshInstance3D = rf.mi
+	var sg := 1.0 if lado == "e" else -1.0
+	var out := []
+	for iu in 32:
+		var u := lerpf(-0.25, 1.0, (float(iu) + 0.5) / 32.0)
+		var y := lerpf(float(rf.y_rabo), float(rf.y_pescoco), u)
+		var zb := _barriga_z(mi, y)
+		var zt := _costas_z(mi, y)
+		var wx := _meia_largura(mi, y)
+		var zc := (zb + zt) * 0.5
+		var hz := maxf((zt - zb) * 0.5, 1e-4)
+		for ix in 6:
+			var fx := (float(ix) + 0.5) / 6.0
+			for iz in 8:
+				var fz := (float(iz) + 0.5) / 8.0 * 2.0 - 1.0
+				if fx * fx + fz * fz > 1.0:
+					continue
+				out.append([u, Vector3(sg * fx * wx, y, zc + fz * hz)])
+	_dentro_cache[key] = out
+	return out
+
+
+## Os pontos de dentro desta peça (na malha).
+func _dentro_pc(uid: String, pc: Dictionary, no: Node3D) -> Array:
+	var out := []
+	var pls: Array = pc.get("pl", [])
+	for e in _dentro_meia(uid, str(pc.lado), no):
+		var u := float(e[0])
+		if u < float(pc.u0) or u >= float(pc.u1):
+			continue
+		if _no_pl(e[1], pls):
+			out.append(e[1])
+	return out
+
+
+## Corta a peça num plano (n, w na malha): a peça fica com n·p >= w, a nova com o resto.
+## Não corta (devolve {}) se a faca passa fora da carne ou já tem cortes demais.
+func peca_partir_plano(uid: String, id: int, n: Vector3, w: float) -> Dictionary:
+	var pc := peca_de(uid, id)
+	var no := peca_no(uid, id)
+	if pc.is_empty() or no == null:
+		return {}
+	var pls: Array = pc.get("pl", [])
+	if pls.size() >= PL_MAX:
+		return {}
+	var tot := _dentro_pc(uid, pc, no)
+	if tot.size() < 2:
+		return {}
+	var na := 0
+	for q in tot:
+		if n.dot(q) >= w:
+			na += 1
+	var nb := tot.size() - na
+	if na < 1 or nb < 1:
+		return {}
+	var f0 := float(pc.get("frac", 1.0))
+	var nova := pc.duplicate(true)
+	nova.erase("id")
+	var pa: Array = pls.duplicate(true)
+	pa.append([n.x, n.y, n.z, w])
+	var pb: Array = pls.duplicate(true)
+	pb.append([-n.x, -n.y, -n.z, -w])
+	pc["pl"] = pa
+	nova["pl"] = pb
+	pc["frac"] = f0 * float(na) / float(tot.size())
+	nova["frac"] = f0 * float(nb) / float(tot.size())
 	var d := peca_nova(uid, nova)
 	_peca_monta(uid, pc)
 	return d
@@ -1613,6 +1744,8 @@ uniform vec3 rabo4;
 uniform vec3 rabo5;
 uniform float r_rabo;
 uniform float com_rabo;
+uniform vec3 cab_p;
+uniform float r_cab;
 uniform float corte_q;
 uniform float q_faca;
 uniform float q_parte;
@@ -1622,9 +1755,24 @@ uniform float q_w;
 uniform float zb;
 uniform float zt;
 uniform float sujo;
+uniform vec4 pl[12];                // cortes da mesa: fica onde dot(n, p) >= w
+uniform int n_pl = 0;
 varying vec3 p;
 varying vec3 nn;
-void vertex() { p = VERTEX; nn = NORMAL; }
+varying vec3 cam_l;
+void vertex() {
+	p = VERTEX; nn = NORMAL;
+	cam_l = (inverse(MODEL_MATRIX) * vec4(CAMERA_POSITION_WORLD, 1.0)).xyz;
+}
+// o raio do olho até o ponto entra no lado que fica deste plano em t (o maior é a tampa)
+void entra(vec3 c, vec3 d, vec3 n, float w, inout float tm, inout vec3 nm) {
+	float fc = dot(n, c) - w;
+	if (fc >= 0.0) { return; }
+	float den = dot(n, d);
+	if (den <= 1e-9) { return; }
+	float t = -fc / den;
+	if (t > tm) { tm = t; nm = n; }
+}
 float seg(vec3 q, vec3 a, vec3 b) {
 	vec3 ab = b - a;
 	float t = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
@@ -1653,20 +1801,62 @@ void fragment() {
 	} else if (p.x * lado < 0.0) {
 		discard;
 	}
+	for (int i = 0; i < 12; i++) {
+		if (i < n_pl && dot(pl[i].xyz, p) < pl[i].w) { discard; }
+	}
 	vec3 q = p * esc;
 	float n1 = ruido(q * 11.0);
 	float n2 = ruido(q * 34.0 + vec3(3.1, 1.7, 5.3));
 	float dc = min(min(distance(p, casco0), distance(p, casco1)), min(distance(p, casco2), distance(p, casco3)));
+	bool tampa = false;
 	if (!FRONT_FACING) {
-		// o lado de dentro da banda: a carne partida e, perto do meio, o osso da espinha
-		vec3 carne = mix(vec3(0.3, 0.025, 0.02), vec3(0.46, 0.06, 0.045), n1);
-		float osso = smoothstep(0.55, 0.8, abs(sin(q.y * 3.14159 / 0.05))) * step(0.0, nn.z);
-		ALBEDO = mix(carne, vec3(0.88, 0.82, 0.74), osso * 0.8);
-		ROUGHNESS = 0.45;
+		// visto por um corte: a carne é maciça. Pinta o lado de dentro como a face do corte
+		// (lisa, virada para o olho, no plano do corte), nunca a casca oca do outro lado.
+		vec3 d = p - cam_l;
+		float tm = -1.0;
+		vec3 nm = vec3(0.0);
+		float k = 1.0 / (y_rabo - y_pescoco);
+		float ak = abs(k);
+		if (abs(lado) > 0.5) { entra(cam_l, d, vec3(lado, 0.0, 0.0), 0.0, tm, nm); }
+		if (u_lo > -5.0) { entra(cam_l, d, vec3(0.0, -k, 0.0) / ak, (u_lo - k * y_rabo) / ak, tm, nm); }
+		if (u_hi < 5.0) { entra(cam_l, d, vec3(0.0, k, 0.0) / ak, (k * y_rabo - u_hi) / ak, tm, nm); }
+		if (com_cabeca < 0.5) { entra(cam_l, d, vec3(0.0, k, 0.0) / ak, (k * y_rabo - 0.92) / ak, tm, nm); }
+		for (int i = 0; i < 12; i++) {
+			if (i < n_pl) { entra(cam_l, d, normalize(pl[i].xyz), pl[i].w / length(pl[i].xyz), tm, nm); }
+		}
+		if (tm > 0.0 && tm < 1.0) {
+			vec3 P = cam_l + d * tm;
+			float uP = (y_rabo - P.y) / (y_rabo - y_pescoco);
+			// o meio (espinha) não corta a cabeça da banda que ficou com ela
+			if (!(abs(nm.x) > 0.9 && com_cabeca > 0.5 && uP > 0.92)) {
+				tampa = true;
+				vec3 qc = P * esc;
+				float c1 = ruido(qc * 11.0);
+				float c2 = ruido(qc * 26.0 + vec3(2.3, 0.7, 4.1));
+				vec3 carne = mix(vec3(0.34, 0.03, 0.025), vec3(0.52, 0.07, 0.05), c1);
+				float gord = smoothstep(0.68, 0.82, c2) * 0.5;
+				vec3 cor = mix(carne, vec3(0.82, 0.74, 0.62), gord);
+				// no meio da vaca: as costelas partidas e a espinha (osso branco)
+				if (abs(nm.x) > 0.9 && uP > 0.3 && uP < 0.85) {
+					float osso = smoothstep(0.82, 0.95, abs(sin(qc.y * 3.14159 / 0.07))) * (0.6 + 0.4 * c2);
+					cor = mix(cor, vec3(0.86, 0.8, 0.72), osso * 0.75);
+				}
+				ALBEDO = cor;
+				ROUGHNESS = 0.4;
+				NORMAL = normalize((VIEW_MATRIX * (MODEL_MATRIX * vec4(-nm, 0.0))).xyz);
+			}
+		}
+		if (!tampa) {
+			// por dentro sem corte na frente (a barriga aberta): a carne e as costelas
+			vec3 carne = mix(vec3(0.3, 0.025, 0.02), vec3(0.46, 0.06, 0.045), n1);
+			float osso = smoothstep(0.55, 0.8, abs(sin(q.y * 3.14159 / 0.05))) * step(0.0, nn.z);
+			ALBEDO = mix(carne, vec3(0.88, 0.82, 0.74), osso * 0.8);
+			ROUGHNESS = 0.45;
+		}
 	} else if (dc < r_casco) {
 		ALBEDO = vec3(0.12, 0.1, 0.08);
 		ROUGHNESS = 0.6;
-	} else if (u > 1.0) {
+	} else if (distance(p, cab_p) < r_cab) {
 		ALBEDO = cor_pelo * (0.85 + 0.3 * n2);
 		ROUGHNESS = 0.85;
 	} else {
@@ -1793,6 +1983,8 @@ func _banda_mat(n: Node3D, c: Dictionary, lado: float, cab: bool) -> ShaderMater
 		sm.set_shader_parameter("rabo%d" % i, rb[i])
 	sm.set_shader_parameter("rabo5", (rb[4] as Vector3) + ((rb[4] as Vector3) - (rb[3] as Vector3)) * 1.2)
 	sm.set_shader_parameter("r_rabo", 0.075 / m_por_u)
+	sm.set_shader_parameter("cab_p", rf.cab_p)
+	sm.set_shader_parameter("r_cab", 0.27 / m_por_u)
 	sm.set_shader_parameter("com_rabo", 0.0 if cab else 1.0)     # o rabo vai com a banda sem a cabeça
 	var yq := lerpf(float(rf.y_rabo), float(rf.y_pescoco), QUARTO_U)
 	sm.set_shader_parameter("corte_q", QUARTO_U)
@@ -2167,6 +2359,73 @@ func _evis_aplica(n: Node3D, c: Dictionary) -> void:
 # parte, na pose de pendurada) que cai, quica e fica no chão; na carcaça fica o toco
 # (carne vermelha com o osso branco no meio). c.cortes = [tipo...]; c.partes = [{tipo, xf}].
 
+## A tampa do corte de uma parte solta (pata, cabeça): por dentro da casca, visto pela
+## abertura, pinta a face do corte (carne com o osso no meio) em vez do vazio.
+const TAMPA_SHADER := """
+shader_type spatial;
+render_mode cull_front, diffuse_burley, specular_schlick_ggx;
+uniform vec3 pc;
+uniform vec3 dn;
+uniform float r_osso;
+uniform float esc;
+uniform float sujo;
+varying vec3 p;
+varying vec3 cam_l;
+void vertex() {
+	p = VERTEX;
+	cam_l = (inverse(MODEL_MATRIX) * vec4(CAMERA_POSITION_WORLD, 1.0)).xyz;
+}
+float hh(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float ruido(vec3 q) {
+	vec3 i = floor(q); vec3 f = fract(q); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(hh(i), hh(i + vec3(1,0,0)), f.x), mix(hh(i + vec3(0,1,0)), hh(i + vec3(1,1,0)), f.x), f.y),
+		mix(mix(hh(i + vec3(0,0,1)), hh(i + vec3(1,0,1)), f.x), mix(hh(i + vec3(0,1,1)), hh(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+void fragment() {
+	vec3 d = p - cam_l;
+	float fc = dot(dn, cam_l - pc);
+	float den = dot(dn, d);
+	float t = (fc < 0.0 && den > 1e-9) ? -fc / den : -1.0;
+	vec3 P = cam_l + d * max(t, 0.0);
+	vec3 qc = P * esc;
+	float c1 = ruido(qc * 11.0);
+	vec3 cor = mix(vec3(0.34, 0.03, 0.025), vec3(0.52, 0.07, 0.05), c1);
+	float ro = distance(P, pc);
+	if (t > 0.0 && t < 1.0) {
+		cor = mix(cor, vec3(0.9, 0.85, 0.76), 1.0 - smoothstep(r_osso * 0.85, r_osso, ro));
+		NORMAL = normalize((VIEW_MATRIX * (MODEL_MATRIX * vec4(-dn, 0.0))).xyz);
+	}
+	if (sujo > 0.5) {
+		float tt = ruido(qc * 9.0 + vec3(1.3, 4.1, 2.2));
+		cor = mix(cor, vec3(0.3, 0.22, 0.13), smoothstep(0.35, 0.6, tt) * 0.8);
+	}
+	ALBEDO = cor;
+	ROUGHNESS = 0.45;
+	SPECULAR = 0.25;
+}
+"""
+static var _tampa_sh: Shader = null
+
+
+## Uma cópia da malha só com a tampa do corte (o lado de dentro visto pela abertura).
+static func tampa_no(mesh: Mesh, pc: Vector3, dn: Vector3, r_osso: float, esc: float) -> MeshInstance3D:
+	if _tampa_sh == null:
+		_tampa_sh = Shader.new()
+		_tampa_sh.code = TAMPA_SHADER
+	var sm := ShaderMaterial.new()
+	sm.shader = _tampa_sh
+	sm.set_shader_parameter("pc", pc)
+	sm.set_shader_parameter("dn", dn.normalized())
+	sm.set_shader_parameter("r_osso", r_osso)
+	sm.set_shader_parameter("esc", esc)
+	var t := MeshInstance3D.new()
+	t.name = "tampa"
+	t.mesh = mesh
+	t.material_override = sm
+	t.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return t
+
+
 const PARTES := {
 	"pe_td": {"ossos": ["BackLowLeg_R", "BackFoot_R"], "de": "BackLowLeg_R", "ate": "BackFoot_R", "golpes": 3, "r": 0.05},
 	"pe_te": {"ossos": ["BackLowLeg_L", "BackFoot_L"], "de": "BackLowLeg_L", "ate": "BackFoot_L", "golpes": 3, "r": 0.05},
@@ -2303,6 +2562,8 @@ func parte_malha(c: Dictionary, tipo: String) -> Dictionary:
 ## O toco: carne vermelha com o osso branco no meio (um disco), virado para dir.
 static func _toco(r: float, cor_osso := Color(0.92, 0.88, 0.8)) -> Node3D:
 	var root := Node3D.new()
+	if true:
+		return root                          # (sem a tampa redonda: o corte fica só a carne)
 	var carne := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
 	cm.top_radius = r
@@ -2393,9 +2654,9 @@ func _parte_no(uid: String, tipo: String, xf_salvo := [], base: MeshInstance3D =
 		em.material_override = e[2]
 		par.add_child(em)
 		em.transform = rel * (e[1] as Transform3D)
-	var tc := _toco(float(PARTES[tipo].r) / m_por_u)
-	par.add_child(tc)
-	tc.transform = rel * Transform3D(_base_para(-(pm.dir as Vector3)), pm.corte)
+	var tp := tampa_no(pm.mesh, pm.corte, pm.dir, float(PARTES[tipo].r) * 0.4 / m_por_u, m_por_u)
+	par.add_child(tp)
+	tp.transform = rel
 	par.set_meta("uid", uid)
 	par.set_meta("tipo", tipo)
 	if xf_salvo.size() >= 12:
@@ -2588,7 +2849,7 @@ func _caindo_tick(delta: float) -> void:
 
 const COURO_SHADER := """
 shader_type spatial;
-render_mode cull_back, diffuse_burley, specular_schlick_ggx;
+render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 uniform float y_rabo;
 uniform float y_pescoco;
 uniform float corte_ini;
@@ -2602,6 +2863,8 @@ uniform vec3 casco1;
 uniform vec3 casco2;
 uniform vec3 casco3;
 uniform float r_casco;
+uniform vec3 cab_p;
+uniform float r_cab;
 uniform float ab_y;
 uniform float ab;
 uniform float y_e;
@@ -2626,75 +2889,82 @@ float ruido(vec3 q) {
 		mix(mix(hh(i + vec3(0,0,1)), hh(i + vec3(1,0,1)), f.x), mix(hh(i + vec3(0,1,1)), hh(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
 void fragment() {
-	float u = (y_rabo - p.y) / (y_rabo - y_pescoco);
-	float dc = min(min(distance(p, casco0), distance(p, casco1)), min(distance(p, casco2), distance(p, casco3)));
-	if (dc < r_casco || u > 1.0) { discard; }
-	vec3 q = p * esc;
-	// a vaca aberta: o corte da barriga (do pescoço até o úbere), o Y em volta do úbere
-	// (um de cada lado até as pernas de trás) e a garganta; abrindo, vira um rasgo escuro
-	float wa = largura * 1.5 * (1.0 + aberto * 2.2);
-	bool rasgo = false;
-	if (nn.z < -0.35) {
-		if (u <= 1.0 && u >= max(ab, ab_y) && abs(p.x) < wa) { rasgo = true; }
-		if (u < ab_y && u >= u_ini2) {
-			float k = (ab_y - u) / max(ab_y - u_ini2, 0.0001);
-			float off = y_off * k;
-			if (abs(p.x - off) < wa && k <= y_d) { rasgo = true; }
-			if (abs(p.x + off) < wa && k <= y_e) { rasgo = true; }
-		}
-	}
-	if (garg > 0.5 && u > 0.93 && u < 0.99 && nn.z < 0.2) { rasgo = true; }
-	// aberta: o interior (a cavidade vermelho-escura, as costelas brancas no peito)
-	bool dentro = false;
-	vec3 cav = vec3(0.0);
-	if (aberto > 0.0 && u > ab_y && u < 1.0 && nn.z < 0.15) {
-		float tt = (u - ab_y) / (1.0 - ab_y);
-		float wo = wa + abre_w * aberto * sin(3.14159 * clamp(tt, 0.0, 1.0));
-		if (abs(p.x) < wo) {
-			float fundo = 1.0 - abs(p.x) / max(wo, 0.0001);
-			cav = mix(vec3(0.34, 0.05, 0.04), vec3(0.12, 0.015, 0.012), fundo * 0.8);
-			if (tt > 0.45) {
-				float cost = abs(sin(q.y * 3.14159 / 0.085));
-				float c2 = smoothstep(0.72, 0.93, cost) * smoothstep(0.45, 0.55, tt);
-				cav = mix(cav, vec3(0.86, 0.78, 0.72), c2 * 0.85);
-			}
-			float beira = smoothstep(0.75, 1.0, 1.0 - fundo);
-			cav = mix(cav, vec3(0.6, 0.12, 0.09), beira * 0.6);
-			dentro = true;
-		}
-	}
-	// partindo ao meio: o corte do machado pela espinha (de cima para baixo), o osso no meio
-	if (!dentro && u <= 0.9 && u >= parte_u && nn.z > 0.15 && abs(p.x) < wa * 1.3) {
-		dentro = true;
-		cav = abs(p.x) < wa * 0.45 ? vec3(0.86, 0.8, 0.72) : vec3(0.3, 0.02, 0.02);
-	}
-	if (dentro) {
-		ALBEDO = cav;
-		ROUGHNESS = 0.4;
-		SPECULAR = 0.35;
-	} else if (rasgo) {
-		ALBEDO = mix(vec3(0.3, 0.012, 0.012), vec3(0.16, 0.015, 0.012), aberto);
-		ROUGHNESS = 0.25;
-		SPECULAR = 0.5;
-	} else if (u > pele) {
-		float n1 = ruido(q * 11.0);
-		float n2 = ruido(q * 34.0 + vec3(3.1, 1.7, 5.3));
-		float n3 = ruido(q * 70.0 + vec3(7.7, 2.2, 0.4));
-		float fio = abs(sin((q.y * 90.0 + n1 * 4.0)));
-		vec3 carne = mix(vec3(0.22, 0.02, 0.018), vec3(0.4, 0.045, 0.035), n1 * 0.6 + fio * 0.25 + n3 * 0.15);
-		float gord = smoothstep(0.66, 0.8, n2 * 0.7 + n3 * 0.3);
-		vec3 col = mix(carne, vec3(0.74, 0.66, 0.55), gord * 0.5);
-		float borda = smoothstep(pele + 0.05, pele, u);
-		col = mix(col, vec3(0.82, 0.74, 0.7), borda * 0.7);
-		ALBEDO = col;
+	// por dentro (o buraco do úbere, os cortes): a carne escura, nunca o outro lado do mundo
+	if (!FRONT_FACING) {
+		ALBEDO = vec3(0.22, 0.025, 0.02);
 		ROUGHNESS = 0.55;
-		SPECULAR = 0.25;
-	} else if (u >= corte_ini && u >= corte && nn.z < -0.55 && abs(p.x) < largura) {
-		ALBEDO = vec3(0.4, 0.02, 0.02);
-		ROUGHNESS = 0.25;
-		SPECULAR = 0.5;
+		SPECULAR = 0.2;
 	} else {
-		discard;
+		float u = (y_rabo - p.y) / (y_rabo - y_pescoco);
+		float dc = min(min(distance(p, casco0), distance(p, casco1)), min(distance(p, casco2), distance(p, casco3)));
+		if (dc < r_casco || distance(p, cab_p) < r_cab) { discard; }   // a cabeça e os cascos ficam com o couro
+		vec3 q = p * esc;
+		// a vaca aberta: o corte da barriga (do pescoço até o úbere), o Y em volta do úbere
+		// (um de cada lado até as pernas de trás) e a garganta; abrindo, vira um rasgo escuro
+		float wa = largura * 1.5 * (1.0 + aberto * 2.2);
+		bool rasgo = false;
+		if (nn.z < -0.35) {
+			if (u <= 1.0 && u >= max(ab, ab_y) && abs(p.x) < wa) { rasgo = true; }
+			if (u < ab_y && u >= u_ini2) {
+				float k = (ab_y - u) / max(ab_y - u_ini2, 0.0001);
+				float off = y_off * k;
+				if (abs(p.x - off) < wa && k <= y_d) { rasgo = true; }
+				if (abs(p.x + off) < wa && k <= y_e) { rasgo = true; }
+			}
+		}
+		if (garg > 0.5 && u > 0.93 && u < 0.99 && nn.z < 0.2) { rasgo = true; }
+		// aberta: o interior (a cavidade vermelho-escura, as costelas brancas no peito)
+		bool dentro = false;
+		vec3 cav = vec3(0.0);
+		if (aberto > 0.0 && u > ab_y && u < 1.0 && nn.z < 0.15) {
+			float tt = (u - ab_y) / (1.0 - ab_y);
+			float wo = wa + abre_w * aberto * sin(3.14159 * clamp(tt, 0.0, 1.0));
+			if (abs(p.x) < wo) {
+				float fundo = 1.0 - abs(p.x) / max(wo, 0.0001);
+				cav = mix(vec3(0.34, 0.05, 0.04), vec3(0.12, 0.015, 0.012), fundo * 0.8);
+				if (tt > 0.45) {
+					float cost = abs(sin(q.y * 3.14159 / 0.085));
+					float c2 = smoothstep(0.72, 0.93, cost) * smoothstep(0.45, 0.55, tt);
+					cav = mix(cav, vec3(0.86, 0.78, 0.72), c2 * 0.85);
+				}
+				float beira = smoothstep(0.75, 1.0, 1.0 - fundo);
+				cav = mix(cav, vec3(0.6, 0.12, 0.09), beira * 0.6);
+				dentro = true;
+			}
+		}
+		// partindo ao meio: o corte do machado pela espinha (de cima para baixo), o osso no meio
+		if (!dentro && u <= 0.9 && u >= parte_u && nn.z > 0.15 && abs(p.x) < wa * 1.3) {
+			dentro = true;
+			cav = abs(p.x) < wa * 0.45 ? vec3(0.86, 0.8, 0.72) : vec3(0.3, 0.02, 0.02);
+		}
+		if (dentro) {
+			ALBEDO = cav;
+			ROUGHNESS = 0.4;
+			SPECULAR = 0.35;
+		} else if (rasgo) {
+			ALBEDO = mix(vec3(0.3, 0.012, 0.012), vec3(0.16, 0.015, 0.012), aberto);
+			ROUGHNESS = 0.25;
+			SPECULAR = 0.5;
+		} else if (u > pele) {
+			float n1 = ruido(q * 11.0);
+			float n2 = ruido(q * 34.0 + vec3(3.1, 1.7, 5.3));
+			float n3 = ruido(q * 70.0 + vec3(7.7, 2.2, 0.4));
+			float fio = abs(sin((q.y * 90.0 + n1 * 4.0)));
+			vec3 carne = mix(vec3(0.22, 0.02, 0.018), vec3(0.4, 0.045, 0.035), n1 * 0.6 + fio * 0.25 + n3 * 0.15);
+			float gord = smoothstep(0.66, 0.8, n2 * 0.7 + n3 * 0.3);
+			vec3 col = mix(carne, vec3(0.74, 0.66, 0.55), gord * 0.5);
+			float borda = smoothstep(pele + 0.05, pele, u);
+			col = mix(col, vec3(0.82, 0.74, 0.7), borda * 0.7);
+			ALBEDO = col;
+			ROUGHNESS = 0.55;
+			SPECULAR = 0.25;
+		} else if (u >= corte_ini && u >= corte && nn.z < -0.55 && abs(p.x) < largura) {
+			ALBEDO = vec3(0.4, 0.02, 0.02);
+			ROUGHNESS = 0.25;
+			SPECULAR = 0.5;
+		} else {
+			discard;
+		}
 	}
 }
 """
@@ -2766,7 +3036,8 @@ func _couro_ref(n: Node3D) -> Dictionary:
 	var y_ini: float = (pos.call("BackUpLeg_R") as Vector3).y
 	return {"mi": mi, "y_rabo": y_rabo, "y_pescoco": y_pes, "u_ini": (y_rabo - y_ini) / (y_rabo - y_pes), "u_ubere": (y_rabo - (-0.004)) / (y_rabo - y_pes),
 		"cascos": [pos.call("BackFoot_R"), pos.call("BackFoot_L"), pos.call("FrontFoot_R"), pos.call("FrontFoot_L")],
-		"rabo": [pos.call("Back"), pos.call("Tail1"), pos.call("Tail2"), pos.call("Tail3"), pos.call("Tail4")]}
+		"rabo": [pos.call("Back"), pos.call("Tail1"), pos.call("Tail2"), pos.call("Tail3"), pos.call("Tail4")],
+		"cab_p": (pos.call("Head") as Vector3) + ((pos.call("Head") as Vector3) - (pos.call("Neck") as Vector3)).normalized() * 0.006}
 
 
 ## O couro na pele (o corte e a carne aparecendo). Faz o material da carcaça na primeira vez.
@@ -2804,7 +3075,7 @@ func couro_visual(uid: String) -> void:
 	var u_ini := float(rf.u_ini)
 	if float(cr.get("pele", 0.0)) >= 1.0:
 		for cp in n.find_children("cupim", "MeshInstance3D", true, false):
-			(cp as MeshInstance3D).material_override = _carne_mat()
+			(cp as MeshInstance3D).visible = false          # (sem o couro o cupim é só a carne do lombo)
 	sm.set_shader_parameter("y_rabo", rf.y_rabo)
 	sm.set_shader_parameter("y_pescoco", rf.y_pescoco)
 	sm.set_shader_parameter("corte_ini", u_ini)
@@ -2815,6 +3086,8 @@ func couro_visual(uid: String) -> void:
 	sm.set_shader_parameter("infla", 0.0015 / m_por_u)
 	sm.set_shader_parameter("esc", m_por_u)
 	sm.set_shader_parameter("r_casco", 0.1 / m_por_u)
+	sm.set_shader_parameter("cab_p", rf.cab_p)
+	sm.set_shader_parameter("r_cab", 0.27 / m_por_u)
 	for i in 4:
 		sm.set_shader_parameter("casco%d" % i, rf.cascos[i])
 	var ev: Dictionary = c.get("evis", {})
