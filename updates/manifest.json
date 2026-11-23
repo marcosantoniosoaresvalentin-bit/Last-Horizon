@@ -1,9 +1,9 @@
 {
-  "version": 220,
-  "file": "update_220.zip",
-  "size": 5871430,
-  "sha256": "5c64a916adbdcfd8154a79698b6791add6c1297c7a4d7a15b25bd72822c92cb5",
+  "version": 221,
+  "file": "update_221.zip",
+  "size": 5872472,
+  "sha256": "4bbc46b9f7dc95023fd428c25f55c140d4ce1d8a27dbdbcc7778198e0e9ce4c6",
   "min_build": 1,
-  "notes": "Fogão de barro mais baixo: a base de madeira ficou baixinha e a chapa com as panelas fica na altura da cintura (uns 85 cm do chão).",
+  "notes": "Fogão: o olho aparece sempre perto do fogão pronto, com Pôr lenha, Acender e Pôr a vasilha; a boca aceita lenha maior (a acha comum cabe; só o toquinho inteiro não). Mensagens de erro de volta em todo o jogo: quando algo não dá certo aparece o porquê (falta lenha, lenha grossa demais, sem vasilha, sem água, sem pedra, sem barro, mochila cheia...). As dicas continuam desligadas.",
   "date": "2026-11-23"
 }
