@@ -1,9 +1,9 @@
 {
-  "version": 222,
-  "file": "update_222.zip",
-  "size": 5873536,
-  "sha256": "745a5df04f80d5a6acf12bb308f15d2005e53e3b77af8a0248e8a1a84d2e70b2",
+  "version": 223,
+  "file": "update_223.zip",
+  "size": 5873904,
+  "sha256": "8fe26ac550a1404b8b6228244bb9f014c1b2e877ea56fb3bf0f8cd5b8d59abbc",
   "min_build": 1,
-  "notes": "Desempenho: menos trabalho a cada quadro (botões, peças de carne no carrinho e na mesa, urubus de longe mais simples e animando menos, decomposição e moscas só perto do jogador). No multiplayer o fogão, o espeto e os urubus comendo não fazem mais o mundo ser reenviado sem parar.",
+  "notes": "Com a lenha na mão, chegando no fogão, no forno de carvão ou na fogueira, o olho aparece com 'Pôr lenha' e a acha da mão vai para o fogo (antes o olho sumia com a lenha na mão). Sem lenha, a mensagem diz para trazer a acha na mão.",
   "date": "2026-11-23"
 }
