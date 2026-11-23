@@ -331,9 +331,11 @@ func _day(day: int) -> void:
 	for v in vacas:
 		var ag := day - int(v.nasc)
 		if ag > int(v.vida) or int(v.fome) > FOME_MORRE:
+			_morre_sozinha(v, ag)
 			continue
 		var mae := _find(int(v.mae)) if int(v.mae) >= 0 else {}
 		if int(v.mae) >= 0 and ag < 120 and mae.is_empty():
+			_morre_sozinha(v, ag)
 			continue                        # bezerro novo sem a mãe não vive
 		if str(v.sexo) == "f" and ag >= ADULTA:
 			if int(v.prenhe) >= 0:
@@ -430,6 +432,27 @@ func update(delta: float) -> void:
 	if _tex_sujo and Engine.get_process_frames() % 20 == 0:
 		tex.update(_img)
 		_tex_sujo = false
+
+
+## Morreu de fome, de velha (ou bezerro sem a mãe): cai e fica a carcaça ali (os urubus
+## e as bicheiras dão conta dela).
+func _morre_sozinha(v: Dictionary, ag: int) -> void:
+	var id := int(v.id)
+	var pos := Vector3(float(v.x), 0.0, float(v.z))
+	var yaw := _rng.randf() * TAU
+	var s := clampf(lerpf(0.45, 1.0, float(ag) / ADULTA), 0.45, 1.0)
+	var touro := str(v.sexo) == "m" and ag >= ADULTA
+	if touro:
+		s *= 1.08
+	if _agents.has(id):
+		var n: Node3D = _agents[id].node
+		pos = n.global_position
+		yaw = n.rotation.y
+		s = float(_agents[id].get("s", s))
+		n.queue_free()
+		_agents.erase(id)
+	if _jogo and _jogo.get("_caca") != null:
+		_jogo._caca.morte_natural("vaca", id, {"s": s, "cor": str(v.get("cor", "branca")), "touro": touro, "seed": int(v.get("seed", 1)), "magra": int(v.fome) > 0}, pos, yaw)
 
 
 func _spawn(v: Dictionary) -> void:

@@ -17,10 +17,11 @@ const TamModelo := preload("res://scripts/world/tamandua_modelo.gd")
 const MacacoModelo := preload("res://scripts/world/macaco_modelo.gd")
 const AraraModelo := preload("res://scripts/world/arara_modelo.gd")
 const Sons := preload("res://scripts/sons.gd")
+const Podre := preload("res://scripts/world/podre.gd")
 
 const G := 9.8
 const FLECHA_L := 0.78
-const APODRECE := 20              # dias que a carcaça fica
+const APODRECE := 90              # dias que a carcaça fica (os ossos ficam muito tempo)
 
 ## Vida de cada bicho (o dano das partes soma até passar disso).
 const VIDA := {"vaca": 120.0, "boi": 150.0, "bezerro": 60.0, "tamandua": 70.0, "macaco": 35.0, "arara": 25.0, "cobra": 25.0}
@@ -104,6 +105,10 @@ func update(delta: float) -> void:
 	_caindo_tick(delta)
 	_pecas_tick()
 	_couro_chao_tick(delta)
+	_podre_t -= delta
+	if _podre_t <= 0.0:
+		_podre_t = 1.0
+		_podre_tick()
 	# poças de sangue crescendo
 	for p in _poças.duplicate():
 		p.r = move_toward(float(p.r), float(p.alvo), delta * 0.03)
@@ -364,7 +369,7 @@ func _morrer(hit: Dictionary, ponto: Vector3, dir: Vector3) -> void:
 	var pai: Node3D = hit.get("pai", n)
 	var local := pai.global_transform.affine_inverse() * ponto
 	var ldir := pai.global_transform.basis.inverse() * dir
-	var c := {"uid": uid, "esp": esp, "id": id, "p": params, "dia": int(j.sim.elapsed_days()),
+	var c := {"uid": uid, "esp": esp, "id": id, "p": params, "dia": int(j.sim.elapsed_days()), "t0": agora_h(),
 		"feridas": [[local.x, local.y, local.z, ldir.x, ldir.y, ldir.z, str(pai.get_meta("osso", ""))]], "xf": []}
 	carcacas.append(c)
 	var nd := {"node": n, "c": c, "cai": 0.0, "de": n.global_transform}
@@ -3899,3 +3904,288 @@ func couro_chao_tirar(uid: String) -> void:
 	if _cchao.has(uid) and is_instance_valid(_cchao[uid]):
 		(_cchao[uid] as Node).queue_free()
 	_cchao.erase(uid)
+
+
+# ================== A DECOMPOSIÇÃO (e o que os urubus comem) ==================
+# Tudo o que morreu apodrece pelo tempo do jogo (Podre): a carcaça inteira, os pedaços
+# de carne, a buchada, as patas e a cabeça. O que os urubus comem soma em "comido"
+# (0..1 do peso): c.comido na carcaça, pc.comido na peça, e.comido na parte.
+
+var _podre_t := 0.5
+const PODRE_K := {"vaca": 1.0, "tamandua": 1.3, "macaco": 1.6, "arara": 2.2, "cobra": 1.8}
+
+
+## Horas do jogo desde o começo do mundo.
+func agora_h() -> float:
+	if _jogo == null or _jogo.sim == null:
+		return 0.0
+	return float(_jogo.sim.steps) / float(_jogo.sim.STEPS_DAY) * 24.0
+
+
+## Horas desde a morte.
+func idade_h(c: Dictionary) -> float:
+	var t0 := float(c.get("t0", float(c.get("dia", 0)) * 24.0 + 12.0))
+	return maxf(0.0, agora_h() - t0)
+
+
+## A carcaça inteira, deitada no chão (não a que está sendo trabalhada no tripé)?
+func _inteira(c: Dictionary) -> bool:
+	return not c.has("couro") and (c.get("xf", []) as Array).size() >= 12
+
+
+## Quanto da carcaça já foi (0..1) e o estágio.
+func podre_de(c: Dictionary, comido: float, k: float) -> Array:
+	var h := idade_h(c)
+	var cons := clampf(Podre.consumo_tempo(h, k) + comido, 0.0, 1.0)
+	return [Podre.estagio(h, cons, k), cons]
+
+
+## Peso (kg) da carcaça inteira.
+func carcaca_kg(c: Dictionary) -> float:
+	var p: Dictionary = c.get("p", {})
+	var s := float(p.get("s", 1.0))
+	match str(c.esp):
+		"vaca":
+			return (450.0 if bool(p.get("touro", false)) else 380.0) * s * s * s
+		"tamandua":
+			return 30.0 * s * s * s
+		"macaco":
+			return 8.0
+		"arara":
+			return 1.2
+		"cobra":
+			return 1.5
+	return 20.0
+
+
+func _podre_tick() -> void:
+	var cam_p: Vector3 = _jogo._player.global_position if _jogo and _jogo._player else Vector3.ZERO
+	for uid in _nodes:
+		var nd: Dictionary = _nodes[uid]
+		var c: Dictionary = nd.c
+		var n: Node3D = nd.node
+		if not is_instance_valid(n) or nd.has("corre") or nd.has("cai"):
+			continue
+		var k := float(PODRE_K.get(str(c.esp), 1.0))
+		if _inteira(c):
+			var pr := podre_de(c, float(c.get("comido", 0.0)), k)
+			_podre_no(nd, n, float(pr[0]), float(pr[1]), c, cam_p)
+		# os pedaços de carne (onde estiverem) e as partes no chão
+		for pc in c.get("pecas", []):
+			var pn := peca_no(str(uid), int(pc.id))
+			if pn == null:
+				continue
+			var pr2 := podre_de(c, float(pc.get("comido", 0.0)), k * 1.2)
+			if float(pr2[0]) > 0.05:
+				Podre.atualiza(pn, minf(float(pr2[0]), 3.3), float(pr2[1]))
+			if float(pr2[1]) >= 1.0 and str(pc.onde) == "chao":
+				peca_tirar(str(uid), int(pc.id))
+				break
+		var partes: Array = c.get("partes", [])
+		for e in partes.duplicate():
+			if not (e as Dictionary).has("xf"):
+				continue
+			var pn2 := _parte_node(str(uid), str(e.tipo))
+			if pn2 == null:
+				continue
+			var kb := 1.8 if str(e.tipo) == "buchada" else 1.2
+			var pr3 := podre_de(c, float(e.get("comido", 0.0)), k * kb)
+			if float(pr3[1]) >= 1.0:
+				if str(e.tipo) == "buchada":
+					partes.erase(e)
+					pn2.queue_free()
+				elif not pn2.has_meta("ossos"):
+					_vira_osso_generico(pn2)
+				continue
+			if float(pr3[0]) > 0.05:
+				Podre.atualiza(pn2, minf(float(pr3[0]), 3.3), float(pr3[1]))
+
+
+func _parte_node(uid: String, tipo: String) -> Node3D:
+	for ch in get_children():
+		if ch is Node3D and ch.has_meta("tipo") and str(ch.get_meta("uid", "")) == uid and str(ch.get_meta("tipo")) == tipo:
+			return ch
+	return null
+
+
+## A carcaça no estágio dela: a passada de podre, o inchaço, as moscas, a mancha e, no
+## fim, só o esqueleto.
+func _podre_no(nd: Dictionary, n: Node3D, est: float, cons: float, c: Dictionary, cam_p: Vector3) -> void:
+	if not n.has_meta("esc0"):
+		n.set_meta("esc0", n.scale)
+	var tam := carcaca_kg(c)
+	var r := clampf(pow(tam, 0.33) * 0.13, 0.15, 1.0)
+	if est >= 3.9 or cons >= 0.999:
+		if not n.has_meta("ossos"):
+			n.scale = n.get_meta("esc0")
+			if str(c.esp) == "vaca" and n.has_meta("sk"):
+				var sk: Skeleton3D = n.get_meta("sk")
+				for m in n.find_children("*", "MeshInstance3D", true, false):
+					if (m as MeshInstance3D).material_override != VacaModelo._mat_chifre():
+						(m as MeshInstance3D).visible = false
+				var oss := Podre.esqueleto_vaca(sk, c.get("cortes", []))
+				sk.add_child(oss)
+			else:
+				_vira_osso_generico(n)
+			n.set_meta("ossos", true)
+		if nd.has("moscas") and is_instance_valid(nd.moscas):
+			(nd.moscas as CPUParticles3D).emitting = false
+		if nd.has("zum") and is_instance_valid(nd.zum):
+			(nd.zum as AudioStreamPlayer3D).stop()
+		if nd.has("mancha") and is_instance_valid(nd.mancha):
+			var mm: MeshInstance3D = nd.mancha
+			mm.scale = Vector3.ONE * maxf(0.3, 1.0 - (est - 3.9) * 0.5)
+		return
+	if n.has_meta("ossos"):
+		return
+	if est > 0.05 or cons > 0.0:
+		Podre.atualiza(n, est, cons)
+	# inchado: a barriga estufa; depois murcha e achata
+	var b := smoothstep(0.6, 1.6, est) * (1.0 - smoothstep(2.0, 2.6, est))
+	var f := (1.0 + 0.08 * b) * (1.0 - 0.1 * smoothstep(2.4, 3.8, est))
+	n.scale = (n.get_meta("esc0") as Vector3) * f
+	# as moscas (e o zumbido perto)
+	var com_mosca := est > 0.12 and est < 3.4
+	if com_mosca and not nd.has("moscas"):
+		var mo := Podre.moscas(r)
+		add_child(mo)
+		nd["moscas"] = mo
+	if nd.has("moscas") and is_instance_valid(nd.moscas):
+		var mo2: CPUParticles3D = nd.moscas
+		mo2.global_position = _centro_bicho(n) + Vector3.UP * r * 0.4
+		mo2.emitting = com_mosca
+		var perto := mo2.global_position.distance_to(cam_p) < 14.0
+		if com_mosca and perto:
+			if not nd.has("zum") or not is_instance_valid(nd.zum):
+				var z := AudioStreamPlayer3D.new()
+				var stv := Sons.pick("moscas")
+				if stv is AudioStreamOggVorbis:
+					(stv as AudioStreamOggVorbis).loop = true
+				z.stream = stv
+				z.volume_db = -14.0 + minf(est, 2.5) * 3.0
+				z.unit_size = 2.0
+				z.max_distance = 16.0
+				add_child(z)
+				nd["zum"] = z
+			var zz: AudioStreamPlayer3D = nd.zum
+			zz.global_position = mo2.global_position
+			if not zz.playing:
+				zz.play()
+		elif nd.has("zum") and is_instance_valid(nd.zum):
+			(nd.zum as AudioStreamPlayer3D).stop()
+	# o líquido escuro no chão quando estoura
+	if est >= 1.9 and not nd.has("mancha"):
+		var ms := Podre.mancha(r * 1.4)
+		add_child(ms)
+		var cp := _centro_bicho(n)
+		ms.global_position = Vector3(cp.x, _jogo.ground_at(cp.x, cp.z) + 0.012, cp.z)
+		nd["mancha"] = ms
+
+
+func _centro_bicho(n: Node3D) -> Vector3:
+	var ab := AABB()
+	var tem := false
+	for m in n.find_children("*", "MeshInstance3D", true, false):
+		var mi := m as MeshInstance3D
+		if not mi.visible or mi.mesh == null:
+			continue
+		var a: AABB = mi.global_transform * mi.get_aabb()
+		ab = a if not tem else ab.merge(a)
+		tem = true
+	return ab.get_center() if tem else n.global_position
+
+
+## Sem carne: o corpo some e ficam uns ossos do tamanho dele.
+func _vira_osso_generico(n: Node3D) -> void:
+	var ab := AABB()
+	var tem := false
+	for m in n.find_children("*", "MeshInstance3D", true, false):
+		var mi := m as MeshInstance3D
+		if mi.mesh == null:
+			continue
+		var a: AABB = mi.global_transform * mi.get_aabb()
+		ab = a if not tem else ab.merge(a)
+		tem = true
+		mi.visible = false
+	if not tem:
+		return
+	var fr := n.global_transform.basis.x if ab.size.x >= ab.size.z else n.global_transform.basis.z
+	var cy: float = _jogo.ground_at(ab.get_center().x, ab.get_center().z)
+	var o := Podre.ossada_generica(ab, fr, cy)
+	add_child(o)
+	o.reparent(n, true)
+	n.set_meta("ossos", true)
+
+
+## O que tem para os urubus comerem: [{key, pos, kg (o que sobra), uid}]. Só o que está
+## no chão (não a vaca pendurada no tripé nem a carne na mesa ou no carrinho).
+func comidas() -> Array:
+	var out := []
+	for uid in _nodes:
+		var nd: Dictionary = _nodes[uid]
+		var c: Dictionary = nd.c
+		if not is_instance_valid(nd.node) or nd.has("corre") or nd.has("cai"):
+			continue
+		var k := float(PODRE_K.get(str(c.esp), 1.0))
+		if _inteira(c) and idade_h(c) >= 1.5:
+			var pr := podre_de(c, float(c.get("comido", 0.0)), k)
+			if float(pr[1]) < 0.97:
+				out.append({"key": str(uid), "pos": _centro_bicho(nd.node), "kg": carcaca_kg(c) * (1.0 - float(pr[1])), "uid": str(uid), "r": clampf(pow(carcaca_kg(c), 0.33) * 0.13, 0.15, 1.0)})
+		for pc in c.get("pecas", []):
+			if str(pc.onde) != "chao":
+				continue
+			var cp := peca_centro(str(uid), int(pc.id))
+			if cp == Vector3.INF:
+				continue
+			out.append({"key": "%s:p:%d" % [uid, int(pc.id)], "pos": cp, "kg": peca_kg(str(uid), pc) * (1.0 - float(pc.get("comido", 0.0))), "uid": str(uid), "r": 0.35})
+		for e in c.get("partes", []):
+			if not (e as Dictionary).has("xf"):
+				continue
+			var pn := _parte_node(str(uid), str(e.tipo))
+			if pn == null or pn.has_meta("ossos"):
+				continue
+			out.append({"key": "%s:t:%s" % [uid, str(e.tipo)], "pos": _centro_bicho(pn), "kg": _parte_kg(c, str(e.tipo)) * (1.0 - float(e.get("comido", 0.0))), "uid": str(uid), "r": 0.25})
+	return out
+
+
+func _parte_kg(c: Dictionary, tipo: String) -> float:
+	var s := float((c.get("p", {}) as Dictionary).get("s", 1.0))
+	match tipo:
+		"buchada":
+			return 55.0 * s * s * s
+		"cabeca":
+			return 18.0 * s * s * s
+	return 4.0 * s * s * s
+
+
+## Um urubu comeu kg do que tem em key (só no dono do mundo: os outros recebem).
+func comer(key: String, kg: float) -> void:
+	if _jogo and _jogo._mp_client():
+		return
+	var ps := key.split(":")
+	var c := couro_de(ps[0])
+	if c.is_empty():
+		return
+	if ps.size() == 1:
+		c["comido"] = minf(1.0, float(c.get("comido", 0.0)) + kg / maxf(carcaca_kg(c), 0.5))
+	elif ps[1] == "p":
+		var pc := peca_de(ps[0], int(ps[2]))
+		if not pc.is_empty():
+			pc["comido"] = minf(1.0, float(pc.get("comido", 0.0)) + kg / maxf(peca_kg(ps[0], pc), 0.2))
+	elif ps[1] == "t":
+		for e in c.get("partes", []):
+			if str(e.tipo) == ps[2]:
+				e["comido"] = minf(1.0, float(e.get("comido", 0.0)) + kg / maxf(_parte_kg(c, ps[2]), 0.2))
+
+
+## Um bicho que morreu sozinho (fome, velhice): fica a carcaça deitada onde caiu.
+func morte_natural(esp: String, id: int, params: Dictionary, pos: Vector3, yaw: float) -> void:
+	if _jogo == null or _jogo._mp_client():
+		return
+	var s := float(params.get("s", 1.0))
+	var xf := Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * s), Vector3(pos.x, _jogo.ground_at(pos.x, pos.z), pos.z))
+	var uid := "%d_%d" % [Time.get_ticks_msec(), _rng.randi() % 100000]
+	carcacas.append({"uid": uid, "esp": esp, "id": id, "p": params, "dia": int(_jogo.sim.elapsed_days()), "t0": agora_h(),
+		"feridas": [], "xf": _xf_json(xf), "natural": true})
+	_rebuild()
+
