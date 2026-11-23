@@ -1,9 +1,9 @@
 {
-  "version": 210,
-  "file": "update_210.zip",
-  "size": 5620666,
-  "sha256": "4af86cbca4a3725ffefc4cb3dd56fbcc3f8c5d8af6346fbc0d906a7e5ffe4b8e",
+  "version": 211,
+  "file": "update_211.zip",
+  "size": 5621247,
+  "sha256": "8c2efe510a4079a7e7f45b1d4e4a91da6d47bd030fe8a19d5ccc71e54df888c6",
   "min_build": 1,
-  "notes": "Mesa de carne: tirar patas e cabeça antes de cortar; soltar a banda",
-  "date": "2026-11-22"
+  "notes": "Tripé pode ser montado no chão torto (pernas de tamanhos diferentes)",
+  "date": "2026-11-23"
 }
