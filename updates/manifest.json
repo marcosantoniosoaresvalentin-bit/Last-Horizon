@@ -1,9 +1,9 @@
 {
-  "version": 215,
-  "file": "update_215.zip",
-  "size": 5850401,
-  "sha256": "32cec9dfa805bb5daeb4952440f1ef7edd7f36c9295f406ec7bb8a63d1953b7c",
+  "version": 216,
+  "file": "update_216.zip",
+  "size": 5860475,
+  "sha256": "855a9d4bf5e26ebdeaaf0289b016dacd2b2b79ff750f7487682d19628e466172",
   "min_build": 1,
-  "notes": "Urubus mais realistas: penas, pescoço pelado enrugado, bico com gancho, asas com as pontas abertas; pousam freando, ficam atentos, andam e pulam, poucos comem de cada vez (os outros esperam, tomam sol de asas abertas e brigam pelo lugar), puxam a carne aos trancos, correm batendo as asas para decolar. Vozes do gado: mugido da vaca, berro do touro, bezerro chamando a mãe (ela responde), bufo de susto. Bicho morto no morro agora deita acompanhando o chão (nem flutua nem entra na terra) e escorrega morro abaixo se for íngreme.",
+  "notes": "Forro do tripé acompanha o morro (as folhas deitam no chão, não flutuam). Mesa de carne nova: ao trabalhar a carne escolhe o corte (pedaços pequenos para cozinhar/fritar ou grandes para assar); aparece a grade de quadradinhos em cima da peça; marca e corta cada um com a faca (e o machado onde tem osso: espinha, costelas, bacia, fêmur); os pedaços pequenos vão numa vasilha de barro (2 kg em cada); os grandes vão para a mochila e podem ser picados em pequenos. Assar: na fogueira acesa, 'Assar a carne' põe o pedaço no espeto; assa em uns 45 min do jogo (crua → assada → queimada se esquecer) e mata bem a fome.",
   "date": "2026-11-23"
 }
