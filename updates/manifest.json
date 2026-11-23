@@ -1,9 +1,9 @@
 {
-  "version": 233,
-  "file": "update_233.zip",
-  "size": 6105310,
-  "sha256": "32535644feec5cef0f5ff726b61e24cf6789a218cd3534b1f2c6716fa72f9d15",
+  "version": 234,
+  "file": "update_234.zip",
+  "size": 6106017,
+  "sha256": "915869693cce383ec9ece320f64439a6d784e0b37b1c5ed52aac3f3365c2a84c",
   "min_build": 1,
-  "notes": "Câmera em terceira pessoa (botão no alto para alternar)",
+  "notes": "Opções gráficas nas Configurações (muito baixo, baixo, médio, alto)",
   "date": "2026-11-23"
 }
