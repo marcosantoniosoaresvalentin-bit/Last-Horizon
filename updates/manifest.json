@@ -1,9 +1,9 @@
 {
-  "version": 224,
-  "file": "update_224.zip",
-  "size": 5885201,
-  "sha256": "f7e521e4357415e080236f1ccf60a5fa6d79fe7ed9f751b683ac3a30bc467bb5",
+  "version": 225,
+  "file": "update_225.zip",
+  "size": 5896733,
+  "sha256": "d76022dc7778572bda5fac692be0941a575a0ffb27be6cee06a99ad254c8ba5a",
   "min_build": 1,
-  "notes": "Livro do Sobrevivente: ensina o jogo todo (abre na primeira vez; depois nas Configurações)",
+  "notes": "Pesca: linha de fibra de coco no cavalete, vara de pesca, arremessar, puxar o peixe com Força, 5 peixes, fritar no fogão",
   "date": "2026-11-23"
 }
