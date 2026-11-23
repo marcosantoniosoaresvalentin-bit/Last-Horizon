@@ -150,6 +150,35 @@ const TIPOS := {
 		"area": Rect2(-1.05, -0.6, 2.1, 1.2),
 		"mesa_carne": true,
 	},
+	# Fogão de barro (fogão caipira): a base de madeira (4 pés de tora, 2 travessas e o
+	# tampo de tábuas) e em cima o fogão: as pedras assentadas no tampo (o chão do fogão e
+	# o forro da boca de fogo) e o barro levantando as paredes, a chapa de barro com as duas
+	# bocas das panelas e a chaminé atrás. Na frente a boca de fogo: lenha fina, rachada no
+	# cepo (a acha grossa não cabe).
+	"fogao": {
+		"nome": "Fogão de Barro",
+		"desc": "Fogão caipira de barro e pedras em cima de uma base de madeira. Primeiro a base (pés, travessas e o tampo de tábuas), depois as pedras do chão do fogão e o barro das paredes, da chapa com as duas bocas de panela e da chaminé. Na boca de fogo vai lenha fina (rachada no cepo em pedaços pequenos); acende com o arco de fogo. Nas bocas vão as vasilhas com carne: cozinhar (com água) ou fritar (mexendo).",
+		"pecas": [
+			["tora", 0.55, Vector3(0.6, 0.275, 0.33), "y", 0.07],      # 0 pé
+			["tora", 0.55, Vector3(0.6, 0.275, -0.33), "y", 0.07],     # 1 pé
+			["tora", 0.55, Vector3(-0.6, 0.275, 0.33), "y", 0.07],     # 2 pé
+			["tora", 0.55, Vector3(-0.6, 0.275, -0.33), "y", 0.07],    # 3 pé
+			["tora", 0.9, Vector3(0.6, 0.6, 0.0), "z", 0.06],          # 4 travessa
+			["tora", 0.9, Vector3(-0.6, 0.6, 0.0), "z", 0.06],         # 5 travessa
+			["tabua", 1.45, Vector3(0.0, 0.695, -0.3), "x", 0.15],     # 6 tampo
+			["tabua", 1.45, Vector3(0.0, 0.695, -0.1), "x", 0.15],     # 7 tampo
+			["tabua", 1.45, Vector3(0.0, 0.695, 0.1), "x", 0.15],      # 8 tampo
+			["tabua", 1.45, Vector3(0.0, 0.695, 0.3), "x", 0.15],      # 9 tampo
+		],
+		"pinos": [
+			[[4, 0], Vector3(0.6, 0.6, 0.33)], [[4, 1], Vector3(0.6, 0.6, -0.33)],
+			[[5, 2], Vector3(-0.6, 0.6, 0.33)], [[5, 3], Vector3(-0.6, 0.6, -0.33)],
+			[[6, 4], Vector3(0.6, 0.68, -0.3)], [[9, 4], Vector3(0.6, 0.68, 0.3)],
+			[[6, 5], Vector3(-0.6, 0.68, -0.3)], [[9, 5], Vector3(-0.6, 0.68, 0.3)],
+		],
+		"area": Rect2(-0.8, -0.5, 1.6, 1.0),
+		"fogao": {"pedras": 10, "barro": 6},
+	},
 	# Torno de oleiro (de pedal): armação quadrada (4 pés com 2 tábuas em cima e uma tábua
 	# atravessada no meio, o mancal, com o furo do eixo). O eixo (tora fina em pé) passa
 	# pelo mancal: em cima dele a mesa giratória (rodela grossa de tora), embaixo o
@@ -406,8 +435,9 @@ static func needs(tipo: String) -> Dictionary:
 	out["cipo_trancado"] = int(tp.get("cordinha", 0))
 	out["corda"] = int(tp.get("corda", 0))
 	out["folha_babacu"] = int(tp.get("forro", 0))
-	out["pedra"] = int(fz.get("pedras", 0))
-	out["barro"] = int(fz.get("barro", 0)) + int(fz.get("porta", 0))
+	var fg: Dictionary = t.get("fogao", {})
+	out["pedra"] = int(fz.get("pedras", 0)) + int(fg.get("pedras", 0))
+	out["barro"] = int(fz.get("barro", 0)) + int(fz.get("porta", 0)) + int(fg.get("barro", 0))
 	return out
 
 
@@ -474,6 +504,10 @@ func complete(mi: int) -> void:
 		p["ped"] = int(fz.pedras)
 		p["bar"] = int(fz.barro)
 		p["porta"] = int(fz.porta)
+	var fg: Dictionary = TIPOS[p.tipo].get("fogao", {})
+	if not fg.is_empty():
+		p["ped"] = int(fg.pedras)
+		p["bar"] = int(fg.barro)
 	_rebuild()
 
 
@@ -617,6 +651,9 @@ func pronta(mi: int) -> bool:
 	var p: Dictionary = plantas[mi]
 	var fz: Dictionary = TIPOS[p.tipo].get("forno", {})
 	if not fz.is_empty() and (int(p.get("ped", 0)) < int(fz.pedras) or int(p.get("bar", 0)) < int(fz.barro) or int(p.get("porta", 0)) < int(fz.porta)):
+		return false
+	var fg: Dictionary = TIPOS[p.tipo].get("fogao", {})
+	if not fg.is_empty() and (int(p.get("ped", 0)) < int(fg.pedras) or int(p.get("bar", 0)) < int(fg.barro)):
 		return false
 	if lamina_count(mi) < lamina_need(str(p.tipo)):
 		return false
@@ -1299,6 +1336,10 @@ func _rebuild() -> void:
 			continue
 		if t.has("forno"):
 			_draw_forno(mi, root, nd)
+			_nodes[mi] = nd
+			continue
+		if t.has("fogao"):
+			_draw_fogao(mi, root, nd)
 			_nodes[mi] = nd
 			continue
 		if t.has("tripe"):
@@ -3373,3 +3414,344 @@ func _load(path: String) -> bool:
 		if (old[i] as Dictionary).has("_ph"):
 			plantas[i]["_ph"] = old[i]._ph
 	return true
+
+
+# ---------- fogão de barro ----------
+# Estado de uso (p.fg): {lenha: [achas], aceso: bool, f: lenha queimando (em lenhas),
+# bocas: [{tipo, modo ("cozinhar"/"fritar"), p, q (queimando), mexe (hora)} ou {}, ...]}
+
+const FOGAO_Y := 0.725            # o chão do fogão (em cima do tampo e das pedras)
+const FOGAO_H := 0.42             # a altura da chapa em cima do chão do fogão
+const FOGAO_W := 0.6              # meia largura (x)
+const FOGAO_D := 0.33             # meia fundura (z); a frente é +z
+const FOGAO_CAP := 5              # lenhas que cabem na boca
+const FOGAO_LARG := 0.095         # a acha mais grossa que passa pela boca (m)
+const FOGAO_BOCAS := [Vector3(0.24, 0.0, 0.02), Vector3(-0.22, 0.0, 0.02)]
+const FOGAO_R_BOCA := 0.11
+const FOGAO_FOGO := Vector3(0.24, 0.0, 0.0)     # o meio da fornalha (embaixo da boca 0)
+
+
+func fogao_st(mi: int) -> Dictionary:
+	var p: Dictionary = plantas[mi]
+	if not p.has("fg"):
+		p["fg"] = {"lenha": [], "aceso": false, "f": 0.0, "bocas": [{}, {}]}
+	return p.fg
+
+
+## O que falta para ficar pronto: "base", "pedra", "barro" ou "".
+func fogao_etapa(mi: int) -> String:
+	var p: Dictionary = plantas[mi]
+	var fg: Dictionary = TIPOS[p.tipo].fogao
+	for b in p.pecas:
+		if not bool(b):
+			return "base"
+	for b in p.pinos:
+		if int(b) < 2:
+			return "base"
+	if int(p.get("ped", 0)) < int(fg.pedras):
+		return "pedra"
+	if int(p.get("bar", 0)) < int(fg.barro):
+		return "barro"
+	return ""
+
+
+func fogao_por(mi: int, what: String) -> void:
+	var p: Dictionary = plantas[mi]
+	var fg: Dictionary = TIPOS[p.tipo].fogao
+	match what:
+		"pedra": p["ped"] = mini(int(p.get("ped", 0)) + 1, int(fg.pedras))
+		"barro": p["bar"] = mini(int(p.get("bar", 0)) + 1, int(fg.barro))
+	_rebuild()
+
+
+## A grossura da acha (o lado maior da seção, m): só a fina passa pela boca do fogão.
+static func acha_larg(acha: Dictionary) -> float:
+	var r := 0.12
+	if acha.has("cil"):
+		r = maxf(float(acha.cil.get("ra", 0.12)), float(acha.cil.get("rb", 0.12)))
+	if not acha.has("sec"):
+		return r * 2.0
+	var mx := 0.0
+	for k in 6:
+		var a := PI * k / 6.0
+		var fx: Vector2 = Arvores.sec_faixa(acha.sec, Vector2(cos(a), sin(a)))
+		mx = maxf(mx, (fx.y - fx.x) * r)
+	return mx
+
+
+static func acha_cabe(acha: Dictionary) -> bool:
+	return acha_larg(acha) <= FOGAO_LARG
+
+
+func fogao_lenha(mi: int, acha: Dictionary) -> void:
+	var g := fogao_st(mi)
+	(g.lenha as Array).append(acha)
+	if bool(g.aceso):
+		g.f = float(g.f) + 1.0
+	_rebuild()
+
+
+func fogao_acender(mi: int) -> void:
+	var g := fogao_st(mi)
+	if (g.lenha as Array).is_empty():
+		return
+	g.aceso = true
+	g.f = float((g.lenha as Array).size())
+	_rebuild()
+
+
+func fogao_boca_mundo(mi: int) -> Vector3:
+	return xform(mi) * Vector3(FOGAO_FOGO.x, FOGAO_Y + 0.1, FOGAO_D + 0.15)
+
+
+func fogao_panela_mundo(mi: int, k: int) -> Vector3:
+	var b: Vector3 = FOGAO_BOCAS[k]
+	return xform(mi) * Vector3(b.x, FOGAO_Y + FOGAO_H, b.z)
+
+
+## O fogo: vai queimando a lenha (horas do jogo); acabou, apaga. As bocas: a de cima da
+## fornalha esquenta mais que a de trás.
+func fogao_tick(mi: int, dh: float) -> void:
+	var g := fogao_st(mi)
+	if not bool(g.aceso):
+		return
+	var f := float(g.f) - dh / 0.22                 # uma lenha fina queima em uns 13 min do jogo
+	var n := (g.lenha as Array).size()
+	while n > 0 and f < float(n) - 1.0:
+		(g.lenha as Array).pop_front()
+		n -= 1
+	if f <= 0.0:
+		g.f = 0.0
+		g.aceso = false
+		g.lenha = []
+		_rebuild()
+		return
+	g.f = f
+
+
+func fogao_calor(mi: int, k: int) -> float:
+	var g := fogao_st(mi)
+	if not bool(g.aceso):
+		return 0.0
+	var forte := clampf(0.6 + float(g.f) * 0.15, 0.6, 1.4)
+	return forte * (1.0 if k == 0 else 0.6)
+
+
+static var _barro_mat: StandardMaterial3D = null
+
+static func _barro_m() -> StandardMaterial3D:
+	if _barro_mat == null:
+		_barro_mat = StandardMaterial3D.new()
+		_barro_mat.albedo_color = Color(0.46, 0.3, 0.2)
+		_barro_mat.roughness = 1.0
+		_barro_mat.metallic_specular = 0.05
+		_barro_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		# o barro alisado à mão: manchas e marcas (textura de ruído)
+		var nt := NoiseTexture2D.new()
+		var fn := FastNoiseLite.new()
+		fn.frequency = 0.05
+		nt.noise = fn
+		nt.width = 128
+		nt.height = 128
+		nt.seamless = true
+		var gtx := Gradient.new()
+		gtx.colors = PackedColorArray([Color(0.86, 0.82, 0.78), Color(1.0, 1.0, 1.0), Color(1.04, 1.0, 0.97)])
+		gtx.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+		nt.color_ramp = gtx
+		_barro_mat.albedo_texture = nt
+		_barro_mat.uv1_triplanar = true
+		_barro_mat.uv1_scale = Vector3(1.6, 1.6, 1.6)
+	return _barro_mat
+
+
+## Uma caixa (no SurfaceTool), de mn a mx.
+static func _cx(st: SurfaceTool, mn: Vector3, mx: Vector3) -> void:
+	var c := (mn + mx) * 0.5
+	var e := (mx - mn) * 0.5
+	for f in [[Vector3.RIGHT, Vector3.UP, Vector3.BACK], [Vector3.LEFT, Vector3.BACK, Vector3.UP], [Vector3.UP, Vector3.BACK, Vector3.RIGHT],
+			[Vector3.DOWN, Vector3.RIGHT, Vector3.BACK], [Vector3.BACK, Vector3.RIGHT, Vector3.UP], [Vector3.FORWARD, Vector3.UP, Vector3.RIGHT]]:
+		var n: Vector3 = f[0]
+		var u: Vector3 = f[1]
+		var v: Vector3 = f[2]
+		var o := c + n * e
+		var uu := u * e
+		var vv := v * e
+		var q := [o - uu - vv, o + uu - vv, o + uu + vv, o - uu + vv]
+		for t in [0, 1, 2, 0, 2, 3]:
+			st.set_normal(n)
+			st.add_vertex(q[t])
+
+
+## O fogão: as pedras (até onde foram postas), o barro subindo (paredes, chapa com as
+## duas bocas, chaminé), a boca de fogo escura na frente, a lenha, o fogo e a fumaça.
+func _draw_fogao(mi: int, root: Node3D, nd: Dictionary) -> void:
+	var p: Dictionary = plantas[mi]
+	var fg: Dictionary = TIPOS[p.tipo].fogao
+	var nped := int(p.get("ped", 0))
+	var fbar := float(p.get("bar", 0)) / float(fg.barro)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 900 + mi
+	var y0 := FOGAO_Y - 0.03
+	# as pedras: o chão do fogão e o forro da fornalha (embaixo da boca 0), em fileira
+	for k in nped:
+		var a := float(k) / float(fg.pedras)
+		var pos := Vector3(lerpf(-0.48, 0.48, fmod(a * 2.0, 1.0)), y0 + 0.02, -0.16 if k % 2 == 0 else 0.16)
+		var pm := SphereMesh.new()
+		var r := rng.randf_range(0.07, 0.1)
+		pm.radius = r
+		pm.height = r * 1.2
+		pm.radial_segments = 7
+		pm.rings = 4
+		var pd := MeshInstance3D.new()
+		pd.mesh = pm
+		pd.material_override = _fzm("pedra")
+		pd.position = pos
+		pd.rotation = Vector3(rng.randf(), rng.randf() * 3.0, rng.randf())
+		root.add_child(pd)
+	if fbar <= 0.0:
+		return
+	# o barro: as paredes subindo; com tudo, a chapa (com as bocas) e a chaminé
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var hw := FOGAO_H * minf(1.0, fbar * 1.25)
+	var t := 0.06
+	var yb := y0
+	var yt := y0 + hw
+	_cx(st, Vector3(-FOGAO_W, yb, -FOGAO_D), Vector3(-FOGAO_W + t, yt, FOGAO_D))        # parede esquerda
+	_cx(st, Vector3(FOGAO_W - t, yb, -FOGAO_D), Vector3(FOGAO_W, yt, FOGAO_D))          # parede direita
+	_cx(st, Vector3(-FOGAO_W, yb, -FOGAO_D), Vector3(FOGAO_W, yt, -FOGAO_D + t))        # fundo
+	# a frente, com a boca de fogo (embaixo da boca 0)
+	var bx0 := FOGAO_FOGO.x - 0.13
+	var bx1 := FOGAO_FOGO.x + 0.13
+	var by1 := minf(yt, y0 + 0.2)
+	_cx(st, Vector3(-FOGAO_W, yb, FOGAO_D - t), Vector3(bx0, yt, FOGAO_D))
+	_cx(st, Vector3(bx1, yb, FOGAO_D - t), Vector3(FOGAO_W, yt, FOGAO_D))
+	if yt > by1:
+		_cx(st, Vector3(bx0, by1, FOGAO_D - t), Vector3(bx1, yt, FOGAO_D))
+	# a parede de dentro que separa a fornalha (o fogo fica só embaixo da boca 0)
+	_cx(st, Vector3(-0.02, yb, -FOGAO_D), Vector3(0.03, yt, FOGAO_D))
+	if fbar >= 1.0:
+		# a chapa de barro, furada nas duas bocas (quadradinhos fora dos furos)
+		var cel := 0.04
+		var nx := int(FOGAO_W * 2.0 / cel)
+		var nz := int(FOGAO_D * 2.0 / cel)
+		for i in nx:
+			for j in nz:
+				var x0 := -FOGAO_W + i * cel
+				var z0 := -FOGAO_D + j * cel
+				var cc := Vector3(x0 + cel * 0.5, 0, z0 + cel * 0.5)
+				var fura := false
+				for b in FOGAO_BOCAS:
+					if Vector2(cc.x - (b as Vector3).x, cc.z - (b as Vector3).z).length() < FOGAO_R_BOCA:
+						fura = true
+				if fura:
+					continue
+				_cx(st, Vector3(x0, yt, z0), Vector3(x0 + cel, yt + 0.05, z0 + cel))
+		# a chaminé atrás, à esquerda
+		_cx(st, Vector3(-FOGAO_W + 0.02, yt, -FOGAO_D + 0.02), Vector3(-FOGAO_W + 0.18, yt + 0.62, -FOGAO_D + 0.18))
+	var bm := MeshInstance3D.new()
+	bm.mesh = st.commit()
+	bm.material_override = _barro_m()
+	root.add_child(bm)
+	# a boca de fogo escura e o fundo das bocas de panela (o escuro de dentro)
+	var bq := MeshInstance3D.new()
+	var bqm := QuadMesh.new()
+	bqm.size = Vector2(0.26, by1 - yb)
+	bq.mesh = bqm
+	bq.material_override = _fzm("escuro")
+	bq.position = Vector3(FOGAO_FOGO.x, (yb + by1) * 0.5, -FOGAO_D + t + 0.01)     # o fundo da fornalha (escuro)
+	root.add_child(bq)
+	# as paredes de dentro da fornalha (escuras de fuligem)
+	for sx in [-1.0, 1.0]:
+		var pq := MeshInstance3D.new()
+		var pqm := QuadMesh.new()
+		pqm.size = Vector2(FOGAO_D * 2.0 - t * 2.0, by1 - yb)
+		pq.mesh = pqm
+		pq.material_override = _fzm("escuro")
+		pq.rotation.y = PI * 0.5
+		pq.position = Vector3(FOGAO_FOGO.x + sx * 0.13, (yb + by1) * 0.5, 0.0)
+		root.add_child(pq)
+	if fbar < 1.0:
+		return
+	for b in FOGAO_BOCAS:
+		var fd := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = FOGAO_R_BOCA
+		cm.bottom_radius = FOGAO_R_BOCA
+		cm.height = 0.01
+		cm.radial_segments = 16
+		fd.mesh = cm
+		fd.material_override = _fzm("escuro")
+		fd.position = Vector3((b as Vector3).x, yt + 0.005, (b as Vector3).z)
+		root.add_child(fd)
+	var g := fogao_st(mi)
+	# a lenha na fornalha (as mesmas achas, deitadas apontando para a boca)
+	var ach: Array = g.lenha
+	for k in ach.size():
+		var ln: Node3D = _arv.free_log_node(ach[k])
+		ln.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5) * Basis(Vector3.UP, float(k) * 1.3),
+			Vector3(FOGAO_FOGO.x + (k % 3 - 1) * 0.07, y0 + 0.05 + (k / 3) * 0.05, -0.02))
+		root.add_child(ln)
+	# o fogo (aceso) e a luz
+	var chama := CPUParticles3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.12, 0.16)
+	chama.mesh = qm
+	chama.material_override = _fzm("fogo")
+	chama.amount = 22
+	chama.lifetime = 0.5
+	chama.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	chama.emission_box_extents = Vector3(0.1, 0.03, 0.2)
+	chama.direction = Vector3.UP
+	chama.spread = 15.0
+	chama.gravity = Vector3(0, 1.0, 0)
+	chama.initial_velocity_min = 0.15
+	chama.initial_velocity_max = 0.4
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
+	grad.colors = PackedColorArray([Color(1.0, 0.85, 0.35, 0.95), Color(1.0, 0.45, 0.08, 0.8), Color(0.6, 0.1, 0.02, 0.0)])
+	chama.color_ramp = grad
+	chama.position = Vector3(FOGAO_FOGO.x, y0 + 0.08, 0.0)
+	root.add_child(chama)
+	nd["chama"] = chama
+	var luz := OmniLight3D.new()
+	luz.light_color = Color(1.0, 0.55, 0.2)
+	luz.light_energy = 1.2
+	luz.omni_range = 3.0
+	luz.position = Vector3(FOGAO_FOGO.x, y0 + 0.15, FOGAO_D + 0.3)
+	root.add_child(luz)
+	nd["luz"] = luz
+	# a brasa no chão da fornalha (brilha com o fogo)
+	var br := MeshInstance3D.new()
+	var brm := BoxMesh.new()
+	brm.size = Vector3(0.22, 0.02, FOGAO_D * 1.6)
+	br.mesh = brm
+	br.material_override = _fzm("brasa")
+	br.position = Vector3(FOGAO_FOGO.x, y0 + 0.02, 0.0)
+	root.add_child(br)
+	nd["brasa"] = br
+	var fum: Node3D = load("res://scripts/world/fumaca.gd").new()
+	fum.position = Vector3(-FOGAO_W + 0.1, yt + 0.66, -FOGAO_D + 0.1)
+	root.add_child(fum)
+	nd["fumaca"] = fum
+	fogao_visual(mi, nd)
+
+
+func fogao_visual(mi: int, nd := {}) -> void:
+	if nd.is_empty():
+		if not _nodes.has(mi):
+			return
+		nd = _nodes[mi]
+	if not pronta(mi):
+		return
+	var aceso := bool(fogao_st(mi).aceso)
+	if nd.has("chama") and is_instance_valid(nd.chama):
+		(nd.chama as CPUParticles3D).emitting = aceso
+		(nd.chama as CPUParticles3D).visible = aceso
+	if nd.has("luz") and is_instance_valid(nd.luz):
+		(nd.luz as OmniLight3D).visible = aceso
+	if nd.has("brasa") and is_instance_valid(nd.brasa):
+		(nd.brasa as Node3D).visible = aceso
+	if nd.has("fumaca") and is_instance_valid(nd.fumaca):
+		nd.fumaca.set_emitting(aceso)
+

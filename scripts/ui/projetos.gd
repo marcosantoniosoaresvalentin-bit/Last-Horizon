@@ -209,7 +209,7 @@ func _draw_plan() -> void:
 	var s := _draw.size
 	var sc := minf(s.x / 6.6, s.y / 3.2)
 	var o := Vector2(s.x * 0.5, s.y - 18)
-	if t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho") or t.has("amarrar") or t.has("mesa_carne"):
+	if t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho") or t.has("amarrar") or t.has("mesa_carne") or t.has("fogao"):
 		sc = minf(s.x / 2.8, s.y / 1.25)          # máquina pequena: desenho maior
 	if t.has("tripe"):
 		sc = minf(s.x / 8.0, s.y / 5.0)
@@ -246,7 +246,7 @@ func _draw_plan() -> void:
 			_draw.draw_line(P.call(x0, 0.03), P.call(x0 + 0.5, 0.03), C_HI, 3.0)
 		_draw.draw_string(fnt, P.call(-1.9, -0.25), "FORRO DE FOLHA DE BABAÇU", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
 		return
-	var small := t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho") or t.has("amarrar") or t.has("mesa_carne")
+	var small := t.has("laminas") or t.has("mesa") or t.has("torno") or t.has("filtro") or t.has("forno") or t.has("carrinho") or t.has("amarrar") or t.has("mesa_carne") or t.has("fogao")
 	_draw.draw_line(P.call(-3.2 if not small else -1.2, 0), P.call(3.2 if not small else 0.9, 0), C_DIM, 1.5)
 	for pc in t.pecas:
 		var c: Vector3 = pc[2]
@@ -294,6 +294,23 @@ func _draw_plan() -> void:
 		_draw.draw_string(font, P.call(0.62, 0.62), "EIXO DE GALHO", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_DIM)
 		_draw.draw_string(font, P.call(-0.4, 0.7), "CAIXA DE TÁBUAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)
 		_draw.draw_string(font, P.call(-1.05, 0.38), "ALÇAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_DIM)
+		return
+	if t.has("fogao"):
+		# o fogão de barro em cima da base: o corpo, a boca de fogo, as bocas e a chaminé
+		var y0 := Maquinas.FOGAO_Y
+		var yt := y0 + Maquinas.FOGAO_H
+		var corpo := Rect2(P.call(-Maquinas.FOGAO_W, yt), P.call(Maquinas.FOGAO_W, y0) - P.call(-Maquinas.FOGAO_W, yt))
+		_draw.draw_rect(corpo, C_HI, false, 2.5)
+		var bx: float = Maquinas.FOGAO_FOGO.x
+		_draw.draw_rect(Rect2(P.call(bx - 0.13, y0 + 0.2), P.call(bx + 0.13, y0) - P.call(bx - 0.13, y0 + 0.2)), C_HI, false, 2.0)
+		_draw.draw_rect(Rect2(P.call(-Maquinas.FOGAO_W + 0.02, yt + 0.62), P.call(-Maquinas.FOGAO_W + 0.18, yt) - P.call(-Maquinas.FOGAO_W + 0.02, yt + 0.62)), C_HI, false, 2.0)
+		for b in Maquinas.FOGAO_BOCAS:
+			_draw.draw_line(P.call((b as Vector3).x - Maquinas.FOGAO_R_BOCA, yt + 0.02), P.call((b as Vector3).x + Maquinas.FOGAO_R_BOCA, yt + 0.02), C_INK, 4.0)
+		_draw.draw_string(font, P.call(-0.4, yt + 0.12), "BOCAS DAS PANELAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
+		_draw.draw_string(font, P.call(-0.45, yt + 0.68), "CHAMINÉ", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
+		_draw.draw_string(font, P.call(-0.5, y0 + 0.25), "BARRO E PEDRAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_HI)
+		_draw.draw_string(font, P.call(0.42, y0 + 0.1), "BOCA DE FOGO", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_DIM)
+		_draw.draw_string(font, P.call(0.66, 0.35), "BASE DE MADEIRA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, C_DIM)
 		return
 	if t.has("mesa_carne"):
 		_draw.draw_string(font, P.call(-0.5, 1.12), "TAMPO: 4 TÁBUAS DE COMPRIDO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, C_HI)

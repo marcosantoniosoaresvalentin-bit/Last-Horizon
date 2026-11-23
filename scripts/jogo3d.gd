@@ -1594,6 +1594,8 @@ func _process(delta: float) -> void:
 		_capins.dia(int(sim.elapsed_days()))     # o capim seca no fim do mês e rebrota
 	if _fogos:
 		_assar_tick(delta)
+	if _maq:
+		_fogao_tick(delta)
 	if _fogos and Engine.get_process_frames() % 6 == 0:
 		_fogos.atualizar()                       # o fogo baixa e apaga pelo relógio
 		if bool(sim.raining) and not _mp_client():
@@ -2841,6 +2843,9 @@ func comer(id: String) -> String:
 	_update_inventory()
 	_fome = minf(100.0, _fome + float(it.fome))
 	_sede = minf(100.0, _sede + float(it.get("sede", 0.0)))
+	if id.begins_with("vasilha_carne_"):
+		add_item("vasilha_barro", 1)              # comeu: fica a vasilha vazia
+		_update_inventory()
 	Sons.play_at(self, "folha_cai", _player.position + Vector3.UP * 1.5, -16.0, 0.8)
 	return "Você comeu %s. (fome %d de 100)" % [Itens.nome(id).to_lower(), roundi(_fome)]
 
@@ -3224,6 +3229,10 @@ func _update_ctx_btn() -> void:
 			_ctx_btn.text = "Fazer a porta de barro"
 		else:
 			_ctx_btn.text = "Levantar a parede de barro (%d/%d)" % [int(_maq.plantas[fmi].get("bar", 0)) + 1, int(Maquinas.TIPOS.forno.forno.barro)]
+	elif _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _fogao_precisa("barro") >= 0:
+		var gmi2 := _fogao_precisa("barro")
+		_ctx_action = "fogao_barro"
+		_ctx_btn.text = "Pôr barro no fogão (%d/%d)" % [int(_maq.plantas[gmi2].get("bar", 0)) + 1, int(Maquinas.TIPOS.fogao.fogao.barro)]
 	elif _mao == "balde" and str(_balde_carga.get("tipo", "")) == "barro" and _crouch_job == "" and not _air and _reb.is_empty() and _constr and _maq.planta_near(_player.position, 2.0) < 0 and not _constr.reboco_spots(_player.position, 2.6).is_empty():
 		_ctx_action = "rebocar"
 		_ctx_btn.text = "Rebocar com barro"
@@ -3381,7 +3390,7 @@ func _ctx_press() -> void:
 					_show_toast("+1 folha seca de buriti")
 				_act_check = 0.0
 			return
-		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar", "forno_pedra", "forno_barro", "car_eixo", "car_roda", "car_cipo", "amarrar_cipo":
+		"planta_peca", "planta_lamina", "sobra", "pedalar", "empurrar", "tora_serra", "saida_pegar", "forno_pedra", "forno_barro", "fogao_pedra", "fogao_barro", "car_eixo", "car_roda", "car_cipo", "amarrar_cipo":
 			_maq_ctx_press(_ctx_action)
 			return
 		"car_soltar", "car_lenha", "car_balde", "car_encher", "car_empurrar":
@@ -13197,6 +13206,11 @@ func _maq_ctx() -> bool:
 			_ctx_action = "forno_pedra"
 			_ctx_btn.text = "Encaixar pedra (%d/%d)" % [int(p.get("ped", 0)) + 1, int(fz.pedras)]
 			return true
+	var fgz: Dictionary = Maquinas.TIPOS[p.tipo].get("fogao", {})
+	if not fgz.is_empty() and _carry.is_empty() and _maq.fogao_etapa(mi) == "pedra" and (item_qtd("pedra") > 0 or teste):
+		_ctx_action = "fogao_pedra"
+		_ctx_btn.text = "Assentar pedra (%d/%d)" % [int(p.get("ped", 0)) + 1, int(fgz.pedras)]
+		return true
 	if _maq.amarras_falta(mi) > 0 and _carry.is_empty() and (item_qtd("cipo") > 0 or teste):
 		_ctx_action = "amarrar_cipo"
 		var am: Dictionary = Maquinas.TIPOS[p.tipo].amarrar
@@ -13287,6 +13301,25 @@ func _maq_ctx_press(act: String) -> void:
 			var fz2: Dictionary = Maquinas.TIPOS.forno.forno
 			var pp: Dictionary = _maq.plantas[mi]
 			_show_toast(("Pedra encaixada no barro (%d de %d)." % [int(pp.ped), int(fz2.pedras)]) + (" Agora faça a porta de barro (mais um balde de barro)." if int(pp.ped) >= int(fz2.pedras) else ""))
+			return
+		"fogao_pedra":
+			if not teste:
+				remove_item("pedra", 1)
+				_update_inventory()
+			_maq.fogao_por(mi, "pedra")
+			Sons.play_at(self, "pedra_bate", _maq.xform(mi).origin + Vector3.UP * 0.75, -6.0, 1.1)
+			_act_check = 0.0
+			return
+		"fogao_barro":
+			var gm := _fogao_precisa("barro")
+			if gm < 0:
+				return
+			_balde_carga = {}
+			_update_balde_fill(_balde_fill, _balde_carga)
+			_update_inventory()
+			_maq.fogao_por(gm, "barro")
+			Sons.play_at(self, "cavar", _maq.xform(gm).origin + Vector3.UP * 0.9, -4.0, 1.3)
+			_act_check = 0.0
 			return
 		"forno_barro":
 			var etapa: String = _maq.forno_etapa(mi)
@@ -15263,7 +15296,7 @@ func _fogueira_pick(i: int, acao: String) -> void:
 # a fogueira (ponha lenha logo, só o capim queima pouco).
 const ARCO_SOPROS := 4
 
-func fogo_start(forno_mi := -1) -> String:
+func fogo_start(forno_mi := -1, fogao_mi := -1) -> String:
 	if not _arco.is_empty():
 		return ""
 	var falta := []
@@ -15282,6 +15315,8 @@ func fogo_start(forno_mi := -1) -> String:
 	var spot := _front(0.85)
 	if forno_mi >= 0:
 		spot = _maq.forno_boca(forno_mi)       # acende a lenha na boca do forno
+	elif fogao_mi >= 0:
+		spot = _maq.fogao_boca_mundo(fogao_mi)  # e na boca de fogo do fogão
 	elif _fogos:
 		var fi: int = _fogos.near(spot, 1.0)
 		if fi < 0:
@@ -15323,7 +15358,7 @@ func fogo_start(forno_mi := -1) -> String:
 	soprar.visible = false
 	soprar.pressed.connect(_arco_soprar)
 	ui.add_child(soprar)
-	_arco = {"ui": ui, "sair": sair, "soprar": soprar, "calor": 0.0, "brasa": false, "sopros": 0, "spot": spot, "forno": forno_mi,
+	_arco = {"ui": ui, "sair": sair, "soprar": soprar, "calor": 0.0, "brasa": false, "sopros": 0, "spot": spot, "forno": forno_mi, "fogao": fogao_mi,
 		"x": -1.0, "dir": 0, "ida": 0.0, "giro": 0.0, "bow": 0.0, "tid": -9}
 	_face_to(spot)
 	_yaw = _face
@@ -15578,6 +15613,11 @@ func _arco_soprar() -> void:
 			_show_toast("A ripa da base ficou toda furada e foi embora.")
 		_update_inventory()
 	Sons.play_at(self, "estalo", spot, -6.0, 0.9)
+	var gmi := int(_arco.get("fogao", -1))
+	if gmi >= 0:
+		_maq.fogao_acender(gmi)
+		_arco_end()
+		return
 	var fmi := int(_arco.get("forno", -1))
 	if fmi >= 0:
 		_maq.forno_acender(fmi)
@@ -16874,7 +16914,7 @@ func _olho_tick() -> void:
 		cands.append([cp, pp.distance_to(Vector2(co.x, co.z))])
 	if _maq:
 		var mi: int = _maq.planta_near(_player.position, 2.2)
-		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho", "trancador", "mesa_carne"] and _maq.pronta(mi) and _tranca.is_empty() and _carne.is_empty() and _mc.is_empty():
+		if mi >= 0 and str(_maq.plantas[mi].tipo) in ["desfibradeira", "mesa_argila", "torno_ceramica", "filtro_agua", "forno", "carrinho", "trancador", "mesa_carne", "fogao"] and _maq.pronta(mi) and _tranca.is_empty() and _carne.is_empty() and _mc.is_empty():
 			var mo: Vector3 = _maq.xform(mi).origin
 			cands.append([{"maq": mi}, maxf(0.0, pp.distance_to(Vector2(mo.x, mo.z)) - 0.8)])
 	if _fogos:
@@ -16907,6 +16947,8 @@ func _olho_opts(p: Dictionary) -> Array:
 	if p.has("maq"):
 		if str(_maq.plantas[int(p.maq)].tipo) == "forno":
 			return _forno_opts(int(p.maq))
+		if str(_maq.plantas[int(p.maq)].tipo) == "fogao":
+			return _fogao_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "carrinho":
 			return _car_opts(int(p.maq))
 		if str(_maq.plantas[int(p.maq)].tipo) == "trancador":
@@ -16988,6 +17030,7 @@ func _olho_layout() -> Dictionary:
 func _draw_bur_ui() -> void:
 	_draw_fornos()
 	_draw_espetos()
+	_draw_fogoes()
 	_tranca_draw()
 	_laco_draw()
 	_tri_draw()
@@ -17174,6 +17217,10 @@ func _olho_pick(acao: String) -> void:
 		"forno_lenha", "forno_acender", "forno_fechar", "forno_abrir", "forno_carvao":
 			_forno_pick(int(p.maq), acao)
 			return
+	if acao.begins_with("fogao_"):
+		_fogao_pick(int(p.maq), acao)
+		return
+	match acao:
 		"car_despejar", "car_pegar_lenha", "car_tirar_itens":
 			_car_pick(int(p.maq), acao)
 			return
@@ -17907,4 +17954,346 @@ void fragment() {
 	carne.material_override = mt
 	giro.add_child(carne)
 	return root
+
+
+# ================== FOGÃO DE BARRO ==================
+# Construído pela planta: a base de madeira; depois "Assentar pedra" (10 pedras do chão) e
+# "Pôr barro no fogão" (6 baldes de barro). Pronto, pelo olho: "Pôr lenha" (só a lenha
+# fina, rachada no cepo em pedaços pequenos, passa pela boca de fogo), "Acender" (o arco
+# de fogo na boca), e em cada uma das duas bocas "Pôr a vasilha" (a vasilha com carne
+# picada): cozinhar (com água da cabaça) ou fritar (na gordura da própria carne, tem que
+# mexer). A boca em cima da fornalha esquenta mais. De perto, um relógio em cada vasilha.
+# Pronta: "Tirar a vasilha" (a carne cozida ou frita, que já se come; comendo, fica a
+# vasilha vazia). Esquecida no fogo: queima.
+
+const COZ_H := {"cozinhar": 0.5, "fritar": 0.3}     # horas do jogo na boca quente, fogo médio
+const FRITA_MEXER_H := 0.08                         # sem mexer mais que isso, a fritura gruda e queima
+var _fogao_nos := {}                                # "mi:k" -> Node3D (a vasilha na boca)
+
+
+## Fogão em construção aqui perto esperando essa etapa (ou -1).
+func _fogao_precisa(etapa: String) -> int:
+	if _maq == null:
+		return -1
+	var mi: int = _maq.planta_near(_player.position, 2.2)
+	if mi < 0 or str(_maq.plantas[mi].tipo) != "fogao":
+		return -1
+	return mi if _maq.fogao_etapa(mi) == etapa else -1
+
+
+## As achas da mochila que passam pela boca do fogão.
+func _lenhas_finas() -> Array:
+	_lenha_fix()
+	var out := []
+	for i in _lenhas.size():
+		if Maquinas.acha_cabe(_lenhas[i]):
+			out.append(i)
+	return out
+
+
+func _fogao_opts(mi: int) -> Array:
+	var g: Dictionary = _maq.fogao_st(mi)
+	var op := []
+	var n := (g.lenha as Array).size()
+	var na_mao := not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1 and Maquinas.acha_cabe(_carry)
+	if n < Maquinas.FOGAO_CAP and (na_mao or not _lenhas_finas().is_empty()):
+		op.append(["fogao_lenha", "Pôr lenha"])
+	if not bool(g.aceso) and n > 0:
+		op.append(["fogao_acender", "Acender"])
+	var nomes := ["boca do fogo", "boca do lado"]
+	for k in 2:
+		var b: Dictionary = (g.bocas as Array)[k]
+		if b.is_empty():
+			if item_qtd("vasilha_carne") > 0:
+				op.append(["fogao_panela_%d" % k, "Pôr a vasilha (%s)" % nomes[k]])
+		else:
+			if str(b.modo) == "fritar" and float(b.p) < 1.0:
+				op.append(["fogao_mexer_%d" % k, "Mexer a carne (%s)" % nomes[k]])
+			op.append(["fogao_tirar_%d" % k, "Tirar a vasilha (%s)" % nomes[k]])
+	return op
+
+
+func _cabaca_goles() -> int:
+	var t := 0
+	for mid in ["moringa_limpa", "moringa_agua"]:
+		for v in _dur_fix(mid):
+			t += int(v)
+	return t
+
+
+## Tira 2 goles de água das cabaças (a filtrada primeiro).
+func _gasta_agua(goles: int) -> bool:
+	if _cabaca_goles() < goles:
+		return false
+	var falta := goles
+	for mid in ["moringa_limpa", "moringa_agua"]:
+		while falta > 0 and item_qtd(mid) > 0:
+			var l := _dur_fix(mid)
+			if l.is_empty():
+				break
+			l[0] = int(l[0]) - 1
+			falta -= 1
+			if int(l[0]) <= 0:
+				l.pop_front()
+				_dur[mid] = l
+				remove_item(mid, 1)
+				add_item("moringa_barro", 1)
+			else:
+				_dur[mid] = l
+			_dur_fix(mid)
+	return true
+
+
+func _fogao_pick(mi: int, acao: String) -> void:
+	var g: Dictionary = _maq.fogao_st(mi)
+	var boca: Vector3 = _maq.fogao_boca_mundo(mi)
+	if acao == "fogao_lenha":
+		var cabe: int = Maquinas.FOGAO_CAP - (g.lenha as Array).size()
+		if not _carry.is_empty() and int(_carry.get("lenha", 0)) >= 1 and Maquinas.acha_cabe(_carry) and cabe > 0:
+			var am: Dictionary = _carry.duplicate(true)
+			for k in ["pos", "yaw", "golpes", "em_pe"]:
+				am.erase(k)
+			_soltar_carga()
+			_maq.fogao_lenha(mi, am)
+		else:
+			var finas := _lenhas_finas()
+			var nl := mini(cabe, finas.size())
+			if nl <= 0:
+				return
+			finas.reverse()
+			for k in nl:
+				var acha: Dictionary = _lenhas[int(finas[k])]
+				_lenhas.remove_at(int(finas[k]))
+				_itens["lenha"] = int(_itens.get("lenha", 0)) - 1
+				if int(_itens.lenha) <= 0:
+					_itens.erase("lenha")
+				_maq.fogao_lenha(mi, acha)
+			_update_inventory()
+		_face_to(boca)
+		Sons.play_at(self, "baque", boca, -12.0, 1.3)
+		return
+	if acao == "fogao_acender":
+		_face_to(boca)
+		_yaw = _face
+		var msg := fogo_start(-1, mi)
+		if msg != "":
+			_show_toast(msg)
+		return
+	var k := int(acao.substr(acao.length() - 1))
+	var bocas: Array = g.bocas
+	if acao.begins_with("fogao_panela_"):
+		if item_qtd("vasilha_carne") <= 0 or not (bocas[k] as Dictionary).is_empty():
+			return
+		var por := func(modo: String) -> void:
+			if item_qtd("vasilha_carne") <= 0 or not (bocas[k] as Dictionary).is_empty():
+				return
+			if modo == "cozinhar" and not _gasta_agua(2):
+				return
+			remove_item("vasilha_carne", 1)
+			_update_inventory()
+			bocas[k] = {"modo": modo, "p": 0.0, "q": 0.0, "mexe": _agora_h()}
+			Sons.play_at(self, "agua" if modo == "cozinhar" else "baque", _maq.fogao_panela_mundo(mi, k), -12.0, 1.2)
+		var opts := []
+		if _cabaca_goles() >= 2:
+			opts.append(["Cozinhar", "Com água da cabaça (2 goles):\na carne cozida no caldo.", func(): por.call("cozinhar")])
+		opts.append(["Fritar", "Na gordura da própria carne,\nmais depressa. Tem que mexer\nsenão gruda e queima.", func(): por.call("fritar")])
+		_choice_menu("NO FOGÃO", "Como fazer a carne", opts)
+		return
+	var b: Dictionary = bocas[k]
+	if b.is_empty():
+		return
+	if acao.begins_with("fogao_mexer_"):
+		b.mexe = _agora_h()
+		Sons.play_at(self, "fibra_bate", _maq.fogao_panela_mundo(mi, k), -14.0, 1.6)
+		return
+	if acao.begins_with("fogao_tirar_"):
+		var item := "vasilha_carne"
+		if float(b.get("q", 0.0)) >= 1.0:
+			item = "vasilha_carne_queimada"
+		elif float(b.p) >= 1.0:
+			item = "vasilha_carne_cozida" if str(b.modo) == "cozinhar" else "vasilha_carne_frita"
+		if _bag_total() + Itens.kg(item) > BAG_MAX:
+			return
+		bocas[k] = {}
+		add_item(item, 1)
+		_update_inventory()
+		Sons.play_at(self, "baque", _maq.fogao_panela_mundo(mi, k), -14.0, 1.1)
+
+
+func _agora_h() -> float:
+	return float(sim.steps) / float(sim.STEPS_DAY) * 24.0
+
+
+func _fogao_tick(delta: float) -> void:
+	var dh := delta / maxf(float(sim.real_s_por_hora()), 1.0)
+	for mi in _maq.plantas.size():
+		if str(_maq.plantas[mi].tipo) != "fogao" or not _maq.pronta(mi):
+			continue
+		var g: Dictionary = _maq.fogao_st(mi)
+		var aceso0 := bool(g.aceso)
+		if not _mp_client():
+			_maq.fogao_tick(mi, dh)
+		if bool(g.aceso) != aceso0:
+			_maq.fogao_visual(mi)
+		var bocas: Array = g.bocas
+		for k in 2:
+			var key := "%d:%d" % [mi, k]
+			var b: Dictionary = bocas[k]
+			if b.is_empty():
+				if _fogao_nos.has(key):
+					if is_instance_valid(_fogao_nos[key]):
+						(_fogao_nos[key] as Node).queue_free()
+					_fogao_nos.erase(key)
+				continue
+			var cal: float = _maq.fogao_calor(mi, k)
+			if not _mp_client() and cal > 0.0:
+				var T := float(COZ_H.get(str(b.modo), 0.5))
+				b.p = float(b.p) + cal * dh / T
+				if str(b.modo) == "cozinhar":
+					if float(b.p) > 2.0:
+						b.q = float(b.get("q", 0.0)) + cal * dh / 0.3      # a água secou: queima
+				elif _agora_h() - float(b.get("mexe", 0.0)) > FRITA_MEXER_H:
+					b.q = float(b.get("q", 0.0)) + cal * dh / 0.25         # sem mexer: gruda e queima
+			var no: Node3D = _fogao_nos.get(key, null)
+			if no == null or not is_instance_valid(no):
+				no = _panela_no(str(b.modo))
+				add_child(no)
+				_fogao_nos[key] = no
+			no.global_position = _maq.fogao_panela_mundo(mi, k) + Vector3.UP * 0.01
+			var sm: ShaderMaterial = (no.get_node("carne") as MeshInstance3D).material_override
+			sm.set_shader_parameter("p0", minf(float(b.p), 1.0) + float(b.get("q", 0.0)) * 0.75)
+			sm.set_shader_parameter("p1", minf(float(b.p), 1.0) + float(b.get("q", 0.0)) * 0.75)
+			var vap: CPUParticles3D = no.get_node_or_null("vapor")
+			if vap:
+				vap.emitting = cal > 0.0
+
+
+## A vasilha na boca do fogão com os cubos de carne dentro (e o caldo, cozinhando).
+func _panela_no(modo: String) -> Node3D:
+	var root := Node3D.new()
+	var pot := MeshInstance3D.new()
+	pot.mesh = Olaria.malha("vasilha_barro", [1.0, 1.0, 1.0, 1.0])
+	pot.material_override = Olaria.material()
+	root.add_child(pot)
+	var pf: Array = Olaria.perfil_final("vasilha_barro")
+	var topo: float = (pf[pf.size() - 1] as Vector2).y
+	var rb: float = (pf[pf.size() - 1] as Vector2).x
+	if modo == "cozinhar":
+		var ca := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = rb * 0.88
+		cm.bottom_radius = rb * 0.88
+		cm.height = 0.005
+		ca.mesh = cm
+		var cmat := StandardMaterial3D.new()
+		cmat.albedo_color = Color(0.45, 0.3, 0.18, 0.85)
+		cmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		cmat.roughness = 0.15
+		ca.material_override = cmat
+		ca.position.y = topo * 0.75
+		root.add_child(ca)
+	# os cubos (um montinho) com a cor do ponto
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = randi()
+	for i in 9:
+		var a := rng.randf() * TAU
+		var r := rng.randf() * rb * 0.6
+		var l := rng.randf_range(0.035, 0.05)
+		var o := Vector3(cos(a) * r, topo * (0.55 if modo == "cozinhar" else 0.35) + rng.randf() * 0.02, sin(a) * r)
+		var rot := Basis(Vector3.UP, rng.randf() * TAU) * Basis(Vector3.RIGHT, rng.randf_range(-0.4, 0.4))
+		Caca._bloco(st, o - rot * Vector3(l, l, l) * 0.5, rot * Vector3(l, 0, 0), rot * Vector3(0, 0, l), rot * Vector3(0, l, 0), false, i * 31 + 7)
+	var carne := MeshInstance3D.new()
+	carne.name = "carne"
+	carne.mesh = st.commit()
+	if _assa_sh == null:
+		_espeto_no().free()                     # (faz o shader da carne no fogo)
+	var mt := ShaderMaterial.new()
+	mt.shader = _assa_sh
+	carne.material_override = mt
+	root.add_child(carne)
+	# o vapor (cozinhando) ou a fumacinha da fritura
+	var vp := CPUParticles3D.new()
+	vp.name = "vapor"
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.08, 0.08)
+	vp.mesh = qm
+	var vm := StandardMaterial3D.new()
+	vm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	vm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	vm.vertex_color_use_as_albedo = true
+	vm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	vm.albedo_texture = load("res://scripts/world/fogueiras.gd").soft_tex()
+	vp.material_override = vm
+	vp.amount = 14
+	vp.lifetime = 1.6
+	vp.direction = Vector3.UP
+	vp.spread = 12.0
+	vp.gravity = Vector3(0, 0.25, 0)
+	vp.initial_velocity_min = 0.1
+	vp.initial_velocity_max = 0.25
+	vp.scale_amount_min = 0.8
+	vp.scale_amount_max = 2.2
+	var gr := Gradient.new()
+	gr.colors = PackedColorArray([Color(1, 1, 1, 0.0), Color(0.95, 0.95, 0.95, 0.35 if modo == "cozinhar" else 0.2), Color(1, 1, 1, 0.0)])
+	gr.offsets = PackedFloat32Array([0.0, 0.25, 1.0])
+	vp.color_ramp = gr
+	vp.position.y = topo
+	vp.emitting = false
+	root.add_child(vp)
+	return root
+
+
+## O relógio de cada vasilha no fogão (de perto): quanto falta; verde pronta; o anel
+## vermelho piscando: fritura pedindo para mexer (ou o caldo secando, queimando).
+func _draw_fogoes() -> void:
+	if _maq == null:
+		return
+	var font := ThemeDB.fallback_font
+	for mi in _maq.plantas.size():
+		if str(_maq.plantas[mi].tipo) != "fogao" or not _maq.pronta(mi):
+			continue
+		var o: Vector3 = _maq.xform(mi).origin
+		if Vector2(o.x - _player.position.x, o.z - _player.position.z).length() > 3.0:
+			continue
+		var g: Dictionary = _maq.fogao_st(mi)
+		for k in 2:
+			var b: Dictionary = (g.bocas as Array)[k]
+			if b.is_empty():
+				continue
+			var w: Vector3 = _maq.fogao_panela_mundo(mi, k) + Vector3.UP * 0.45
+			if _cam.is_position_behind(w):
+				continue
+			var c := _cam.unproject_position(w)
+			var R := 26.0
+			var cal: float = _maq.fogao_calor(mi, k)
+			var fl := clampf(1.0 - float(b.p), 0.0, 1.0)
+			var q := float(b.get("q", 0.0))
+			_sub_ui.draw_circle(c, R + 5.0, Color(0.04, 0.035, 0.03, 0.8))
+			_sub_ui.draw_arc(c, R + 5.0, 0, TAU, 36, Color(0.86, 0.7, 0.38, 0.6), 2.0, true)
+			if q >= 1.0:
+				_sub_ui.draw_circle(c, R, Color(0.12, 0.07, 0.05))
+			elif fl > 0.0:
+				var pts := PackedVector2Array([c])
+				var seg := maxi(3, int(40 * fl))
+				for qq in seg + 1:
+					var an := -PI * 0.5 + TAU * fl * float(qq) / seg
+					pts.append(c + Vector2(cos(an), sin(an)) * R)
+				_sub_ui.draw_colored_polygon(pts, Color(0.85, 0.12, 0.08).lerp(Color(1.0, 0.55, 0.15), 1.0 - fl))
+				if cal > 0.0:
+					var seg_left := int(ceil(fl * float(COZ_H.get(str(b.modo), 0.5)) / cal * float(sim.real_s_por_hora())))
+					var tx := "%d:%02d" % [seg_left / 60, seg_left % 60]
+					var tw := font.get_string_size(tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+					_sub_ui.draw_string(font, c + Vector2(-tw * 0.5, R + 22), tx, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 0.95, 0.85))
+			else:
+				_sub_ui.draw_circle(c, R, Color(0.2, 0.7, 0.3))
+			# o perigo: a fritura sem mexer (ou o caldo secando) queimando
+			var perigo := q > 0.0 or (str(b.modo) == "fritar" and fl > 0.0 and _agora_h() - float(b.get("mexe", 0.0)) > FRITA_MEXER_H * 0.7)
+			if perigo and q < 1.0:
+				var pis := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 120.0)
+				_sub_ui.draw_arc(c, R + 11.0, 0, TAU, 36, Color(1, 0.15, 0.08, 0.5 + 0.5 * pis), 4.0, true)
+			_sub_ui.draw_line(c, c + Vector2(0, -R * 0.75), Color(1, 1, 1, 0.9), 3.0, true)
+			_sub_ui.draw_line(c, c + Vector2(R * 0.5, 0), Color(1, 1, 1, 0.9), 3.0, true)
+			_sub_ui.draw_circle(c, 3.5, Color(1, 1, 1))
 

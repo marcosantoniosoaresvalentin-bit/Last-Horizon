@@ -566,13 +566,23 @@ static func item(ci: CanvasItem, id: String, c: Vector2, s: float) -> bool:
 				ci.draw_colored_polygon(lump, Color(0.66, 0.1, 0.08))
 				ci.draw_colored_polygon(P.call([[-10, -10], [8, -16], [20, -6], [6, -8]]), Color(0.92, 0.84, 0.68))
 				ci.draw_polyline(lump + PackedVector2Array([lump[0]]), ink, 2.0 * u, true)
-		"vasilha_carne":
-			# a vasilha com os cubos de carne aparecendo por cima da boca
+		"vasilha_carne", "vasilha_carne_cozida", "vasilha_carne_frita", "vasilha_carne_queimada":
+			# a vasilha com os cubos de carne aparecendo por cima da boca (crus, cozidos,
+			# fritos ou queimados); a cozida com o vapor
 			load("res://scripts/world/olaria.gd").icone(ci, "vasilha_barro", c + Vector2(0, 8) * u, s * 0.95)
+			var cc := Color(0.62, 0.1, 0.08)
+			match id:
+				"vasilha_carne_cozida": cc = Color(0.55, 0.38, 0.3)
+				"vasilha_carne_frita": cc = Color(0.58, 0.3, 0.1)
+				"vasilha_carne_queimada": cc = Color(0.1, 0.06, 0.04)
+			if id == "vasilha_carne_cozida":
+				for k in 3:
+					var vx := -14.0 + k * 14.0
+					ci.draw_polyline(PackedVector2Array([c + Vector2(vx, -34) * u, c + Vector2(vx + 5, -42) * u, c + Vector2(vx - 3, -50) * u, c + Vector2(vx + 3, -58) * u]), Color(0.9, 0.9, 0.92, 0.85), 2.5 * u, true)
 			for q in [[-18, -14], [-4, -18], [10, -15], [-11, -24], [4, -27], [18, -22]]:
 				var o := c + Vector2(q[0], q[1]) * u
 				var cub := PackedVector2Array([o + Vector2(-7, -5) * u, o + Vector2(7, -6) * u, o + Vector2(8, 6) * u, o + Vector2(-6, 7) * u])
-				ci.draw_colored_polygon(cub, Color(0.62, 0.1, 0.08))
+				ci.draw_colored_polygon(cub, cc)
 				ci.draw_line(o + Vector2(-7, -5) * u, o + Vector2(7, -6) * u, Color(0.9, 0.82, 0.68), 2.0 * u, true)
 				ci.draw_polyline(cub + PackedVector2Array([cub[0]]), ink, 1.5 * u, true)
 		"carne_crua", "carne_assar", "carne_assada", "carne_queimada", "carne_suja":
