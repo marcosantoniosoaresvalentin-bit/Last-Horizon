@@ -1571,6 +1571,7 @@ func _process(delta: float) -> void:
 	_update_sky(delta)
 	if not _ready_world:
 		return
+	_arruma_botoes()
 	_finish_water()
 	_water_timer -= delta
 	if _water_timer <= 0.0:
@@ -10890,7 +10891,7 @@ func _couro_draw() -> void:
 		ui.draw_line(Vector2(r.position.x - 8, ny), Vector2(r.end.x + 8, ny), Color(1, 1, 1, 0.95), 3.0)
 		ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
 	# o quanto já foi (corte e couro)
-	var rb := Rect2(Vector2(s.x * 0.5 - 200, 30), Vector2(400, 12))
+	var rb := Rect2(Vector2(s.x * 0.5 - 200, 96), Vector2(400, 12))
 	ui.draw_rect(rb.grow(3), Color(0.05, 0.04, 0.03, 0.8))
 	var f := (float(cr.corte) * 0.3 + float(cr.pele) * 0.7)
 	ui.draw_rect(Rect2(rb.position, Vector2(rb.size.x * f, rb.size.y)), Color(0.7, 0.25, 0.18))
@@ -11163,7 +11164,7 @@ func _evis_draw() -> void:
 		var ny := r.end.y - r.size.y * EVIS_PRECISA
 		ui.draw_line(Vector2(r.position.x - 8, ny), Vector2(r.end.x + 8, ny), Color(1, 1, 1, 0.95), 3.0)
 		ui.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
-	var rb := Rect2(Vector2(s.x * 0.5 - 200, 30), Vector2(400, 12))
+	var rb := Rect2(Vector2(s.x * 0.5 - 200, 96), Vector2(400, 12))
 	ui.draw_rect(rb.grow(3), Color(0.05, 0.04, 0.03, 0.8))
 	var tot := 0.0
 	for f in EVIS_FASES:
@@ -17237,3 +17238,53 @@ func _leaf_fall(bp: Dictionary, li: int, land_at := Vector3.INF, yaw_at := INF, 
 			on_land.call()
 		else:
 			_buritis.add_chao_folha(v, li, land, yaw, s))
+
+
+# ================== BOTÕES SEM SOBREPOR ==================
+# Os botões do canto de baixo à direita têm cada um o seu lugar, mas alguns dividem o
+# mesmo lugar (aparecem em horas diferentes). Se dois aparecem juntos, o que veio depois
+# vai para o lugar livre mais perto (na mesma grade); quando o lugar dele vaga, volta.
+
+const BTN_COLS := [-150, -290, -430, -570, -710]
+const BTN_ROWS := [-146, -286, -426, -566]
+
+
+func _arruma_botoes() -> void:
+	if _hud == null:
+		return
+	var postos := []                      # rects já ocupados (offsets)
+	for ch in _hud.get_children():
+		if not (ch is Button) or not (ch as Control).visible:
+			continue
+		var b := ch as Control
+		if b.anchor_left != 1.0 or b.anchor_top != 1.0:
+			continue
+		if not b.has_meta("casa"):
+			b.set_meta("casa", Rect2(b.offset_left, b.offset_top, b.offset_right - b.offset_left, b.offset_bottom - b.offset_top))
+		var casa: Rect2 = b.get_meta("casa")
+		var alvo := casa
+		if _btn_bate(casa, postos):
+			var melhor := INF
+			for cx in BTN_COLS:
+				for cy in BTN_ROWS:
+					var r := Rect2(float(cx), float(cy), casa.size.x, casa.size.y)
+					if _btn_bate(r, postos):
+						continue
+					var d := r.position.distance_to(casa.position)
+					if d < melhor:
+						melhor = d
+						alvo = r
+		postos.append(alvo)
+		if b.offset_left != alvo.position.x or b.offset_top != alvo.position.y:
+			b.offset_left = alvo.position.x
+			b.offset_top = alvo.position.y
+			b.offset_right = alvo.end.x
+			b.offset_bottom = alvo.end.y
+
+
+static func _btn_bate(r: Rect2, postos: Array) -> bool:
+	for q in postos:
+		if (q as Rect2).grow(-4.0).intersects(r.grow(-4.0)):
+			return true
+	return false
+
