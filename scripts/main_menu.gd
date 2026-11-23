@@ -62,6 +62,18 @@ func _ready() -> void:
 	theme = _make_theme()
 	_build_layout()
 	_show("Mundos")
+	if not Perfil.livro_visto():
+		_abre_livro.call_deferred()
+
+
+## O Livro do Sobrevivente (abre sozinho na primeira vez e pelas Configurações).
+func _abre_livro() -> void:
+	if get_node_or_null("Livro") != null:
+		return
+	var l: Control = load("res://scripts/ui/livro.gd").new()
+	l.name = "Livro"
+	add_child(l)
+	l.fechou.connect(func(): Perfil.set_livro_visto())
 
 
 func _notification(what: int) -> void:
@@ -771,6 +783,29 @@ func _page_settings() -> Control:
 	tchk.toggled.connect(func(on: bool): Perfil.set_teste(on))
 	tb.add_child(tchk)
 	tb.add_child(_note("Para testar o jogo: fabricar sem gastar nada, pedra fica pronta na hora de modelar, madeira corta numa batida (árvore, tora, galho, tábua, rachar com cunha, serrar) e as ferramentas não gastam. Vale só neste celular.", C_DIM))
+
+	var lc := PanelContainer.new()
+	lc.add_theme_stylebox_override("panel", _box(C_CARD, 10, C_LINE, 1))
+	v.add_child(lc)
+	var lm := MarginContainer.new()
+	for k in ["left", "right", "top", "bottom"]:
+		lm.add_theme_constant_override("margin_" + k, 22)
+	lc.add_child(lm)
+	var lh := HBoxContainer.new()
+	lh.add_theme_constant_override("separation", 12)
+	lm.add_child(lh)
+	var li := VBoxContainer.new()
+	li.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lh.add_child(li)
+	var lt := Label.new()
+	lt.text = "Livro do Sobrevivente"
+	lt.add_theme_font_size_override("font_size", 22)
+	li.add_child(lt)
+	li.add_child(_note("Ensina tudo: os controles, a água e a comida, o fogo, a madeira, as ferramentas, o barro, as máquinas, a caça, a cozinha e como a natureza funciona.", C_DIM))
+	var lb := _button("Abrir o livro", true)
+	lb.custom_minimum_size = Vector2(190, 54)
+	lb.pressed.connect(_abre_livro)
+	lh.add_child(lb)
 
 	var s := Conta.session()
 	if not s.is_empty():

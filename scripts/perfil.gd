@@ -57,6 +57,17 @@ static func set_teste(on: bool) -> void:
 	_write(d)
 
 
+## O Livro do Sobrevivente já abriu sozinho uma vez neste celular.
+static func livro_visto() -> bool:
+	return bool(_read().get("livro_visto", false))
+
+
+static func set_livro_visto() -> void:
+	var d := _read()
+	d["livro_visto"] = true
+	_write(d)
+
+
 static func set_skin(s: String) -> void:
 	var d := _read()
 	d["skin"] = s
