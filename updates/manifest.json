@@ -1,9 +1,9 @@
 {
-  "version": 212,
-  "file": "update_212.zip",
-  "size": 5628126,
-  "sha256": "62dbeca384113856960917723443255a2ce745d136b77714c462809f0adc7b19",
+  "version": 213,
+  "file": "update_213.zip",
+  "size": 5631793,
+  "sha256": "a442b10fd5f1f4d22e8d23995b10e6371fd3b08b62d204b159c76104a861c0be",
   "min_build": 1,
-  "notes": "Carne cortada sem partes transparentes (o corte é carne maciça); água da valeta perto do rio aparece; mesa: linha vermelha que anda e gira em qualquer ângulo para cortar pedaços e cubinhos; machado bate com o fio; içar a vaca só andando com Força; couro novo (força e faca juntos na borda), o couro fica estendido no chão para enrolar e pegar; sem toco redondo nas patas/cabeça; botões não ficam mais um em cima do outro",
+  "notes": "O couro da cabeça não sai mais (a cabeça fica com o couro inteira); ossos realistas na banda partida: espinhos e corpos das vértebras serrados com os discos, o canal da medula, costelas curvas com a carne entre elas, o esterno, o filé e o sebo do rim no lombo e a bacia serrada",
   "date": "2026-11-23"
 }
