@@ -1,9 +1,9 @@
 {
-  "version": 213,
-  "file": "update_213.zip",
-  "size": 5631793,
-  "sha256": "a442b10fd5f1f4d22e8d23995b10e6371fd3b08b62d204b159c76104a861c0be",
+  "version": 214,
+  "file": "update_214.zip",
+  "size": 5722897,
+  "sha256": "ec3c6d03b840640f0c9edd74f57356dfefdfc485300ae7fe4f4506e53166fe9c",
   "min_build": 1,
-  "notes": "O couro da cabeça não sai mais (a cabeça fica com o couro inteira); ossos realistas na banda partida: espinhos e corpos das vértebras serrados com os discos, o canal da medula, costelas curvas com a carne entre elas, o esterno, o filé e o sebo do rim no lombo e a bacia serrada",
+  "notes": "Decomposição dos bichos mortos com o tempo: incha e esverdeia, estoura (bicheiras comendo, moscas zumbindo, líquido escuro no chão), vira couro seco e no fim só os ossos (o esqueleto completo da vaca). Urubus: aparecem horas depois da morte, rondam em círculos lá em cima, pousam quando não tem ninguém perto, chegam aos pulinhos e comem a carcaça, os pedaços de carne, a buchada, as patas e a cabeça no chão; fogem batendo as asas quando alguém chega e vão embora à noite. Vaca que morre de fome ou velhice agora fica caída no pasto.",
   "date": "2026-11-23"
 }
